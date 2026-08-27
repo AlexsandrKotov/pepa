@@ -39,10 +39,11 @@ jobs:
       - name: Backend - build
         run: go build -v ./...
 
+      - name: Backend - install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
       - name: Backend - lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+        run: $(go env GOPATH)/bin/golangci-lint run
 
       - name: Backend - test
         run: go test -race -coverprofile=coverage.out ./...
