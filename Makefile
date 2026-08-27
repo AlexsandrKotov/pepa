@@ -3,7 +3,9 @@
 # "Delivery without pain, GitOps with joy."
 # ============================================================
 
-.PHONY: all build test lint clean docker-build docker-up docker-down docker-logs deploy plugins clean-plugins
+.PHONY: all build test lint clean docker-build docker-up docker-down docker-logs deploy plugins clean-plugins \
+	release release-check release-tag release-checksums release-plugins-image release-push release-helm \
+	sign-plugins verify-plugins clean-plugins
 
 # Variables
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -248,7 +250,10 @@ verify-plugins:
 
 # ── Release ────────────────────────────────────────────────────
 
-RELEASE_TAG ?= $(shell git describe --tags --always 2>/dev/null || echo "v0.0.0")
+RELEASE_TAG   ?= $(shell git describe --tags --always 2>/dev/null || echo "v0.0.0")
+RELEASE_VERSION := $(shell echo "$(RELEASE_TAG)" | sed 's/^v//')
+GHCR_REGISTRY ?= ghcr.io
+GHCR_IMAGE    := $(GHCR_REGISTRY)/$(shell git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]\(.*\)\.git/\1/' | tr 'A-Z' 'a-z')
 
 release-check:
 	@echo "→ Pre-release checks..."
@@ -275,12 +280,69 @@ release-checksums:
 	@cat release/sha256sums.txt
 	@echo "✓ Checksums in release/sha256sums.txt"
 
-release: release-check docker-build plugins
+# Build and push plugins image to GHCR
+release-plugins-image: plugins sign-plugins verify-plugins
+	@echo "→ Building plugins image ($(RELEASE_TAG))..."
+	@mkdir -p plugins/bin-amd64 plugins/bin-arm64
+	@cp -r plugins/bin/builtin plugins/bin-amd64/builtin
+	@cp -r plugins/bin/community plugins/bin-amd64/community 2>/dev/null || mkdir -p plugins/bin-amd64/community
+	@cp -r plugins/bin/builtin plugins/bin-arm64/builtin
+	@cp -r plugins/bin/community plugins/bin-arm64/community 2>/dev/null || mkdir -p plugins/bin-arm64/community
+	@docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-f deployments/docker/Dockerfile.plugins \
+		-t $(GHCR_IMAGE)/pepa-plugins:$(RELEASE_TAG) \
+		-t $(GHCR_IMAGE)/pepa-plugins:$(RELEASE_VERSION) \
+		--push .
+	@rm -rf plugins/bin-amd64 plugins/bin-arm64
+	@echo "✓ Pushed $(GHCR_IMAGE)/pepa-plugins:$(RELEASE_TAG)"
+
+# Build and push all Docker images to GHCR
+release-push:
+	@echo "→ Pushing images to $(GHCR_REGISTRY)..."
+	@for target in api-server worker; do \
+		docker buildx build \
+			--platform linux/amd64,linux/arm64 \
+			-f deployments/docker/Dockerfile.$(subst api-server,api,$(target)) \
+			-t $(GHCR_IMAGE)/pepa-$(target):$(RELEASE_TAG) \
+			-t $(GHCR_IMAGE)/pepa-$(target):$(RELEASE_VERSION) \
+			--push .; \
+		echo "  ✓ pepa-$(target):$(RELEASE_TAG)"; \
+	done
+	@docker buildx build \
+		--platform linux/amd64,linux/arm64 \
+		-f deployments/docker/Dockerfile.frontend \
+		-t $(GHCR_IMAGE)/pepa-frontend:$(RELEASE_TAG) \
+		-t $(GHCR_IMAGE)/pepa-frontend:$(RELEASE_VERSION) \
+		--push frontend/
+	@echo "  ✓ pepa-frontend:$(RELEASE_TAG)"
+	@echo "✓ All images pushed to $(GHCR_REGISTRY)"
+
+# Push Helm chart to GHCR (OCI)
+release-helm:
+	@echo "→ Pushing Helm chart..."
+	@helm package deployments/helm/pepa/ \
+		--version "$(RELEASE_VERSION)" \
+		--app-version "$(RELEASE_TAG)" \
+		-d .helm-charts/
+	@echo "$(GITHUB_TOKEN)" | helm registry login $(GHCR_REGISTRY) -u "$(shell git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]\(.*\)\.git/\1/' | cut -d/ -f1)" --password-stdin 2>/dev/null || true
+	@helm push .helm-charts/pepa-$(RELEASE_VERSION).tgz "oci://$(GHCR_REGISTRY)/$(shell git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]\(.*\)\.git/\1/' | cut -d/ -f1)/charts"
+	@rm -rf .helm-charts/
+	@echo "✓ Helm chart pushed"
+
+# Full release: check → tag → push
+release: release-check release-tag
 	@echo ""
-	@echo "→ Release $(RELEASE_TAG) ready!"
+	@echo "→ Release $(RELEASE_TAG) prepared!"
 	@echo ""
-	@echo "  Next steps:"
-	@echo "  1. make release-tag"
-	@echo "  2. git push origin $(RELEASE_TAG)"
-	@echo "  3. GitHub Actions will build and publish the release"
+	@echo "  Push the tag to trigger CI/CD:"
+	@echo "    git push origin $(RELEASE_TAG)"
+	@echo ""
+	@echo "  GitHub Actions will automatically:"
+	@echo "    • Run full test suite"
+	@echo "    • Build & push Docker images to $(GHCR_REGISTRY)"
+	@echo "    • Build, sign & push plugins image to $(GHCR_REGISTRY)"
+	@echo "    • Build CLI binaries"
+	@echo "    • Package & push Helm chart"
+	@echo "    • Create GitHub Release with artifacts"
 	@echo ""

@@ -148,8 +148,9 @@ jobs:
         with:
           name: signed-plugins
           path: |
-            plugins/bin/*/
+            plugins/bin/builtin/
+            plugins/bin/community/
             plugins/builtin/*/plugin.yaml
             plugins/builtin/*/plugin.yaml.checksum
-            plugins/builtin/*/plugin.yaml.sig
+            plugins/builtin/*/plugin.yaml.checksum.sig
           retention-days: 30

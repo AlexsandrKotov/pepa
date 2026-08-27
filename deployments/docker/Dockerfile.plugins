@@ -1,0 +1,60 @@
+# PEPA Plugins — signed plugin binaries + manifests.
+#
+# Build context must contain pre-built binaries at:
+#   plugins/bin-<arch>/builtin/<name>/<name>
+#   plugins/bin-<arch>/community/<name>/<name>
+#   plugins/builtin/<name>/plugin.yaml (+ .checksum, .checksum.sig)
+#
+# Build args:
+#   TARGETARCH — target architecture (amd64/arm64), set automatically by buildx
+#
+# Usage (CI):
+#   docker buildx build --platform linux/amd64,linux/arm64 \
+#     -f deployments/docker/Dockerfile.plugins \
+#     -t ghcr.io/<owner>/<repo>/pepa-plugins:<tag> --push .
+
+FROM alpine:3.24
+
+ARG TARGETARCH
+
+LABEL org.opencontainers.image.title="PEPA Plugins" \
+      org.opencontainers.image.description="Signed built-in and community plugin binaries with manifests" \
+      org.opencontainers.image.vendor="PEPA" \
+      org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
+
+RUN apk add --no-cache ca-certificates openssl bash
+
+# Plugin binaries for this architecture
+COPY plugins/bin-${TARGETARCH}/builtin/   /plugins/bin/builtin/
+COPY plugins/bin-${TARGETARCH}/community/ /plugins/bin/community/
+
+# Plugin manifests, checksums and signatures (shared across architectures)
+COPY plugins/builtin/ /plugins/builtin/
+
+# Verify signatures at build time
+COPY internal/plugin/signature/pepa-plugins-public.pem /tmp/pepa-plugins-public.pem
+RUN set -e; \
+    verified=0; \
+    for category in builtin community; do \
+        for dir in /plugins/bin/${category}/*/; do \
+            [ -d "$dir" ] || continue; \
+            name=$(basename "$dir"); \
+            bin="${dir}${name}"; \
+            sum="${dir}checksum"; \
+            sig="${sum}.sig"; \
+            [ -f "$bin" ] && [ -f "$sum" ] && [ -f "$sig" ] || continue; \
+            actual=$(sha256sum "$bin" | awk '{print $1}'); \
+            stored=$(cat "$sum" | tr -d '[:space:]'); \
+            if [ "$actual" != "$stored" ]; then \
+                echo "TAMPERED: $category/$name (hash mismatch)"; exit 1; \
+            fi; \
+            if ! openssl pkeyutl -verify -pubin -inkey /tmp/pepa-plugins-public.pem \
+                    -sigfile "$sig" -in "$sum" >/dev/null 2>&1; then \
+                echo "INVALID SIG: $category/$name"; exit 1; \
+            fi; \
+            echo "VERIFIED: $name (${category})"; \
+            verified=$((verified + 1)); \
+        done; \
+    done; \
+    echo "✓ $verified plugin(s) verified"; \
+    rm -f /tmp/pepa-plugins-public.pem
