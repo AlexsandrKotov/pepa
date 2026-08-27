@@ -35,7 +35,7 @@ sign_binary() {
     local sig_path="${checksum_path}.sig"
 
     # SHA-256 hash of binary
-    sha256sum "$bin_path" | awk '{print $1}' > "$checksum_path"
+    printf '%s' "$(sha256sum "$bin_path" | awk '{print $1}')" > "$checksum_path"
 
     # Sign the checksum with Ed25519
     openssl pkeyutl -sign \
@@ -58,7 +58,7 @@ sign_yaml() {
     local checksum_path="${PLUGIN_BUILTIN_DIR}/${plugin_name}/plugin.yaml.checksum"
     local sig_path="${checksum_path}.sig"
 
-    sha256sum "$yaml_path" | awk '{print $1}' > "$checksum_path"
+    printf '%s' "$(sha256sum "$yaml_path" | awk '{print $1}')" > "$checksum_path"
 
     openssl pkeyutl -sign \
         -inkey "$PRIVATE_KEY" \
