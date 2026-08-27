@@ -1,0 +1,35 @@
+name: slack
+version: "0.1.0"
+display_name: "Slack"
+description: "Notification plugin for Slack — send messages to channels and users."
+category: notification
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    bot_token:
+      type: string
+      description: "Slack Bot OAuth token (xoxb-...)"
+    signing_secret:
+      type: string
+      description: "Slack app signing secret"
+    default_channel:
+      type: string
+      description: "Default channel for notifications"
+  required:
+    - bot_token
+
+actions:
+  - name: send
+    description: "Send a message to a Slack channel"
+  - name: send_thread
+    description: "Send a message as a thread reply"
+  - name: create_channel
+    description: "Create a new Slack channel"
+
+health_check:
+  endpoint: /health
+  interval: 60s

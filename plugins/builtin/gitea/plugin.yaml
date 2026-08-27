@@ -1,0 +1,37 @@
+name: gitea
+version: "0.1.0"
+display_name: "Gitea"
+description: "Git provider plugin for Gitea — organizations, repositories, branches, pipelines, and CI config parsing."
+category: git_provider
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: "Gitea instance URL (e.g. https://gitea.example.com)"
+    token:
+      type: string
+      description: "Gitea API access token"
+  required:
+    - url
+    - token
+
+actions:
+  - name: list_groups
+    description: "List Gitea organizations"
+  - name: list_repos
+    description: "List repositories (optionally filtered by organization)"
+  - name: get_branches
+    description: "List branches for a repository"
+  - name: list_pipelines
+    description: "List Gitea Actions pipeline runs for a repository"
+  - name: parse_ci_config
+    description: "Parse Gitea Actions workflow files to extract variables and parameters"
+
+health_check:
+  endpoint: /health
+  interval: 30s

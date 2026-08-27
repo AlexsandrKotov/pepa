@@ -1,0 +1,27 @@
+name: teams
+version: "0.1.0"
+display_name: "Microsoft Teams"
+description: "Notification plugin for Microsoft Teams — send messages and cards via webhooks."
+category: notification
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    webhook_url:
+      type: string
+      description: "Teams Incoming Webhook URL"
+  required:
+    - webhook_url
+
+actions:
+  - name: send_message
+    description: "Send a simple text message to a Teams channel"
+  - name: send_card
+    description: "Send a rich MessageCard with title and color to a Teams channel"
+
+health_check:
+  endpoint: /health
+  interval: 60s

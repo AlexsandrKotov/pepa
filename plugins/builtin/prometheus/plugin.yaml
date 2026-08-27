@@ -1,0 +1,42 @@
+name: prometheus
+version: "0.1.0"
+display_name: "Prometheus"
+description: "Prometheus monitoring integration — PromQL queries, alerts, targets, and rules."
+category: monitoring
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: "Prometheus server URL (e.g. http://prometheus:9090)"
+    token:
+      type: string
+      description: "Bearer token for authentication (optional)"
+  required:
+    - url
+
+actions:
+  - name: query
+    description: "Execute an instant PromQL query"
+  - name: query_range
+    description: "Execute a range PromQL query over a time span"
+  - name: list_alerts
+    description: "List active alerts from Prometheus"
+  - name: list_rules
+    description: "List recording and alerting rules"
+  - name: list_targets
+    description: "List all scrape targets and their states"
+  - name: labels
+    description: "List all label names"
+  - name: label_values
+    description: "Get values for a specific label"
+  - name: alertmanagers
+    description: "List discovered Alertmanager instances"
+
+health_check:
+  endpoint: /health
+  interval: 30s

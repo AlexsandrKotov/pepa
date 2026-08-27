@@ -1,0 +1,94 @@
+name: proxmox
+version: "0.1.0"
+display_name: "Proxmox VE"
+description: "Virtualization plugin for Proxmox VE — manage cluster nodes, QEMU virtual machines, and LXC containers via the Proxmox API."
+category: virtualization
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: "Proxmox VE API URL (e.g., https://proxmox.local:8006)"
+    token_id:
+      type: string
+      description: "API token ID (format: user@realm!tokenname)"
+    token_secret:
+      type: string
+      description: "API token secret"
+    insecure_tls:
+      type: string
+      description: "Skip TLS certificate verification for self-signed certs (true/false)"
+    ssh_private_key:
+      type: string
+      description: "SSH private key (PEM) used to provision Docker-in-LXC containers; its public part is injected into new containers"
+    ssh_user:
+      type: string
+      description: "SSH user for container provisioning (default: root)"
+  required:
+    - url
+    - token_id
+    - token_secret
+
+actions:
+  - name: test_connection
+    description: "Check connectivity to the Proxmox cluster"
+  - name: list_nodes
+    description: "List cluster nodes with resource usage"
+  - name: get_node
+    description: "Get details of a specific node"
+  - name: list_vms
+    description: "List QEMU virtual machines across all nodes"
+  - name: get_vm
+    description: "Get configuration of a virtual machine"
+  - name: create_vm
+    description: "Create a new virtual machine"
+  - name: delete_vm
+    description: "Delete a virtual machine"
+  - name: start_vm
+    description: "Start a virtual machine"
+  - name: stop_vm
+    description: "Force-stop a virtual machine"
+  - name: shutdown_vm
+    description: "Gracefully shut down a virtual machine"
+  - name: reboot_vm
+    description: "Reboot a virtual machine"
+  - name: list_containers
+    description: "List LXC containers across all nodes"
+  - name: create_container
+    description: "Create a new LXC container"
+  - name: delete_container
+    description: "Delete an LXC container"
+  - name: start_container
+    description: "Start an LXC container"
+  - name: stop_container
+    description: "Stop an LXC container"
+  - name: cluster_resources
+    description: "List all cluster resources (nodes, VMs, storage, networks)"
+  - name: list_pools
+    description: "List resource pools"
+  - name: list_storage
+    description: "List storage targets"
+  - name: get_permissions
+    description: "Show effective API permissions of the configured token"
+  - name: next_id
+    description: "Get the next free VMID from the cluster"
+  - name: list_os_templates
+    description: "List downloadable LXC OS templates for a node"
+  - name: list_storage_content
+    description: "List storage content (OS templates, ISOs)"
+  - name: node_syslog
+    description: "Read node syslog entries"
+  - name: node_tasks
+    description: "List recent node tasks (operations)"
+  - name: task_log
+    description: "Read the log output of a task"
+  - name: deploy_docker
+    description: "Deploy a Docker workload into a new LXC container (registry image, local folder, or local Docker image)"
+
+health_check:
+  endpoint: /health
+  interval: 30s

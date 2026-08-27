@@ -1,0 +1,60 @@
+name: jira
+version: "2.0.0"
+display_name: "Jira"
+description: "Jira integration — issues, projects, transitions, comments, and deployment notifications."
+category: task_tracker
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    base_url:
+      type: string
+      description: "Jira instance base URL (e.g. https://yourorg.atlassian.net)"
+    username:
+      type: string
+      description: "Jira username or email"
+    api_token:
+      type: string
+      description: "Jira API token"
+  required:
+    - base_url
+    - api_token
+
+actions:
+  - name: list_projects
+    description: "List all Jira projects"
+  - name: list_issues
+    description: "List issues with optional JQL filter"
+  - name: search_issues
+    description: "Search issues using JQL with pagination"
+  - name: get_issue
+    description: "Get details of a specific issue"
+  - name: create_issue
+    description: "Create a new Jira issue"
+  - name: update_issue
+    description: "Update an existing issue"
+  - name: delete_issue
+    description: "Delete a Jira issue"
+  - name: transition_issue
+    description: "Transition an issue to a new status"
+  - name: list_transitions
+    description: "List available transitions for an issue"
+  - name: add_comment
+    description: "Add a comment to an issue"
+  - name: list_comments
+    description: "List comments on an issue"
+  - name: list_labels
+    description: "List all labels in a project"
+  - name: get_project_meta
+    description: "Get project metadata and issue types"
+  - name: link_mr
+    description: "Link a merge request to a Jira issue"
+  - name: notify_deployment
+    description: "Post deployment event notification to a Jira issue"
+
+health_check:
+  endpoint: /health
+  interval: 30s

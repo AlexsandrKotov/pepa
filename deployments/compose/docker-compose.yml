@@ -1,0 +1,286 @@
+# ============================================================
+# PEPA — Platform Engineering & Pipeline Automator
+# "Delivery without pain, GitOps with joy."
+# ============================================================
+# Usage:
+#   Development:  docker compose up -d
+#   Production:   docker compose --profile production up -d
+#
+# All sensitive values are loaded from .env file (see .env.example).
+# NEVER hardcode secrets here — they belong in .env (gitignored).
+# ============================================================
+
+name: pepa
+
+networks:
+  pepa-net:
+    driver: bridge
+  pepa-frontend:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  custom-plugins:  # For user-uploaded custom plugin binaries
+  pepa-token-tmpfs:  # In-memory volume for bootstrap token (never persisted)
+  nginx-logs:
+    driver: local
+
+# ── Shared environment variables (api-server + worker) ──────
+# Both Go services need the same DB/Redis/S3 connection settings.
+# Use YAML anchor to define once, reference with <<: *common-env.
+x-common-env: &common-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-pepa}
+  POSTGRES_USER: ${POSTGRES_USER:-pepa}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  POSTGRES_SSLMODE: disable
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD}
+  S3_ENDPOINT: ""  # Uncomment to enable external S3: http://minio:9000
+  # S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  # S3_SECRET_KEY: ${S3_SECRET_KEY}
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+  AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
+  AUTH_SESSION_DURATION: ${AUTH_SESSION_DURATION:-168h}
+  PLUGIN_DIR: /plugins
+  VAULT_ALLOW_PRIVATE_IPS: ${VAULT_ALLOW_PRIVATE_IPS:-false}
+
+services:
+
+  # ── PostgreSQL + PGvector ──────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: pepa-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pepa}
+      POSTGRES_USER: ${POSTGRES_USER:-pepa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Bound to loopback only — the DB must not be reachable from the
+      # network. Other services connect over the internal pepa-net.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - pepa-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pepa} -d ${POSTGRES_DB:-pepa}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # Production tuning via command override
+    command: >
+      postgres
+        -c max_connections=${POSTGRES_MAX_CONNECTIONS:-100}
+        -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-128MB}
+        -c effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-384MB}
+        -c work_mem=${POSTGRES_WORK_MEM:-8MB}
+        -c maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-64MB}
+        -c wal_buffers=${POSTGRES_WAL_BUFFERS:-4MB}
+        -c log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION:-1000}
+    deploy:
+      resources:
+        limits:
+          cpus: '${POSTGRES_CPUS_LIMIT:-2.0}'
+          memory: ${POSTGRES_MEMORY_LIMIT:-2G}
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7.4-alpine
+    container_name: pepa-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+    ports:
+      # Bound to loopback only — Redis must not be reachable from the network.
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - pepa-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '${REDIS_CPUS_LIMIT:-0.5}'
+          memory: ${REDIS_MEMORY_LIMIT:-256M}
+
+  # ── PEPA API Server ────────────────────────────────────────
+  api-server:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.api
+    image: pepa/api-server:latest
+    container_name: pepa-api
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVER_PORT: "8080"
+      SERVER_HOST: "0.0.0.0"
+      SERVER_ENV: ${SERVER_ENV:-production}
+      CUSTOM_PLUGIN_DIR: /custom-plugins
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:8088}
+    ports:
+      - "${API_PORT:-8088}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      # Plugins are bind-mounted from the host — not baked into the image.
+      # Run `make plugins` to build them, then restart the container.
+      - ../../plugins:/plugins:ro
+      - custom-plugins:/custom-plugins
+      # WARNING: Mounting the Docker socket gives the api container control
+      # over the Docker daemon (create/delete containers, read secrets, etc.).
+      # Disabled by default (mounts /dev/null). Set MOUNT_DOCK_SOCKET to the
+      # socket path only if you need Docker host management features; the
+      # mount stays read-only either way.
+      - ${MOUNT_DOCK_SOCKET:-/dev/null}:/var/run/docker.sock:ro
+      # Bootstrap token is written here (in-memory tmpfs, never touches disk).
+      # Read it with: docker exec pepa-api cat /var/run/pepa/bootstrap_token.txt
+      - pepa-token-tmpfs:/var/run/pepa
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pepa-net
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=256m,exec
+    deploy:
+      resources:
+        limits:
+          cpus: '${API_CPUS_LIMIT:-2.0}'
+          memory: ${API_MEMORY_LIMIT:-1G}
+
+  # ── PEPA Background Worker ─────────────────────────────────
+  worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.worker
+    image: pepa/worker:latest
+    container_name: pepa-worker
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      CUSTOM_PLUGIN_DIR: /custom-plugins
+    volumes:
+      # Plugins are bind-mounted from the host — not baked into the image.
+      - ../../plugins:/plugins:ro
+      # Writable storage for uploaded custom plugins.
+      - custom-plugins:/custom-plugins
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - pepa-net
+    # Security hardening
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    deploy:
+      resources:
+        limits:
+          cpus: '${WORKER_CPUS_LIMIT:-1.0}'
+          memory: ${WORKER_MEMORY_LIMIT:-512M}
+
+  # ── Frontend (Next.js) ────────────────────────────────────
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../deployments/docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ""
+    image: pepa/frontend:latest
+    container_name: pepa-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - api-server
+    networks:
+      - pepa-net
+      - pepa-frontend
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/cache/nginx:size=32m
+      - /var/run:size=8m
+    deploy:
+      resources:
+        limits:
+          cpus: '${FRONTEND_CPUS_LIMIT:-0.5}'
+          memory: ${FRONTEND_MEMORY_LIMIT:-128M}
+
+
+  # ── Nginx Reverse Proxy (Production only) ─────────────────
+  # Enabled with: docker compose --profile production up -d
+  # Provides TLS termination, rate limiting, and security headers.
+  nginx:
+    image: nginx:1.31-alpine
+    container_name: pepa-nginx
+    restart: unless-stopped
+    profiles:
+      - production
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      api-server:
+        condition: service_started
+      frontend:
+        condition: service_healthy
+    networks:
+      - pepa-frontend
+      - pepa-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '${NGINX_CPUS_LIMIT:-0.5}'
+          memory: ${NGINX_MEMORY_LIMIT:-128M}

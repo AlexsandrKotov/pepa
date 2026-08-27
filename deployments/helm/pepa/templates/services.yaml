@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pepa.fullname" . }}-api
+  labels:
+    {{- include "pepa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.apiPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "pepa.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pepa.fullname" . }}-frontend
+  labels:
+    {{- include "pepa.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.frontendPort }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "pepa.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend

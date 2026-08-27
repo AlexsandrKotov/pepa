@@ -1,0 +1,1090 @@
+openapi: "3.0.3"
+info:
+  title: PEPA — Platform Engineering & Pipeline Automator API
+  description: |
+    PEPA — Platform Engineering & Pipeline Automator API for managing services, workflows, scorecards,
+    plugins, RBAC, and platform operations.
+  version: "0.1.0"
+  contact:
+    name: PEPA Team
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: http://localhost:8088/api/v1
+    description: Local development
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Health
+    description: Health check
+  - name: Entities
+    description: Universal entity store
+  - name: Entity Types
+    description: Entity type registry
+  - name: Relationships
+    description: Entity relationships and graph
+  - name: Workflows
+    description: Workflow definitions and executions
+  - name: Plugins
+    description: Plugin management
+  - name: Scorecards
+    description: Maturity scorecards with rules and evaluation
+  - name: Audit
+    description: Immutable audit log
+  - name: RBAC
+    description: Roles, permissions, and assignments
+  - name: User
+    description: Current user context
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      operationId: healthz
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  version: { type: string, example: dev }
+                  app: { type: string }
+
+  # ── Entities ────────────────────────────────────────────────────
+  /entities:
+    get:
+      tags: [Entities]
+      summary: List entities
+      operationId: listEntities
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: type_key
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated entity list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Entity"
+                  total: { type: integer }
+                  page: { type: integer }
+                  per_page: { type: integer }
+                  total_pages: { type: integer }
+    post:
+      tags: [Entities]
+      summary: Create entity
+      operationId: createEntity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEntityRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entity"
+
+  /entities/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Entities]
+      summary: Get entity by ID
+      operationId: getEntity
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entity"
+    put:
+      tags: [Entities]
+      summary: Update entity
+      operationId: updateEntity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEntityRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entity"
+    delete:
+      tags: [Entities]
+      summary: Delete entity
+      operationId: deleteEntity
+      responses:
+        "200":
+          description: Deleted
+
+  /entities/{id}/graph:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Relationships]
+      summary: Get entity relationship graph
+      operationId: getEntityGraph
+      parameters:
+        - name: depth
+          in: query
+          schema: { type: integer, default: 2 }
+      responses:
+        "200":
+          description: Graph with nodes and edges
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GraphNode"
+                  edges:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GraphEdge"
+
+  /entities/{id}/relationships:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Relationships]
+      summary: Get entity relationships
+      operationId: getEntityRelationships
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  relationships:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Relationship"
+    post:
+      tags: [Relationships]
+      summary: Create relationship
+      operationId: createRelationship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_id, type_key]
+              properties:
+                target_id: { type: string, format: uuid }
+                type_key: { type: string }
+                metadata: { type: object }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Relationship"
+
+  /entities/relationships/{relId}:
+    parameters:
+      - name: relId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Relationships]
+      summary: Delete relationship
+      operationId: deleteRelationship
+      responses:
+        "200":
+          description: Deleted
+
+  # ── Entity Types ────────────────────────────────────────────────
+  /entity-types:
+    get:
+      tags: [Entity Types]
+      summary: List entity types
+      operationId: listEntityTypes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entity_types:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EntityType"
+    post:
+      tags: [Entity Types]
+      summary: Register entity type
+      operationId: registerEntityType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type_key, display_name]
+              properties:
+                type_key: { type: string }
+                display_name: { type: string }
+                description: { type: string }
+                category: { type: string }
+                icon: { type: string }
+      responses:
+        "201":
+          description: Created
+
+  # ── Workflows ───────────────────────────────────────────────────
+  /workflows:
+    get:
+      tags: [Workflows]
+      summary: List workflows
+      operationId: listWorkflows
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workflows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Workflow"
+                  total: { type: integer }
+    post:
+      tags: [Workflows]
+      summary: Create workflow
+      operationId: createWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Workflow"
+      responses:
+        "201":
+          description: Created
+
+  /workflows/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Workflows]
+      summary: Get workflow
+      operationId: getWorkflow
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+    put:
+      tags: [Workflows]
+      summary: Update workflow
+      operationId: updateWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Workflow"
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Workflows]
+      summary: Delete workflow
+      operationId: deleteWorkflow
+      responses:
+        "200":
+          description: Deleted
+
+  /workflows/{id}/execute:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Workflows]
+      summary: Execute workflow
+      operationId: executeWorkflow
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parameters: { type: object }
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowExecution"
+
+  /workflows/{id}/executions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Workflows]
+      summary: List workflow executions
+      operationId: listExecutions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  executions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowExecution"
+
+  # ── Plugins ─────────────────────────────────────────────────────
+  /plugins:
+    get:
+      tags: [Plugins]
+      summary: List plugins
+      operationId: listPlugins
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Plugin"
+
+  # ── Scorecards ──────────────────────────────────────────────────
+  /scorecards:
+    get:
+      tags: [Scorecards]
+      summary: List scorecards
+      operationId: listScorecards
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scorecards:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Scorecard"
+                  total: { type: integer }
+    post:
+      tags: [Scorecards]
+      summary: Create scorecard
+      operationId: createScorecard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScorecardRequest"
+      responses:
+        "201":
+          description: Created
+
+  /scorecards/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Scorecards]
+      summary: Get scorecard with rules
+      operationId: getScorecard
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: [Scorecards]
+      summary: Update scorecard
+      operationId: updateScorecard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Scorecards]
+      summary: Delete scorecard
+      operationId: deleteScorecard
+      responses:
+        "200":
+          description: Deleted
+
+  /scorecards/{id}/rules:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Scorecards]
+      summary: List scorecard rules
+      operationId: listScorecardRules
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScorecardRule"
+    post:
+      tags: [Scorecards]
+      summary: Add scorecard rule
+      operationId: addScorecardRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, expression]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                expression: { type: string }
+                weight: { type: integer, default: 5 }
+                severity: { type: string, enum: [info, warning, critical] }
+      responses:
+        "201":
+          description: Created
+
+  /scorecards/rules/{ruleId}:
+    parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [Scorecards]
+      summary: Delete scorecard rule
+      operationId: deleteScorecardRule
+      responses:
+        "200":
+          description: Deleted
+
+  /scorecards/{id}/evaluate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Scorecards]
+      summary: Evaluate scorecard for an entity
+      operationId: evaluateScorecard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entity_id]
+              properties:
+                entity_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Evaluation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScorecardResult"
+
+  /scorecards/{id}/results:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Scorecards]
+      summary: List scorecard evaluation results
+      operationId: listScorecardResults
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScorecardResult"
+
+  /scorecards/entity/{entityId}:
+    parameters:
+      - name: entityId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Scorecards]
+      summary: Get all scorecard results for an entity
+      operationId: getEntityScores
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scores:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ScorecardResult"
+                  total: { type: integer }
+
+  # ── Audit ───────────────────────────────────────────────────────
+  /audit:
+    get:
+      tags: [Audit]
+      summary: List audit log entries
+      operationId: listAuditLogs
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: entity_type
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditLog"
+                  total: { type: integer }
+
+  /audit/stats:
+    get:
+      tags: [Audit]
+      summary: Audit log statistics
+      operationId: auditStats
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  by_action:
+                    type: object
+                    additionalProperties: { type: integer }
+                  by_resource:
+                    type: object
+                    additionalProperties: { type: integer }
+
+  # ── RBAC ────────────────────────────────────────────────────────
+  /roles:
+    get:
+      tags: [RBAC]
+      summary: List roles
+      operationId: listRoles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Role"
+                  total: { type: integer }
+    post:
+      tags: [RBAC]
+      summary: Create role
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+                description: { type: string }
+                scope: { type: string, default: tenant }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+
+  /roles/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [RBAC]
+      summary: Delete role
+      operationId: deleteRole
+      responses:
+        "200":
+          description: Deleted
+
+  /roles/{id}/permissions:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [RBAC]
+      summary: Get role permissions
+      operationId: getRolePermissions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Permission"
+                  total: { type: integer }
+    post:
+      tags: [RBAC]
+      summary: Add permission to role
+      operationId: addRolePermission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource, action]
+              properties:
+                resource: { type: string }
+                action: { type: string }
+                effect: { type: string, default: allow }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Permission"
+
+  /role-assignments:
+    get:
+      tags: [RBAC]
+      summary: List role assignments
+      operationId: listAssignments
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+                  total: { type: integer }
+    post:
+      tags: [RBAC]
+      summary: Assign role to user
+      operationId: assignRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role_id]
+              properties:
+                user_id: { type: string, format: uuid }
+                role_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Created
+
+  /role-assignments/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [RBAC]
+      summary: Revoke role assignment
+      operationId: revokeAssignment
+      responses:
+        "200":
+          description: Assignment revoked
+
+  /me/roles:
+    get:
+      tags: [User]
+      summary: Current user's roles
+      operationId: myRoles
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items: { type: string }
+                  assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RoleAssignment"
+
+  /me/check:
+    get:
+      tags: [User]
+      summary: Check current user's permission
+      operationId: checkMyPermission
+      parameters:
+        - name: resource
+          in: query
+          required: true
+          schema: { type: string }
+        - name: action
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed: { type: boolean }
+
+# ── Components ──────────────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Entity:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type_key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        status: { type: string }
+        metadata: { type: object }
+        tenant_id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        sync_status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateEntityRequest:
+      type: object
+      required: [name, type_key]
+      properties:
+        name: { type: string }
+        type_key: { type: string }
+        description: { type: string }
+        metadata: { type: object }
+
+    UpdateEntityRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        status: { type: string }
+        metadata: { type: object }
+
+    EntityType:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type_key: { type: string }
+        display_name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        icon: { type: string }
+        is_system: { type: boolean }
+
+    Relationship:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type_key: { type: string }
+        source_id: { type: string, format: uuid }
+        target_id: { type: string, format: uuid }
+        metadata: { type: object }
+        created_at: { type: string, format: date-time }
+
+    GraphNode:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type_key: { type: string }
+        status: { type: string }
+
+    GraphEdge:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string, format: uuid }
+        target: { type: string, format: uuid }
+        type_key: { type: string }
+
+    Workflow:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        tenant_id: { type: string, format: uuid }
+        spec: { type: object }
+        version: { type: integer }
+        is_enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    WorkflowExecution:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        workflow_id: { type: string, format: uuid }
+        status: { type: string }
+        trigger_type: { type: string }
+        triggered_by: { type: string, format: uuid }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        duration_ms: { type: integer }
+
+    Plugin:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        version: { type: string }
+        type: { type: string }
+        enabled: { type: boolean }
+        config: { type: object }
+
+    Scorecard:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        enabled: { type: boolean }
+        tenant_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    CreateScorecardRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        enabled: { type: boolean, default: true }
+        rules:
+          type: array
+          items:
+            type: object
+            required: [name, expression]
+            properties:
+              name: { type: string }
+              expression: { type: string }
+              weight: { type: integer, default: 5 }
+              severity: { type: string, enum: [info, warning, critical] }
+
+    ScorecardRule:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        scorecard_id: { type: string, format: uuid }
+        name: { type: string }
+        expression: { type: string }
+        weight: { type: integer }
+        severity: { type: string }
+
+    ScorecardResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        scorecard_id: { type: string, format: uuid }
+        entity_id: { type: string, format: uuid }
+        score: { type: integer }
+        max_score: { type: integer }
+        pass_count: { type: integer }
+        fail_count: { type: integer }
+        total_rules: { type: integer }
+        level: { type: string }
+        details: { type: array, items: { type: object } }
+        evaluated_at: { type: string, format: date-time }
+
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string, format: uuid }
+        ip_address: { type: string }
+        created_at: { type: string, format: date-time }
+
+    Role:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        description: { type: string }
+        is_system: { type: boolean }
+        scope: { type: string }
+
+    Permission:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        role_id: { type: string, format: uuid }
+        resource: { type: string }
+        action: { type: string }
+        effect: { type: string }
+
+    RoleAssignment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        role_id: { type: string, format: uuid }
+        role_name: { type: string }
+        is_active: { type: boolean }

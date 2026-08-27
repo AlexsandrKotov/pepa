@@ -1,0 +1,406 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/pepa
+
+jobs:
+  # -- 1. Full Test Suite --
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Backend - build
+        run: go build -v ./...
+
+      - name: Backend - lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+
+      - name: Backend - test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Backend - security scan
+        uses: securego/gosec@master
+        with:
+          args: '-exclude-generated ./...'
+
+      - name: Backend - vulnerability check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Frontend - install
+        run: cd frontend && npm ci
+
+      - name: Frontend - lint
+        run: cd frontend && npm run lint
+        continue-on-error: true
+
+      - name: Frontend - build
+        run: cd frontend && npm run build
+
+      - name: Frontend - audit
+        run: cd frontend && npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+        continue-on-error: true
+
+  # -- 2. Build & Push Docker Images --
+  docker:
+    name: Docker Images
+    runs-on: ubuntu-latest
+    needs: [test]
+    strategy:
+      matrix:
+        include:
+          - target: api-server
+            dockerfile: deployments/docker/Dockerfile.api
+            context: .
+          - target: worker
+            dockerfile: deployments/docker/Dockerfile.worker
+            context: .
+          - target: frontend
+            dockerfile: deployments/docker/Dockerfile.frontend
+            context: frontend/
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.target }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=PEPA ${{ matrix.target }}
+            org.opencontainers.image.description=PEPA Platform Engineering & Pipeline Automator
+            org.opencontainers.image.vendor=PEPA
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_PREFIX }}-${{ matrix.target }}:${{ github.ref_name }}
+          format: 'sarif'
+          output: 'trivy-${{ matrix.target }}.sarif'
+          severity: 'CRITICAL,HIGH'
+        continue-on-error: true
+
+      - name: Upload Trivy results
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-${{ matrix.target }}.sarif'
+        continue-on-error: true
+
+  # -- 3. Build & Sign Plugins --
+  plugins:
+    name: Build & Sign Plugins
+    runs-on: ubuntu-latest
+    needs: [test]
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build plugins
+        run: make plugins PLUGIN_GOARCH=${{ matrix.arch }}
+
+      - name: Write signing key
+        if: env.PEPA_SIGNING_KEY != ''
+        env:
+          PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
+        run: echo "$PEPA_SIGNING_KEY" > pepa-plugins-private.pem
+
+      - name: Sign plugins
+        if: env.PEPA_SIGNING_KEY != ''
+        run: |
+          make sign-plugins
+          rm -f pepa-plugins-private.pem
+
+      - name: Verify plugin signatures
+        run: make verify-plugins
+
+      - name: Upload plugin artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-linux-${{ matrix.arch }}
+          path: |
+            plugins/bin/*/
+            plugins/builtin/*/plugin.yaml
+          retention-days: 7
+
+  # -- 4. Build CLI Binaries --
+  cli:
+    name: CLI Binaries
+    runs-on: ubuntu-latest
+    needs: [test]
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build CLI
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          BUILD_TIME="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          go build -ldflags "-s -w -X main.version=${RELEASE_TAG} -X main.buildTime=${BUILD_TIME}" \
+            -o "bin/pepa-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            ./cmd/cli
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: bin/pepa-*
+          retention-days: 7
+
+  # -- 5. Package Helm Chart --
+  helm:
+    name: Helm Chart
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Lint chart
+        run: helm lint deployments/helm/pepa/
+
+      - name: Package chart
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          HELM_VERSION="${RELEASE_TAG#v}"
+          helm package deployments/helm/pepa/ \
+            --version "${HELM_VERSION}" \
+            --app-version "${RELEASE_TAG}" \
+            -d .helm-charts/
+
+      - name: Upload chart package
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: .helm-charts/*.tgz
+          retention-days: 7
+
+      - name: Push chart to GHCR (OCI)
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
+          helm push .helm-charts/*.tgz "oci://${REGISTRY}/${REPO_OWNER}/charts"
+
+  # -- 6. Generate Checksums --
+  checksums:
+    name: Generate Checksums
+    runs-on: ubuntu-latest
+    needs: [cli, plugins, helm]
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts/
+          find . -type f \( -name 'pepa-*' -o -name '*.tgz' \) | sort | while read -r f; do
+            sha256sum "$f" >> ../sha256sums.txt
+          done
+          cd ..
+          cat sha256sums.txt
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: sha256sums.txt
+          retention-days: 30
+
+  # -- 7. Create GitHub Release --
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [docker, plugins, cli, helm, checksums]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+
+      - name: Flatten release assets
+        run: |
+          mkdir -p release-upload/
+          find release-assets/cli-* -type f -name 'pepa-*' -exec cp {} release-upload/ \; 2>/dev/null || true
+          find release-assets/helm-chart -type f -name '*.tgz' -exec cp {} release-upload/ \; 2>/dev/null || true
+          cp release-assets/checksums/sha256sums.txt release-upload/ 2>/dev/null || true
+          ls -la release-upload/
+
+      - name: Generate release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PREV_TAG: ${{ github.event.inputs.previous_tag || '' }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          {
+            echo "# PEPA ${RELEASE_TAG}"
+            echo ""
+            echo "## What's Changed"
+            echo ""
+            if [ -n "${PREV_TAG}" ]; then
+              RANGE="${PREV_TAG}..${RELEASE_TAG}"
+            else
+              PREV_TAG="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo '')"
+              if [ -n "${PREV_TAG}" ]; then
+                RANGE="${PREV_TAG}..${RELEASE_TAG}"
+              else
+                RANGE="${RELEASE_TAG}"
+              fi
+            fi
+            git log --pretty=format:"- %s (%h)" "${RANGE}" 2>/dev/null | grep -v '^Merge' | head -50 || echo "- Initial release"
+            echo ""
+            echo ""
+            echo "## Docker Images"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${IMAGE_PREFIX}-api-server:${RELEASE_TAG}"
+            echo "docker pull ${IMAGE_PREFIX}-worker:${RELEASE_TAG}"
+            echo "docker pull ${IMAGE_PREFIX}-frontend:${RELEASE_TAG}"
+            echo '```'
+            echo ""
+            echo "## Helm Install"
+            echo ""
+            echo '```bash'
+            HELM_VERSION="${RELEASE_TAG#v}"
+            echo "helm install pepa oci://${REGISTRY}/${REPO_OWNER}/charts/pepa --version ${HELM_VERSION}"
+            echo '```'
+            echo ""
+            echo "## CLI Install"
+            echo ""
+            echo '```bash'
+            echo "curl -fsSL https://get.pepa.io | sh"
+            echo "# Or download a binary below"
+            echo '```'
+            echo ""
+            echo "## Checksums"
+            echo ""
+            echo "See \`sha256sums.txt\` attached."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "PEPA ${{ github.ref_name }}"
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-alpha') }}
+          generate_release_notes: false
+          files: |
+            release-upload/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

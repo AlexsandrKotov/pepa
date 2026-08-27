@@ -1,0 +1,46 @@
+name: gitlab
+version: "0.2.0"
+display_name: "GitLab"
+description: "Git provider plugin for GitLab — repositories, merge requests, pipelines, webhooks, and CI/CD management."
+category: git_provider
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    base_url:
+      type: string
+      description: "GitLab instance URL (e.g., https://gitlab.com)"
+    private_token:
+      type: string
+      description: "GitLab personal access token or project token"
+    project_id:
+      type: string
+      description: "Default GitLab project ID"
+  required:
+    - base_url
+    - private_token
+
+actions:
+  - name: list_repos
+    description: "List projects/repositories accessible to the configured token"
+  - name: get_repo
+    description: "Get details of a specific project"
+  - name: list_merge_requests
+    description: "List merge requests for a project"
+  - name: get_merge_request
+    description: "Get details of a specific merge request"
+  - name: create_merge_request
+    description: "Create a new merge request"
+  - name: list_pipelines
+    description: "List CI/CD pipelines for a project"
+  - name: trigger_pipeline
+    description: "Trigger a new CI/CD pipeline"
+  - name: get_pipeline
+    description: "Get status of a specific pipeline"
+
+health_check:
+  endpoint: /health
+  interval: 30s

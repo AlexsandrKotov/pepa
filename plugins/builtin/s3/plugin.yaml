@@ -1,0 +1,55 @@
+name: s3
+version: "0.1.0"
+display_name: "S3 Object Storage"
+description: "S3-compatible object storage plugin — browse buckets, upload and manage files in MinIO, AWS S3, and other S3-compatible storage systems."
+category: storage
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    endpoint:
+      type: string
+      description: "S3 endpoint URL (e.g., https://s3.amazonaws.com or http://minio.local:9000)"
+    access_key:
+      type: string
+      description: "Access key ID for authentication"
+    secret_key:
+      type: string
+      description: "Secret access key for authentication"
+    use_ssl:
+      type: string
+      description: "Use SSL/TLS for connections (true/false)"
+    region:
+      type: string
+      description: "AWS region (optional, for AWS S3)"
+  required:
+    - endpoint
+    - access_key
+    - secret_key
+
+actions:
+  - name: test_connection
+    description: "Verify connectivity to the S3 storage"
+  - name: list_buckets
+    description: "List all accessible buckets"
+  - name: list_objects
+    description: "List objects in a bucket with optional prefix"
+  - name: create_bucket
+    description: "Create a new bucket"
+  - name: delete_bucket
+    description: "Delete an empty bucket"
+  - name: upload_object
+    description: "Upload a single file to a bucket"
+  - name: upload_objects
+    description: "Upload multiple files or an entire folder to a bucket, preserving directory structure"
+  - name: delete_object
+    description: "Delete an object from a bucket"
+  - name: get_object_meta
+    description: "Get metadata for an object"
+
+health_check:
+  endpoint: /health
+  interval: 30s

@@ -1,0 +1,169 @@
+# Default values for PEPA Helm chart.
+# This is a YAML-formatted file.
+# Production-ready configuration with HA support.
+
+# -- Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# -- Number of replicas (default, overridden per-component below)
+replicaCount: 1
+
+# -- API Server configuration
+apiServer:
+  image:
+    repository: ghcr.io/akotau/pepa-api-server
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  port: 8080
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  env:
+    DEV_MODE: "false"
+    LOG_LEVEL: "info"
+  # -- Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+    targetMemory: 80
+  # -- Pod Disruption Budget
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# -- Worker configuration
+worker:
+  image:
+    repository: ghcr.io/akotau/pepa-worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  env:
+    LOG_LEVEL: "info"
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# -- Frontend configuration
+frontend:
+  image:
+    repository: ghcr.io/akotau/pepa-frontend
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  port: 80
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# -- Ingress configuration
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: pepa.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: api
+  tls: []
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  apiPort: 8080
+  frontendPort: 80
+
+# -- PostgreSQL subchart
+postgresql:
+  enabled: true
+  auth:
+    username: pepa
+    database: pepa
+  primary:
+    persistence:
+      size: 50Gi
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+
+# -- Redis subchart
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+  master:
+    persistence:
+      size: 10Gi
+
+# -- Secrets (REQUIRED — never commit real values)
+# Provide these via --set or an external values file.
+secrets:
+  databaseUrl: ""
+  redisUrl: ""
+  jwtSecret: ""
+  postgresPassword: ""
+  redisPassword: ""
+
+# -- Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1000
+
+# -- Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# -- Node selector, tolerations, affinity
+nodeSelector: {}
+tolerations: []
+affinity: {}

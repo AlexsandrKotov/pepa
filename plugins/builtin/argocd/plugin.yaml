@@ -1,0 +1,41 @@
+name: argocd
+version: "0.1.0"
+display_name: "ArgoCD"
+description: "CD engine plugin for ArgoCD — deploy, sync, rollback, and environment management."
+category: cd_engine
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    server_url:
+      type: string
+      description: "ArgoCD server URL"
+    auth_token:
+      type: string
+      description: "ArgoCD API authentication token"
+    insecure:
+      type: boolean
+      description: "Skip TLS verification"
+      default: false
+  required:
+    - server_url
+    - auth_token
+
+actions:
+  - name: sync
+    description: "Sync an ArgoCD application to its target state"
+  - name: rollback
+    description: "Rollback an application to a previous revision"
+  - name: history
+    description: "Get deployment history for an application"
+  - name: get_status
+    description: "Get current deployment status"
+  - name: list_environments
+    description: "List available environments/applications"
+
+health_check:
+  endpoint: /health
+  interval: 30s

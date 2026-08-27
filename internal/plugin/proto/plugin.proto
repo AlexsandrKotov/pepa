@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package plugin;
+
+option go_package = "github.com/openportal/openportal/internal/plugin/proto";
+
+// PEPAPlugin is the gRPC service that ALL PEPA plugins must implement.
+service PEPAPlugin {
+  // Info returns metadata about the plugin.
+  rpc Info(InfoRequest) returns (InfoResponse);
+  // Execute runs a named action with JSON parameters.
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  // HealthCheck returns the current health status.
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ── Info ──────────────────────────────────────────────────────
+
+message InfoRequest {}
+
+message InfoResponse {
+  string name = 1;
+  string version = 2;
+  string description = 3;
+  string plugin_type = 4;       // git_provider, task_tracker, cd_engine, etc.
+  repeated ActionInfo actions = 5;
+  map<string, string> metadata = 6;
+}
+
+message ActionInfo {
+  string name = 1;
+  string description = 2;
+  string input_schema = 3;      // JSON Schema as string
+}
+
+// ── Execute ───────────────────────────────────────────────────
+
+message ExecuteRequest {
+  string action = 1;
+  bytes params = 2;             // JSON-encoded parameters
+  string tenant_id = 3;
+  map<string, string> connection_config = 4; // connection credentials/settings
+}
+
+message ExecuteResponse {
+  bool success = 1;
+  bytes output = 2;             // JSON-encoded result
+  string error = 3;
+}
+
+// ── HealthCheck ───────────────────────────────────────────────
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;            // "healthy", "degraded", "unhealthy"
+  string message = 2;
+  int64 latency_ms = 3;
+}

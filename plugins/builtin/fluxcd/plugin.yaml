@@ -1,0 +1,122 @@
+name: fluxcd
+version: "0.3.0"
+display_name: "FluxCD"
+description: "CD engine plugin for FluxCD — GitOps reconciliations, Helm releases, Kustomizations, and source management."
+category: cd_engine
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    kubeconfig:
+      type: string
+      description: "Path to kubeconfig or base64-encoded cluster config"
+    namespace:
+      type: string
+      description: "Flux system namespace"
+      default: "flux-system"
+    context:
+      type: string
+      description: "Kubernetes context to use (optional)"
+  required:
+    - kubeconfig
+
+actions:
+  - name: reconcile
+    description: "Trigger a FluxCD reconciliation for a Kustomization or HelmRelease"
+    parameters:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: ["Kustomization", "HelmRelease"]
+          description: "Flux resource kind"
+        name:
+          type: string
+          description: "Resource name"
+        namespace:
+          type: string
+          description: "Resource namespace"
+      required:
+        - kind
+        - name
+
+  - name: suspend
+    description: "Suspend a Flux reconciliation"
+    parameters:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: ["Kustomization", "HelmRelease", "GitRepository", "HelmRepository"]
+        name:
+          type: string
+        namespace:
+          type: string
+      required:
+        - kind
+        - name
+
+  - name: resume
+    description: "Resume a suspended Flux reconciliation"
+    parameters:
+      type: object
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+      required:
+        - kind
+        - name
+
+  - name: get_status
+    description: "Get current reconciliation status of a Flux resource"
+    parameters:
+      type: object
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+        namespace:
+          type: string
+      required:
+        - kind
+        - name
+
+  - name: list_resources
+    description: "List all Flux-managed resources (Kustomizations, HelmReleases, Sources)"
+    parameters:
+      type: object
+      properties:
+        namespace:
+          type: string
+        kind:
+          type: string
+          enum: ["Kustomization", "HelmRelease", "GitRepository", "HelmRepository", "OCIRepository", "Bucket"]
+
+  - name: rollback
+    description: "Rollback a HelmRelease to a previous revision"
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        revision:
+          type: integer
+          description: "Target revision (default: previous)"
+          default: -1
+      required:
+        - kind
+        - name
+
+health_check:
+  endpoint: /health
+  interval: 30s

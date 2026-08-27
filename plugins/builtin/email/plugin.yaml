@@ -1,0 +1,38 @@
+name: email
+version: "0.1.0"
+display_name: "Email"
+description: "Email notification plugin — send emails via SMTP with TLS support."
+category: notification
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    smtp_host:
+      type: string
+      description: "SMTP server hostname"
+    smtp_port:
+      type: string
+      description: "SMTP server port (default: 587)"
+    smtp_user:
+      type: string
+      description: "SMTP authentication username"
+    smtp_password:
+      type: string
+      description: "SMTP authentication password"
+    from_address:
+      type: string
+      description: "Sender email address (From header)"
+  required:
+    - smtp_host
+    - from_address
+
+actions:
+  - name: send_email
+    description: "Send an email to one or more recipients"
+
+health_check:
+  endpoint: /health
+  interval: 60s

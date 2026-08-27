@@ -1,0 +1,45 @@
+name: github
+version: "0.1.0"
+display_name: "GitHub"
+description: "Git provider plugin for GitHub — repositories, pull requests, webhooks, and commit history."
+category: git_provider
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    app_id:
+      type: string
+      description: "GitHub App ID"
+    installation_id:
+      type: string
+      description: "GitHub App Installation ID"
+    private_key:
+      type: string
+      description: "GitHub App private key (PEM)"
+    base_url:
+      type: string
+      description: "GitHub API base URL (default: https://api.github.com)"
+      default: "https://api.github.com"
+  required:
+    - app_id
+    - installation_id
+    - private_key
+
+actions:
+  - name: list_repos
+    description: "List repositories for the configured organization/user"
+  - name: get_pull_requests
+    description: "List pull requests for a repository"
+  - name: create_webhook
+    description: "Register a webhook on a repository"
+  - name: get_commits
+    description: "Get recent commit history for a branch"
+  - name: checkout
+    description: "Checkout a repository at a specific ref"
+
+health_check:
+  endpoint: /health
+  interval: 30s

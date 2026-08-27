@@ -1,0 +1,37 @@
+name: bitbucket
+version: "0.1.0"
+display_name: "Bitbucket"
+description: "Git provider plugin for Bitbucket — workspaces, repositories, branches, pipelines, and CI config parsing."
+category: git_provider
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    token:
+      type: string
+      description: "Bitbucket App Password or OAuth token"
+    url:
+      type: string
+      description: "Bitbucket API base URL (default: https://api.bitbucket.org/2.0)"
+      default: "https://api.bitbucket.org/2.0"
+  required:
+    - token
+
+actions:
+  - name: list_groups
+    description: "List Bitbucket workspaces"
+  - name: list_repos
+    description: "List repositories (optionally filtered by workspace)"
+  - name: get_branches
+    description: "List branches for a repository"
+  - name: list_pipelines
+    description: "List Bitbucket Pipelines runs for a repository"
+  - name: parse_ci_config
+    description: "Parse bitbucket-pipelines.yml to extract variables and parameters"
+
+health_check:
+  endpoint: /health
+  interval: 30s
