@@ -140,6 +140,9 @@ jobs:
           rm -f pepa-plugins-private.pem
 
       - name: Verify plugin signatures
+        if: env.PEPA_SIGNING_KEY != ''
+        env:
+          PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
         run: make verify-plugins
 
       - name: Upload signed plugins
