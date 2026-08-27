@@ -265,7 +265,7 @@ func findKustomizeOverlays(root, relPrefix string, depth, maxDepth int) map[stri
 		// Check for kustomization.yaml in this directory
 		kustPath := findKustomizationFile(subDir)
 		if kustPath != "" {
-			data, err := os.ReadFile(kustPath)
+			data, err := os.ReadFile(kustPath) //nolint:gosec // G304: kustPath is from a controlled directory listing
 			if err == nil {
 				kInfo := ParseKustomization(data, subRel)
 				if kInfo != nil && kInfo.IsOverlay {

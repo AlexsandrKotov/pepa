@@ -94,7 +94,7 @@ func (c *Client) env() []string {
 
 // run executes a docker CLI command and returns stdout.
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker is an admin-configured binary
 	cmd.Env = c.env()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -182,7 +182,7 @@ func (c *Client) ComposeUp(ctx context.Context, projectName, composeYaml string,
 	}
 
 	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "-d"}
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker compose with validated args
 	cmd.Env = c.env()
 	for k, v := range envVars {
 		cmd.Env = append(cmd.Env, k+"="+v)

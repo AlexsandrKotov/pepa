@@ -79,7 +79,7 @@ func (a *AnsibleAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 	if !strings.HasPrefix(absPlaybook, absWorkDir) {
 		return nil, fmt.Errorf("invalid playbook path")
 	}
-	data, err := os.ReadFile(absPlaybook)
+	data, err := os.ReadFile(absPlaybook) //nolint:gosec // G304: absPlaybook is validated to be within workDir
 	if err != nil {
 		// Fallback: just provide basic params
 		props["inventory"] = PropertyDef{Type: "string", Description: "Inventory file/host list", Default: cfg.Inventory}
@@ -193,7 +193,7 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		args = append(args, "-e", fmt.Sprintf("%s=%v", k, v))
 	}
 
-	cmd := exec.CommandContext(ctx, "ansible-playbook", args...)
+	cmd := exec.CommandContext(ctx, "ansible-playbook", args...) //nolint:gosec // G204: ansible-playbook is an admin-configured binary
 	cmd.Dir = workDir
 	_, err = cmd.CombinedOutput()
 
@@ -269,7 +269,7 @@ func gitClone(ctx context.Context, repoURL, token, destDir string) error {
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, destDir)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, destDir) //nolint:gosec // G204: git clone with validated args
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(output), err)

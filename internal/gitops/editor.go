@@ -73,7 +73,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 		tmpDir,
 	}
 
-	cmd := exec.CommandContext(ctx, "git", cloneArgs...)
+	cmd := exec.CommandContext(ctx, "git", cloneArgs...) //nolint:gosec // G204: git clone with validated args
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("git clone: %s: %w", maskGitSecrets(string(out), token), err)
@@ -90,7 +90,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 		gitEmail = e
 	}
 	for _, cfg := range []string{"user.email=" + gitEmail, "user.name=" + gitName} {
-		cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "config", strings.SplitN(cfg, "=", 2)[0], strings.SplitN(cfg, "=", 2)[1])
+		cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "config", strings.SplitN(cfg, "=", 2)[0], strings.SplitN(cfg, "=", 2)[1]) //nolint:gosec // G204: git config with validated args
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("git config: %s: %w", string(out), err)
 		}
@@ -110,7 +110,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	}
 
 	// Read original content for diff
-	originalContent, err := os.ReadFile(targetPath)
+	originalContent, err := os.ReadFile(targetPath) //nolint:gosec // G304: targetPath is validated against path traversal
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -143,7 +143,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	}
 
 	// Stage the change
-	cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "add", cleanPath)
+	cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "add", cleanPath) //nolint:gosec // G204: git add with validated path
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("git add: %s: %w", string(out), err)
 	}
@@ -153,13 +153,13 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	if commitMsg == "" {
 		commitMsg = fmt.Sprintf("gitops: update %s in %s", req.FieldPath, req.FilePath)
 	}
-	cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "commit", "-m", commitMsg)
+	cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "commit", "-m", commitMsg) //nolint:gosec // G204: git commit in controlled temp dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("git commit: %s: %w", string(out), err)
 	}
 
 	// Try to push directly
-	pushCmd := exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", branch)
+	pushCmd := exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", branch) //nolint:gosec // G204: git push in controlled temp dir
 	pushCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	_, pushErr := pushCmd.CombinedOutput()
 
@@ -177,12 +177,12 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 
 	// Push rejected — create a feature branch and try again
 	featureBranch := fmt.Sprintf("pepa/edit-%d", time.Now().Unix())
-	cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "branch", "-m", featureBranch)
+	cmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "branch", "-m", featureBranch) //nolint:gosec // G204: git branch in controlled temp dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("git branch rename: %s: %w", string(out), err)
 	}
 
-	pushCmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", featureBranch)
+	pushCmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", featureBranch) //nolint:gosec // G204: git push in controlled temp dir
 	pushCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	pushOut, pushErr := pushCmd.CombinedOutput()
 	if pushErr != nil {
@@ -213,7 +213,7 @@ func (e *Editor) PreviewDiff(ctx context.Context, repo *Repo, req *EditRequest) 
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cloneArgs := []string{"clone", "--depth", "1", "--branch", repo.Branch, "--single-branch", "--no-tags", repoURL, tmpDir}
-	cmd := exec.CommandContext(ctx, "git", cloneArgs...)
+	cmd := exec.CommandContext(ctx, "git", cloneArgs...) //nolint:gosec // G204: git clone with validated args
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git clone: %s: %w", maskGitSecrets(string(out), token), err)
@@ -231,7 +231,7 @@ func (e *Editor) PreviewDiff(ctx context.Context, repo *Repo, req *EditRequest) 
 		return "", fmt.Errorf("file path escapes repository root")
 	}
 
-	originalContent, err := os.ReadFile(targetPath)
+	originalContent, err := os.ReadFile(targetPath) //nolint:gosec // G304: targetPath is validated against path traversal
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
@@ -381,7 +381,7 @@ func generateDiff(filePath string, original, modified []byte) string {
 
 // getHeadSHA returns the current HEAD commit SHA.
 func getHeadSHA(ctx context.Context, dir string) string {
-	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "HEAD")
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "HEAD") //nolint:gosec // G204: git rev-parse in controlled dir
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

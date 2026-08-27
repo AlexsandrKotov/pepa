@@ -389,7 +389,7 @@ func sanitizeID(s string) string {
 	for _, c := range s {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
 			if c < 128 {
-				result = append(result, byte(c))
+				result = append(result, byte(c)) //nolint:gosec // G115: c < 128 guarantees safe byte range
 			}
 		} else {
 			result = append(result, '_')

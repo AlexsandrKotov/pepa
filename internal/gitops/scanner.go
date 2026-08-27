@@ -52,7 +52,7 @@ func (s *Scanner) Scan(ctx context.Context, repo *Repo) (*ScanResult, error) {
 		tmpDir,
 	}
 
-	cmd := exec.CommandContext(ctx, "git", cloneArgs...)
+	cmd := exec.CommandContext(ctx, "git", cloneArgs...) //nolint:gosec // G204: git clone with validated args
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("git clone: %s: %w", maskGitSecrets(string(out), token), err)
@@ -107,7 +107,7 @@ func (s *Scanner) Scan(ctx context.Context, repo *Repo) (*ScanResult, error) {
 		cluster := detectClusterFromPath(relPath)
 
 		// Read and classify the file
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // G122,G304: path comes from filepath.Walk within a controlled temp clone
 		if err != nil {
 			log.Printf("gitops scanner: skip %s: %v", relPath, err)
 			return nil

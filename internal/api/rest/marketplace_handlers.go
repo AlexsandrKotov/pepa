@@ -110,7 +110,7 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 			continue
 		}
 		yamlPath := filepath.Join(builtinDir, entry.Name(), "plugin.yaml")
-		data, err := os.ReadFile(yamlPath)
+		data, err := os.ReadFile(yamlPath) //nolint:gosec // G304: yamlPath is from a controlled builtin plugins directory
 		if err != nil {
 			log.Printf("[marketplace] skip %s: no plugin.yaml", entry.Name())
 			continue

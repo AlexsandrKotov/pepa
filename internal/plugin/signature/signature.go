@@ -40,7 +40,7 @@ func VerifyPluginBinary(binPath string, pubKey ed25519.PublicKey) error {
 	sigPath := filepath.Join(binDir, "checksum.sig")
 
 	// 1. Read stored checksum (hex text as written by sign-plugin.sh)
-	checksumRaw, err := os.ReadFile(checksumPath)
+	checksumRaw, err := os.ReadFile(checksumPath) //nolint:gosec // G304: checksumPath is derived from validated plugin binary path
 	if err != nil {
 		return fmt.Errorf("missing checksum file for plugin %s: %w", binName, err)
 	}
@@ -51,7 +51,7 @@ func VerifyPluginBinary(binPath string, pubKey ed25519.PublicKey) error {
 	}
 
 	// 2. Read signature
-	sig, err := os.ReadFile(sigPath)
+	sig, err := os.ReadFile(sigPath) //nolint:gosec // G304: sigPath is derived from validated plugin binary path
 	if err != nil {
 		return fmt.Errorf("missing signature file for plugin %s: %w", binName, err)
 	}
@@ -89,7 +89,7 @@ func VerifyPluginYAML(yamlPath string, pubKey ed25519.PublicKey) error {
 	checksumPath := filepath.Join(dir, "plugin.yaml.checksum")
 	sigPath := filepath.Join(dir, "plugin.yaml.sig")
 
-	checksumRaw, err := os.ReadFile(checksumPath)
+	checksumRaw, err := os.ReadFile(checksumPath) //nolint:gosec // G304: checksumPath is derived from validated YAML path
 	if err != nil {
 		return fmt.Errorf("missing plugin.yaml checksum: %w", err)
 	}
@@ -99,7 +99,7 @@ func VerifyPluginYAML(yamlPath string, pubKey ed25519.PublicKey) error {
 		return fmt.Errorf("invalid plugin.yaml checksum format: %w", err)
 	}
 
-	sig, err := os.ReadFile(sigPath)
+	sig, err := os.ReadFile(sigPath) //nolint:gosec // G304: sigPath is derived from validated YAML path
 	if err != nil {
 		return fmt.Errorf("missing plugin.yaml signature: %w", err)
 	}
@@ -151,7 +151,7 @@ func hashFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("file %s exceeds maximum size (%d > %d bytes)", path, fi.Size(), maxPluginSize)
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: path is a validated plugin binary path
 	if err != nil {
 		return nil, err
 	}

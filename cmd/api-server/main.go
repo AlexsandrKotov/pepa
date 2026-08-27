@@ -86,12 +86,12 @@ func main() {
 		// where secrets can linger in indexes and be exposed to wider audiences.
 		tokenPath := os.Getenv("BOOTSTRAP_TOKEN_PATH")
 		if tokenPath == "" {
-			tokenPath = "/var/run/pepa/bootstrap_token.txt"
+			tokenPath = "/var/run/pepa/bootstrap_token.txt" //nolint:gosec // G101: not a credential, just a default file path
 		}
-		if writeErr := os.MkdirAll(filepath.Dir(tokenPath), 0700); writeErr != nil {
+		if writeErr := os.MkdirAll(filepath.Dir(tokenPath), 0700); writeErr != nil { //nolint:gosec // G703: tokenPath is admin-controlled (env var or hardcoded default)
 			log.Printf("Warning: failed to create token directory: %v", writeErr)
 		}
-		if writeErr := os.WriteFile(tokenPath, []byte(rawToken+"\n"), 0600); writeErr != nil {
+		if writeErr := os.WriteFile(tokenPath, []byte(rawToken+"\n"), 0600); writeErr != nil { //nolint:gosec // G703: tokenPath is admin-controlled (env var or hardcoded default)
 			log.Printf("Warning: failed to write bootstrap token file: %v", writeErr)
 			fmt.Fprintln(os.Stderr, "  ERROR: could not write token file — check BOOTSTRAP_TOKEN_PATH")
 		} else {

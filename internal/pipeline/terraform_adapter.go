@@ -93,7 +93,7 @@ func (a *TerraformAdapter) ResolveSchema(ctx context.Context, raw json.RawMessag
 	typeRe := regexp.MustCompile(`(?s)type\s*=\s*(\S+)`)
 
 	for _, tfFile := range tfFiles {
-		data, err := os.ReadFile(tfFile)
+		data, err := os.ReadFile(tfFile) //nolint:gosec // G304: tfFile is from a validated directory listing
 		if err != nil {
 			continue
 		}
