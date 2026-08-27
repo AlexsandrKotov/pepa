@@ -80,9 +80,9 @@ func TestIsBlockedIP(t *testing.T) {
 		{"172.31.255.255", true},
 		{"192.168.1.1", true},
 		{"169.254.1.1", true},
-		{"100.64.0.1", true},   // CGNAT
-		{"8.8.8.8", false},     // Google DNS
-		{"1.1.1.1", false},     // Cloudflare
+		{"100.64.0.1", true},     // CGNAT
+		{"8.8.8.8", false},       // Google DNS
+		{"1.1.1.1", false},       // Cloudflare
 		{"93.184.216.34", false}, // example.com
 	}
 	for _, tt := range tests {
@@ -143,9 +143,9 @@ func TestValidateAddress_ValidExternal(t *testing.T) {
 // bypassing SSRF protection (since test servers use localhost).
 func newTestClient(addr string) *Client {
 	return &Client{
-		address:   addr,
-		token:     "test-token",
-		mountPath: "secret",
+		address:    addr,
+		token:      "test-token",
+		mountPath:  "secret",
 		httpClient: &http.Client{},
 	}
 }
