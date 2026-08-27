@@ -11,7 +11,7 @@
 
 set -e
 
-REPO="akotau/pepa"
+REPO="your-username/pepa"
 BINARY_NAME="pepa"
 
 # Colors

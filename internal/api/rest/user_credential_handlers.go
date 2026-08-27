@@ -339,7 +339,7 @@ func verifyMyCredential(deps Dependencies) gin.HandlerFunc {
 		if status == "connected" {
 			// Auto-update username and email from the provider so git commits
 			// are authored under the user's real identity (e.g. "Aleksandr Kotau"
-			// instead of a manually entered login like "akotau").
+			// instead of a manually entered login like "your-username").
 			if name, email, fetchErr := fetchExternalUserInfo(ctx, cred.Provider, cred.ProviderURL, cred.Username, token); fetchErr == nil {
 				if err := deps.Repos.UserCredential.UpdateVerification(ctx, credID, name, email); err != nil {
 					log.Printf("[credential] failed to update user info for credential %s: %v", credID, err)

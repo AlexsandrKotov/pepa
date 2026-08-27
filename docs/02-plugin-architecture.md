@@ -610,7 +610,7 @@ pepa plugin publish --registry docker.io/pepa/plugins
 │                                                               │
 │  ┌─────────────────┐   ┌─────────────────────────────────┐  │
 │  │ OCI Registry    │   │ Registry API                     │  │
-│  │ (ghcr.io/       │   │                                  │  │
+│  │ (docker.io/       │   │                                  │  │
 │  │  pepa/    │   │  GET  /v1/plugins                │  │
 │  │  plugins/)      │   │  GET  /v1/plugins/{name}         │  │
 │  │                 │   │  POST /v1/plugins/{name}/review   │  │
