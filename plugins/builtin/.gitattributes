@@ -1,0 +1,3 @@
+# Prevent line-ending conversion for signing artifacts
+*.sig binary
+*.checksum text eol=lf
