@@ -237,7 +237,6 @@ func (r *AuthRepository) ListUsers(ctx context.Context, search string, isActive 
 	if isActive != nil {
 		query += fmt.Sprintf(" AND is_active = $%d", argIdx)
 		args = append(args, *isActive)
-		argIdx++
 	}
 	
 	query += " ORDER BY name ASC"

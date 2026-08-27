@@ -144,7 +144,7 @@ func testAIProvider(deps Dependencies) gin.HandlerFunc {
 		}
 
 		status := "connected"
-		message := "Configuration valid"
+		var message string
 
 		switch req.Provider {
 		case "openai":

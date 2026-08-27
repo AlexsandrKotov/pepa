@@ -211,7 +211,7 @@ func getCatalogHealth(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		healthStatus := "unknown"
+		var healthStatus string
 		if totalEnvs == 0 {
 			healthStatus = "not_deployed"
 		} else if healthyEnvs == totalEnvs {

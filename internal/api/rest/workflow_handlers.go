@@ -2,7 +2,6 @@ package rest
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -220,74 +219,4 @@ func listExecutions(deps Dependencies) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"executions": execs})
 	}
-}
-
-func validateWorkflowSpec(spec *models.WorkflowSpec) []string {
-	var errors []string
-
-	if len(spec.Steps) == 0 {
-		errors = append(errors, "Workflow must have at least one step")
-		return errors
-	}
-
-	// Check for duplicate step names
-	stepNames := make(map[string]bool)
-	for _, step := range spec.Steps {
-		if step.Name == "" {
-			errors = append(errors, "Step name cannot be empty")
-			continue
-		}
-		if stepNames[step.Name] {
-			errors = append(errors, fmt.Sprintf("Duplicate step name: %s", step.Name))
-		}
-		stepNames[step.Name] = true
-	}
-
-	// Check DependsOn references
-	for _, step := range spec.Steps {
-		for _, dep := range step.DependsOn {
-			if !stepNames[dep] {
-				errors = append(errors, fmt.Sprintf("Step %q depends on unknown step %q", step.Name, dep))
-			}
-		}
-	}
-
-	// Check for circular dependencies using DFS
-	visited := make(map[string]int) // 0 = unvisited, 1 = visiting, 2 = visited
-	var hasCycle func(string) bool
-	hasCycle = func(name string) bool {
-		if visited[name] == 1 {
-			return true // cycle detected
-		}
-		if visited[name] == 2 {
-			return false // already checked
-		}
-		visited[name] = 1 // mark as visiting
-
-		// Find this step
-		for _, step := range spec.Steps {
-			if step.Name == name {
-				for _, dep := range step.DependsOn {
-					if hasCycle(dep) {
-						return true
-					}
-				}
-				break
-			}
-		}
-
-		visited[name] = 2 // mark as visited
-		return false
-	}
-
-	for _, step := range spec.Steps {
-		if visited[step.Name] == 0 {
-			if hasCycle(step.Name) {
-				errors = append(errors, "Circular dependency detected in workflow")
-				break
-			}
-		}
-	}
-
-	return errors
 }

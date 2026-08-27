@@ -35,7 +35,7 @@
 ### Установка (Docker)
 
 ```bash
-git clone https://github.com/your-username/pepa.git
+git clone https://github.com/AlexsandrKotov/pepa.git
 cd pepa
 make docker-up
 ```

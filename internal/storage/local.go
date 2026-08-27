@@ -23,7 +23,7 @@ func NewLocalStorage(rootDir string) (*LocalStorage, error) {
 	if rootDir == "" {
 		rootDir = "/custom-plugins"
 	}
-	if err := os.MkdirAll(rootDir, 0o755); err != nil {
+	if err := os.MkdirAll(rootDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create storage dir %s: %w", rootDir, err)
 	}
 	log.Printf("[storage] local storage initialized at %s", rootDir)
@@ -100,7 +100,7 @@ func (s *LocalStorage) UploadPlugin(_ context.Context, name, version string, rea
 	}
 
 	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return fmt.Errorf("create plugin dir: %w", err)
 	}
 

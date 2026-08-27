@@ -152,32 +152,6 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 	}
 }
 
-// updateDeploymentStatus updates the deployment status in the database.
-func updateDeploymentStatus(deps Dependencies, id uuid.UUID, status string) {
-	updateDeploymentStatusWithError(deps, id, status, "", "")
-}
-
-// updateDeploymentStatusWithError updates the deployment status with error message.
-func updateDeploymentStatusWithError(deps Dependencies, id uuid.UUID, status string, errMsg string, logs string) {
-	updateDeploymentStatusWithLogs(deps, id, status, errMsg, logs)
-}
-
-// updateDeploymentStatusWithLogs updates the deployment status with error message and logs.
-func updateDeploymentStatusWithLogs(deps Dependencies, id uuid.UUID, status string, errMsg string, logs string) {
-	ctx := context.Background()
-	d, err := deps.Repos.Deployment.Get(ctx, id)
-	if err != nil {
-		log.Printf("ERROR: update deployment status: get deployment %s: %v", id, err)
-		return
-	}
-	d.Status = status
-	d.ErrorMessage = errMsg
-	d.Logs = logs
-	if err := deps.Repos.Deployment.Update(ctx, d); err != nil {
-		log.Printf("ERROR: update deployment status: update deployment %s: %v", id, err)
-	}
-}
-
 func getDeployment(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Deployment == nil {

@@ -161,7 +161,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	// Try to push directly
 	pushCmd := exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", branch)
 	pushCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	pushOut, pushErr := pushCmd.CombinedOutput()
+	_, pushErr := pushCmd.CombinedOutput()
 
 	result := &CommitResult{
 		Branch: branch,
@@ -184,7 +184,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 
 	pushCmd = exec.CommandContext(ctx, "git", "-C", tmpDir, "push", "origin", featureBranch)
 	pushCmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	pushOut, pushErr = pushCmd.CombinedOutput()
+	pushOut, pushErr := pushCmd.CombinedOutput()
 	if pushErr != nil {
 		return nil, fmt.Errorf("git push feature branch: %s: %w", maskGitSecrets(string(pushOut), token), pushErr)
 	}

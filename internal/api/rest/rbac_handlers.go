@@ -2,7 +2,6 @@ package rest
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -458,77 +457,6 @@ func myPermissions(deps Dependencies) gin.HandlerFunc {
 			"permissions": perms,
 			"total":       len(perms),
 		})
-	}
-}
-
-// requirePermission returns a middleware that checks if the user has a specific permission.
-// If the user lacks the permission, a 403 Forbidden response is returned.
-func requirePermission(deps Dependencies, resource, action string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userID := auth.GetUserID(c)
-		if userID == nil {
-			// Dev mode: allow everything
-			c.Next()
-			return
-		}
-
-		tenantID := auth.GetTenantID(c)
-
-		allowed, err := deps.RBAC.CheckPermission(c.Request.Context(), tenantID, *userID, resource, action)
-		if err != nil {
-			respondInternalError(c, err)
-			c.Abort()
-			return
-		}
-
-		if !allowed {
-			c.JSON(http.StatusForbidden, gin.H{
-				"error":    "forbidden",
-				"message":  "you do not have permission to perform this action",
-				"resource": resource,
-				"action":   action,
-			})
-			c.Abort()
-			return
-		}
-
-		c.Next()
-	}
-}
-
-// requireAnyPermission returns a middleware that checks if the user has at least one of the given permissions.
-func requireAnyPermission(deps Dependencies, perms ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userID := auth.GetUserID(c)
-		if userID == nil {
-			c.Next()
-			return
-		}
-
-		tenantID := auth.GetTenantID(c)
-
-		for _, perm := range perms {
-			parts := strings.SplitN(perm, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			allowed, err := deps.RBAC.CheckPermission(c.Request.Context(), tenantID, *userID, parts[0], parts[1])
-			if err != nil {
-				respondInternalError(c, err)
-				c.Abort()
-				return
-			}
-			if allowed {
-				c.Next()
-				return
-			}
-		}
-
-		c.JSON(http.StatusForbidden, gin.H{
-			"error":   "forbidden",
-			"message": "you do not have permission to perform this action",
-		})
-		c.Abort()
 	}
 }
 

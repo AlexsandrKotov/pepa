@@ -15,10 +15,6 @@ import (
 	"github.com/pepa/pepa/pkg/utils"
 )
 
-// sensitiveConfigKeys are the keys in connection config that should be encrypted.
-// Kept for backward compatibility; new code should use utils.IsSensitiveKey.
-var sensitiveConfigKeys = []string{"token", "password", "kubeconfig", "api_token", "secret", "ssh_key"}
-
 // ConnectionType defines supported connection types.
 type ConnectionType string
 

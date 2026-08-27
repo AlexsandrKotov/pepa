@@ -275,4 +275,4 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 - CONTRIBUTING.md — development setup and PR process
 - Apache License 2.0
 
-[0.1.0]: https://github.com/your-username/pepa/releases/tag/v0.1.0
+[0.1.0]: https://github.com/AlexsandrKotov/pepa/releases/tag/v0.1.0

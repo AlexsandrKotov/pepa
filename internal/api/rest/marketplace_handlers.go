@@ -77,7 +77,6 @@ type schemaProp struct {
 var (
 	marketplaceCache []MarketplacePlugin
 	marketplaceMu    sync.RWMutex
-	marketplaceOnce  sync.Once
 )
 
 // loadMarketplacePlugins reads real plugin definitions from plugins/builtin/*/plugin.yaml

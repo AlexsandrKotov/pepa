@@ -44,9 +44,6 @@ var (
 	discoveryCache           []DiscoveredService
 	discoveryCacheTime       time.Time
 	discoveryCacheTTL        = 2 * time.Minute
-	discoveryCacheSources    map[string]int
-	discoveryCacheClusters   map[string]int
-	discoveryCacheNamespaces map[string]int
 )
 
 // DiscoveryService handles service discovery from multiple sources
@@ -1031,8 +1028,7 @@ func getDockerServices(ctx context.Context, deps Dependencies, tenantID uuid.UUI
 			hostName = "docker-host"
 		}
 
-		health := "unknown"
-		status := "unknown"
+		var health, status string
 		switch ds.Status {
 		case "running":
 			health = "healthy"
@@ -1154,8 +1150,7 @@ func discoverDockerContainers(ctx context.Context, deps Dependencies, tenantID u
 				continue
 			}
 
-			health := "unknown"
-			status := "unknown"
+			var health, status string
 			switch strings.ToLower(c.State) {
 			case "running":
 				health = "healthy"

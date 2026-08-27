@@ -542,7 +542,6 @@ func listUsersHandler(deps Dependencies) gin.HandlerFunc {
 			escaped = strings.ReplaceAll(escaped, "_", "\\_")
 			whereClauses = append(whereClauses, fmt.Sprintf("(u.email ILIKE $%d OR u.name ILIKE $%d)", argIdx, argIdx))
 			args = append(args, "%"+escaped+"%")
-			argIdx++
 		}
 		if len(whereClauses) > 0 {
 			query += " WHERE " + strings.Join(whereClauses, " AND ")

@@ -44,19 +44,6 @@ type SharedCredential struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// registerCredentialSharingRoutes registers sharing endpoints under /my/credentials.
-func registerCredentialSharingRoutes(r interface{ POST(string, ...gin.HandlerFunc) gin.IRoutes }, deps Dependencies) {
-	// This is called from registerUserCredentialRoutes, which already has the
-	// /my/credentials group.  We add sharing sub-routes there.
-}
-
-func addSharingRoutes(creds *gin.RouterGroup, deps Dependencies) {
-	creds.POST("/:id/share", shareMyCredential(deps))
-	creds.GET("/:id/shares", listMyCredentialShares(deps))
-	creds.DELETE("/:id/shares/:shareId", revokeMyCredentialShare(deps))
-	creds.GET("/shared", listSharedWithMe(deps))
-}
-
 // shareMyCredential grants another user or team access to a credential.
 func shareMyCredential(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {

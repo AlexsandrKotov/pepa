@@ -326,24 +326,6 @@ func requestIDMiddleware() gin.HandlerFunc {
 	}
 }
 
-// tenantRLSMiddleware is a placeholder for future per-request RLS enforcement.
-//
-// NOTE: With pgxpool, set_config() does not reliably persist across queries
-// because each query may use a different pooled connection. True RLS enforcement
-// requires either:
-//  1. Wrapping each request in an explicit DB transaction (connection pinning), or
-//  2. Using a per-request dedicated connection.
-//
-// Currently, tenant isolation is enforced at the application level: every query
-// includes WHERE tenant_id = <from JWT>. The RLS policies in migrations 013/023
-// serve as defense-in-depth for direct DB access (e.g. via psql).
-func tenantRLSMiddleware(deps Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// Tenant isolation is enforced by application-level WHERE clauses.
-		c.Next()
-	}
-}
-
 func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

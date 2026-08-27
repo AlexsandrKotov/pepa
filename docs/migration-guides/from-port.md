@@ -144,5 +144,5 @@ steps:
 
 ## Need Help?
 
-- [GitHub Discussions](https://github.com/your-username/pepa/discussions)
+- [GitHub Discussions](https://github.com/AlexsandrKotov/pepa/discussions)
 - [PEPA Documentation](../)

@@ -6,7 +6,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat&logo=next.js)](https://nextjs.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql)](https://www.postgresql.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v0.1.0-green)](https://github.com/your-username/pepa/releases)
+[![Release](https://img.shields.io/badge/Release-v0.1.0-green)](https://github.com/AlexsandrKotov/pepa/releases)
 
 PEPA is an open-source **Platform Engineering & Pipeline Automator** for service catalog, GitOps deployments, Kubernetes management, CI/CD pipelines, workflow automation, and developer self-service.
 
@@ -30,7 +30,7 @@ PEPA is an open-source **Platform Engineering & Pipeline Automator** for service
 ### From Source (Development)
 
 ```bash
-git clone https://github.com/your-username/pepa.git && cd pepa
+git clone https://github.com/AlexsandrKotov/pepa.git && cd pepa
 make docker-up
 ```
 
@@ -40,11 +40,11 @@ Access:
 
 ### Production (Tar Archive)
 
-Download the production package from [GitHub Releases](https://github.com/your-username/pepa/releases):
+Download the production package from [GitHub Releases](https://github.com/AlexsandrKotov/pepa/releases):
 
 ```bash
 # Download and extract
-wget https://github.com/your-username/pepa/releases/download/v0.1.0/pepa-production-v0.1.0.tar.gz
+wget https://github.com/AlexsandrKotov/pepa/releases/download/v0.1.0/pepa-production-v0.1.0.tar.gz
 tar xzf pepa-production-v0.1.0.tar.gz
 cd pepa-production-v0.1.0
 
@@ -92,7 +92,7 @@ PEPA includes a three-tier plugin system:
 
 **Built-in (Free):** GitHub, GitLab, ArgoCD, Telegram, Email, Webhook, Slack, Prometheus, S3
 
-**Community (Free):** Gitea - download from [GitHub Releases](https://github.com/your-username/pepa/releases)
+**Community (Free):** Gitea - download from [GitHub Releases](https://github.com/AlexsandrKotov/pepa/releases)
 
 **Premium (Commercial):** Bitbucket, FluxCD, Teams, Jira, Proxmox - contact for licensing
 
@@ -134,7 +134,7 @@ make docker-up    # Start full stack
 
 ## Community
 
-- [GitHub Discussions](https://github.com/your-username/pepa/discussions)
+- [GitHub Discussions](https://github.com/AlexsandrKotov/pepa/discussions)
 - [Contributing](CONTRIBUTING.md)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security Policy](SECURITY.md)
@@ -147,4 +147,4 @@ make docker-up    # Start full stack
 
 ---
 
-**Repository:** https://github.com/your-username/pepa
+**Repository:** https://github.com/AlexsandrKotov/pepa

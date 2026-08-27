@@ -249,11 +249,6 @@ func decryptPluginConfig(config json.RawMessage) json.RawMessage {
 	return result
 }
 
-// scan helper
-type pluginScanner interface {
-	Scan(dest ...interface{}) error
-}
-
 func scanPlugin(rows pgx.Rows) (*Plugin, error) {
 	var p Plugin
 	var configJSON []byte
