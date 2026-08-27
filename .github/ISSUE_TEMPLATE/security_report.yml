@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **IMPORTANT**: If this is a critical vulnerability, please use [GitHub Private Security Reporting](https://github.com/AlexsandrKotov/pepa/security/advisories/new) instead.
+        **IMPORTANT**: If this is a critical vulnerability, please use [GitHub Private Security Reporting](https://github.com/your-username/pepa/security/advisories/new) instead.
         
         Do not disclose details publicly until a fix is available.
 

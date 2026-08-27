@@ -271,7 +271,7 @@ spec:
     type: binary          # binary | container | wasm
     binary: "./jira-plugin"
     # container:
-    #   image: "ghcr.io/pepa/jira-plugin:1.2.0"
+    #   image: "docker.io/pepa/jira-plugin:1.2.0"
     # wasm:
     #   module: "./jira-plugin.wasm"
   
@@ -595,7 +595,7 @@ pepa plugin dev
 pepa plugin package
 
 # Publish to registry
-pepa plugin publish --registry ghcr.io/pepa/plugins
+pepa plugin publish --registry docker.io/pepa/plugins
 ```
 
 ---

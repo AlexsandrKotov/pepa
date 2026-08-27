@@ -168,7 +168,7 @@ keywords:
   - idp
   - platform-engineering
   - internal-developer-platform
-home: https://github.com/AlexsandrKotov/pepa
+home: https://github.com/your-username/pepa
 sources:
   - https://github.com/pepa/pepa
 maintainers:
@@ -192,11 +192,11 @@ annotations:
   artifacthub.io/category: developer-tools
   artifacthub.io/screenshots: |
     - title: Service Catalog
-      url: https://github.com/AlexsandrKotov/pepa/screenshots/catalog.png
+      url: https://github.com/your-username/pepa/screenshots/catalog.png
     - title: Workflow Designer
-      url: https://github.com/AlexsandrKotov/pepa/screenshots/workflow.png
+      url: https://github.com/your-username/pepa/screenshots/workflow.png
     - title: Entity Graph
-      url: https://github.com/AlexsandrKotov/pepa/screenshots/graph.png
+      url: https://github.com/your-username/pepa/screenshots/graph.png
 ```
 
 ### 3.2 Helm Values (Key Excerpts)
@@ -319,7 +319,7 @@ auth:
 
 ```bash
 # Installation
-curl -fsSL https://github.com/AlexsandrKotov/pepa/releases | sh
+curl -fsSL https://github.com/your-username/pepa/releases | sh
 
 # Or via Homebrew
 brew install pepa/tap/pepa-cli
@@ -505,7 +505,7 @@ communication_channels:
 │  │ Plugin Development Resources                              │  │
 │  │                                                           │  │
 │  │  - Plugin SDK (Go, Python, TypeScript)                    │  │
-│  │  - Plugin Development Guide (github.com/AlexsandrKotov/pepa/blob/main/docs/plugins)  │  │
+│  │  - Plugin Development Guide (github.com/your-username/pepa/blob/main/docs/plugins)  │  │
 │  │  - Example Plugin Repository                              │  │
 │  │  - Plugin Testing Framework                               │  │
 │  │  - Mock Core for Local Development                        │  │

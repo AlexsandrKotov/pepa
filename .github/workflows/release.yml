@@ -12,8 +12,8 @@ permissions:
   attestations: write
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/pepa
+  REGISTRY: docker.io
+  IMAGE_PREFIX: docker.io/pepa
 
 jobs:
   # -- 1. Full Test Suite --
@@ -381,7 +381,7 @@ jobs:
             echo "## CLI Install"
             echo ""
             echo '```bash'
-            echo "curl -fsSL https://github.com/AlexsandrKotov/pepa/releases | sh"
+            echo "curl -fsSL https://github.com/your-username/pepa/releases | sh"
             echo "# Or download a binary below"
             echo '```'
             echo ""

@@ -244,7 +244,7 @@ func (c *Client) buildDeployment(spec DeploySpec) *appsv1.Deployment {
 			Namespace: spec.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"github.com/AlexsandrKotov/pepa/managed-by": "pepa",
+				"github.com/your-username/pepa/managed-by": "pepa",
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -313,7 +313,7 @@ func (c *Client) buildService(spec DeploySpec) *corev1.Service {
 			Namespace: spec.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"github.com/AlexsandrKotov/pepa/managed-by": "pepa",
+				"github.com/your-username/pepa/managed-by": "pepa",
 			},
 		},
 		Spec: corev1.ServiceSpec{
