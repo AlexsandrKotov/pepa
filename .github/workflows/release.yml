@@ -40,7 +40,7 @@ jobs:
         run: go build -v ./...
 
       - name: Backend - install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
       - name: Backend - lint
         run: $(go env GOPATH)/bin/golangci-lint run
