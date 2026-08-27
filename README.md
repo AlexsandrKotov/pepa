@@ -27,7 +27,7 @@ PEPA is an open-source **Platform Engineering & Pipeline Automator** for service
 
 ## Quick Start
 
-### Docker Compose (Recommended)
+### From Source (Development)
 
 ```bash
 git clone https://github.com/your-username/pepa.git && cd pepa
@@ -37,6 +37,36 @@ make docker-up
 Access:
 - Frontend: http://localhost:3000
 - API: http://localhost:8088
+
+### Production (Tar Archive)
+
+Download the production package from [GitHub Releases](https://github.com/your-username/pepa/releases):
+
+```bash
+# Download and extract
+wget https://github.com/your-username/pepa/releases/download/v0.1.0/pepa-production-v0.1.0.tar.gz
+tar xzf pepa-production-v0.1.0.tar.gz
+cd pepa-production-v0.1.0
+
+# Deploy
+./deploy.sh
+```
+
+The production package includes:
+- Pre-built Docker images
+- Docker Compose configuration
+- Auto-generated secrets
+- One-command deployment script
+
+### Docker Hub Images
+
+Pre-built images are available on Docker Hub:
+
+```bash
+docker pull docker.io/pepa/api-server:latest
+docker pull docker.io/pepa/worker:latest
+docker pull docker.io/pepa/frontend:latest
+```
 
 ### Helm (Kubernetes)
 
