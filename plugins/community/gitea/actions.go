@@ -36,7 +36,7 @@ func giteaAPIRequest(ctx context.Context, baseURL, token, path string) ([]byte, 
 	if err != nil {
 		return nil, fmt.Errorf("gitea request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -207,7 +207,7 @@ func giteaAPIRequestPOST(ctx context.Context, baseURL, token, path string, body 
 	if err != nil {
 		return 0, nil, fmt.Errorf("gitea request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

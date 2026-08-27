@@ -81,7 +81,7 @@ func (p *SlackPlugin) sendMessage(ctx context.Context, params []byte, webhookURL
 		if err != nil {
 			return nil, fmt.Errorf("webhook request: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(resp.Body)
 			return nil, fmt.Errorf("webhook returned %d: %s", resp.StatusCode, string(respBody))
@@ -108,7 +108,7 @@ func (p *SlackPlugin) sendMessage(ctx context.Context, params []byte, webhookURL
 	if err != nil {
 		return nil, fmt.Errorf("slack api request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("slack api returned %d: %s", resp.StatusCode, string(respBody))
@@ -132,7 +132,7 @@ func (p *SlackPlugin) listChannels(ctx context.Context, botToken string) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("slack api request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		OK       bool `json:"ok"`

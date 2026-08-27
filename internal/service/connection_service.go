@@ -181,7 +181,7 @@ func (s *ConnectionService) TestGitHubConnection(ctx context.Context, rawURL, to
 		}
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach GitHub: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return TestResult{Status: "error", Message: "Invalid token - authentication failed. Verify the token is a valid GitHub Personal Access Token."}
@@ -213,7 +213,7 @@ func (s *ConnectionService) TestGiteaConnection(ctx context.Context, rawURL, tok
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Gitea: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return TestResult{Status: "error", Message: "Invalid token - authentication failed"}
@@ -242,7 +242,7 @@ func (s *ConnectionService) TestBitbucketConnection(ctx context.Context, rawURL,
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Bitbucket: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return TestResult{Status: "error", Message: "Invalid token - authentication failed"}
@@ -274,7 +274,7 @@ func (s *ConnectionService) TestGitLabConnection(ctx context.Context, rawURL, to
 		}
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach GitLab: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return TestResult{Status: "error", Message: "Invalid token - authentication failed"}
@@ -344,7 +344,7 @@ func (s *ConnectionService) TestJiraConnection(ctx context.Context, url, token s
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Jira: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return TestResult{Status: "error", Message: "Invalid token"}
@@ -380,7 +380,7 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Ollama: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Successfully connected to Ollama"}
 		}
@@ -409,7 +409,7 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Qoder: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Successfully connected to Qoder"}
 		} else if resp.StatusCode == 401 {
@@ -432,7 +432,7 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach LM Studio: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Successfully connected to LM Studio"}
 		}
@@ -453,7 +453,7 @@ func (s *ConnectionService) TestStorageConnection(ctx context.Context, endpoint 
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach storage: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Any response means endpoint is reachable
 	return TestResult{Status: "connected", Message: "Storage endpoint is reachable"}
@@ -478,7 +478,7 @@ func (s *ConnectionService) TestCIConnection(ctx context.Context, url string, co
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Jenkins: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Successfully connected to Jenkins"}
 		}
@@ -493,7 +493,7 @@ func (s *ConnectionService) TestCIConnection(ctx context.Context, url string, co
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach CircleCI: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Successfully connected to CircleCI"}
 		}
@@ -517,7 +517,7 @@ func (s *ConnectionService) TestDockerConnection(ctx context.Context, host strin
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Docker: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		return TestResult{Status: "connected", Message: "Successfully connected to Docker daemon"}
 	}
@@ -547,7 +547,7 @@ func (s *ConnectionService) TestVaultConnection(ctx context.Context, address, to
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Vault: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 200 || resp.StatusCode == 429 {
 		return TestResult{Status: "connected", Message: "Successfully connected to Vault"}
@@ -581,7 +581,7 @@ func (s *ConnectionService) TestNotificationConnection(ctx context.Context, conf
 			if err != nil {
 				return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Slack webhook: %v", err)}
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode == 200 {
 				return TestResult{Status: "connected", Message: "Slack webhook is reachable"}
 			}
@@ -605,7 +605,7 @@ func (s *ConnectionService) TestNotificationConnection(ctx context.Context, conf
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Telegram API: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Telegram bot is reachable"}
 		}
@@ -637,7 +637,7 @@ func (s *ConnectionService) TestKubernetesServerConnection(ctx context.Context, 
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach API Server: %v", err)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 200 {
 		return TestResult{Status: "connected", Message: "Successfully connected to Kubernetes API server"}
 	}
@@ -664,7 +664,7 @@ func (s *ConnectionService) TestGitBasicAuthConnection(ctx context.Context, rawU
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Gitea: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			var info map[string]interface{}
 			if err := json.NewDecoder(resp.Body).Decode(&info); err == nil {
@@ -682,7 +682,7 @@ func (s *ConnectionService) TestGitBasicAuthConnection(ctx context.Context, rawU
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach GitLab: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			var info map[string]interface{}
 			if err := json.NewDecoder(resp.Body).Decode(&info); err == nil {
@@ -700,7 +700,7 @@ func (s *ConnectionService) TestGitBasicAuthConnection(ctx context.Context, rawU
 		if err != nil {
 			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach git server: %v", err)}
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode < 500 {
 			return TestResult{Status: "connected", Message: fmt.Sprintf("Git server reachable (status %d)", resp.StatusCode)}
 		}

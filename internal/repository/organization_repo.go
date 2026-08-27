@@ -30,10 +30,10 @@ type Workspace struct {
 
 // WorkspaceStats contains resource counts for a workspace.
 type WorkspaceStats struct {
-	Services    int
-	Connections int
-	Teams       int
-	Users       int
+	Services     int
+	Connections  int
+	Teams        int
+	Users        int
 	Environments int
 }
 
@@ -150,13 +150,13 @@ func (r *OrganizationRepository) GetWorkspace(ctx context.Context, id uuid.UUID)
 // GetWorkspaceStats returns resource counts for a workspace.
 func (r *OrganizationRepository) GetWorkspaceStats(ctx context.Context, workspaceID uuid.UUID) (*WorkspaceStats, error) {
 	stats := &WorkspaceStats{}
-	
+
 	_ = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM services WHERE tenant_id = $1`, workspaceID).Scan(&stats.Services)
 	_ = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM connections WHERE tenant_id = $1`, workspaceID).Scan(&stats.Connections)
 	_ = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM teams WHERE tenant_id = $1`, workspaceID).Scan(&stats.Teams)
 	_ = r.pool.QueryRow(ctx, `SELECT COUNT(DISTINCT user_id) FROM role_assignments WHERE tenant_id = $1 AND is_active = true`, workspaceID).Scan(&stats.Users)
 	_ = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM environments WHERE tenant_id = $1`, workspaceID).Scan(&stats.Environments)
-	
+
 	return stats, nil
 }
 

@@ -97,7 +97,7 @@ func TestEnqueueJob(t *testing.T) {
 	ctx := context.Background()
 	data, _ := client.LPop(ctx, "pepa:jobs").Result()
 	var decoded Job
-	json.Unmarshal([]byte(data), &decoded)
+	_ = json.Unmarshal([]byte(data), &decoded)
 	if decoded.ID != "custom-id" {
 		t.Errorf("expected ID custom-id, got %s", decoded.ID)
 	}

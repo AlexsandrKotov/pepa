@@ -1388,7 +1388,7 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 		svc.Containers = cJSON
 	}
 	svc.Status = "running"
-	t.deps.DockerHostRepo.UpdateService(ctx, svc)
+	_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 	out, _ := json.Marshal(svc)
 	return string(out), nil
 }

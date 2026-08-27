@@ -307,7 +307,7 @@ func stopDockerService(deps Dependencies) gin.HandlerFunc {
 		}
 
 		svc.Status = "stopped"
-		deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 		logAudit(deps, c, "stop", "docker_service", id.String(), nil, nil)
 		c.JSON(http.StatusOK, gin.H{"status": "stopped"})
 	}
@@ -356,7 +356,7 @@ func startDockerService(deps Dependencies) gin.HandlerFunc {
 		}
 
 		svc.Status = "running"
-		deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 		logAudit(deps, c, "start", "docker_service", id.String(), nil, nil)
 		c.JSON(http.StatusOK, gin.H{"status": "started"})
 	}

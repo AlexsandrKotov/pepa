@@ -159,7 +159,7 @@ func (p *WebhookPlugin) sendWebhook(ctx context.Context, params []byte, config m
 	if err != nil {
 		return nil, fmt.Errorf("webhook request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 

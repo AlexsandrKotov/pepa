@@ -1402,7 +1402,7 @@ func gitopsTrackCommit(deps Dependencies) gin.HandlerFunc {
 					return
 				}
 				data, _ := json.Marshal(evt)
-				fmt.Fprintf(c.Writer, "event: deploy\ndata: %s\n\n", data)
+				_, _ = fmt.Fprintf(c.Writer, "event: deploy\ndata: %s\n\n", data)
 				c.Writer.Flush()
 			}
 		}

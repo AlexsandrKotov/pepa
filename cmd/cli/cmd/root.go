@@ -210,7 +210,7 @@ func doRequest(method, path string, body interface{}) ([]byte, error) {
 
 	if resp.StatusCode >= 400 {
 		var errBody map[string]interface{}
-		json.Unmarshal(data, &errBody)
+		_ = json.Unmarshal(data, &errBody)
 		if msg, ok := errBody["error"].(string); ok {
 			return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, msg)
 		}

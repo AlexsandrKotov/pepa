@@ -38,32 +38,32 @@ type Components struct {
 	JobQueue         *queue.Queue
 
 	// Repositories
-	EntityRepo           *repository.EntityRepository
-	WorkflowRepo         *repository.WorkflowRepository
-	PluginRepo           *repository.PluginRepository
-	ScorecardRepo        *repository.ScorecardRepository
-	AuditRepo            *repository.AuditRepository
-	ClusterRepo          *repository.ClusterRepository
-	DeploymentRepo       *repository.DeploymentRepository
-	JiraRepo             *repository.JiraRepository
-	ConnectionRepo       *repository.ConnectionRepository
-	ServiceRepo          *repository.ServiceRepository
-	SettingsRepo         *repository.SettingsRepository
-	EnvironmentRepo      *repository.EnvironmentRepository
-	EnvVariableRepo      *repository.EnvironmentVariableRepository
-	DockerHostRepo       *repository.DockerHostRepository
-	HelmRepo             *repository.HelmRepository
-	PipelineSourceRepo   *repository.PipelineSourceRepository
-	PipelinePresetRepo   *repository.PipelinePresetRepository
-	PipelineRunRepo      *repository.PipelineRunRepository
-	VaultRepo            *repository.VaultRepository
-	VaultConfigRepo      *repository.VaultConfigRepository
-	AuthRepo             *repository.AuthRepository
-	TeamWorkflowRepo     *repository.TeamWorkflowRepository
-	GitopsRepo           *gitops.Repository
-	UserCredentialRepo   *repository.UserCredentialRepository
-	CredentialShareRepo  *repository.CredentialShareRepository
-	OrganizationRepo     *repository.OrganizationRepository
+	EntityRepo          *repository.EntityRepository
+	WorkflowRepo        *repository.WorkflowRepository
+	PluginRepo          *repository.PluginRepository
+	ScorecardRepo       *repository.ScorecardRepository
+	AuditRepo           *repository.AuditRepository
+	ClusterRepo         *repository.ClusterRepository
+	DeploymentRepo      *repository.DeploymentRepository
+	JiraRepo            *repository.JiraRepository
+	ConnectionRepo      *repository.ConnectionRepository
+	ServiceRepo         *repository.ServiceRepository
+	SettingsRepo        *repository.SettingsRepository
+	EnvironmentRepo     *repository.EnvironmentRepository
+	EnvVariableRepo     *repository.EnvironmentVariableRepository
+	DockerHostRepo      *repository.DockerHostRepository
+	HelmRepo            *repository.HelmRepository
+	PipelineSourceRepo  *repository.PipelineSourceRepository
+	PipelinePresetRepo  *repository.PipelinePresetRepository
+	PipelineRunRepo     *repository.PipelineRunRepository
+	VaultRepo           *repository.VaultRepository
+	VaultConfigRepo     *repository.VaultConfigRepository
+	AuthRepo            *repository.AuthRepository
+	TeamWorkflowRepo    *repository.TeamWorkflowRepository
+	GitopsRepo          *gitops.Repository
+	UserCredentialRepo  *repository.UserCredentialRepository
+	CredentialShareRepo *repository.CredentialShareRepository
+	OrganizationRepo    *repository.OrganizationRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -179,40 +179,40 @@ func Bootstrap() (*Components, error) {
 
 	// Initialize all repositories
 	c := &Components{
-		Config:             cfg,
-		DB:                 db,
-		Redis:              redis,
-		Storage:            pluginStorage,
-		PluginMgr:          pluginMgr,
-		ProviderRegistry:   providerRegistry,
-		EventBus:           eventBus,
-		JobQueue:           jobQueue,
-		EntityRepo:         repository.NewEntityRepository(db),
-		WorkflowRepo:       repository.NewWorkflowRepository(db),
-		PluginRepo:         repository.NewPluginRepository(db),
-		ScorecardRepo:      repository.NewScorecardRepository(db),
-		AuditRepo:          repository.NewAuditRepository(db),
-		ClusterRepo:        repository.NewClusterRepository(db),
-		DeploymentRepo:     repository.NewDeploymentRepository(db),
-		JiraRepo:           repository.NewJiraRepository(db),
-		ConnectionRepo:     repository.NewConnectionRepository(db),
-		ServiceRepo:        repository.NewServiceRepository(db),
-		SettingsRepo:       repository.NewSettingsRepository(db),
-		EnvironmentRepo:    repository.NewEnvironmentRepository(db),
-		EnvVariableRepo:    repository.NewEnvironmentVariableRepository(db),
-		DockerHostRepo:     repository.NewDockerHostRepository(db),
-		HelmRepo:           repository.NewHelmRepository(db),
-		PipelineSourceRepo: repository.NewPipelineSourceRepository(db),
-		PipelinePresetRepo: repository.NewPipelinePresetRepository(db),
-		PipelineRunRepo:    repository.NewPipelineRunRepository(db),
-		VaultRepo:            repository.NewVaultRepository(db),
-		VaultConfigRepo:      repository.NewVaultConfigRepository(db.Pool),
-		AuthRepo:             repository.NewAuthRepository(db.Pool),
-		TeamWorkflowRepo:     repository.NewTeamWorkflowRepository(db),
-		GitopsRepo:           gitops.NewRepository(db),
-		UserCredentialRepo:   repository.NewUserCredentialRepository(db.Pool),
-		CredentialShareRepo:  repository.NewCredentialShareRepository(db.Pool),
-		OrganizationRepo:     repository.NewOrganizationRepository(db.Pool),
+		Config:              cfg,
+		DB:                  db,
+		Redis:               redis,
+		Storage:             pluginStorage,
+		PluginMgr:           pluginMgr,
+		ProviderRegistry:    providerRegistry,
+		EventBus:            eventBus,
+		JobQueue:            jobQueue,
+		EntityRepo:          repository.NewEntityRepository(db),
+		WorkflowRepo:        repository.NewWorkflowRepository(db),
+		PluginRepo:          repository.NewPluginRepository(db),
+		ScorecardRepo:       repository.NewScorecardRepository(db),
+		AuditRepo:           repository.NewAuditRepository(db),
+		ClusterRepo:         repository.NewClusterRepository(db),
+		DeploymentRepo:      repository.NewDeploymentRepository(db),
+		JiraRepo:            repository.NewJiraRepository(db),
+		ConnectionRepo:      repository.NewConnectionRepository(db),
+		ServiceRepo:         repository.NewServiceRepository(db),
+		SettingsRepo:        repository.NewSettingsRepository(db),
+		EnvironmentRepo:     repository.NewEnvironmentRepository(db),
+		EnvVariableRepo:     repository.NewEnvironmentVariableRepository(db),
+		DockerHostRepo:      repository.NewDockerHostRepository(db),
+		HelmRepo:            repository.NewHelmRepository(db),
+		PipelineSourceRepo:  repository.NewPipelineSourceRepository(db),
+		PipelinePresetRepo:  repository.NewPipelinePresetRepository(db),
+		PipelineRunRepo:     repository.NewPipelineRunRepository(db),
+		VaultRepo:           repository.NewVaultRepository(db),
+		VaultConfigRepo:     repository.NewVaultConfigRepository(db.Pool),
+		AuthRepo:            repository.NewAuthRepository(db.Pool),
+		TeamWorkflowRepo:    repository.NewTeamWorkflowRepository(db),
+		GitopsRepo:          gitops.NewRepository(db),
+		UserCredentialRepo:  repository.NewUserCredentialRepository(db.Pool),
+		CredentialShareRepo: repository.NewCredentialShareRepository(db.Pool),
+		OrganizationRepo:    repository.NewOrganizationRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry

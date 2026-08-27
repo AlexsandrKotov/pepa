@@ -424,7 +424,7 @@ func testGitLabCredential(ctx context.Context, baseURL, token string) (string, s
 	if err != nil {
 		return "error", fmt.Sprintf("cannot reach GitLab: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return "error", "invalid token"
@@ -450,7 +450,7 @@ func testGitHubCredential(ctx context.Context, baseURL, token string) (string, s
 	if err != nil {
 		return "error", fmt.Sprintf("cannot reach GitHub: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return "error", "invalid token"
@@ -476,7 +476,7 @@ func testGiteaCredential(ctx context.Context, baseURL, token string) (string, st
 	if err != nil {
 		return "error", fmt.Sprintf("cannot reach Gitea: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return "error", "invalid token"
@@ -548,7 +548,7 @@ func fetchExternalUserInfo(ctx context.Context, provider, providerURL, username,
 		if err != nil {
 			return "", "", err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != 200 {
 			return "", "", fmt.Errorf("gitlab returned status %d", resp.StatusCode)
 		}
@@ -571,7 +571,7 @@ func fetchExternalUserInfo(ctx context.Context, provider, providerURL, username,
 		if err != nil {
 			return "", "", err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != 200 {
 			return "", "", fmt.Errorf("github returned status %d", resp.StatusCode)
 		}
@@ -599,7 +599,7 @@ func fetchExternalUserInfo(ctx context.Context, provider, providerURL, username,
 		if err != nil {
 			return "", "", err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != 200 {
 			return "", "", fmt.Errorf("gitea returned status %d", resp.StatusCode)
 		}

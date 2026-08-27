@@ -397,7 +397,7 @@ func testProxmoxConnection(deps Dependencies, c *gin.Context, connConfig map[str
 	if err != nil {
 		return "error", fmt.Sprintf("Connection failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return "error", "Authentication failed: check credentials"

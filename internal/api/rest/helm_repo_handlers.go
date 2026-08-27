@@ -306,7 +306,7 @@ func fetchHelmIndex(repo *repository.HelmRepo) (*helmIndex, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch index from %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		// Read error response body for debugging
@@ -532,7 +532,7 @@ func downloadHelmChart(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("download failed: %v", err)})
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("chart download returned: %s", resp.Status)})

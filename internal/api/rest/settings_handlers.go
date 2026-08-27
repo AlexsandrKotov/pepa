@@ -272,7 +272,7 @@ func testGroqConnection(ctx context.Context, apiKey string) (string, string) {
 	if err != nil {
 		return "error", fmt.Sprintf("Cannot reach Groq: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return "error", "Invalid API key"
@@ -298,7 +298,7 @@ func testOpenAIConnection(ctx context.Context, apiKey string) (string, string) {
 	if err != nil {
 		return "error", fmt.Sprintf("Cannot reach OpenAI: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 401 {
 		return "error", "Invalid API key"

@@ -89,7 +89,7 @@ func promRequest(ctx context.Context, endpoint, token string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))
@@ -113,7 +113,7 @@ func promRequestWithParams(ctx context.Context, endpoint, token string, params u
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("prometheus returned status %d: %s", resp.StatusCode, string(body))

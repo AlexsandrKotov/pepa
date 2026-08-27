@@ -204,7 +204,7 @@ func (e *Engine) executeApproval(ctx context.Context, step *models.StepSpec, exe
 		Message   string   `json:"message"`
 	}
 	if step.Params != nil {
-		json.Unmarshal(step.Params, &approvalReq)
+		_ = json.Unmarshal(step.Params, &approvalReq)
 	}
 
 	// Mark execution as waiting for approval

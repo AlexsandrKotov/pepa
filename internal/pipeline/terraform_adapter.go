@@ -293,8 +293,8 @@ func resolveTerraformDir(ctx context.Context, cfg *TerraformConfig) (baseDir str
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
 	if err := gitClone(ctx, cfg.RepoURL, cfg.Token, tmpDir); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return "", nil, fmt.Errorf("clone terraform repo: %w", err)
 	}
-	return tmpDir, func() { os.RemoveAll(tmpDir) }, nil
+	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }, nil
 }

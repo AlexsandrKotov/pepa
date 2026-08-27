@@ -9,7 +9,7 @@ import (
 // TopologyNode represents a node in the dependency graph.
 type TopologyNode struct {
 	ID         string   `json:"id"`
-	Kind       string   `json:"kind"`        // HelmRelease, Kustomization, Application, HelmRepository, GitRepository
+	Kind       string   `json:"kind"` // HelmRelease, Kustomization, Application, HelmRepository, GitRepository
 	Name       string   `json:"name"`
 	Namespace  string   `json:"namespace"`
 	Health     string   `json:"health"`      // healthy, progressing, degraded, unknown
@@ -79,14 +79,14 @@ func BuildTopology(ctx context.Context, repo *Repo, resources []Resource) *Topol
 				refID := fmt.Sprintf("HelmRepository/%s/%s", r.Namespace, r.Repo)
 				if _, exists := nodeMap[refID]; !exists {
 					refNode := &TopologyNode{
-						ID:        refID,
-						Kind:      "HelmRepository",
-						Name:      r.Repo,
-						Namespace: r.Namespace,
-						Health:    "unknown",
+						ID:         refID,
+						Kind:       "HelmRepository",
+						Name:       r.Repo,
+						Namespace:  r.Namespace,
+						Health:     "unknown",
 						SyncStatus: "unknown",
-						Children:  make([]string, 0),
-						Parents:   make([]string, 0),
+						Children:   make([]string, 0),
+						Parents:    make([]string, 0),
 					}
 					nodeMap[refID] = refNode
 					graph.Nodes = append(graph.Nodes, *refNode)
@@ -107,14 +107,14 @@ func BuildTopology(ctx context.Context, repo *Repo, resources []Resource) *Topol
 				vfID := fmt.Sprintf("%s/%s/%s", vf.Kind, r.Namespace, vf.Name)
 				if _, exists := nodeMap[vfID]; !exists {
 					vfNode := &TopologyNode{
-						ID:        vfID,
-						Kind:      vf.Kind,
-						Name:      vf.Name,
-						Namespace: r.Namespace,
-						Health:    "unknown",
+						ID:         vfID,
+						Kind:       vf.Kind,
+						Name:       vf.Name,
+						Namespace:  r.Namespace,
+						Health:     "unknown",
 						SyncStatus: "unknown",
-						Children:  make([]string, 0),
-						Parents:   make([]string, 0),
+						Children:   make([]string, 0),
+						Parents:    make([]string, 0),
 					}
 					nodeMap[vfID] = vfNode
 					graph.Nodes = append(graph.Nodes, *vfNode)
@@ -135,14 +135,14 @@ func BuildTopology(ctx context.Context, repo *Repo, resources []Resource) *Topol
 			gitRefID := fmt.Sprintf("GitRepository/%s/%s", r.Namespace, r.Name)
 			if _, exists := nodeMap[gitRefID]; !exists {
 				gitNode := &TopologyNode{
-					ID:        gitRefID,
-					Kind:      "GitRepository",
-					Name:      r.Name,
-					Namespace: r.Namespace,
-					Health:    "unknown",
+					ID:         gitRefID,
+					Kind:       "GitRepository",
+					Name:       r.Name,
+					Namespace:  r.Namespace,
+					Health:     "unknown",
 					SyncStatus: "unknown",
-					Children:  make([]string, 0),
-					Parents:   make([]string, 0),
+					Children:   make([]string, 0),
+					Parents:    make([]string, 0),
 				}
 				nodeMap[gitRefID] = gitNode
 				graph.Nodes = append(graph.Nodes, *gitNode)
@@ -164,14 +164,14 @@ func BuildTopology(ctx context.Context, repo *Repo, resources []Resource) *Topol
 				depID = fmt.Sprintf("Unknown/%s/%s", r.Namespace, dep)
 				if _, exists := nodeMap[depID]; !exists {
 					depNode := &TopologyNode{
-						ID:        depID,
-						Kind:      "Unknown",
-						Name:      dep,
-						Namespace: r.Namespace,
-						Health:    "unknown",
+						ID:         depID,
+						Kind:       "Unknown",
+						Name:       dep,
+						Namespace:  r.Namespace,
+						Health:     "unknown",
 						SyncStatus: "unknown",
-						Children:  make([]string, 0),
-						Parents:   make([]string, 0),
+						Children:   make([]string, 0),
+						Parents:    make([]string, 0),
 					}
 					nodeMap[depID] = depNode
 					graph.Nodes = append(graph.Nodes, *depNode)
@@ -193,14 +193,14 @@ func BuildTopology(ctx context.Context, repo *Repo, resources []Resource) *Topol
 			srcID := fmt.Sprintf("ArgoSource/%s", sanitizeID(r.Source.RepoURL))
 			if _, exists := nodeMap[srcID]; !exists {
 				srcNode := &TopologyNode{
-					ID:        srcID,
-					Kind:      "ArgoSource",
-					Name:      r.Source.RepoURL,
-					Namespace: r.Namespace,
-					Health:    "unknown",
+					ID:         srcID,
+					Kind:       "ArgoSource",
+					Name:       r.Source.RepoURL,
+					Namespace:  r.Namespace,
+					Health:     "unknown",
 					SyncStatus: "unknown",
-					Children:  make([]string, 0),
-					Parents:   make([]string, 0),
+					Children:   make([]string, 0),
+					Parents:    make([]string, 0),
 				}
 				nodeMap[srcID] = srcNode
 				graph.Nodes = append(graph.Nodes, *srcNode)

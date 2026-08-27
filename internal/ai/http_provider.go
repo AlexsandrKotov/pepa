@@ -351,7 +351,7 @@ func (p *httpProvider) Stream(ctx context.Context, messages []Message, opts *Cha
 	ch := make(chan *StreamChunk, 32)
 	go func() {
 		defer close(ch)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -422,7 +422,7 @@ func (p *httpProvider) Embed(ctx context.Context, texts []string, opts *EmbedOpt
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if resp.StatusCode != 200 {
@@ -483,7 +483,7 @@ func (p *httpProvider) HealthCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("provider unreachable: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 500 {
 		return fmt.Errorf("provider returned %d", resp.StatusCode)
 	}

@@ -96,8 +96,8 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 			&labelsJSON, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
-		json.Unmarshal(configJSON, &c.Config)
-		json.Unmarshal(labelsJSON, &c.Labels)
+		_ = json.Unmarshal(configJSON, &c.Config)
+		_ = json.Unmarshal(labelsJSON, &c.Labels)
 		if c.Config == nil {
 			c.Config = map[string]any{}
 		}
@@ -129,8 +129,8 @@ func (r *ConnectionRepository) Get(ctx context.Context, id uuid.UUID, tenantID u
 		}
 		return nil, fmt.Errorf("get connection: %w", err)
 	}
-	json.Unmarshal(configJSON, &c.Config)
-	json.Unmarshal(labelsJSON, &c.Labels)
+	_ = json.Unmarshal(configJSON, &c.Config)
+	_ = json.Unmarshal(labelsJSON, &c.Labels)
 	if c.Config == nil {
 		c.Config = map[string]any{}
 	}
@@ -321,8 +321,8 @@ func (r *ConnectionRepository) FindByType(ctx context.Context, connType string) 
 			&labelsJSON, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
-		json.Unmarshal(configJSON, &c.Config)
-		json.Unmarshal(labelsJSON, &c.Labels)
+		_ = json.Unmarshal(configJSON, &c.Config)
+		_ = json.Unmarshal(labelsJSON, &c.Labels)
 		if c.Config == nil {
 			c.Config = map[string]any{}
 		}

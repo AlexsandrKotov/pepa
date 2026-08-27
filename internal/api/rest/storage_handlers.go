@@ -92,7 +92,7 @@ func uploadPlugin(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file field is required: " + err.Error()})
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		if err := deps.Storage.UploadPlugin(c.Request.Context(), name, version, file, header.Size); err != nil {
 			respondInternalError(c, err)
@@ -123,7 +123,7 @@ func downloadPlugin(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "plugin not found"})
 			return
 		}
-		defer reader.Close()
+		defer func() { _ = reader.Close() }()
 
 		c.Header("Content-Disposition", "attachment; filename="+name)
 		c.Header("Content-Type", "application/octet-stream")

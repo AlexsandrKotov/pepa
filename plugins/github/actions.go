@@ -46,7 +46,7 @@ func githubAPIRequest(ctx context.Context, baseURL, token, path string) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("github request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -315,7 +315,7 @@ func (p *GitHubPlugin) triggerPipeline(ctx context.Context, baseURL, token strin
 	if err != nil {
 		return nil, fmt.Errorf("dispatch workflow: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)

@@ -91,7 +91,7 @@ func (p *TelegramPlugin) sendMessage(ctx context.Context, params []byte, botToke
 	if err != nil {
 		return nil, fmt.Errorf("telegram api request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -130,7 +130,7 @@ func (p *TelegramPlugin) getUpdates(ctx context.Context, botToken string) ([]byt
 	if err != nil {
 		return nil, fmt.Errorf("telegram api request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
