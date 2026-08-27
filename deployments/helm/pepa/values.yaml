@@ -13,7 +13,7 @@ replicaCount: 1
 # -- API Server configuration
 apiServer:
   image:
-    repository: docker.io/pepa-api-server
+    repository: ghcr.io/alexsandrkotov/pepa/pepa-api-server
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   port: 8080
@@ -43,7 +43,7 @@ apiServer:
 # -- Worker configuration
 worker:
   image:
-    repository: docker.io/pepa-worker
+    repository: ghcr.io/alexsandrkotov/pepa/pepa-worker
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   replicaCount: 2
@@ -68,7 +68,7 @@ worker:
 # -- Frontend configuration
 frontend:
   image:
-    repository: docker.io/pepa-frontend
+    repository: ghcr.io/alexsandrkotov/pepa/pepa-frontend
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   port: 80

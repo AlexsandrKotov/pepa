@@ -58,20 +58,20 @@ The production package includes:
 - Auto-generated secrets
 - One-command deployment script
 
-### Docker Hub Images
+### GHCR Images
 
-Pre-built images are available on Docker Hub:
+Pre-built images are available on GitHub Container Registry:
 
 ```bash
-docker pull docker.io/pepa/api-server:latest
-docker pull docker.io/pepa/worker:latest
-docker pull docker.io/pepa/frontend:latest
+docker pull ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
+docker pull ghcr.io/alexsandrkotov/pepa/pepa-worker:latest
+docker pull ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest
 ```
 
 ### Helm (Kubernetes)
 
 ```bash
-helm install pepa oci://docker.io/charts/pepa --namespace pepa --create-namespace
+helm install pepa oci://ghcr.io/alexsandrkotov/pepa/charts/pepa --namespace pepa --create-namespace
 ```
 
 ### Local Development

@@ -125,7 +125,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.api
-    image: pepa/api-server:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
     container_name: pepa-api
     restart: unless-stopped
     environment:
@@ -180,7 +180,7 @@ services:
     build:
       context: ../..
       dockerfile: deployments/docker/Dockerfile.worker
-    image: pepa/worker:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-worker:latest
     container_name: pepa-worker
     restart: unless-stopped
     environment:
@@ -217,7 +217,7 @@ services:
       dockerfile: ../deployments/docker/Dockerfile.frontend
       args:
         NEXT_PUBLIC_API_URL: ""
-    image: pepa/frontend:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest
     container_name: pepa-frontend
     restart: unless-stopped
     ports:

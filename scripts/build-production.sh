@@ -65,23 +65,23 @@ step "Building Docker images"
 log "Building API server image..."
 docker build \
   -f "$PROJECT_DIR/deployments/docker/Dockerfile.api" \
-  -t "pepa/api-server:${VERSION}" \
-  -t "pepa/api-server:latest" \
+  -t "ghcr.io/alexsandrkotov/pepa/pepa-api-server:${VERSION}" \
+  -t "ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest" \
   "$PROJECT_DIR"
 
 log "Building Worker image..."
 docker build \
   -f "$PROJECT_DIR/deployments/docker/Dockerfile.worker" \
-  -t "pepa/worker:${VERSION}" \
-  -t "pepa/worker:latest" \
+  -t "ghcr.io/alexsandrkotov/pepa/pepa-worker:${VERSION}" \
+  -t "ghcr.io/alexsandrkotov/pepa/pepa-worker:latest" \
   "$PROJECT_DIR"
 
 log "Building Frontend image..."
 docker build \
   -f "$PROJECT_DIR/deployments/docker/Dockerfile.frontend" \
   --build-arg NEXT_PUBLIC_API_URL="" \
-  -t "pepa/frontend:${VERSION}" \
-  -t "pepa/frontend:latest" \
+  -t "ghcr.io/alexsandrkotov/pepa/pepa-frontend:${VERSION}" \
+  -t "ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest" \
   "$PROJECT_DIR/frontend"
 
 ok "All images built successfully"
@@ -89,14 +89,14 @@ ok "All images built successfully"
 # ── Export images to tar ──────────────────────────────────────
 step "Exporting Docker images"
 
-log "Exporting pepa/api-server..."
-docker save "pepa/api-server:${VERSION}" | gzip > "$PACKAGE_DIR/images/api-server.tar.gz"
+log "Exporting pepa-api-server..."
+docker save "ghcr.io/alexsandrkotov/pepa/pepa-api-server:${VERSION}" | gzip > "$PACKAGE_DIR/images/api-server.tar.gz"
 
-log "Exporting pepa/worker..."
-docker save "pepa/worker:${VERSION}" | gzip > "$PACKAGE_DIR/images/worker.tar.gz"
+log "Exporting pepa-worker..."
+docker save "ghcr.io/alexsandrkotov/pepa/pepa-worker:${VERSION}" | gzip > "$PACKAGE_DIR/images/worker.tar.gz"
 
-log "Exporting pepa/frontend..."
-docker save "pepa/frontend:${VERSION}" | gzip > "$PACKAGE_DIR/images/frontend.tar.gz"
+log "Exporting pepa-frontend..."
+docker save "ghcr.io/alexsandrkotov/pepa/pepa-frontend:${VERSION}" | gzip > "$PACKAGE_DIR/images/frontend.tar.gz"
 
 ok "Images exported"
 
@@ -283,7 +283,7 @@ services:
 
   # ── PEPA API Server ────────────────────────────────────────
   api-server:
-    image: pepa/api-server:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
     container_name: pepa-api
     restart: unless-stopped
     environment:
@@ -328,7 +328,7 @@ services:
 
   # ── PEPA Background Worker ─────────────────────────────────
   worker:
-    image: pepa/worker:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-worker:latest
     container_name: pepa-worker
     restart: unless-stopped
     environment:
@@ -362,7 +362,7 @@ services:
 
   # ── Frontend (Next.js) ────────────────────────────────────
   frontend:
-    image: pepa/frontend:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest
     container_name: pepa-frontend
     restart: unless-stopped
     ports:

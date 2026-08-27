@@ -83,9 +83,9 @@ COMPOSE      := docker compose -f $(COMPOSE_FILE) --profile production
 
 docker-build:
 	@echo "→ Building Docker images..."
-	@docker build -f deployments/docker/Dockerfile.api -t pepa/api-server:latest .
-	@docker build -f deployments/docker/Dockerfile.worker -t pepa/worker:latest .
-	@docker build -f deployments/docker/Dockerfile.frontend -t pepa/frontend:latest frontend/
+	@docker build -f deployments/docker/Dockerfile.api -t ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest .
+	@docker build -f deployments/docker/Dockerfile.worker -t ghcr.io/alexsandrkotov/pepa/pepa-worker:latest .
+	@docker build -f deployments/docker/Dockerfile.frontend -t ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest frontend/
 
 docker-up:
 	@echo "→ Starting PEPA stack..."
