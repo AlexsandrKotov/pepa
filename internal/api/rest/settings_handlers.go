@@ -185,7 +185,7 @@ func testAIProvider(deps Dependencies) gin.HandlerFunc {
 					status = "error"
 					message = fmt.Sprintf("Cannot reach Qoder: %v", err)
 				} else {
-					resp.Body.Close()
+					_ = resp.Body.Close()
 					if resp.StatusCode == 200 {
 						message = "Successfully connected to Qoder"
 					} else if resp.StatusCode == 401 {
@@ -212,7 +212,7 @@ func testAIProvider(deps Dependencies) gin.HandlerFunc {
 					status = "error"
 					message = fmt.Sprintf("Cannot reach Ollama: %v", err)
 				} else {
-					resp.Body.Close()
+					_ = resp.Body.Close()
 					if resp.StatusCode == 200 {
 						message = "Successfully connected to Ollama"
 					} else {
@@ -236,7 +236,7 @@ func testAIProvider(deps Dependencies) gin.HandlerFunc {
 				status = "error"
 				message = fmt.Sprintf("Cannot reach LM Studio: %v", err)
 			} else {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				if resp.StatusCode == 200 {
 					message = "Successfully connected to LM Studio"
 				} else {

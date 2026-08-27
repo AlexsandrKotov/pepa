@@ -310,7 +310,7 @@ func (s *ConnectionService) testLocalGitConnection(path string) TestResult {
 func (s *ConnectionService) testGenericGitConnection(ctx context.Context, rawURL, token string) TestResult {
 	// Try common git server endpoints
 	endpoints := []string{"/api/v1/user", "/api/v4/user", "/api/v3/user", "/user"}
-	
+
 	for _, endpoint := range endpoints {
 		req, err := http.NewRequestWithContext(ctx, "GET", rawURL+endpoint, nil)
 		if err != nil {
@@ -322,7 +322,7 @@ func (s *ConnectionService) testGenericGitConnection(ctx context.Context, rawURL
 		if err != nil {
 			continue
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == 200 {
 			return TestResult{Status: "connected", Message: "Successfully connected to git server"}
@@ -624,7 +624,7 @@ func (s *ConnectionService) TestKubernetesServerConnection(ctx context.Context, 
 	if token, ok := config["token"].(string); ok && token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	
+
 	// Use a client with InsecureSkipVerify for K8s API (self-signed certs common)
 	k8sClient := &http.Client{
 		Timeout: 5 * time.Second,
@@ -632,7 +632,7 @@ func (s *ConnectionService) TestKubernetesServerConnection(ctx context.Context, 
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	
+
 	resp, err := k8sClient.Do(req)
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach API Server: %v", err)}
@@ -647,7 +647,7 @@ func (s *ConnectionService) TestKubernetesServerConnection(ctx context.Context, 
 // TestGitBasicAuthConnection tests a Git connection with basic auth.
 func (s *ConnectionService) TestGitBasicAuthConnection(ctx context.Context, rawURL, username, password, provider string) TestResult {
 	url := strings.TrimRight(rawURL, "/")
-	
+
 	// Use a client with InsecureSkipVerify for git servers (self-signed certs common)
 	gitClient := &http.Client{
 		Timeout: 10 * time.Second,
