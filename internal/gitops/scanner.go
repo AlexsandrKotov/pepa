@@ -41,7 +41,7 @@ func (s *Scanner) Scan(ctx context.Context, repo *Repo) (*ScanResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cloneArgs := []string{
 		"clone", "--depth", "1",

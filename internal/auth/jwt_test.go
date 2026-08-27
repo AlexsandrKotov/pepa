@@ -254,9 +254,9 @@ func TestMiddleware_ProdMode_ValidToken(t *testing.T) {
 
 func TestMiddleware_DevMode_Explicit(t *testing.T) {
 	orig := os.Getenv("SERVER_ENV")
-	defer os.Setenv("SERVER_ENV", orig)
+	defer func() { _ = os.Setenv("SERVER_ENV", orig) }()
 
-	os.Setenv("SERVER_ENV", "development")
+	_ = os.Setenv("SERVER_ENV", "development")
 
 	r := gin.New()
 	r.Use(Middleware("test-secret"))

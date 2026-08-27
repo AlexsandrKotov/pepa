@@ -544,6 +544,6 @@ func downloadHelmChart(deps Dependencies) gin.HandlerFunc {
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 		c.Header("Content-Type", "application/gzip")
 		c.Status(http.StatusOK)
-		io.Copy(c.Writer, resp.Body)
+		_, _ = io.Copy(c.Writer, resp.Body)
 	}
 }

@@ -127,7 +127,7 @@ func TestLocalStorage_UploadDownloadDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadPlugin: %v", err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {

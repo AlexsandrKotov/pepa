@@ -253,10 +253,10 @@ func resolveAnsibleDir(ctx context.Context, cfg *AnsibleConfig) (workDir string,
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
 	}
 	if err := gitClone(ctx, cfg.RepoURL, cfg.Token, tmpDir); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return "", nil, fmt.Errorf("clone ansible repo: %w", err)
 	}
-	return tmpDir, func() { os.RemoveAll(tmpDir) }, nil
+	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }, nil
 }
 
 // gitClone performs a shallow git clone, injecting the token into the URL if provided.

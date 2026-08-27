@@ -1060,7 +1060,7 @@ func (t *refreshDockerServiceTool) Execute(ctx context.Context, params json.RawM
 	} else if running > 0 {
 		svc.Status = "running"
 	}
-	t.deps.DockerHostRepo.UpdateService(ctx, svc)
+	_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 	out, _ := json.Marshal(svc)
 	return string(out), nil
 }
@@ -1109,7 +1109,7 @@ func (t *refreshAllDockerServicesTool) Execute(ctx context.Context, _ json.RawMe
 		} else if running > 0 {
 			svc.Status = "running"
 		}
-		t.deps.DockerHostRepo.UpdateService(ctx, svc)
+		_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 		refreshed++
 	}
 	return fmt.Sprintf(`{"refreshed":%d,"total":%d}`, refreshed, len(services)), nil
@@ -1234,21 +1234,21 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 	}
 
 	result := map[string]interface{}{
-		"id":           bpID,
-		"name":         p.Name,
-		"description":  p.Description,
-		"source_type":  p.SourceType,
-		"image":        p.Image,
-		"chart_name":   p.ChartName,
+		"id":            bpID,
+		"name":          p.Name,
+		"description":   p.Description,
+		"source_type":   p.SourceType,
+		"image":         p.Image,
+		"chart_name":    p.ChartName,
 		"chart_version": p.ChartVersion,
-		"namespace":    p.Namespace,
-		"cpu":          p.CPU,
-		"memory":       p.Memory,
-		"replicas":     p.Replicas,
-		"ports":        p.Ports,
-		"category":     p.Category,
-		"values_yaml":  p.ValuesYAML,
-		"created_at":   createdAt,
+		"namespace":     p.Namespace,
+		"cpu":           p.CPU,
+		"memory":        p.Memory,
+		"replicas":      p.Replicas,
+		"ports":         p.Ports,
+		"category":      p.Category,
+		"values_yaml":   p.ValuesYAML,
+		"created_at":    createdAt,
 	}
 	out, _ := json.Marshal(result)
 	return string(out), nil
@@ -1379,7 +1379,7 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 	defer cancel()
 	if err := client.ComposeUp(dCtx, svc.Name, svc.ComposeYaml, envVars); err != nil {
 		svc.Status = "error"
-		t.deps.DockerHostRepo.UpdateService(ctx, svc)
+		_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 		return "", fmt.Errorf("deploy failed: %w", err)
 	}
 	containers, err := client.ComposePs(dCtx, svc.Name)

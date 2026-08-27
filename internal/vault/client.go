@@ -160,7 +160,7 @@ func (c *Client) Health(ctx context.Context) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vault health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -186,7 +186,7 @@ func (c *Client) ListSecrets(ctx context.Context, path string) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("vault list failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == 404 {
 		return []string{}, nil

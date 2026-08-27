@@ -103,7 +103,7 @@ func registerSSERoutes(r *gin.RouterGroup, eventBus *events.Bus) {
 		defer hub.remove(client)
 
 		// Send initial connected event
-		c.Writer.WriteString("event: connected\ndata: {\"message\":\"stream started\"}\n\n")
+		_, _ = c.Writer.WriteString("event: connected\ndata: {\"message\":\"stream started\"}\n\n")
 		c.Writer.Flush()
 
 		// Keep-alive ticker
@@ -113,11 +113,11 @@ func registerSSERoutes(r *gin.RouterGroup, eventBus *events.Bus) {
 		c.Stream(func(w io.Writer) bool {
 			select {
 			case data := <-client.events:
-				c.Writer.WriteString(data)
+				_, _ = c.Writer.WriteString(data)
 				c.Writer.Flush()
 				return true
 			case <-ticker.C:
-				c.Writer.WriteString(": keepalive\n\n")
+				_, _ = c.Writer.WriteString(": keepalive\n\n")
 				c.Writer.Flush()
 				return true
 			case <-c.Request.Context().Done():

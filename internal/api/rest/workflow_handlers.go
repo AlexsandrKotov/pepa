@@ -177,7 +177,7 @@ func executeWorkflow(deps Dependencies) gin.HandlerFunc {
 
 		// Enqueue job for worker
 		if deps.JobQueue != nil {
-			deps.JobQueue.Enqueue("workflow.execute", tenantID.String(), map[string]interface{}{
+			_ = deps.JobQueue.Enqueue("workflow.execute", tenantID.String(), map[string]interface{}{
 				"workflow_id":  id.String(),
 				"execution_id": exec.ID.String(),
 			})
@@ -187,7 +187,7 @@ func executeWorkflow(deps Dependencies) gin.HandlerFunc {
 
 		// Emit event
 		if deps.EventBus != nil {
-			deps.EventBus.Publish(events.Event{
+			_ = deps.EventBus.Publish(events.Event{
 				Type:     "workflow.executing",
 				TenantID: tenantID.String(),
 				Payload: map[string]interface{}{

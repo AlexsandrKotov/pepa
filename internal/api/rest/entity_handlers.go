@@ -100,7 +100,7 @@ func createEntity(deps Dependencies) gin.HandlerFunc {
 
 		// Emit event
 		if deps.EventBus != nil {
-			deps.EventBus.Publish(events.Event{
+			_ = deps.EventBus.Publish(events.Event{
 				Type:     "entity.created",
 				TenantID: tenantID.String(),
 				EntityID: entity.ID.String(),
@@ -156,7 +156,7 @@ func updateEntity(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if deps.EventBus != nil {
-			deps.EventBus.Publish(events.Event{
+			_ = deps.EventBus.Publish(events.Event{
 				Type:     "entity.updated",
 				EntityID: entity.ID.String(),
 				Payload: map[string]interface{}{
@@ -185,7 +185,7 @@ func deleteEntity(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if deps.EventBus != nil {
-			deps.EventBus.Publish(events.Event{
+			_ = deps.EventBus.Publish(events.Event{
 				Type:     "entity.deleted",
 				EntityID: id.String(),
 			})
@@ -313,7 +313,7 @@ func createRelationship(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if deps.EventBus != nil {
-			deps.EventBus.Publish(events.Event{
+			_ = deps.EventBus.Publish(events.Event{
 				Type:     "relationship.created",
 				TenantID: tenantID.String(),
 				EntityID: sourceID.String(),
@@ -326,7 +326,7 @@ func createRelationship(deps Dependencies) gin.HandlerFunc {
 
 		// Enqueue entity sync job
 		if deps.JobQueue != nil {
-			deps.JobQueue.Enqueue("entity.sync", tenantID.String(), map[string]interface{}{
+			_ = deps.JobQueue.Enqueue("entity.sync", tenantID.String(), map[string]interface{}{
 				"entity_id": sourceID.String(),
 			})
 		}

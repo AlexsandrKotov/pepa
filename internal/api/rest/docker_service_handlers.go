@@ -118,7 +118,7 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 			svc.Containers = cJSON
 		}
 		svc.Status = "running"
-		deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 
 		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name})
 		c.JSON(http.StatusCreated, svc)
@@ -205,7 +205,7 @@ func refreshDockerService(deps Dependencies) gin.HandlerFunc {
 			svc.Status = "running"
 		}
 
-		deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 		c.JSON(http.StatusOK, svc)
 	}
 }
@@ -237,7 +237,7 @@ func restartDockerService(deps Dependencies) gin.HandlerFunc {
 		var req struct {
 			ServiceName string `json:"service_name"`
 		}
-		c.ShouldBindJSON(&req)
+		_ = c.ShouldBindJSON(&req)
 
 		cfg := dockerpkg.HostConfig{
 			HostType:    host.HostType,
@@ -258,7 +258,7 @@ func restartDockerService(deps Dependencies) gin.HandlerFunc {
 		}
 
 		svc.Status = "running"
-		deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 		logAudit(deps, c, "restart", "docker_service", id.String(), nil, nil)
 		c.JSON(http.StatusOK, gin.H{"status": "restarted"})
 	}
@@ -400,7 +400,7 @@ func deleteDockerService(deps Dependencies) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
 
-		client.ComposeDown(ctx, svc.Name) // best-effort
+		_ = client.ComposeDown(ctx, svc.Name) // best-effort
 
 		if err := deps.Repos.DockerHost.DeleteService(c.Request.Context(), id); err != nil {
 			respondInternalError(c, err)

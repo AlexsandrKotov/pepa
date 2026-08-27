@@ -315,7 +315,7 @@ func s3UploadObject(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file field is required: " + err.Error()})
 			return
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		contentType := header.Header.Get("Content-Type")
 		if contentType == "" {
@@ -404,12 +404,12 @@ func s3UploadMultiple(deps Dependencies) gin.HandlerFunc {
 			}
 
 			if err := client.UploadToBucket(c.Request.Context(), bucketName, key, file, fh.Size, contentType); err != nil {
-				file.Close()
+				_ = file.Close()
 				failed++
 				results = append(results, uploadResult{Key: key, OK: false, Err: err.Error()})
 				continue
 			}
-			file.Close()
+			_ = file.Close()
 			results = append(results, uploadResult{Key: key, Size: fh.Size, OK: true})
 		}
 
@@ -486,7 +486,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot download object: %v", err)})
 				return
 			}
-			defer reader.Close()
+			defer func() { _ = reader.Close() }()
 
 			c.Header("Content-Type", ct)
 			c.Header("Content-Disposition", "inline")
@@ -509,7 +509,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot download object: %v", err)})
 				return
 			}
-			defer reader.Close()
+			defer func() { _ = reader.Close() }()
 
 			// Extract filename from key for Content-Disposition
 			parts := strings.Split(key, "/")
@@ -538,12 +538,12 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"key":             meta.Key,
-			"size":            meta.Size,
-			"content_type":    meta.ContentType,
-			"last_modified":   meta.LastModified.Format("2006-01-02T15:04:05Z"),
-			"presigned_url":   presignedURL,
-			"bucket":          bucketName,
+			"key":           meta.Key,
+			"size":          meta.Size,
+			"content_type":  meta.ContentType,
+			"last_modified": meta.LastModified.Format("2006-01-02T15:04:05Z"),
+			"presigned_url": presignedURL,
+			"bucket":        bucketName,
 		})
 	}
 }

@@ -375,7 +375,7 @@ func testProxmoxConnection(deps Dependencies, c *gin.Context, connConfig map[str
 		if err != nil {
 			return "error", fmt.Sprintf("Connection failed: %v", err)
 		}
-		defer ticketResp.Body.Close()
+		defer func() { _ = ticketResp.Body.Close() }()
 		if ticketResp.StatusCode == http.StatusUnauthorized || ticketResp.StatusCode == http.StatusForbidden {
 			return "error", "Authentication failed: check Proxmox username and password"
 		}
@@ -426,7 +426,7 @@ func testProxmoxConnection(deps Dependencies, c *gin.Context, connConfig map[str
 	if err == nil {
 		permReq.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s=%s", tokenID, tokenSecret))
 		if permResp, err := client.Do(permReq); err == nil {
-			defer permResp.Body.Close()
+			defer func() { _ = permResp.Body.Close() }()
 			if permResp.StatusCode >= 200 && permResp.StatusCode < 300 {
 				var permEnvelope struct {
 					Data map[string]map[string]int `json:"data"`

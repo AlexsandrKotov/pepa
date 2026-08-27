@@ -348,7 +348,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 		provider, err = h.aiManager.DefaultProvider()
 	}
 	if err != nil {
-		fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": "AI provider not configured"}))
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": "AI provider not configured"}))
 		flusher.Flush()
 		return
 	}
@@ -383,7 +383,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 
 	stream, err := provider.Stream(c.Request.Context(), messages, opts)
 	if err != nil {
-		fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": err.Error()}))
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": err.Error()}))
 		flusher.Flush()
 		return
 	}
@@ -396,7 +396,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 				continue
 			}
 		}
-		fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(chunk))
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(chunk))
 		flusher.Flush()
 	}
 }

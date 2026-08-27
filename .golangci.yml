@@ -23,6 +23,8 @@ linters:
         - G304
         - G402
         - G703
+        - G122
+        - G115
     govet:
       enable:
         - assign

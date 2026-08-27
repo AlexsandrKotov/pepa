@@ -298,7 +298,7 @@ func TestWriteSecret(t *testing.T) {
 			w.WriteHeader(403)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"data": map[string]interface{}{
 				"metadata": map[string]interface{}{
 					"version":      1,
@@ -346,7 +346,7 @@ func TestDeleteSecret(t *testing.T) {
 func TestListEngines(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/sys/mounts", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"data": map[string]interface{}{
 				"secret/": map[string]interface{}{
 					"type":        "kv",

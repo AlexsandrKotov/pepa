@@ -353,7 +353,7 @@ func newPluginCmd() *cobraCmd {
 					Status  string `json:"status"`
 				} `json:"plugins"`
 			}
-			json.Unmarshal(data, &result)
+			_ = json.Unmarshal(data, &result)
 			if len(result.Plugins) == 0 {
 				fmt.Println("No plugins installed.")
 				return nil
@@ -472,7 +472,7 @@ func newScorecardCmd() *cobraCmd {
 				} `json:"scorecards"`
 				Total int `json:"total"`
 			}
-			json.Unmarshal(data, &result)
+			_ = json.Unmarshal(data, &result)
 			if len(result.Scorecards) == 0 {
 				fmt.Println("No scorecards found.")
 				return nil
@@ -572,7 +572,7 @@ func newAuditCmd() *cobraCmd {
 				} `json:"items"`
 				Total int `json:"total"`
 			}
-			json.Unmarshal(data, &result)
+			_ = json.Unmarshal(data, &result)
 			if len(result.Items) == 0 {
 				fmt.Println("No audit entries found.")
 				return nil
