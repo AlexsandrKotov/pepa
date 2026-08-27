@@ -186,14 +186,19 @@ PLUGIN_GOARCH ?= amd64
 plugins: plugins-builtin plugins-community
 	@echo "✓ All public plugins built"
 
-# Build built-in plugins (included in repository)
+# Build built-in plugins (source in plugins/<name>/, metadata in plugins/builtin/<name>/)
 plugins-builtin:
 	@echo "→ Building built-in plugins ($(PLUGIN_GOOS)/$(PLUGIN_GOARCH))..."
 	@for dir in $(PLUGIN_DIRS_BUILTIN); do \
 		name=$$(basename $$dir); \
+		src="plugins/$$name"; \
+		if [ ! -d "$$src" ] || [ -z "$$(ls $$src/*.go 2>/dev/null)" ]; then \
+			echo "  ⚠ $$name — no Go source, skipping"; \
+			continue; \
+		fi; \
 		echo "  → $$name (builtin)"; \
 		mkdir -p plugins/bin/builtin/$$name; \
-		CGO_ENABLED=0 GOOS=$(PLUGIN_GOOS) GOARCH=$(PLUGIN_GOARCH) go build -o plugins/bin/builtin/$$name/$$name ./$$dir; \
+		CGO_ENABLED=0 GOOS=$(PLUGIN_GOOS) GOARCH=$(PLUGIN_GOARCH) go build -o plugins/bin/builtin/$$name/$$name ./$$src; \
 	done
 	@echo "✓ Built-in plugins built in plugins/bin/builtin/<name>/"
 
