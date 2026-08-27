@@ -22,9 +22,9 @@ If you discover a security vulnerability in PEPA, please report it responsibly:
 
 ### Option 2: Email
 
-Send an email to **security@pepa.io** with:
+Send an email to **security@github.com** with:
 
-> **Note**: If `security@pepa.io` is not yet configured, use [GitHub Private Security Reporting](https://github.com/AlexsandrKotov/pepa/security/advisories/new) instead.
+> **Note**: If `security@github.com` is not yet configured, use [GitHub Private Security Reporting](https://github.com/AlexsandrKotov/pepa/security/advisories/new) instead.
 
 - Description of the vulnerability
 - Steps to reproduce or proof of concept
@@ -87,6 +87,6 @@ Security advisories will be published via:
 ## Contact
 
 - Security reports: **[GitHub Security Advisory](https://github.com/AlexsandrKotov/pepa/security/advisories/new)** (preferred)
-- Email fallback: **security@pepa.io** (if configured)
+- Email fallback: **security@github.com** (if configured)
 - General questions: **GitHub Discussions**
 - Urgent matters: GitHub Security Advisory with "Critical" severity

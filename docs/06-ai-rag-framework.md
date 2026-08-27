@@ -163,7 +163,7 @@ type GeminiProvider struct {
 
 ```yaml
 # ai-config.yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: AIConfig
 metadata:
   name: default
@@ -944,7 +944,7 @@ func (h *AIHandler) Chat(c *gin.Context) {
 
 ```yaml
 # Automated incident analysis pipeline
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: AIAutomation
 metadata:
   name: incident-analyzer
@@ -1032,7 +1032,7 @@ spec:
 
 ```yaml
 # Pre-deployment AI risk check
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: AIAutomation
 metadata:
   name: deployment-risk-assessor
@@ -1079,7 +1079,7 @@ spec:
 
 ```yaml
 # Auto-generate service documentation
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: AIAutomation
 metadata:
   name: doc-generator

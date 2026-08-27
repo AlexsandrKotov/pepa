@@ -316,7 +316,7 @@ User → PEPA Workflow → Multiple Steps → Approvals → Deploy → Notify
 
 #### Example: Enterprise Deployment Workflow
 ```yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: enterprise-deploy
@@ -485,7 +485,7 @@ values:
 
 #### Implementation
 ```yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: blue-green-deploy
@@ -549,7 +549,7 @@ spec:
 
 #### Implementation
 ```yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: canary-deploy
@@ -616,7 +616,7 @@ spec:
 
 #### Implementation
 ```yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: multi-env-promotion

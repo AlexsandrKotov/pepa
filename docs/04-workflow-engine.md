@@ -20,7 +20,7 @@ The Workflow Engine is the **automation backbone** of PEPA. It provides a declar
 ### 2.1 Core Schema
 
 ```yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: deploy-service-pipeline
@@ -686,7 +686,7 @@ class WorkflowSyncEngine {
 
 ```yaml
 # Reusable workflow template
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
   name: standard-deploy
@@ -737,7 +737,7 @@ spec:
 
 ```yaml
 # Concrete workflow that uses a template
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: deploy-payment-service

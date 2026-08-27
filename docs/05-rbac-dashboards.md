@@ -458,7 +458,7 @@ has_sufficient_approvals if {
 
 ```yaml
 # auth-config.yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: AuthConfig
 metadata:
   name: default
@@ -739,7 +739,7 @@ const WIDGET_TYPES = {
 
 ```yaml
 # Default dashboards per role (auto-created for new users)
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: DashboardTemplate
 metadata:
   name: developer-home
@@ -791,7 +791,7 @@ spec:
         maxAge: 24h
 
 ---
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: DashboardTemplate
 metadata:
   name: devops-home
@@ -833,7 +833,7 @@ spec:
         maxAge: 72h
 
 ---
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: DashboardTemplate
 metadata:
   name: security-home

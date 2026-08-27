@@ -364,7 +364,7 @@ Administrators can also define custom entity types through the UI or YAML:
 
 ```yaml
 # custom-entity-type.yaml
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: EntityType
 metadata:
   name: database-instance
@@ -438,7 +438,7 @@ spec:
 
 ```yaml
 # sync-config.yaml — Per-plugin sync settings
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: EntitySyncConfig
 metadata:
   name: jira-sync
@@ -766,7 +766,7 @@ workflow:{workflow_id}:step:{step_id}     → Step execution result
 ```yaml
 # auto-link-rules.yaml
 # Rules for automatically discovering and creating relationships
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: AutoLinkRule
 metadata:
   name: service-to-repository

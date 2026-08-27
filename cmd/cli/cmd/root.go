@@ -38,7 +38,7 @@ from the command line.
 
 Environment:
   PEPA_API_URL   API server URL (default: http://localhost:8088)
-  PEPA_API_USER  API user email (default: admin@pepa.io)`,
+  PEPA_API_USER  API user email (default: admin@example.com)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

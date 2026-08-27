@@ -381,7 +381,7 @@ jobs:
             echo "## CLI Install"
             echo ""
             echo '```bash'
-            echo "curl -fsSL https://get.pepa.io | sh"
+            echo "curl -fsSL https://github.com/AlexsandrKotov/pepa/releases | sh"
             echo "# Or download a binary below"
             echo '```'
             echo ""

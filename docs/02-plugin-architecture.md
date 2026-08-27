@@ -250,7 +250,7 @@ Every plugin ships with a manifest:
 
 ```yaml
 # plugin.yaml — Jira Task Tracker Plugin
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Plugin
 metadata:
   name: jira-tracker
@@ -717,7 +717,7 @@ plugin.yaml config → Secret Reference → Secret Backend (Vault/K8s Secrets/En
 ```yaml
 # workflow: deploy-with-approval.yaml
 # Demonstrates multi-plugin coordination in a single workflow
-apiVersion: pepa.io/v1alpha1
+apiVersion: pepa.github.io/v1alpha1
 kind: Workflow
 metadata:
   name: deploy-with-approval
