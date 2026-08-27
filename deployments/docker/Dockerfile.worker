@@ -10,7 +10,7 @@ FROM gcr.io/distroless/static-debian12
 LABEL org.opencontainers.image.title="PEPA Worker" \
       org.opencontainers.image.description="Platform Engineering & Pipeline Automator — Background Worker" \
       org.opencontainers.image.vendor="PEPA" \
-      org.opencontainers.image.source="https://github.com/akotau/pepa"
+      org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
 
 WORKDIR /home/nonroot
 COPY --from=builder /out/worker /worker

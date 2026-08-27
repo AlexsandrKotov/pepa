@@ -21,7 +21,7 @@ FROM alpine:3.24
 LABEL org.opencontainers.image.title="PEPA API Server" \
       org.opencontainers.image.description="Platform Engineering & Pipeline Automator — API Server" \
       org.opencontainers.image.vendor="PEPA" \
-      org.opencontainers.image.source="https://github.com/akotau/pepa"
+      org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
 
 RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git && \
     mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa
