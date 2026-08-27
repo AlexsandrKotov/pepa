@@ -16,7 +16,7 @@ If you discover a security vulnerability in PEPA, please report it responsibly:
 
 ### Option 1: GitHub Private Vulnerability Reporting (Preferred)
 
-1. Go to the [Security Advisories page](https://github.com/akotau/pepa/security/advisories/new)
+1. Go to the [Security Advisories page](https://github.com/AlexsandrKotov/pepa/security/advisories/new)
 2. Click **Report a vulnerability**
 3. Fill in the advisory form with as much detail as possible
 
@@ -24,7 +24,7 @@ If you discover a security vulnerability in PEPA, please report it responsibly:
 
 Send an email to **security@pepa.io** with:
 
-> **Note**: If `security@pepa.io` is not yet configured, use [GitHub Private Security Reporting](https://github.com/akotau/pepa/security/advisories/new) instead.
+> **Note**: If `security@pepa.io` is not yet configured, use [GitHub Private Security Reporting](https://github.com/AlexsandrKotov/pepa/security/advisories/new) instead.
 
 - Description of the vulnerability
 - Steps to reproduce or proof of concept
@@ -80,13 +80,13 @@ A formal bug bounty program will be announced after the v0.1.0 GA release. In th
 
 Security advisories will be published via:
 
-- [GitHub Security Advisories](https://github.com/akotau/pepa/security/advisories)
+- [GitHub Security Advisories](https://github.com/AlexsandrKotov/pepa/security/advisories)
 - Release notes for patch versions
 - Community Slack (post-launch)
 
 ## Contact
 
-- Security reports: **[GitHub Security Advisory](https://github.com/akotau/pepa/security/advisories/new)** (preferred)
+- Security reports: **[GitHub Security Advisory](https://github.com/AlexsandrKotov/pepa/security/advisories/new)** (preferred)
 - Email fallback: **security@pepa.io** (if configured)
 - General questions: **GitHub Discussions**
 - Urgent matters: GitHub Security Advisory with "Critical" severity

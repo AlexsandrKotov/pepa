@@ -159,6 +159,6 @@ Map Backstage roles to PEPA RBAC:
 
 ## Need Help?
 
-- [GitHub Discussions](https://github.com/akotau/pepa/discussions)
+- [GitHub Discussions](https://github.com/AlexsandrKotov/pepa/discussions)
 - [PEPA Documentation](../)
 - Email: support@pepa.io

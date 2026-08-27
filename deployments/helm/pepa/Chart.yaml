@@ -11,9 +11,9 @@ keywords:
   - gitops
   - cncf
   - developer-tools
-home: https://github.com/akotau/pepa
+home: https://github.com/AlexsandrKotov/pepa
 sources:
-  - https://github.com/akotau/pepa
+  - https://github.com/AlexsandrKotov/pepa
 maintainers:
   - name: PEPA Maintainers
     email: maintainers@pepa.io
