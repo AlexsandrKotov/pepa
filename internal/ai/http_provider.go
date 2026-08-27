@@ -186,7 +186,7 @@ func (p *httpProvider) doChat(ctx context.Context, body map[string]any) (*ChatRe
 		}
 
 		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read response: %w", err)
 		}
@@ -331,7 +331,7 @@ func (p *httpProvider) Stream(ctx context.Context, messages []Message, opts *Cha
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			wait := time.Duration((attempt+1)*3) * time.Second
 			log.Printf("[AI Provider] Stream rate limited (429). Retrying in %v (attempt %d/%d)", wait, attempt+1, maxRetries)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -344,7 +344,7 @@ func (p *httpProvider) Stream(ctx context.Context, messages []Message, opts *Cha
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("stream provider returned %d: %s", resp.StatusCode, string(respBody))
 	}
 

@@ -108,7 +108,7 @@ func (s *LocalStorage) UploadPlugin(_ context.Context, name, version string, rea
 	if err != nil {
 		return fmt.Errorf("create plugin file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if _, err := io.Copy(f, reader); err != nil {
 		return fmt.Errorf("write plugin file: %w", err)

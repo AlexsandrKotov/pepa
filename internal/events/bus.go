@@ -105,7 +105,7 @@ func (b *Bus) Start() {
 		for {
 			select {
 			case <-b.ctx.Done():
-				pubsub.Close()
+				_ = pubsub.Close()
 				close(b.eventCh)
 				wg.Wait()
 				return

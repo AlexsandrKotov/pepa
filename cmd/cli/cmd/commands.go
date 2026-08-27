@@ -95,7 +95,7 @@ func newEntityCmd() *cobraCmd {
 				ID   string `json:"id"`
 				Name string `json:"name"`
 			}
-			json.Unmarshal(data, &result)
+			_ = json.Unmarshal(data, &result)
 			fmt.Printf("Entity created: %s (ID: %s)\n", result.Name, result.ID)
 			return nil
 		},
@@ -180,7 +180,7 @@ func newWorkflowCmd() *cobraCmd {
 				} `json:"workflows"`
 				Total int `json:"total"`
 			}
-			json.Unmarshal(data, &result)
+			_ = json.Unmarshal(data, &result)
 			if len(result.Workflows) == 0 {
 				fmt.Println("No workflows found.")
 				return nil
@@ -302,7 +302,7 @@ func newWorkflowCmd() *cobraCmd {
 					CreatedAt   string `json:"created_at"`
 				} `json:"executions"`
 			}
-			json.Unmarshal(data, &result)
+			_ = json.Unmarshal(data, &result)
 			if len(result.Executions) == 0 {
 				fmt.Println("No executions found.")
 				return nil

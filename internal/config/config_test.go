@@ -189,7 +189,7 @@ func TestLoadFromEnv_EmptyVarsIgnored(t *testing.T) {
 	originalPort := cfg.Server.Port
 
 	// Ensure the env var is not set
-	os.Unsetenv("SERVER_PORT")
+	_ = os.Unsetenv("SERVER_PORT")
 	cfg.LoadFromEnv()
 
 	if cfg.Server.Port != originalPort {

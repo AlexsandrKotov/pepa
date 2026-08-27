@@ -191,26 +191,26 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID uuid.UUID, field
 	if len(fields) == 0 {
 		return nil
 	}
-	
+
 	setClauses := []string{"updated_at = NOW()"}
 	args := []interface{}{}
 	argIdx := 1
-	
+
 	for key, value := range fields {
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", key, argIdx))
 		args = append(args, value)
 		argIdx++
 	}
-	
+
 	args = append(args, userID)
-	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d", 
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d",
 		setClauses[0], argIdx)
 	for i := 1; i < len(setClauses); i++ {
 		query = fmt.Sprintf("UPDATE users SET %s, %s WHERE id = $%d",
 			query[len("UPDATE users SET "):len(query)-len(fmt.Sprintf(" WHERE id = $%d", argIdx))],
 			setClauses[i], argIdx)
 	}
-	
+
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update user: %w", err)
@@ -227,26 +227,26 @@ func (r *AuthRepository) ListUsers(ctx context.Context, search string, isActive 
 	`
 	args := []interface{}{}
 	argIdx := 1
-	
+
 	if search != "" {
 		query += fmt.Sprintf(" AND (email ILIKE $%d OR name ILIKE $%d)", argIdx, argIdx)
 		args = append(args, "%"+search+"%")
 		argIdx++
 	}
-	
+
 	if isActive != nil {
 		query += fmt.Sprintf(" AND is_active = $%d", argIdx)
 		args = append(args, *isActive)
 	}
-	
+
 	query += " ORDER BY name ASC"
-	
+
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
 	defer rows.Close()
-	
+
 	var users []User
 	for rows.Next() {
 		var user User

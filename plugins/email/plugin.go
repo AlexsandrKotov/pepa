@@ -159,13 +159,13 @@ func sendMailWithTLS(addr string, tlsConfig *tls.Config, from string, to []strin
 	if err != nil {
 		return fmt.Errorf("TLS connection to %s failed: %w (STARTTLS or implicit TLS required)", addr, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client, err := smtp.NewClient(conn, tlsConfig.ServerName)
 	if err != nil {
 		return fmt.Errorf("smtp client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	if auth != nil {
 		if err := client.Auth(auth); err != nil {

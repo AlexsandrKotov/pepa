@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -125,7 +126,7 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 		// If a target cluster is specified, perform the actual deployment
 		if d.TargetClusterID != nil && deps.Repos.Cluster != nil {
 			go performDeployment(d.ID, *d.TargetClusterID, d.TargetNamespace,
-				d.GitlabProjectName, int32(d.Replicas), d.Spec, d.TimeoutSeconds, deps)
+				d.GitlabProjectName, safeInt32(d.Replicas), d.Spec, d.TimeoutSeconds, deps)
 		}
 
 		logAudit(deps, c, "create", "deployment", d.ID.String(), nil, gin.H{"deploy_type": d.DeployType, "status": d.Status})
@@ -146,7 +147,7 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 		specJSON,
 		timeoutSeconds,
 	)
-	
+
 	if !result.Success {
 		log.Printf("Deployment %s failed: %s", deploymentID, result.Message)
 	}
@@ -396,4 +397,15 @@ func removeDeployment(deps Dependencies) gin.HandlerFunc {
 		logAudit(deps, c, "delete", "deployment", id.String(), nil, nil)
 		c.JSON(http.StatusOK, gin.H{"message": "deployment deleted"})
 	}
+}
+
+// safeInt32 converts int to int32 with overflow clamping.
+func safeInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
 }

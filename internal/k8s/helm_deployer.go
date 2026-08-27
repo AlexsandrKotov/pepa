@@ -53,12 +53,12 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 	if err != nil {
 		return nil, fmt.Errorf("create kubeconfig temp file: %w", err)
 	}
-	defer os.Remove(kubeconfigFile.Name())
+	defer func() { _ = os.Remove(kubeconfigFile.Name()) }()
 	if _, err := kubeconfigFile.WriteString(kubeconfigData); err != nil {
-		kubeconfigFile.Close()
+		_ = kubeconfigFile.Close()
 		return nil, fmt.Errorf("write kubeconfig: %w", err)
 	}
-	kubeconfigFile.Close()
+	_ = kubeconfigFile.Close()
 
 	// Write values.yaml to temp file if provided
 	var valuesFile string
@@ -67,12 +67,12 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 		if err != nil {
 			return nil, fmt.Errorf("create values temp file: %w", err)
 		}
-		defer os.Remove(vf.Name())
+		defer func() { _ = os.Remove(vf.Name()) }()
 		if _, err := vf.WriteString(spec.ValuesYAML); err != nil {
-			vf.Close()
+			_ = vf.Close()
 			return nil, fmt.Errorf("write values: %w", err)
 		}
-		vf.Close()
+		_ = vf.Close()
 		valuesFile = vf.Name()
 	}
 

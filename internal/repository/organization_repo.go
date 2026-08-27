@@ -178,7 +178,7 @@ func (r *OrganizationRepository) CreateWorkspaceWithEnvironments(ctx context.Con
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO tenants (id, organization_id, name, slug, settings, created_at)

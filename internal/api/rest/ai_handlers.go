@@ -305,7 +305,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 			}
 		}
 		if err != nil {
-			fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": err.Error()}))
+			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": err.Error()}))
 			flusher.Flush()
 			return
 		}
@@ -320,7 +320,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 		// Stream from the agent (prompt mode uses RunStream, native mode falls back to blocking run)
 		stream, sErr := agent.Stream(c.Request.Context(), task, req.Message)
 		if sErr != nil {
-			fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": sErr.Error()}))
+			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": sErr.Error()}))
 			flusher.Flush()
 			return
 		}
@@ -333,7 +333,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 					continue
 				}
 			}
-			fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(chunk))
+			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(chunk))
 			flusher.Flush()
 		}
 		return

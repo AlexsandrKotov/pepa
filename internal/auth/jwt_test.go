@@ -199,9 +199,9 @@ func containsSubstr(s, substr string) bool {
 func TestMiddleware_ProdMode_NoToken(t *testing.T) {
 	// Save and restore SERVER_ENV
 	orig := os.Getenv("SERVER_ENV")
-	defer os.Setenv("SERVER_ENV", orig)
+	defer func() { _ = os.Setenv("SERVER_ENV", orig) }()
 
-	os.Setenv("SERVER_ENV", "production")
+	_ = os.Setenv("SERVER_ENV", "production")
 
 	r := gin.New()
 	r.Use(Middleware("test-secret"))
@@ -224,9 +224,9 @@ func TestMiddleware_ProdMode_NoToken(t *testing.T) {
 
 func TestMiddleware_ProdMode_ValidToken(t *testing.T) {
 	orig := os.Getenv("SERVER_ENV")
-	defer os.Setenv("SERVER_ENV", orig)
+	defer func() { _ = os.Setenv("SERVER_ENV", orig) }()
 
-	os.Setenv("SERVER_ENV", "production")
+	_ = os.Setenv("SERVER_ENV", "production")
 
 	secret := "prod-secret"
 	token := signToken(secret, Claims{

@@ -168,7 +168,7 @@ func (r *ClusterRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Delete dependent rows that reference this cluster via FK
 	dependents := []struct{ table, column string }{

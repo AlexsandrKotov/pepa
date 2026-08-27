@@ -106,7 +106,7 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 
 		if err := client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars); err != nil {
 			svc.Status = "error"
-			deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 			respondInternalError(c, err)
 			return
 		}

@@ -19,13 +19,13 @@ import (
 type ConnectionType string
 
 const (
-	ConnectionKubernetes  ConnectionType = "kubernetes"
-	ConnectionGitLab      ConnectionType = "gitlab"
-	ConnectionGit         ConnectionType = "git"
-	ConnectionJira        ConnectionType = "jira"
-	ConnectionCI          ConnectionType = "ci"
-	ConnectionAI          ConnectionType = "ai"
-	ConnectionStorage     ConnectionType = "storage"
+	ConnectionKubernetes   ConnectionType = "kubernetes"
+	ConnectionGitLab       ConnectionType = "gitlab"
+	ConnectionGit          ConnectionType = "git"
+	ConnectionJira         ConnectionType = "jira"
+	ConnectionCI           ConnectionType = "ci"
+	ConnectionAI           ConnectionType = "ai"
+	ConnectionStorage      ConnectionType = "storage"
 	ConnectionProxmox      ConnectionType = "proxmox"
 	ConnectionDocker       ConnectionType = "docker"
 	ConnectionSecret       ConnectionType = "secret"

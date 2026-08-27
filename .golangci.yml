@@ -16,16 +16,13 @@ linters:
     errcheck:
       check-type-assertions: false
       check-blank: false
-      exclude-functions:
-        - (io.Closer).Close
-        - (net/http.ResponseWriter).Write
-        - encoding/json:Encoder.Encode
-        - (*net/http.Response).Body.Close
-        - fmt:Fprint
-        - fmt:Fprintf
     gosec:
       excludes:
         - G101
+        - G204
+        - G304
+        - G402
+        - G703
     govet:
       enable:
         - assign

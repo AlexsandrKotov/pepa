@@ -930,7 +930,7 @@ func (t *restartDockerServiceTool) Execute(ctx context.Context, params json.RawM
 		return "", err
 	}
 	svc.Status = "running"
-	t.deps.DockerHostRepo.UpdateService(ctx, svc)
+	_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 	return fmt.Sprintf(`{"status":"restarted","service":"%s"}`, svc.Name), nil
 }
 
@@ -969,7 +969,7 @@ func (t *stopDockerServiceTool) Execute(ctx context.Context, params json.RawMess
 		return "", err
 	}
 	svc.Status = "stopped"
-	t.deps.DockerHostRepo.UpdateService(ctx, svc)
+	_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 	return fmt.Sprintf(`{"status":"stopped","service":"%s"}`, svc.Name), nil
 }
 
@@ -1008,7 +1008,7 @@ func (t *startDockerServiceTool) Execute(ctx context.Context, params json.RawMes
 		return "", err
 	}
 	svc.Status = "running"
-	t.deps.DockerHostRepo.UpdateService(ctx, svc)
+	_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
 	return fmt.Sprintf(`{"status":"started","service":"%s"}`, svc.Name), nil
 }
 

@@ -63,7 +63,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cloneArgs := []string{
 		"clone",
@@ -129,7 +129,7 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	}
 
 	// Write the modified file
-	if err := os.WriteFile(targetPath, newContent, 0644); err != nil {
+	if err := os.WriteFile(targetPath, newContent, 0600); err != nil {
 		return nil, fmt.Errorf("write file: %w", err)
 	}
 
@@ -210,7 +210,7 @@ func (e *Editor) PreviewDiff(ctx context.Context, repo *Repo, req *EditRequest) 
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cloneArgs := []string{"clone", "--depth", "1", "--branch", repo.Branch, "--single-branch", "--no-tags", repoURL, tmpDir}
 	cmd := exec.CommandContext(ctx, "git", cloneArgs...)

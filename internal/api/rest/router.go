@@ -31,32 +31,32 @@ import (
 
 // Repositories groups all repository instances.
 type Repositories struct {
-	Entity           *repository.EntityRepository
-	Workflow         *repository.WorkflowRepository
-	Plugin           *repository.PluginRepository
-	Scorecard        *repository.ScorecardRepository
-	Audit            *repository.AuditRepository
-	Cluster          *repository.ClusterRepository
-	Deployment       *repository.DeploymentRepository
-	Jira             *repository.JiraRepository
-	Connection       *repository.ConnectionRepository
-	Service          *repository.ServiceRepository
-	Settings         *repository.SettingsRepository
-	Environment      *repository.EnvironmentRepository
-	EnvVariable      *repository.EnvironmentVariableRepository
-	DockerHost       *repository.DockerHostRepository
-	Helm             *repository.HelmRepository
-	PipelineSource   *repository.PipelineSourceRepository
-	PipelinePreset   *repository.PipelinePresetRepository
-	PipelineRun      *repository.PipelineRunRepository
-	Vault            *repository.VaultRepository
-	VaultConfig      *repository.VaultConfigRepository
-	Auth             *repository.AuthRepository
-	TeamWorkflow     *repository.TeamWorkflowRepository
-	GitopsRepo       *gitops.Repository
-	UserCredential   *repository.UserCredentialRepository
-	CredentialShare  *repository.CredentialShareRepository
-	Organization     *repository.OrganizationRepository
+	Entity          *repository.EntityRepository
+	Workflow        *repository.WorkflowRepository
+	Plugin          *repository.PluginRepository
+	Scorecard       *repository.ScorecardRepository
+	Audit           *repository.AuditRepository
+	Cluster         *repository.ClusterRepository
+	Deployment      *repository.DeploymentRepository
+	Jira            *repository.JiraRepository
+	Connection      *repository.ConnectionRepository
+	Service         *repository.ServiceRepository
+	Settings        *repository.SettingsRepository
+	Environment     *repository.EnvironmentRepository
+	EnvVariable     *repository.EnvironmentVariableRepository
+	DockerHost      *repository.DockerHostRepository
+	Helm            *repository.HelmRepository
+	PipelineSource  *repository.PipelineSourceRepository
+	PipelinePreset  *repository.PipelinePresetRepository
+	PipelineRun     *repository.PipelineRunRepository
+	Vault           *repository.VaultRepository
+	VaultConfig     *repository.VaultConfigRepository
+	Auth            *repository.AuthRepository
+	TeamWorkflow    *repository.TeamWorkflowRepository
+	GitopsRepo      *gitops.Repository
+	UserCredential  *repository.UserCredentialRepository
+	CredentialShare *repository.CredentialShareRepository
+	Organization    *repository.OrganizationRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.

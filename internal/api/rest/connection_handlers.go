@@ -446,7 +446,7 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		now := time.Now()
 		conn.LastCheckAt = &now
 		conn.Status = status
-		deps.Repos.Connection.Update(c.Request.Context(), conn)
+		_ = deps.Repos.Connection.Update(c.Request.Context(), conn)
 
 		// Sync cluster from connection for kubernetes type
 		if conn.Type == repository.ConnectionKubernetes && status == "connected" {

@@ -837,7 +837,7 @@ func updateUserHandler(deps Dependencies) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update roles"})
 				return
 			}
-			defer tx.Rollback(ctx)
+			defer func() { _ = tx.Rollback(ctx) }()
 
 			// Revoke existing assignments
 			if _, err := tx.Exec(ctx, `

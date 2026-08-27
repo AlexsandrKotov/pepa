@@ -152,7 +152,7 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			name := fmt.Sprintf("provider_%d", idx)
-			r.Get(name) // may or may not find it
+			_, _ = r.Get(name) // may or may not find it
 			r.List()
 		}(i)
 	}

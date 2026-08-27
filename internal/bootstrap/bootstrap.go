@@ -449,6 +449,6 @@ func (c *Components) StartEventBus() {
 func (c *Components) Shutdown(ctx context.Context) {
 	c.EventBus.Stop()
 	c.PluginMgr.Shutdown(ctx)
-	c.Redis.Close()
+	_ = c.Redis.Close()
 	c.DB.Close()
 }

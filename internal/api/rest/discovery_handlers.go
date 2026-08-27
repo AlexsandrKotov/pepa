@@ -40,10 +40,10 @@ type DiscoveredService struct {
 // In-memory cache for discovery results.
 var (
 	// Discovery result cache — avoids hitting k8s API on every request
-	discoveryCacheMu         sync.RWMutex
-	discoveryCache           []DiscoveredService
-	discoveryCacheTime       time.Time
-	discoveryCacheTTL        = 2 * time.Minute
+	discoveryCacheMu   sync.RWMutex
+	discoveryCache     []DiscoveredService
+	discoveryCacheTime time.Time
+	discoveryCacheTTL  = 2 * time.Minute
 )
 
 // DiscoveryService handles service discovery from multiple sources
@@ -318,10 +318,10 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 				"docker-container": countBySource(allServices, "docker-container"),
 				"manual":           countBySource(allServices, "manual"),
 			},
-			"clusters":         allClusters,
-			"namespaces":       namespaces,
-			"k8s_clusters":     len(k8sClusterSet),
-			"k8s_namespaces":   len(k8sNamespaceSet),
+			"clusters":       allClusters,
+			"namespaces":     namespaces,
+			"k8s_clusters":   len(k8sClusterSet),
+			"k8s_namespaces": len(k8sNamespaceSet),
 		})
 	}
 }

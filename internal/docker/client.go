@@ -174,10 +174,10 @@ func (c *Client) ComposeUp(ctx context.Context, projectName, composeYaml string,
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 
 	composePath := filepath.Join(dir, "docker-compose.yml")
-	if err := os.WriteFile(composePath, []byte(composeYaml), 0644); err != nil {
+	if err := os.WriteFile(composePath, []byte(composeYaml), 0600); err != nil {
 		return fmt.Errorf("writing compose file: %w", err)
 	}
 
@@ -336,13 +336,13 @@ func writeCertsToTempDir(caCert, cert, key string) string {
 		return ""
 	}
 	if caCert != "" {
-		os.WriteFile(filepath.Join(dir, "ca.pem"), []byte(caCert), 0600)
+		_ = os.WriteFile(filepath.Join(dir, "ca.pem"), []byte(caCert), 0600)
 	}
 	if cert != "" {
-		os.WriteFile(filepath.Join(dir, "cert.pem"), []byte(cert), 0600)
+		_ = os.WriteFile(filepath.Join(dir, "cert.pem"), []byte(cert), 0600)
 	}
 	if key != "" {
-		os.WriteFile(filepath.Join(dir, "key.pem"), []byte(key), 0600)
+		_ = os.WriteFile(filepath.Join(dir, "key.pem"), []byte(key), 0600)
 	}
 	return dir
 }
@@ -353,8 +353,8 @@ func writeSSHKeyToTempFile(key string) string {
 	if err != nil {
 		return ""
 	}
-	f.WriteString(key)
-	f.Chmod(0600)
-	f.Close()
+	_, _ = f.WriteString(key)
+	_ = f.Chmod(0600)
+	_ = f.Close()
 	return f.Name()
 }

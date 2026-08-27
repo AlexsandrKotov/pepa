@@ -157,7 +157,7 @@ func TestHealth(t *testing.T) {
 			w.WriteHeader(403)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"initialized": true,
 			"sealed":      false,
 		})
@@ -181,7 +181,7 @@ func TestHealth(t *testing.T) {
 func TestGetSecret(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/secret/data/myapp", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"data": map[string]interface{}{
 				"data": map[string]interface{}{
 					"username": "admin",
@@ -244,7 +244,7 @@ func TestListSecrets(t *testing.T) {
 			w.WriteHeader(400)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"data": map[string]interface{}{
 				"keys": []string{"web", "api", "worker"},
 			},

@@ -131,12 +131,12 @@ func TestPromoteDelayedJobs(t *testing.T) {
 	// Add a delayed job with score in the past (should be promoted)
 	job := &Job{ID: "promote-me", Type: "delayed.job", CreatedAt: time.Now().UTC()}
 	data, _ := json.Marshal(job)
-	mr.ZAdd("pepa:jobs:delayed", float64(time.Now().Add(-10*time.Second).Unix()), string(data))
+	_, _ = mr.ZAdd("pepa:jobs:delayed", float64(time.Now().Add(-10*time.Second).Unix()), string(data))
 
 	// Add a delayed job with score in the future (should NOT be promoted)
 	futureJob := &Job{ID: "wait-me", Type: "future.job", CreatedAt: time.Now().UTC()}
 	futureData, _ := json.Marshal(futureJob)
-	mr.ZAdd("pepa:jobs:delayed", float64(time.Now().Add(1*time.Hour).Unix()), string(futureData))
+	_, _ = mr.ZAdd("pepa:jobs:delayed", float64(time.Now().Add(1*time.Hour).Unix()), string(futureData))
 
 	if err := q.PromoteDelayedJobs(ctx); err != nil {
 		t.Fatalf("promote: %v", err)

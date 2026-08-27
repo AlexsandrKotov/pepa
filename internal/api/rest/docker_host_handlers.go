@@ -264,7 +264,7 @@ func testDockerHost(deps Dependencies) gin.HandlerFunc {
 			host.Status = "error"
 			now := time.Now()
 			host.LastCheckedAt = &now
-			deps.Repos.DockerHost.UpdateHost(c.Request.Context(), host)
+			_ = deps.Repos.DockerHost.UpdateHost(c.Request.Context(), host)
 			log.Printf("testDockerHost: connection test failed for host %s: %v", id, err)
 			c.JSON(http.StatusOK, gin.H{"status": "error", "error": "connection test failed"})
 			return
@@ -276,7 +276,7 @@ func testDockerHost(deps Dependencies) gin.HandlerFunc {
 		host.ContainersRunning = info.ContainersRunning
 		now := time.Now()
 		host.LastCheckedAt = &now
-		deps.Repos.DockerHost.UpdateHost(c.Request.Context(), host)
+		_ = deps.Repos.DockerHost.UpdateHost(c.Request.Context(), host)
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":             "connected",

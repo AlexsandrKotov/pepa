@@ -231,11 +231,11 @@ func printJSON(data []byte) {
 
 func printTable(headers []string, rows [][]string) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, joinTab(headers))
+	_, _ = fmt.Fprintln(w, joinTab(headers))
 	for _, row := range rows {
-		fmt.Fprintln(w, joinTab(row))
+		_, _ = fmt.Fprintln(w, joinTab(row))
 	}
-	w.Flush()
+	_ = w.Flush()
 }
 
 func joinTab(cols []string) string {
