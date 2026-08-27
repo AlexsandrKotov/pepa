@@ -1,6 +1,6 @@
 #!/bin/sh
 # PEPA CLI installer
-# Usage: curl -fsSL https://github.com/AlexsandrKotov/pepa/releases | sh
+# Usage: curl -fsSL https://github.com/your-username/pepa/releases | sh
 #
 # Environment variables:
 #   PEPA_VERSION  - specific version (default: latest)
