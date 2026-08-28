@@ -334,13 +334,13 @@ jobs:
           echo "================================"
           for arch in amd64 arm64; do
             PKG="pepa-plugins-${VERSION}-linux-${arch}"
-            mkdir -p "${PKG}/bin/builtin" "${PKG}/bin/community" "${PKG}/builtin"
-            # Copy binaries for this arch (from plugins/bin/builtin/ → builtin/ in artifact)
+            mkdir -p "${PKG}/bin" "${PKG}/builtin"
+            # Copy all plugin binaries directly to bin/ (no subdirectories)
             if [ -d "staging/${arch}/builtin" ]; then
-              cp -r "staging/${arch}/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
+              cp -r "staging/${arch}/builtin/"* "${PKG}/bin/" 2>/dev/null || true
             fi
             if [ -d "staging/${arch}/community" ]; then
-              cp -r "staging/${arch}/community/"* "${PKG}/bin/community/" 2>/dev/null || true
+              cp -r "staging/${arch}/community/"* "${PKG}/bin/" 2>/dev/null || true
             fi
             # Copy manifests (shared, from separate manifests artifact)
             if [ -d "staging/manifests" ]; then
