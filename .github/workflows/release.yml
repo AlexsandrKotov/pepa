@@ -357,6 +357,8 @@ jobs:
             if [ -d "staging/manifests" ]; then
               cp -r staging/manifests/* "${PKG}/builtin/" 2>/dev/null || true
             fi
+            # Ensure binaries are executable
+            chmod +x "${PKG}/bin/"* 2>/dev/null || true
             tar czf "${PKG}.tar.gz" "${PKG}"
             echo "Built ${PKG}.tar.gz"
             echo "Contents:"
