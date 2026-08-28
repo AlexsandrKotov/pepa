@@ -84,6 +84,24 @@ frontend:
     enabled: true
     minAvailable: 1
 
+# -- Plugins configuration
+# The plugins image contains signed built-in and community plugin binaries.
+# An initContainer copies them into a shared emptyDir volume mounted at
+# /plugins in both api-server and worker pods.
+plugins:
+  image:
+    repository: ghcr.io/alexsandrkotov/pepa/pepa-plugins
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  # -- Resource limits for the init-plugins initContainer
+  initResources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
 # -- Ingress configuration
 ingress:
   enabled: false

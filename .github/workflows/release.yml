@@ -61,10 +61,6 @@ jobs:
       - name: Frontend - install
         run: cd frontend && npm ci
 
-      - name: Frontend - lint
-        run: cd frontend && npm run lint
-        continue-on-error: true
-
       - name: Frontend - build
         run: cd frontend && npm run build
 
@@ -362,7 +358,7 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
-          helm push .helm-charts/*.tgz "oci://${REGISTRY}/${REPO_OWNER}/charts"
+          helm push .helm-charts/*.tgz "oci://${REGISTRY}/${REPO_OWNER,,}/charts"
 
   # -- 6. Generate Checksums --
   checksums:
@@ -453,7 +449,7 @@ jobs:
             echo '```bash'
             HELM_VERSION="${RELEASE_TAG#v}"
             REPO_OWNER="${REPO%%/*}"
-            echo "helm install pepa oci://${REGISTRY}/${REPO_OWNER}/charts/pepa --version ${HELM_VERSION}"
+            echo "helm install pepa oci://${REGISTRY}/${REPO_OWNER,,}/charts/pepa --version ${HELM_VERSION}"
             echo '```'
             echo ""
             echo "## CLI Install"
