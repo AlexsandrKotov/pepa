@@ -330,53 +330,11 @@ jobs:
           path: bin/pepa-*
           retention-days: 7
 
-  # -- 5. Package Helm Chart --
-  helm:
-    name: Helm Chart
-    runs-on: ubuntu-latest
-    needs: [test]
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v5
-        with:
-          version: v3.14.0
-
-      - name: Lint chart
-        run: helm lint deployments/helm/pepa/
-
-      - name: Package chart
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          mkdir -p .helm-charts/
-          HELM_VERSION="${RELEASE_TAG#v}"
-          helm package deployments/helm/pepa/ \
-            --version "${HELM_VERSION}" \
-            --app-version "${RELEASE_TAG}" \
-            -d .helm-charts/
-
-      - name: Upload chart package
-        uses: actions/upload-artifact@v5
-        with:
-          name: helm-chart
-          path: .helm-charts/*.tgz
-          retention-days: 7
-
-      - name: Push chart to GHCR (OCI)
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          REPO_OWNER: ${{ github.repository_owner }}
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
-          helm push .helm-charts/*.tgz "oci://${REGISTRY}/${REPO_OWNER,,}/charts"
-
-  # -- 6. Generate Checksums --
+  # -- 5. Generate Checksums --
   checksums:
     name: Generate Checksums
     runs-on: ubuntu-latest
-    needs: [cli, plugins, plugins-image, helm]
+    needs: [cli, plugins, plugins-image]
     steps:
       - name: Download CLI artifacts
         uses: actions/download-artifact@v5
@@ -385,15 +343,9 @@ jobs:
           path: artifacts/cli/
           merge-multiple: false
 
-      - name: Download Helm chart
-        uses: actions/download-artifact@v5
-        with:
-          name: helm-chart
-          path: artifacts/helm/
-
       - name: Generate SHA256 checksums
         run: |
-          find artifacts/ -type f \( -name 'pepa-*' -o -name '*.tgz' \) | sort | while read -r f; do
+          find artifacts/ -type f -name 'pepa-*' | sort | while read -r f; do
             sha256sum "$f" >> sha256sums.txt
           done
           cat sha256sums.txt
@@ -405,11 +357,11 @@ jobs:
           path: sha256sums.txt
           retention-days: 30
 
-  # -- 7. Create GitHub Release --
+  # -- 6. Create GitHub Release --
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [docker, plugins, plugins-image, cli, helm, checksums]
+    needs: [docker, plugins, plugins-image, cli, checksums]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -422,12 +374,6 @@ jobs:
           path: release-assets/cli/
           merge-multiple: false
 
-      - name: Download Helm chart
-        uses: actions/download-artifact@v5
-        with:
-          name: helm-chart
-          path: release-assets/helm-chart/
-
       - name: Download checksums
         uses: actions/download-artifact@v5
         with:
@@ -438,7 +384,6 @@ jobs:
         run: |
           mkdir -p release-upload/
           find release-assets/cli/ -type f -name 'pepa-*' -exec cp {} release-upload/ \; 2>/dev/null || true
-          find release-assets/helm-chart/ -type f -name '*.tgz' -exec cp {} release-upload/ \; 2>/dev/null || true
           cp release-assets/checksums/sha256sums.txt release-upload/ 2>/dev/null || true
           ls -la release-upload/
 
@@ -474,14 +419,6 @@ jobs:
             echo "docker pull ${GHCR}/pepa-worker:${RELEASE_TAG}"
             echo "docker pull ${GHCR}/pepa-frontend:${RELEASE_TAG}"
             echo "docker pull ${GHCR}/pepa-plugins:${RELEASE_TAG}"
-            echo '```'
-            echo ""
-            echo "## Helm Install"
-            echo ""
-            echo '```bash'
-            HELM_VERSION="${RELEASE_TAG#v}"
-            REPO_OWNER="${REPO%%/*}"
-            echo "helm install pepa oci://${REGISTRY}/${REPO_OWNER,,}/charts/pepa --version ${HELM_VERSION}"
             echo '```'
             echo ""
             echo "## CLI Install"

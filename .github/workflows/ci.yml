@@ -77,7 +77,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build ${{ matrix.target }}
         uses: docker/build-push-action@v6
@@ -147,7 +147,7 @@ jobs:
 
       - name: Upload signed plugins
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: signed-plugins
           path: |
