@@ -127,6 +127,8 @@ service:
 # -- PostgreSQL subchart
 postgresql:
   enabled: true
+  image:
+    tag: "18"
   auth:
     username: pepa
     database: pepa
