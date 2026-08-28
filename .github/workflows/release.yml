@@ -210,7 +210,15 @@ jobs:
         with:
           name: plugins-linux-${{ matrix.arch }}
           path: |
-            plugins/bin/
+            plugins/bin/builtin/
+            plugins/bin/community/
+          retention-days: 7
+
+      - name: Upload plugin manifests
+        uses: actions/upload-artifact@v5
+        with:
+          name: plugins-manifests
+          path: |
             plugins/builtin/
           retention-days: 7
 
@@ -234,10 +242,16 @@ jobs:
           name: plugins-linux-arm64
           path: staging/arm64
 
+      - name: Download plugin manifests
+        uses: actions/download-artifact@v5
+        with:
+          name: plugins-manifests
+          path: staging/manifests
+
       - name: Stage per-arch directories
         run: |
           echo "=== Debug: staging structure ==="
-          find staging/ -type f | head -30
+          find staging/ -type f | head -50
           echo "================================"
           for arch in amd64 arm64; do
             mkdir -p "plugins/bin-${arch}/builtin" "plugins/bin-${arch}/community"
@@ -248,8 +262,8 @@ jobs:
               cp -r "staging/${arch}/community/"* "plugins/bin-${arch}/community/" 2>/dev/null || true
             fi
           done
-          # Copy manifests (shared across architectures)
-          cp -r staging/amd64/builtin/* plugins/builtin/ 2>/dev/null || true
+          # Copy manifests (shared across architectures, from separate artifact)
+          cp -r staging/manifests/* plugins/builtin/ 2>/dev/null || true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -304,31 +318,38 @@ jobs:
           name: plugins-linux-arm64
           path: staging/arm64
 
+      - name: Download plugin manifests
+        uses: actions/download-artifact@v5
+        with:
+          name: plugins-manifests
+          path: staging/manifests
+
       - name: Create per-arch tarballs
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           VERSION="${RELEASE_TAG#v}"
           echo "=== Debug: staging structure ==="
-          find staging/ -type f | head -30
+          find staging/ -type f | head -50
           echo "================================"
           for arch in amd64 arm64; do
             PKG="pepa-plugins-${VERSION}-linux-${arch}"
             mkdir -p "${PKG}/bin/builtin" "${PKG}/bin/community" "${PKG}/builtin"
-            # Copy binaries for this arch
+            # Copy binaries for this arch (from plugins/bin/builtin/ → builtin/ in artifact)
             if [ -d "staging/${arch}/builtin" ]; then
               cp -r "staging/${arch}/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
             fi
             if [ -d "staging/${arch}/community" ]; then
               cp -r "staging/${arch}/community/"* "${PKG}/bin/community/" 2>/dev/null || true
             fi
-            # Copy manifests (shared, from amd64 staging)
-            if [ -d "staging/amd64/builtin" ]; then
-              cp -r staging/amd64/builtin/* "${PKG}/builtin/" 2>/dev/null || true
+            # Copy manifests (shared, from separate manifests artifact)
+            if [ -d "staging/manifests" ]; then
+              cp -r staging/manifests/* "${PKG}/builtin/" 2>/dev/null || true
             fi
             tar czf "${PKG}.tar.gz" "${PKG}"
             echo "Built ${PKG}.tar.gz"
-            tar tzf "${PKG}.tar.gz" | head -20
+            echo "Contents:"
+            tar tzf "${PKG}.tar.gz" | head -30
           done
           ls -lh pepa-plugins-*.tar.gz
 
