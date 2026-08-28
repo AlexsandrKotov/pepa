@@ -776,25 +776,52 @@ jobs:
             echo "docker pull ${GHCR}/pepa-plugins:${RELEASE_TAG}"
             echo '```'
             echo ""
-            echo "## Production Archive"
+            echo "## Quick Deploy"
+            echo ""
+            echo "### 1. Download archives"
             echo ""
             echo '```bash'
+            echo "# Production archive (docker-compose, configs, scripts)"
             echo "curl -fsSL -o pepa-production-${RELEASE_TAG#v}.tar.gz \\"
             echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-production-${RELEASE_TAG#v}.tar.gz"
-            echo "tar xzf pepa-production-${RELEASE_TAG#v}.tar.gz"
-            echo "cd pepa-production-${RELEASE_TAG#v} && ./deploy.sh"
-            echo '```'
             echo ""
-            echo "## Plugin Binaries"
-            echo ""
-            echo '```bash'
-            echo "# amd64"
+            echo "# Plugin binaries (choose your architecture)"
+            echo "# amd64:"
             echo "curl -fsSL -o pepa-plugins-${RELEASE_TAG#v}-linux-amd64.tar.gz \\"
             echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-plugins-${RELEASE_TAG#v}-linux-amd64.tar.gz"
-            echo "# arm64"
+            echo "# arm64:"
             echo "curl -fsSL -o pepa-plugins-${RELEASE_TAG#v}-linux-arm64.tar.gz \\"
             echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-plugins-${RELEASE_TAG#v}-linux-arm64.tar.gz"
             echo '```'
+            echo ""
+            echo "### 2. Extract and copy plugins"
+            echo ""
+            echo '```bash'
+            echo "tar xzf pepa-production-${RELEASE_TAG#v}.tar.gz"
+            echo "tar xzf pepa-plugins-${RELEASE_TAG#v}-linux-<arch>.tar.gz"
+            echo ""
+            echo "# Copy plugin binaries"
+            echo "cp -r pepa-plugins-${RELEASE_TAG#v}-linux-<arch>/bin/* \\"
+            echo "  pepa-production-${RELEASE_TAG#v}/plugins/bin/"
+            echo '```'
+            echo ""
+            echo "### 3. Deploy"
+            echo ""
+            echo '```bash'
+            echo "cd pepa-production-${RELEASE_TAG#v}"
+            echo "./deploy.sh"
+            echo '```'
+            echo ""
+            echo "<details>"
+            echo "<summary>Or use Docker images directly</summary>"
+            echo ""
+            echo '```bash'
+            echo "docker pull ${GHCR}/pepa-api-server:${RELEASE_TAG}"
+            echo "docker pull ${GHCR}/pepa-worker:${RELEASE_TAG}"
+            echo "docker pull ${GHCR}/pepa-frontend:${RELEASE_TAG}"
+            echo "docker pull ${GHCR}/pepa-plugins:${RELEASE_TAG}"
+            echo '```'
+            echo "</details>"
             echo ""
             echo "## Checksums"
             echo ""

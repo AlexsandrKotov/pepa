@@ -38,25 +38,43 @@ Access:
 - Frontend: http://localhost:3000
 - API: http://localhost:8088
 
-### Production (Tar Archive)
+### Production Deployment
 
-Download the production package from [GitHub Releases](https://github.com/AlexsandrKotov/pepa/releases):
+Download the production package and plugin binaries from [GitHub Releases](https://github.com/AlexsandrKotov/pepa/releases):
 
 ```bash
-# Download and extract
-wget https://github.com/AlexsandrKotov/pepa/releases/download/v0.1.0/pepa-production-v0.1.0.tar.gz
-tar xzf pepa-production-v0.1.0.tar.gz
-cd pepa-production-v0.1.0
+# 1. Download production archive (docker-compose, configs, scripts)
+curl -fsSL -o pepa-production-0.1.0.tar.gz \
+  https://github.com/AlexsandrKotov/pepa/releases/download/v0.1.0/pepa-production-0.1.0.tar.gz
 
-# Deploy
+# 2. Download plugin binaries (choose your architecture)
+# amd64:
+curl -fsSL -o pepa-plugins-0.1.0-linux-amd64.tar.gz \
+  https://github.com/AlexsandrKotov/pepa/releases/download/v0.1.0/pepa-plugins-0.1.0-linux-amd64.tar.gz
+# arm64:
+curl -fsSL -o pepa-plugins-0.1.0-linux-arm64.tar.gz \
+  https://github.com/AlexsandrKotov/pepa/releases/download/v0.1.0/pepa-plugins-0.1.0-linux-arm64.tar.gz
+
+# 3. Extract both archives
+tar xzf pepa-production-0.1.0.tar.gz
+tar xzf pepa-plugins-0.1.0-linux-<arch>.tar.gz
+
+# 4. Copy plugin binaries into the production package
+cp -r pepa-plugins-0.1.0-linux-<arch>/bin/* \
+  pepa-production-0.1.0/plugins/bin/
+
+# 5. Deploy
+cd pepa-production-0.1.0
 ./deploy.sh
 ```
 
 The production package includes:
-- Pre-built Docker images
-- Docker Compose configuration
-- Auto-generated secrets
-- One-command deployment script
+- Docker Compose configuration (images pulled from GHCR)
+- Auto-generated secrets (.env)
+- Nginx config with SSL
+- Deployment scripts (`deploy.sh`, `stop.sh`)
+
+> **Note:** Docker images are pulled from GHCR during deployment. Make sure your server has access to `ghcr.io`.
 
 ### GHCR Images
 
