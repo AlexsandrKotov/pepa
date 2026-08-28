@@ -20,6 +20,22 @@ spec:
       serviceAccountName: {{ include "pepa.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-plugins
+          image: "{{ .Values.plugins.image.repository }}:{{ .Values.plugins.image.tag }}"
+          imagePullPolicy: {{ .Values.plugins.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              cp -r /plugins/bin/* /shared-plugins/bin/ 2>/dev/null || true
+              cp -r /plugins/builtin/* /shared-plugins/builtin/ 2>/dev/null || true
+              chmod -R 755 /shared-plugins/
+          volumeMounts:
+            - name: plugins-dir
+              mountPath: /shared-plugins
+          resources:
+            {{- toYaml .Values.plugins.initResources | nindent 12 }}
       containers:
         - name: api
           image: "{{ .Values.apiServer.image.repository }}:{{ .Values.apiServer.image.tag }}"
@@ -40,6 +56,12 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.apiServer.resources | nindent 12 }}
+          volumeMounts:
+            - name: plugins-dir
+              mountPath: /plugins
+              readOnly: true
+            - name: custom-plugins
+              mountPath: /custom-plugins
           livenessProbe:
             httpGet:
               path: /healthz
@@ -52,6 +74,11 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: plugins-dir
+          emptyDir: {}
+        - name: custom-plugins
+          emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -75,6 +102,22 @@ spec:
       serviceAccountName: {{ include "pepa.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-plugins
+          image: "{{ .Values.plugins.image.repository }}:{{ .Values.plugins.image.tag }}"
+          imagePullPolicy: {{ .Values.plugins.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              cp -r /plugins/bin/* /shared-plugins/bin/ 2>/dev/null || true
+              cp -r /plugins/builtin/* /shared-plugins/builtin/ 2>/dev/null || true
+              chmod -R 755 /shared-plugins/
+          volumeMounts:
+            - name: plugins-dir
+              mountPath: /shared-plugins
+          resources:
+            {{- toYaml .Values.plugins.initResources | nindent 12 }}
       containers:
         - name: worker
           image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
@@ -92,6 +135,17 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts:
+            - name: plugins-dir
+              mountPath: /plugins
+              readOnly: true
+            - name: custom-plugins
+              mountPath: /custom-plugins
+      volumes:
+        - name: plugins-dir
+          emptyDir: {}
+        - name: custom-plugins
+          emptyDir: {}
 ---
 apiVersion: apps/v1
 kind: Deployment
