@@ -236,13 +236,16 @@ jobs:
 
       - name: Stage per-arch directories
         run: |
+          echo "=== Debug: staging structure ==="
+          find staging/ -type f | head -30
+          echo "================================"
           for arch in amd64 arm64; do
             mkdir -p "plugins/bin-${arch}/builtin" "plugins/bin-${arch}/community"
-            if [ -d "staging/${arch}/bin/builtin" ]; then
-              cp -r "staging/${arch}/bin/builtin/"* "plugins/bin-${arch}/builtin/" 2>/dev/null || true
+            if [ -d "staging/${arch}/builtin" ]; then
+              cp -r "staging/${arch}/builtin/"* "plugins/bin-${arch}/builtin/" 2>/dev/null || true
             fi
-            if [ -d "staging/${arch}/bin/community" ]; then
-              cp -r "staging/${arch}/bin/community/"* "plugins/bin-${arch}/community/" 2>/dev/null || true
+            if [ -d "staging/${arch}/community" ]; then
+              cp -r "staging/${arch}/community/"* "plugins/bin-${arch}/community/" 2>/dev/null || true
             fi
           done
           # Copy manifests (shared across architectures)
@@ -306,15 +309,18 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           VERSION="${RELEASE_TAG#v}"
+          echo "=== Debug: staging structure ==="
+          find staging/ -type f | head -30
+          echo "================================"
           for arch in amd64 arm64; do
             PKG="pepa-plugins-${VERSION}-linux-${arch}"
             mkdir -p "${PKG}/bin/builtin" "${PKG}/bin/community" "${PKG}/builtin"
             # Copy binaries for this arch
-            if [ -d "staging/${arch}/bin/builtin" ]; then
-              cp -r "staging/${arch}/bin/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
+            if [ -d "staging/${arch}/builtin" ]; then
+              cp -r "staging/${arch}/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
             fi
-            if [ -d "staging/${arch}/bin/community" ]; then
-              cp -r "staging/${arch}/bin/community/"* "${PKG}/bin/community/" 2>/dev/null || true
+            if [ -d "staging/${arch}/community" ]; then
+              cp -r "staging/${arch}/community/"* "${PKG}/bin/community/" 2>/dev/null || true
             fi
             # Copy manifests (shared, from amd64 staging)
             if [ -d "staging/amd64/builtin" ]; then
@@ -322,6 +328,7 @@ jobs:
             fi
             tar czf "${PKG}.tar.gz" "${PKG}"
             echo "Built ${PKG}.tar.gz"
+            tar tzf "${PKG}.tar.gz" | head -20
           done
           ls -lh pepa-plugins-*.tar.gz
 
