@@ -285,64 +285,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # -- 4. Build CLI Binaries --
-  cli:
-    name: CLI Binaries
-    runs-on: ubuntu-latest
-    needs: [test]
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26'
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Build CLI
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          BUILD_TIME="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          go build -ldflags "-s -w -X main.version=${RELEASE_TAG} -X main.buildTime=${BUILD_TIME}" \
-            -o "bin/pepa-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}" \
-            ./cmd/cli
-
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: cli-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: bin/pepa-*
-          retention-days: 7
-
-  # -- 5. Generate Checksums --
+  # -- 4. Generate Checksums --
   checksums:
     name: Generate Checksums
     runs-on: ubuntu-latest
-    needs: [cli, plugins, plugins-image, production-archive]
+    needs: [plugins, plugins-image, production-archive]
     steps:
-      - name: Download CLI artifacts
-        uses: actions/download-artifact@v5
-        with:
-          pattern: cli-*
-          path: artifacts/cli/
-          merge-multiple: false
-
       - name: Download production archive
         uses: actions/download-artifact@v5
         with:
@@ -351,7 +299,7 @@ jobs:
 
       - name: Generate SHA256 checksums
         run: |
-          { find artifacts/cli/ -type f -name 'pepa-*'; find artifacts/production/ -type f -name '*.tar.gz'; } | sort | while read -r f; do
+          find artifacts/production/ -type f -name '*.tar.gz' | sort | while read -r f; do
             sha256sum "$f" >> sha256sums.txt
           done
           cat sha256sums.txt
@@ -712,18 +660,11 @@ jobs:
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [docker, plugins, plugins-image, cli, checksums, production-archive]
+    needs: [docker, plugins, plugins-image, checksums, production-archive]
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
-      - name: Download CLI binaries
-        uses: actions/download-artifact@v5
-        with:
-          pattern: cli-*
-          path: release-assets/cli/
-          merge-multiple: false
 
       - name: Download checksums
         uses: actions/download-artifact@v5
@@ -740,7 +681,6 @@ jobs:
       - name: Flatten release assets
         run: |
           mkdir -p release-upload/
-          find release-assets/cli/ -type f -name 'pepa-*' -exec cp {} release-upload/ \; 2>/dev/null || true
           find release-assets/production/ -type f -name '*.tar.gz' -exec cp {} release-upload/ \; 2>/dev/null || true
           cp release-assets/checksums/sha256sums.txt release-upload/ 2>/dev/null || true
           ls -la release-upload/
@@ -786,13 +726,6 @@ jobs:
             echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-production-${RELEASE_TAG#v}.tar.gz"
             echo "tar xzf pepa-production-${RELEASE_TAG#v}.tar.gz"
             echo "cd pepa-production-${RELEASE_TAG#v} && ./deploy.sh"
-            echo '```'
-            echo ""
-            echo "## CLI Install"
-            echo ""
-            echo '```bash'
-            echo "curl -fsSL https://github.com/${REPO}/releases | sh"
-            echo "# Or download a binary below"
             echo '```'
             echo ""
             echo "## Checksums"
