@@ -210,10 +210,8 @@ jobs:
         with:
           name: plugins-linux-${{ matrix.arch }}
           path: |
-            plugins/bin/builtin/
-            plugins/bin/community/
-            plugins/builtin/*/plugin.yaml
-            plugins/builtin/*/plugin.yaml.checksum
+            plugins/bin/
+            plugins/builtin/
           retention-days: 7
 
   # -- 3b. Push Plugins Image to GHCR --
@@ -240,15 +238,15 @@ jobs:
         run: |
           for arch in amd64 arm64; do
             mkdir -p "plugins/bin-${arch}/builtin" "plugins/bin-${arch}/community"
-            if [ -d "staging/${arch}/plugins/bin/builtin" ]; then
-              cp -r "staging/${arch}/plugins/bin/builtin/"* "plugins/bin-${arch}/builtin/" 2>/dev/null || true
+            if [ -d "staging/${arch}/bin/builtin" ]; then
+              cp -r "staging/${arch}/bin/builtin/"* "plugins/bin-${arch}/builtin/" 2>/dev/null || true
             fi
-            if [ -d "staging/${arch}/plugins/bin/community" ]; then
-              cp -r "staging/${arch}/plugins/bin/community/"* "plugins/bin-${arch}/community/" 2>/dev/null || true
+            if [ -d "staging/${arch}/bin/community" ]; then
+              cp -r "staging/${arch}/bin/community/"* "plugins/bin-${arch}/community/" 2>/dev/null || true
             fi
           done
           # Copy manifests (shared across architectures)
-          cp -r staging/amd64/plugins/builtin/* plugins/builtin/ 2>/dev/null || true
+          cp -r staging/amd64/builtin/* plugins/builtin/ 2>/dev/null || true
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -312,15 +310,15 @@ jobs:
             PKG="pepa-plugins-${VERSION}-linux-${arch}"
             mkdir -p "${PKG}/bin/builtin" "${PKG}/bin/community" "${PKG}/builtin"
             # Copy binaries for this arch
-            if [ -d "staging/${arch}/plugins/bin/builtin" ]; then
-              cp -r "staging/${arch}/plugins/bin/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
+            if [ -d "staging/${arch}/bin/builtin" ]; then
+              cp -r "staging/${arch}/bin/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
             fi
-            if [ -d "staging/${arch}/plugins/bin/community" ]; then
-              cp -r "staging/${arch}/plugins/bin/community/"* "${PKG}/bin/community/" 2>/dev/null || true
+            if [ -d "staging/${arch}/bin/community" ]; then
+              cp -r "staging/${arch}/bin/community/"* "${PKG}/bin/community/" 2>/dev/null || true
             fi
             # Copy manifests (shared, from amd64 staging)
-            if [ -d "staging/amd64/plugins/builtin" ]; then
-              cp -r staging/amd64/plugins/builtin/* "${PKG}/builtin/" 2>/dev/null || true
+            if [ -d "staging/amd64/builtin" ]; then
+              cp -r staging/amd64/builtin/* "${PKG}/builtin/" 2>/dev/null || true
             fi
             tar czf "${PKG}.tar.gz" "${PKG}"
             echo "Built ${PKG}.tar.gz"
