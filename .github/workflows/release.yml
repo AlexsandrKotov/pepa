@@ -403,16 +403,9 @@ jobs:
   production-archive:
     name: Production Archive
     runs-on: ubuntu-latest
-    needs: [docker, plugins-packaging]
+    needs: [docker]
     steps:
       - uses: actions/checkout@v5
-
-      - name: Download plugin archives
-        uses: actions/download-artifact@v5
-        with:
-          pattern: plugins-archive-*
-          path: staging/plugin-archives/
-          merge-multiple: true
 
       - name: Build production package
         env:
@@ -421,21 +414,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           PKG="pepa-production-${VERSION}"
-          mkdir -p "${PKG}/nginx/ssl" "${PKG}/plugins/bin-amd64/builtin" "${PKG}/plugins/bin-amd64/community" "${PKG}/plugins/bin-arm64/builtin" "${PKG}/plugins/bin-arm64/community" "${PKG}/plugins/builtin"
-
-          # Extract plugin archives for both architectures
-          for arch in amd64 arm64; do
-            PLUGIN_TAR="staging/plugin-archives/pepa-plugins-*-linux-${arch}.tar.gz"
-            if ls ${PLUGIN_TAR} 1>/dev/null 2>&1; then
-              tmpdir="$(mktemp -d)"
-              tar xzf ${PLUGIN_TAR} -C "${tmpdir}" --strip-components=1
-              cp -r "${tmpdir}/bin/builtin/"* "${PKG}/plugins/bin-${arch}/builtin/" 2>/dev/null || true
-              cp -r "${tmpdir}/bin/community/"* "${PKG}/plugins/bin-${arch}/community/" 2>/dev/null || true
-              cp -r "${tmpdir}/builtin/"* "${PKG}/plugins/builtin/" 2>/dev/null || true
-              rm -rf "${tmpdir}"
-              echo "Plugins for ${arch} extracted"
-            fi
-          done
+          mkdir -p "${PKG}/nginx/ssl" "${PKG}/plugins/bin"
 
           # Copy supporting files
           cp deployments/compose/init-db.sql "${PKG}/init-db.sql"
@@ -662,20 +641,6 @@ jobs:
           if ! docker info &> /dev/null; then err "Docker daemon is not running."; exit 1; fi
           if docker compose version &> /dev/null; then COMPOSE_CMD="docker compose"; elif command -v docker-compose &> /dev/null; then COMPOSE_CMD="docker-compose"; else err "Docker Compose not available."; exit 1; fi
           ok "Docker & Compose detected ($COMPOSE_CMD)"
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64)  PLUGIN_ARCH=amd64 ;;
-            aarch64) PLUGIN_ARCH=arm64 ;;
-            arm64)   PLUGIN_ARCH=arm64 ;;
-            *)       err "Unsupported arch: $ARCH"; exit 1 ;;
-          esac
-          if [ -d "plugins/bin-${PLUGIN_ARCH}" ]; then
-            mkdir -p plugins/bin
-            cp -r "plugins/bin-${PLUGIN_ARCH}/"* plugins/bin/
-            ok "Plugins for ${PLUGIN_ARCH} installed"
-          else
-            warn "No plugins found for ${PLUGIN_ARCH}"
-          fi
           if [ ! -f .env ]; then warn ".env not found."; exit 1; fi
           ok ".env found"
           log "Stopping any existing PEPA stack..."
