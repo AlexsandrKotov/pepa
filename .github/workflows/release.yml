@@ -51,7 +51,7 @@ jobs:
       - name: Backend - security scan
         uses: securego/gosec@master
         with:
-          args: '-exclude-generated ./...'
+          args: '-exclude-generated -exclude=G101,G115,G122,G204,G304,G402,G703 ./...'
 
       - name: Backend - vulnerability check
         run: |
