@@ -30,7 +30,7 @@
 
 ### Prerequisites
 
-- Docker & Docker Compose (recommended), or Go 1.26+ / Node.js 22+ / PostgreSQL 16+
+- Docker & Docker Compose (recommended), or Go 1.26+ / Node.js 22+ / PostgreSQL 18+
 
 ### Installation (Docker)
 

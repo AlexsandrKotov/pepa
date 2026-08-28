@@ -30,7 +30,7 @@
 
 ### Требования
 
-- Docker и Docker Compose (рекомендуется), или Go 1.22+ / Node.js 18+ / PostgreSQL 16+
+- Docker и Docker Compose (рекомендуется), или Go 1.22+ / Node.js 18+ / PostgreSQL 18+
 
 ### Установка (Docker)
 

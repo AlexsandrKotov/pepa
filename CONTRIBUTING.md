@@ -13,7 +13,7 @@ Please be respectful and constructive in all interactions. We aim to maintain a 
 - Go 1.26 or later
 - Node.js 22 or later
 - Docker and Docker Compose
-- PostgreSQL 16 (or use Docker)
+- PostgreSQL 18 (or use Docker)
 
 ### Getting Started
 

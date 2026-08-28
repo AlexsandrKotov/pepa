@@ -62,7 +62,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 #### Backend
 - **Language:** Go 1.26
 - **Framework:** Gin HTTP framework
-- **Database:** PostgreSQL 16 with PGVector
+- **Database:** PostgreSQL 18 with PGVector
 - **Cache:** Redis
 - **Architecture:** Repository pattern with service layer
 - **API:** 30+ RESTful endpoints with OpenAPI specification

@@ -926,8 +926,8 @@ const sections: DocSection[] = [
       ]},
       { type: 'heading', content: { en: 'Docker Compose Production', ru: 'Docker Compose для продакшена' }},
       { type: 'code', content: {
-        en: '# Use the production compose file\ndocker compose -f deployments/compose/docker-compose.prod.yml up -d\n\n# This includes:\n# - Nginx with TLS termination\n# - Frontend (Next.js standalone)\n# - API server\n# - Worker\n# - PostgreSQL 16 + PGvector\n# - Redis\n# - MinIO (S3)\n# - Prometheus + Grafana (monitoring)',
-        ru: '# Используйте продакшен compose файл\ndocker compose -f deployments/compose/docker-compose.prod.yml up -d\n\n# Это включает:\n# - Nginx с TLS терминацией\n# - Frontend (Next.js standalone)\n# - API сервер\n# - Worker\n# - PostgreSQL 16 + PGvector\n# - Redis\n# - MinIO (S3)\n# - Prometheus + Grafana (мониторинг)',
+        en: '# Use the production compose file\ndocker compose -f deployments/compose/docker-compose.prod.yml up -d\n\n# This includes:\n# - Nginx with TLS termination\n# - Frontend (Next.js standalone)\n# - API server\n# - Worker\n# - PostgreSQL 18 + PGvector\n# - Redis\n# - MinIO (S3)\n# - Prometheus + Grafana (monitoring)',
+        ru: '# Используйте продакшен compose файл\ndocker compose -f deployments/compose/docker-compose.prod.yml up -d\n\n# Это включает:\n# - Nginx с TLS терминацией\n# - Frontend (Next.js standalone)\n# - API сервер\n# - Worker\n# - PostgreSQL 18 + PGvector\n# - Redis\n# - MinIO (S3)\n# - Prometheus + Grafana (мониторинг)',
       }},
       { type: 'heading', content: { en: 'Helm Chart (Kubernetes)', ru: 'Helm чарт (Kubernetes)' }},
       { type: 'code', content: {

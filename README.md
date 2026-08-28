@@ -4,7 +4,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8?style=flat&logo=go)](https://go.dev)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat&logo=next.js)](https://nextjs.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat&logo=postgresql)](https://www.postgresql.org)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-336791?style=flat&logo=postgresql)](https://www.postgresql.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/badge/Release-v0.1.0-green)](https://github.com/AlexsandrKotov/pepa/releases)
 
@@ -120,7 +120,7 @@ PEPA includes a three-tier plugin system:
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend** | Go 1.27, Gin, PostgreSQL 16 |
+| **Backend** | Go 1.27, Gin, PostgreSQL 18 |
 | **Frontend** | Next.js 14, React 18, TypeScript |
 | **Infrastructure** | Docker, Kubernetes, Helm |
 | **Security** | Vault, RBAC, JWT, Multi-tenant |

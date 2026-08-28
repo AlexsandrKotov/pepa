@@ -762,11 +762,11 @@ function NewServiceForm() {
                           )}
                         </div>
                       ) : (
-                        <input type="text" value={helmUrl} onChange={e => setHelmUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://charts.bitnami.com/bitnami/postgresql or bitnami/postgresql:16" />
+                        <input type="text" value={helmUrl} onChange={e => setHelmUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://charts.bitnami.com/bitnami/postgresql or bitnami/postgresql:18" />
                       )}
                     </div>
                   ) : (
-                    <input type="text" value={helmUrl} onChange={e => setHelmUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://charts.bitnami.com/bitnami/postgresql or bitnami/postgresql:16" />
+                    <input type="text" value={helmUrl} onChange={e => setHelmUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://charts.bitnami.com/bitnami/postgresql or bitnami/postgresql:18" />
                   )}
                   {selectedTemplate?.helm_chart ? (
                     <p className="text-[11px] text-green-600 mt-1 flex items-center gap-1">
