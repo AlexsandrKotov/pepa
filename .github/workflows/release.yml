@@ -334,7 +334,7 @@ jobs:
   checksums:
     name: Generate Checksums
     runs-on: ubuntu-latest
-    needs: [cli, plugins, plugins-image]
+    needs: [cli, plugins, plugins-image, production-archive]
     steps:
       - name: Download CLI artifacts
         uses: actions/download-artifact@v5
@@ -343,9 +343,15 @@ jobs:
           path: artifacts/cli/
           merge-multiple: false
 
+      - name: Download production archive
+        uses: actions/download-artifact@v5
+        with:
+          name: production-archive
+          path: artifacts/production/
+
       - name: Generate SHA256 checksums
         run: |
-          find artifacts/ -type f -name 'pepa-*' | sort | while read -r f; do
+          { find artifacts/cli/ -type f -name 'pepa-*'; find artifacts/production/ -type f -name '*.tar.gz'; } | sort | while read -r f; do
             sha256sum "$f" >> sha256sums.txt
           done
           cat sha256sums.txt
@@ -357,11 +363,356 @@ jobs:
           path: sha256sums.txt
           retention-days: 30
 
+  # -- 5b. Production Archive --
+  production-archive:
+    name: Production Archive
+    runs-on: ubuntu-latest
+    needs: [docker, plugins]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download amd64 plugins
+        uses: actions/download-artifact@v5
+        with:
+          name: plugins-linux-amd64
+          path: staging/plugins
+
+      - name: Build production package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          PKG="pepa-production-${VERSION}"
+          mkdir -p "${PKG}/images" "${PKG}/nginx/ssl" "${PKG}/plugins/bin/builtin" "${PKG}/plugins/bin/community" "${PKG}/plugins/builtin"
+
+          GHCR="ghcr.io/${REPO,,}"
+
+          # Pull and export Docker images
+          for svc in api-server worker frontend; do
+            echo "Pulling ${GHCR}/pepa-${svc}:${RELEASE_TAG}..."
+            docker pull "${GHCR}/pepa-${svc}:${RELEASE_TAG}"
+            docker tag "${GHCR}/pepa-${svc}:${RELEASE_TAG}" "${GHCR}/pepa/pepa-${svc}:${VERSION}"
+            docker save "${GHCR}/pepa/pepa-${svc}:${VERSION}" | gzip > "${PKG}/images/${svc}.tar.gz"
+          done
+          echo "Images exported"
+
+          # Copy plugins
+          if [ -d staging/plugins/plugins/bin/builtin ]; then
+            cp -r staging/plugins/plugins/bin/builtin/* "${PKG}/plugins/bin/builtin/" 2>/dev/null || true
+          fi
+          if [ -d staging/plugins/plugins/bin/community ]; then
+            cp -r staging/plugins/plugins/bin/community/* "${PKG}/plugins/bin/community/" 2>/dev/null || true
+          fi
+          if [ -d staging/plugins/plugins/builtin ]; then
+            cp -r staging/plugins/plugins/builtin/* "${PKG}/plugins/builtin/" 2>/dev/null || true
+          fi
+
+          # Copy supporting files
+          cp deployments/compose/init-db.sql "${PKG}/init-db.sql"
+
+          # Generate secrets
+          JWT_SECRET="$(openssl rand -hex 32)"
+          ENCRYPTION_KEY="$(openssl rand -hex 32)"
+          POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          REDIS_PASSWORD="$(openssl rand -hex 16)"
+
+          # Generate .env
+          cat << ENVEOF | sed 's/^          //' > "${PKG}/.env"
+          # PEPA Production Environment — ${RELEASE_TAG}
+          SERVER_ENV=production
+          POSTGRES_DB=pepa
+          POSTGRES_USER=pepa
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_PORT=5432
+          REDIS_PASSWORD=${REDIS_PASSWORD}
+          REDIS_PORT=6379
+          AUTH_JWT_SECRET=${JWT_SECRET}
+          ENCRYPTION_KEY=${ENCRYPTION_KEY}
+          API_PORT=8088
+          FRONTEND_PORT=3000
+          CORS_ORIGINS=https://localhost,https://127.0.0.1
+          VAULT_ALLOW_PRIVATE_IPS=false
+          MOUNT_DOCK_SOCKET=/dev/null
+          ENVEOF
+
+          # Generate self-signed SSL cert
+          openssl req -x509 -nodes -days 365 \
+            -newkey rsa:2048 \
+            -keyout "${PKG}/nginx/ssl/key.pem" \
+            -out "${PKG}/nginx/ssl/cert.pem" \
+            -subj "/C=US/ST=State/L=City/O=PEPA/CN=localhost" 2>/dev/null
+
+          echo "Package built"
+
+      - name: Generate production docker-compose and nginx
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          PKG="pepa-production-${VERSION}"
+          GHCR="ghcr.io/${REPO,,}"
+
+          # Generate a self-contained docker-compose.yml with hardcoded image refs
+          cat > "${PKG}/docker-compose.yml" << COMPEOF
+          name: pepa
+          networks:
+            pepa-net:
+              driver: bridge
+          volumes:
+            postgres-data:
+              driver: local
+            redis-data:
+              driver: local
+            custom-plugins:
+              driver: local
+            nginx-logs:
+              driver: local
+          x-common-env: &common-env
+            POSTGRES_HOST: postgres
+            POSTGRES_PORT: "5432"
+            POSTGRES_DB: pepa
+            POSTGRES_USER: pepa
+            POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+            POSTGRES_SSLMODE: disable
+            REDIS_HOST: redis
+            REDIS_PORT: "6379"
+            REDIS_PASSWORD: \${REDIS_PASSWORD}
+            ENCRYPTION_KEY: \${ENCRYPTION_KEY}
+            AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
+            PLUGIN_DIR: /plugins
+            VAULT_ALLOW_PRIVATE_IPS: false
+          services:
+            postgres:
+              image: pgvector/pgvector:pg18
+              container_name: pepa-postgres
+              restart: unless-stopped
+              environment:
+                POSTGRES_DB: pepa
+                POSTGRES_USER: pepa
+                POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+                PGDATA: /var/lib/postgresql/data/pgdata
+              ports:
+                - "127.0.0.1:\${POSTGRES_PORT:-5432}:5432"
+              volumes:
+                - postgres-data:/var/lib/postgresql/data
+                - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+              networks:
+                - pepa-net
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U pepa -d pepa"]
+                interval: 5s
+                timeout: 3s
+                retries: 10
+                start_period: 10s
+            redis:
+              image: redis:7.4-alpine
+              container_name: pepa-redis
+              restart: unless-stopped
+              command: >
+                redis-server
+                --requirepass \${REDIS_PASSWORD}
+                --maxmemory 200mb
+                --maxmemory-policy allkeys-lru
+                --appendonly yes
+              ports:
+                - "127.0.0.1:\${REDIS_PORT:-6379}:6379"
+              volumes:
+                - redis-data:/data
+              networks:
+                - pepa-net
+              healthcheck:
+                test: ["CMD", "redis-cli", "-a", "\${REDIS_PASSWORD}", "ping"]
+                interval: 5s
+                timeout: 3s
+                retries: 10
+            api-server:
+              image: ${GHCR}/pepa-api-server:${VERSION}
+              container_name: pepa-api
+              restart: unless-stopped
+              environment:
+                <<: *common-env
+                SERVER_PORT: "8080"
+                SERVER_HOST: "0.0.0.0"
+                SERVER_ENV: production
+                LOG_LEVEL: info
+                CUSTOM_PLUGIN_DIR: /custom-plugins
+                CORS_ORIGINS: \${CORS_ORIGINS:-https://localhost}
+              ports:
+                - "\${API_PORT:-8088}:8080"
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+                interval: 15s
+                timeout: 5s
+                retries: 5
+                start_period: 30s
+              volumes:
+                - ./plugins:/plugins:ro
+                - custom-plugins:/custom-plugins
+              depends_on:
+                postgres:
+                  condition: service_healthy
+                redis:
+                  condition: service_healthy
+              networks:
+                - pepa-net
+            worker:
+              image: ${GHCR}/pepa-worker:${VERSION}
+              container_name: pepa-worker
+              restart: unless-stopped
+              environment:
+                <<: *common-env
+                CUSTOM_PLUGIN_DIR: /custom-plugins
+                SERVER_ENV: production
+                LOG_LEVEL: info
+              volumes:
+                - ./plugins:/plugins:ro
+                - custom-plugins:/custom-plugins
+              depends_on:
+                postgres:
+                  condition: service_healthy
+                redis:
+                  condition: service_healthy
+              networks:
+                - pepa-net
+            frontend:
+              image: ${GHCR}/pepa-frontend:${VERSION}
+              container_name: pepa-frontend
+              restart: unless-stopped
+              ports:
+                - "\${FRONTEND_PORT:-3000}:3000"
+              depends_on:
+                - api-server
+              networks:
+                - pepa-net
+            nginx:
+              image: nginx:1.31-alpine
+              container_name: pepa-nginx
+              restart: unless-stopped
+              ports:
+                - "80:80"
+                - "443:443"
+              volumes:
+                - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+                - ./nginx/ssl:/etc/nginx/ssl:ro
+                - nginx-logs:/var/log/nginx
+              depends_on:
+                api-server:
+                  condition: service_started
+                frontend:
+                  condition: service_started
+              networks:
+                - pepa-net
+          COMPEOF
+          sed -i 's/^          //' "${PKG}/docker-compose.yml"
+
+          # Copy nginx config from the repo
+          cp deployments/compose/nginx.conf "${PKG}/nginx/nginx.conf"
+
+      - name: Create deploy.sh and stop.sh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          PKG="pepa-production-${VERSION}"
+
+          cat > "${PKG}/deploy.sh" << 'DEPLOY_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$SCRIPT_DIR"
+          log()  { echo -e "\033[0;34m[PEPA]\033[0m $*"; }
+          ok()   { echo -e "\033[0;32m[OK]\033[0m $*"; }
+          warn() { echo -e "\033[1;33m[WARN]\033[0m $*"; }
+          err()  { echo -e "\033[0;31m[ERROR]\033[0m $*"; }
+          echo ""
+          echo -e "\033[0;34m  PEPA — Production Deployment\033[0m"
+          echo ""
+          if ! command -v docker &> /dev/null; then err "Docker is not installed."; exit 1; fi
+          if ! docker info &> /dev/null; then err "Docker daemon is not running."; exit 1; fi
+          if docker compose version &> /dev/null; then COMPOSE_CMD="docker compose"; elif command -v docker-compose &> /dev/null; then COMPOSE_CMD="docker-compose"; else err "Docker Compose not available."; exit 1; fi
+          ok "Docker & Compose detected ($COMPOSE_CMD)"
+          log "Loading Docker images..."
+          for img in images/*.tar.gz; do
+            [ -f "$img" ] || continue
+            log "  Loading $(basename "$img")..."
+            gunzip -c "$img" | docker load
+          done
+          ok "All images loaded"
+          if [ ! -f .env ]; then warn ".env not found."; exit 1; fi
+          ok ".env found"
+          log "Stopping any existing PEPA stack..."
+          $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+          FRESH=false
+          for arg in "$@"; do case $arg in --fresh) FRESH=true ;; esac; done
+          if $FRESH; then
+            warn "--fresh flag set: removing all data volumes!"
+            $COMPOSE_CMD down -v --remove-orphans 2>/dev/null || true
+          fi
+          log "Starting PEPA services..."
+          $COMPOSE_CMD up -d
+          log "Waiting for services..."
+          MAX_RETRIES=60; RETRY=0
+          while [ $RETRY -lt $MAX_RETRIES ]; do
+            if curl -sf http://localhost:${API_PORT:-8088}/healthz > /dev/null 2>&1; then break; fi
+            RETRY=$((RETRY + 1)); sleep 2
+          done
+          if [ $RETRY -eq $MAX_RETRIES ]; then
+            warn "API not ready. Check: $COMPOSE_CMD logs api-server"
+          else
+            ok "PEPA is up and running!"
+          fi
+          echo ""
+          echo "  Frontend:   https://localhost"
+          echo "  API:        http://localhost:${API_PORT:-8088}"
+          echo ""
+          DEPLOY_EOF
+          sed -i 's/^          //' "${PKG}/deploy.sh"
+          chmod +x "${PKG}/deploy.sh"
+
+          cat > "${PKG}/stop.sh" << 'STOP_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$SCRIPT_DIR"
+          if docker compose version &> /dev/null; then COMPOSE_CMD="docker compose"; else COMPOSE_CMD="docker-compose"; fi
+          echo "Stopping PEPA..."
+          $COMPOSE_CMD down
+          echo "PEPA stopped."
+          STOP_EOF
+          sed -i 's/^          //' "${PKG}/stop.sh"
+          chmod +x "${PKG}/stop.sh"
+
+      - name: Create tarball
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          PKG="pepa-production-${VERSION}"
+          tar czf "${PKG}.tar.gz" "${PKG}"
+          ls -lh "${PKG}.tar.gz"
+          echo "ARCHIVE=${PKG}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload production archive
+        uses: actions/upload-artifact@v5
+        with:
+          name: production-archive
+          path: pepa-production-*.tar.gz
+          retention-days: 7
+
   # -- 6. Create GitHub Release --
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [docker, plugins, plugins-image, cli, checksums]
+    needs: [docker, plugins, plugins-image, cli, checksums, production-archive]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -380,10 +731,17 @@ jobs:
           name: checksums
           path: release-assets/checksums/
 
+      - name: Download production archive
+        uses: actions/download-artifact@v5
+        with:
+          name: production-archive
+          path: release-assets/production/
+
       - name: Flatten release assets
         run: |
           mkdir -p release-upload/
           find release-assets/cli/ -type f -name 'pepa-*' -exec cp {} release-upload/ \; 2>/dev/null || true
+          find release-assets/production/ -type f -name '*.tar.gz' -exec cp {} release-upload/ \; 2>/dev/null || true
           cp release-assets/checksums/sha256sums.txt release-upload/ 2>/dev/null || true
           ls -la release-upload/
 
@@ -419,6 +777,15 @@ jobs:
             echo "docker pull ${GHCR}/pepa-worker:${RELEASE_TAG}"
             echo "docker pull ${GHCR}/pepa-frontend:${RELEASE_TAG}"
             echo "docker pull ${GHCR}/pepa-plugins:${RELEASE_TAG}"
+            echo '```'
+            echo ""
+            echo "## Production Archive"
+            echo ""
+            echo '```bash'
+            echo "curl -fsSL -o pepa-production-${RELEASE_TAG#v}.tar.gz \\"
+            echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-production-${RELEASE_TAG#v}.tar.gz"
+            echo "tar xzf pepa-production-${RELEASE_TAG#v}.tar.gz"
+            echo "cd pepa-production-${RELEASE_TAG#v} && ./deploy.sh"
             echo '```'
             echo ""
             echo "## CLI Install"
