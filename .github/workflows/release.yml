@@ -210,8 +210,7 @@ jobs:
         with:
           name: plugins-linux-${{ matrix.arch }}
           path: |
-            plugins/bin/builtin/
-            plugins/bin/community/
+            plugins/bin/
           retention-days: 7
 
       - name: Upload plugin manifests
