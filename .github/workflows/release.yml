@@ -254,13 +254,19 @@ jobs:
           find staging/ -type f | head -50
           echo "================================"
           for arch in amd64 arm64; do
-            mkdir -p "plugins/bin-${arch}/builtin" "plugins/bin-${arch}/community"
-            if [ -d "staging/${arch}/builtin" ]; then
-              cp -r "staging/${arch}/builtin/"* "plugins/bin-${arch}/builtin/" 2>/dev/null || true
-            fi
-            if [ -d "staging/${arch}/community" ]; then
-              cp -r "staging/${arch}/community/"* "plugins/bin-${arch}/community/" 2>/dev/null || true
-            fi
+            mkdir -p "plugins/bin-${arch}"
+            # Extract binaries: staging has builtin/<name>/<name>, we want bin-<arch>/<name>
+            for dir in builtin community; do
+              if [ -d "staging/${arch}/${dir}" ]; then
+                for plugin_dir in "staging/${arch}/${dir}"/*/; do
+                  [ -d "$plugin_dir" ] || continue
+                  name=$(basename "$plugin_dir")
+                  if [ -f "${plugin_dir}${name}" ]; then
+                    cp "${plugin_dir}${name}" "plugins/bin-${arch}/${name}"
+                  fi
+                done
+              fi
+            done
           done
           # Copy manifests (shared across architectures, from separate artifact)
           cp -r staging/manifests/* plugins/builtin/ 2>/dev/null || true
@@ -335,14 +341,19 @@ jobs:
           for arch in amd64 arm64; do
             PKG="pepa-plugins-${VERSION}-linux-${arch}"
             mkdir -p "${PKG}/bin" "${PKG}/builtin"
-            # Copy all plugin binaries directly to bin/ (no subdirectories)
-            if [ -d "staging/${arch}/builtin" ]; then
-              cp -r "staging/${arch}/builtin/"* "${PKG}/bin/" 2>/dev/null || true
-            fi
-            if [ -d "staging/${arch}/community" ]; then
-              cp -r "staging/${arch}/community/"* "${PKG}/bin/" 2>/dev/null || true
-            fi
-            # Copy manifests (shared, from separate manifests artifact)
+            # Extract binaries: staging has builtin/<name>/<name>, we want bin/<name>
+            for dir in builtin community; do
+              if [ -d "staging/${arch}/${dir}" ]; then
+                for plugin_dir in "staging/${arch}/${dir}"/*/; do
+                  [ -d "$plugin_dir" ] || continue
+                  name=$(basename "$plugin_dir")
+                  if [ -f "${plugin_dir}${name}" ]; then
+                    cp "${plugin_dir}${name}" "${PKG}/bin/${name}"
+                  fi
+                done
+              fi
+            done
+            # Copy manifests: staging has <name>/plugin.yaml, we want builtin/<name>/plugin.yaml
             if [ -d "staging/manifests" ]; then
               cp -r staging/manifests/* "${PKG}/builtin/" 2>/dev/null || true
             fi
