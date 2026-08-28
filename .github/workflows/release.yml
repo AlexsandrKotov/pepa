@@ -141,13 +141,14 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
 
       - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ github.ref_name }}
-          format: 'sarif'
-          output: 'trivy-${{ matrix.target }}.sarif'
-          severity: 'CRITICAL,HIGH'
-        continue-on-error: true
+        env:
+          TRIVY_IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          # Strip 'v' prefix from tag (images are tagged as '0.1.0' not 'v0.1.0')
+          TRIVY_IMAGE_TAG="${TRIVY_IMAGE_TAG#v}"
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${TRIVY_IMAGE_TAG}"
+          echo "Scanning ${IMAGE_REF}"
+          trivy image --format sarif --output "trivy-${{ matrix.target }}.sarif" --severity CRITICAL,HIGH "${IMAGE_REF}" || true
 
       - name: Check Trivy output
         id: trivy-check
