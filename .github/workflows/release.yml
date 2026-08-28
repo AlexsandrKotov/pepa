@@ -407,13 +407,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download plugin archives
         uses: actions/download-artifact@v5
         with:
@@ -428,17 +421,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           PKG="pepa-production-${VERSION}"
-          mkdir -p "${PKG}/images" "${PKG}/nginx/ssl" "${PKG}/plugins/bin-amd64/builtin" "${PKG}/plugins/bin-amd64/community" "${PKG}/plugins/bin-arm64/builtin" "${PKG}/plugins/bin-arm64/community" "${PKG}/plugins/builtin"
-
-          GHCR="ghcr.io/${REPO,,}"
-
-          # Pull and export Docker images (image tags use VERSION without 'v' prefix)
-          for svc in api-server worker frontend; do
-            echo "Pulling ${GHCR}/pepa-${svc}:${VERSION}..."
-            docker pull "${GHCR}/pepa-${svc}:${VERSION}"
-            docker save "${GHCR}/pepa-${svc}:${VERSION}" | gzip > "${PKG}/images/${svc}.tar.gz"
-          done
-          echo "Images exported"
+          mkdir -p "${PKG}/nginx/ssl" "${PKG}/plugins/bin-amd64/builtin" "${PKG}/plugins/bin-amd64/community" "${PKG}/plugins/bin-arm64/builtin" "${PKG}/plugins/bin-arm64/community" "${PKG}/plugins/builtin"
 
           # Extract plugin archives for both architectures
           for arch in amd64 arm64; do
@@ -679,13 +662,6 @@ jobs:
           if ! docker info &> /dev/null; then err "Docker daemon is not running."; exit 1; fi
           if docker compose version &> /dev/null; then COMPOSE_CMD="docker compose"; elif command -v docker-compose &> /dev/null; then COMPOSE_CMD="docker-compose"; else err "Docker Compose not available."; exit 1; fi
           ok "Docker & Compose detected ($COMPOSE_CMD)"
-          log "Loading Docker images..."
-          for img in images/*.tar.gz; do
-            [ -f "$img" ] || continue
-            log "  Loading $(basename "$img")..."
-            gunzip -c "$img" | docker load
-          done
-          ok "All images loaded"
           ARCH=$(uname -m)
           case "$ARCH" in
             x86_64)  PLUGIN_ARCH=amd64 ;;
@@ -710,6 +686,9 @@ jobs:
             warn "--fresh flag set: removing all data volumes!"
             $COMPOSE_CMD down -v --remove-orphans 2>/dev/null || true
           fi
+          log "Pulling Docker images from GHCR..."
+          $COMPOSE_CMD pull
+          ok "Images pulled"
           log "Starting PEPA services..."
           $COMPOSE_CMD up -d
           log "Waiting for services..."
