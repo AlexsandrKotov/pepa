@@ -285,11 +285,67 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # -- 3c. Package Plugin Archives --
+  plugins-packaging:
+    name: Plugin Archives
+    runs-on: ubuntu-latest
+    needs: [plugins]
+    steps:
+      - name: Download amd64 plugins
+        uses: actions/download-artifact@v5
+        with:
+          name: plugins-linux-amd64
+          path: staging/amd64
+
+      - name: Download arm64 plugins
+        uses: actions/download-artifact@v5
+        with:
+          name: plugins-linux-arm64
+          path: staging/arm64
+
+      - name: Create per-arch tarballs
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          for arch in amd64 arm64; do
+            PKG="pepa-plugins-${VERSION}-linux-${arch}"
+            mkdir -p "${PKG}/bin/builtin" "${PKG}/bin/community" "${PKG}/builtin"
+            # Copy binaries for this arch
+            if [ -d "staging/${arch}/plugins/bin/builtin" ]; then
+              cp -r "staging/${arch}/plugins/bin/builtin/"* "${PKG}/bin/builtin/" 2>/dev/null || true
+            fi
+            if [ -d "staging/${arch}/plugins/bin/community" ]; then
+              cp -r "staging/${arch}/plugins/bin/community/"* "${PKG}/bin/community/" 2>/dev/null || true
+            fi
+            # Copy manifests (shared, from amd64 staging)
+            if [ -d "staging/amd64/plugins/builtin" ]; then
+              cp -r staging/amd64/plugins/builtin/* "${PKG}/builtin/" 2>/dev/null || true
+            fi
+            tar czf "${PKG}.tar.gz" "${PKG}"
+            echo "Built ${PKG}.tar.gz"
+          done
+          ls -lh pepa-plugins-*.tar.gz
+
+      - name: Upload amd64 archive
+        uses: actions/upload-artifact@v5
+        with:
+          name: plugins-archive-amd64
+          path: pepa-plugins-*-linux-amd64.tar.gz
+          retention-days: 7
+
+      - name: Upload arm64 archive
+        uses: actions/upload-artifact@v5
+        with:
+          name: plugins-archive-arm64
+          path: pepa-plugins-*-linux-arm64.tar.gz
+          retention-days: 7
+
   # -- 4. Generate Checksums --
   checksums:
     name: Generate Checksums
     runs-on: ubuntu-latest
-    needs: [plugins, plugins-image, production-archive]
+    needs: [plugins-packaging, production-archive]
     steps:
       - name: Download production archive
         uses: actions/download-artifact@v5
@@ -297,9 +353,16 @@ jobs:
           name: production-archive
           path: artifacts/production/
 
+      - name: Download plugin archives
+        uses: actions/download-artifact@v5
+        with:
+          pattern: plugins-archive-*
+          path: artifacts/plugins/
+          merge-multiple: true
+
       - name: Generate SHA256 checksums
         run: |
-          find artifacts/production/ -type f -name '*.tar.gz' | sort | while read -r f; do
+          find artifacts/ -type f -name '*.tar.gz' | sort | while read -r f; do
             sha256sum "$f" >> sha256sums.txt
           done
           cat sha256sums.txt
@@ -315,7 +378,7 @@ jobs:
   production-archive:
     name: Production Archive
     runs-on: ubuntu-latest
-    needs: [docker, plugins]
+    needs: [docker, plugins-packaging]
     steps:
       - uses: actions/checkout@v5
 
@@ -326,11 +389,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download amd64 plugins
+      - name: Download plugin archives
         uses: actions/download-artifact@v5
         with:
-          name: plugins-linux-amd64
-          path: staging/plugins
+          pattern: plugins-archive-*
+          path: staging/plugin-archives/
+          merge-multiple: true
 
       - name: Build production package
         env:
@@ -339,7 +403,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           PKG="pepa-production-${VERSION}"
-          mkdir -p "${PKG}/images" "${PKG}/nginx/ssl" "${PKG}/plugins/bin/builtin" "${PKG}/plugins/bin/community" "${PKG}/plugins/builtin"
+          mkdir -p "${PKG}/images" "${PKG}/nginx/ssl" "${PKG}/plugins/bin-amd64/builtin" "${PKG}/plugins/bin-amd64/community" "${PKG}/plugins/bin-arm64/builtin" "${PKG}/plugins/bin-arm64/community" "${PKG}/plugins/builtin"
 
           GHCR="ghcr.io/${REPO,,}"
 
@@ -352,16 +416,19 @@ jobs:
           done
           echo "Images exported"
 
-          # Copy plugins
-          if [ -d staging/plugins/plugins/bin/builtin ]; then
-            cp -r staging/plugins/plugins/bin/builtin/* "${PKG}/plugins/bin/builtin/" 2>/dev/null || true
-          fi
-          if [ -d staging/plugins/plugins/bin/community ]; then
-            cp -r staging/plugins/plugins/bin/community/* "${PKG}/plugins/bin/community/" 2>/dev/null || true
-          fi
-          if [ -d staging/plugins/plugins/builtin ]; then
-            cp -r staging/plugins/plugins/builtin/* "${PKG}/plugins/builtin/" 2>/dev/null || true
-          fi
+          # Extract plugin archives for both architectures
+          for arch in amd64 arm64; do
+            PLUGIN_TAR="staging/plugin-archives/pepa-plugins-*-linux-${arch}.tar.gz"
+            if ls ${PLUGIN_TAR} 1>/dev/null 2>&1; then
+              tmpdir="$(mktemp -d)"
+              tar xzf ${PLUGIN_TAR} -C "${tmpdir}" --strip-components=1
+              cp -r "${tmpdir}/bin/builtin/"* "${PKG}/plugins/bin-${arch}/builtin/" 2>/dev/null || true
+              cp -r "${tmpdir}/bin/community/"* "${PKG}/plugins/bin-${arch}/community/" 2>/dev/null || true
+              cp -r "${tmpdir}/builtin/"* "${PKG}/plugins/builtin/" 2>/dev/null || true
+              rm -rf "${tmpdir}"
+              echo "Plugins for ${arch} extracted"
+            fi
+          done
 
           # Copy supporting files
           cp deployments/compose/init-db.sql "${PKG}/init-db.sql"
@@ -595,6 +662,20 @@ jobs:
             gunzip -c "$img" | docker load
           done
           ok "All images loaded"
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)  PLUGIN_ARCH=amd64 ;;
+            aarch64) PLUGIN_ARCH=arm64 ;;
+            arm64)   PLUGIN_ARCH=arm64 ;;
+            *)       err "Unsupported arch: $ARCH"; exit 1 ;;
+          esac
+          if [ -d "plugins/bin-${PLUGIN_ARCH}" ]; then
+            mkdir -p plugins/bin
+            cp -r "plugins/bin-${PLUGIN_ARCH}/"* plugins/bin/
+            ok "Plugins for ${PLUGIN_ARCH} installed"
+          else
+            warn "No plugins found for ${PLUGIN_ARCH}"
+          fi
           if [ ! -f .env ]; then warn ".env not found."; exit 1; fi
           ok ".env found"
           log "Stopping any existing PEPA stack..."
@@ -660,7 +741,7 @@ jobs:
   release:
     name: GitHub Release
     runs-on: ubuntu-latest
-    needs: [docker, plugins, plugins-image, checksums, production-archive]
+    needs: [docker, plugins, plugins-image, checksums, production-archive, plugins-packaging]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -678,10 +759,18 @@ jobs:
           name: production-archive
           path: release-assets/production/
 
+      - name: Download plugin archives
+        uses: actions/download-artifact@v5
+        with:
+          pattern: plugins-archive-*
+          path: release-assets/plugins/
+          merge-multiple: true
+
       - name: Flatten release assets
         run: |
           mkdir -p release-upload/
           find release-assets/production/ -type f -name '*.tar.gz' -exec cp {} release-upload/ \; 2>/dev/null || true
+          find release-assets/plugins/ -type f -name '*.tar.gz' -exec cp {} release-upload/ \; 2>/dev/null || true
           cp release-assets/checksums/sha256sums.txt release-upload/ 2>/dev/null || true
           ls -la release-upload/
 
@@ -726,6 +815,17 @@ jobs:
             echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-production-${RELEASE_TAG#v}.tar.gz"
             echo "tar xzf pepa-production-${RELEASE_TAG#v}.tar.gz"
             echo "cd pepa-production-${RELEASE_TAG#v} && ./deploy.sh"
+            echo '```'
+            echo ""
+            echo "## Plugin Binaries"
+            echo ""
+            echo '```bash'
+            echo "# amd64"
+            echo "curl -fsSL -o pepa-plugins-${RELEASE_TAG#v}-linux-amd64.tar.gz \\"
+            echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-plugins-${RELEASE_TAG#v}-linux-amd64.tar.gz"
+            echo "# arm64"
+            echo "curl -fsSL -o pepa-plugins-${RELEASE_TAG#v}-linux-arm64.tar.gz \\"
+            echo "  https://github.com/${REPO}/releases/download/${RELEASE_TAG}/pepa-plugins-${RELEASE_TAG#v}-linux-arm64.tar.gz"
             echo '```'
             echo ""
             echo "## Checksums"
