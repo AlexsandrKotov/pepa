@@ -366,18 +366,24 @@ jobs:
     runs-on: ubuntu-latest
     needs: [cli, plugins, plugins-image, helm]
     steps:
-      - name: Download all artifacts
+      - name: Download CLI artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          pattern: cli-*
+          path: artifacts/cli/
+          merge-multiple: false
+
+      - name: Download Helm chart
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+          path: artifacts/helm/
 
       - name: Generate SHA256 checksums
         run: |
-          cd artifacts/
-          find . -type f \( -name 'pepa-*' -o -name '*.tgz' \) | sort | while read -r f; do
-            sha256sum "$f" >> ../sha256sums.txt
+          find artifacts/ -type f \( -name 'pepa-*' -o -name '*.tgz' \) | sort | while read -r f; do
+            sha256sum "$f" >> sha256sums.txt
           done
-          cd ..
           cat sha256sums.txt
 
       - name: Upload checksums
@@ -397,16 +403,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download CLI binaries
         uses: actions/download-artifact@v4
         with:
-          path: release-assets/
+          pattern: cli-*
+          path: release-assets/cli/
+          merge-multiple: false
+
+      - name: Download Helm chart
+        uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+          path: release-assets/helm-chart/
+
+      - name: Download checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: checksums
+          path: release-assets/checksums/
 
       - name: Flatten release assets
         run: |
           mkdir -p release-upload/
-          find release-assets/cli-* -type f -name 'pepa-*' -exec cp {} release-upload/ \; 2>/dev/null || true
-          find release-assets/helm-chart -type f -name '*.tgz' -exec cp {} release-upload/ \; 2>/dev/null || true
+          find release-assets/cli/ -type f -name 'pepa-*' -exec cp {} release-upload/ \; 2>/dev/null || true
+          find release-assets/helm-chart/ -type f -name '*.tgz' -exec cp {} release-upload/ \; 2>/dev/null || true
           cp release-assets/checksums/sha256sums.txt release-upload/ 2>/dev/null || true
           ls -la release-upload/
 
