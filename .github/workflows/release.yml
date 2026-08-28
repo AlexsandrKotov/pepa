@@ -407,12 +407,11 @@ jobs:
 
           GHCR="ghcr.io/${REPO,,}"
 
-          # Pull and export Docker images
+          # Pull and export Docker images (image tags use VERSION without 'v' prefix)
           for svc in api-server worker frontend; do
-            echo "Pulling ${GHCR}/pepa-${svc}:${RELEASE_TAG}..."
-            docker pull "${GHCR}/pepa-${svc}:${RELEASE_TAG}"
-            docker tag "${GHCR}/pepa-${svc}:${RELEASE_TAG}" "${GHCR}/pepa/pepa-${svc}:${VERSION}"
-            docker save "${GHCR}/pepa/pepa-${svc}:${VERSION}" | gzip > "${PKG}/images/${svc}.tar.gz"
+            echo "Pulling ${GHCR}/pepa-${svc}:${VERSION}..."
+            docker pull "${GHCR}/pepa-${svc}:${VERSION}"
+            docker save "${GHCR}/pepa-${svc}:${VERSION}" | gzip > "${PKG}/images/${svc}.tar.gz"
           done
           echo "Images exported"
 
