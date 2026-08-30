@@ -426,6 +426,9 @@ CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_tenant ON rag_chunks(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_rag_chunks_metadata ON rag_chunks USING GIN(metadata);
 CREATE INDEX IF NOT EXISTS idx_rag_docs_source ON rag_documents(tenant_id, source, source_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_documents_unique
+    ON rag_documents (tenant_id, source, source_type, source_id)
+    WHERE source_id IS NOT NULL;
 
 ALTER TABLE rag_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rag_chunks ENABLE ROW LEVEL SECURITY;

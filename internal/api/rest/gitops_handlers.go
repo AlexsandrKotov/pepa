@@ -313,6 +313,10 @@ func triggerGitOpsSync(deps Dependencies, deployment *repository.Deployment) {
 }
 
 // triggerArgoSync calls the ArgoCD plugin to sync an application.
+// Supports two modes:
+//  1. REST API mode: if cluster labels have argocd_server_url + argocd_auth_token
+//  2. CRD mode: falls back to kubeconfig-based CRD operations (no ArgoCD server needed)
+//
 // Note: ArgoCD credentials should ideally be stored in Vault, not in cluster labels.
 // This is a temporary implementation until Vault integration is complete.
 func triggerArgoSync(ctx context.Context, deps Dependencies, deployment *repository.Deployment, cluster *repository.Cluster) error {
@@ -330,19 +334,54 @@ func triggerArgoSync(ctx context.Context, deps Dependencies, deployment *reposit
 		return fmt.Errorf("marshal params: %w", err)
 	}
 
-	// Try to find ArgoCD plugin config from cluster labels
-	// TODO: Migrate to Vault-based credential storage
+	// Build plugin config: try GitOps repo config first, then cluster labels, then CRD mode
 	pluginConfig := map[string]string{}
-	if cluster.Labels != nil {
-		if serverURL, ok := cluster.Labels["argocd_server_url"]; ok {
-			pluginConfig["server_url"] = serverURL
+
+	// 1. Check GitOps repo config (highest priority)
+	if deps.Repos.GitopsRepo != nil {
+		repos, err := deps.Repos.GitopsRepo.List(ctx, deployment.TenantID)
+		if err == nil {
+			for _, repo := range repos {
+				if repo.Config != nil {
+					if serverURL, ok := repo.Config["argocd_server_url"]; ok && serverURL != "" {
+						pluginConfig["server_url"] = serverURL
+					}
+					if authToken, ok := repo.Config["argocd_auth_token"]; ok && authToken != "" {
+						pluginConfig["auth_token"] = authToken
+					}
+					if pluginConfig["server_url"] != "" && pluginConfig["auth_token"] != "" {
+						slog.Info("triggerArgoSync: using ArgoCD REST API from GitOps repo config", "repo", repo.Name)
+						break
+					}
+				}
+			}
 		}
-		// WARNING: Auth token in labels is a security risk
-		// This should be migrated to Vault integration
-		if authToken, ok := cluster.Labels["argocd_auth_token"]; ok {
-			pluginConfig["auth_token"] = authToken
-			slog.Warn("triggerArgoSync: auth token found in cluster labels, consider migrating to Vault")
+	}
+
+	// 2. Fall back to cluster labels if repo config not available
+	if pluginConfig["server_url"] == "" || pluginConfig["auth_token"] == "" {
+		if cluster.Labels != nil {
+			if serverURL, ok := cluster.Labels["argocd_server_url"]; ok {
+				pluginConfig["server_url"] = serverURL
+			}
+			if authToken, ok := cluster.Labels["argocd_auth_token"]; ok {
+				pluginConfig["auth_token"] = authToken
+				slog.Warn("triggerArgoSync: auth token found in cluster labels, consider migrating to GitOps repo config")
+			}
 		}
+	}
+
+	// 3. If REST API credentials are not available, use CRD mode via kubeconfig
+	if pluginConfig["server_url"] == "" || pluginConfig["auth_token"] == "" {
+		if deps.Repos.Cluster == nil {
+			return fmt.Errorf("argocd: neither REST API nor cluster repository available")
+		}
+		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(ctx, cluster.ID, cluster.TenantID)
+		if err != nil {
+			return fmt.Errorf("argocd: failed to get kubeconfig for CRD mode: %w", err)
+		}
+		pluginConfig["kubeconfig"] = kubeconfig
+		slog.Info("triggerArgoSync: using CRD mode (kubeconfig) for cluster", "cluster", cluster.Name)
 	}
 
 	_, err = deps.PluginMgr.Execute(ctx, ArgoCDPluginName, "sync", paramsJSON, pluginConfig)
@@ -635,13 +674,15 @@ func gitopsCreateRepo(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			Name         string `json:"name" binding:"required"`
-			ConnectionID string `json:"connection_id"`
-			RepoURL      string `json:"repo_url" binding:"required"`
-			Branch       string `json:"branch"`
-			Path         string `json:"path"`
-			EngineType   string `json:"engine_type"`
-			Token        string `json:"token"`
+			Name             string `json:"name" binding:"required"`
+			ConnectionID     string `json:"connection_id"`
+			RepoURL          string `json:"repo_url" binding:"required"`
+			Branch           string `json:"branch"`
+			Path             string `json:"path"`
+			EngineType       string `json:"engine_type"`
+			Token            string `json:"token"`
+			ArgoServerURL    string `json:"argocd_server_url"`
+			ArgoAuthToken    string `json:"argocd_auth_token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -664,6 +705,12 @@ func gitopsCreateRepo(deps Dependencies) gin.HandlerFunc {
 		}
 		if req.Token != "" && req.Token != "***" {
 			repo.Config["token"] = req.Token
+		}
+		if req.ArgoServerURL != "" {
+			repo.Config["argocd_server_url"] = req.ArgoServerURL
+		}
+		if req.ArgoAuthToken != "" && req.ArgoAuthToken != "***" {
+			repo.Config["argocd_auth_token"] = req.ArgoAuthToken
 		}
 		if req.ConnectionID != "" {
 			if id, err := uuid.Parse(req.ConnectionID); err == nil {
@@ -742,13 +789,15 @@ func gitopsUpdateRepo(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name         string `json:"name"`
-			RepoURL      string `json:"repo_url"`
-			Branch       string `json:"branch"`
-			Path         string `json:"path"`
-			EngineType   string `json:"engine_type"`
-			Token        string `json:"token"`
-			ConnectionID string `json:"connection_id"`
+			Name             string `json:"name"`
+			RepoURL          string `json:"repo_url"`
+			Branch           string `json:"branch"`
+			Path             string `json:"path"`
+			EngineType       string `json:"engine_type"`
+			Token            string `json:"token"`
+			ConnectionID     string `json:"connection_id"`
+			ArgoServerURL    string `json:"argocd_server_url"`
+			ArgoAuthToken    string `json:"argocd_auth_token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -776,6 +825,12 @@ func gitopsUpdateRepo(deps Dependencies) gin.HandlerFunc {
 		}
 		if req.Token != "" && req.Token != "***" {
 			existing.Config["token"] = req.Token
+		}
+		if req.ArgoServerURL != "" {
+			existing.Config["argocd_server_url"] = req.ArgoServerURL
+		}
+		if req.ArgoAuthToken != "" && req.ArgoAuthToken != "***" {
+			existing.Config["argocd_auth_token"] = req.ArgoAuthToken
 		}
 		if req.ConnectionID != "" {
 			if id, err := uuid.Parse(req.ConnectionID); err == nil {

@@ -1,11 +1,13 @@
 # Stage 1: Helm binary (cached independently of Go code)
 FROM alpine:3.24 AS helm
 ARG HELM_VERSION=v4.2.4
+ARG TARGETARCH
 RUN apk add --no-cache curl && \
-    curl -fsSLo helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" && \
+    ARCH=$(if [ "$TARGETARCH" = "arm64" ]; then echo "arm64"; else echo "amd64"; fi) && \
+    curl -fsSLo helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${ARCH}.tar.gz" && \
     tar -xzf helm.tar.gz -C /tmp && \
-    mv /tmp/linux-amd64/helm /usr/local/bin/helm && \
-    rm -rf helm.tar.gz /tmp/linux-amd64
+    mv /tmp/linux-${ARCH}/helm /usr/local/bin/helm && \
+    rm -rf helm.tar.gz /tmp/linux-${ARCH}
 
 # Stage 2: Go builder
 FROM golang:1.26-alpine AS builder

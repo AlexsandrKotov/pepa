@@ -96,35 +96,41 @@ func validateURL(rawURL string) error {
 	return nil
 }
 
+// privateRanges holds the parsed CIDR ranges for private/reserved IPs.
+// Parsed once at package init to avoid repeated work and eliminate the
+// possibility of a runtime panic from malformed constants.
+var privateRanges []*net.IPNet
+
+func init() {
+	cidrs := []string{
+		"127.0.0.0/8",    // Loopback
+		"10.0.0.0/8",     // Private
+		"172.16.0.0/12",  // Private
+		"192.168.0.0/16", // Private
+		"169.254.0.0/16", // Link-local
+		"::1/128",        // IPv6 loopback
+		"fc00::/7",       // IPv6 private
+		"fe80::/10",      // IPv6 link-local
+	}
+	for _, cidr := range cidrs {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			// These are hardcoded constants; a parse failure is a programmer error
+			// that must be caught immediately, not silently ignored.
+			panic("invalid private CIDR " + cidr + ": " + err.Error())
+		}
+		privateRanges = append(privateRanges, network)
+	}
+}
+
 // isPrivateIP checks if an IP is in private/reserved ranges.
 func isPrivateIP(ip net.IP) bool {
-	privateRanges := []struct {
-		network *net.IPNet
-	}{
-		{mustParseCIDR("127.0.0.0/8")},    // Loopback
-		{mustParseCIDR("10.0.0.0/8")},     // Private
-		{mustParseCIDR("172.16.0.0/12")},  // Private
-		{mustParseCIDR("192.168.0.0/16")}, // Private
-		{mustParseCIDR("169.254.0.0/16")}, // Link-local
-		{mustParseCIDR("::1/128")},        // IPv6 loopback
-		{mustParseCIDR("fc00::/7")},       // IPv6 private
-		{mustParseCIDR("fe80::/10")},      // IPv6 link-local
-	}
-
-	for _, r := range privateRanges {
-		if r.network.Contains(ip) {
+	for _, network := range privateRanges {
+		if network.Contains(ip) {
 			return true
 		}
 	}
 	return false
-}
-
-func mustParseCIDR(s string) *net.IPNet {
-	_, network, err := net.ParseCIDR(s)
-	if err != nil {
-		panic(err)
-	}
-	return network
 }
 
 // Discover fetches the OpenID Connect discovery document.

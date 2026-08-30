@@ -168,7 +168,7 @@ export default function ImportPage() {
           style={{ fontFamily: 'monospace' }}
         />
         <p className="text-[11px] text-[var(--text-tertiary)] mt-2">
-          💡 Tip: Click "Load Example" to see the expected format
+          💡 Tip: Click {`"Load Example"`} to see the expected format
         </p>
       </div>
 

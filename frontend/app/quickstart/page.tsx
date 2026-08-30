@@ -191,7 +191,7 @@ export default function QuickstartPage() {
       <div className="page-animate mb-8">
         <h1 className="page-title-modern">Quickstart Guide</h1>
         <p className="page-subtitle-modern">
-          Go from zero to "my service is deployed" in under 5 minutes. Complete each section below to get started.
+          Go from zero to {`"my service is deployed"`} in under 5 minutes. Complete each section below to get started.
         </p>
       </div>
 
@@ -204,7 +204,7 @@ export default function QuickstartPage() {
           <div className="flex-1">
             <h2 className="text-xl font-semibold mb-2">Register Your Service</h2>
             <p className="text-[var(--text-secondary)] mb-4">
-              Create a service entry in the catalog. We'll use the static-site template to get you started quickly.
+              {`Create a service entry in the catalog. We'll use the static-site template to get you started quickly.`}
             </p>
             
             {!serviceCreated ? (
@@ -231,7 +231,7 @@ export default function QuickstartPage() {
             ) : (
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
                 <p className="text-emerald-600">
-                  ✓ Service "<strong>{serviceName}</strong>" created successfully!
+                  ✓ Service <strong>{`"${serviceName}"`}</strong> created successfully!
                   <Link href={`/services?id=${serviceId}`} className="ml-2 text-blue-600 hover:underline">
                     View service →
                   </Link>
@@ -251,7 +251,7 @@ export default function QuickstartPage() {
           <div className="flex-1">
             <h2 className="text-xl font-semibold mb-2">Create a Pipeline</h2>
             <p className="text-[var(--text-secondary)] mb-4">
-              We'll create a "Hello PEPA" pipeline for your service. This template has no external dependencies and runs entirely in the simulator.
+              {`We'll create a "Hello PEPA" pipeline for your service. This template has no external dependencies and runs entirely in the simulator.`}
             </p>
             
             {!pipelineCreated ? (
@@ -338,7 +338,7 @@ export default function QuickstartPage() {
               {deployResult?.simulated ? (
                 <>Your service has been deployed (simulated). In a real environment with a connected Kubernetes cluster, this would deploy to ArgoCD or FluxCD.</>
               ) : (
-                <>Deploy your service. Since no cluster is connected, we'll run a simulated deployment to show you how it works.</>
+                <>Deploy your service. Since no cluster is connected, we{`'`}ll run a simulated deployment to show you how it works.</>
               )}
             </p>
             
@@ -373,8 +373,8 @@ export default function QuickstartPage() {
         <div className="p-6 bg-gradient-to-r from-green-500 to-blue-500 text-white rounded-xl shadow-lg page-animate-up page-delay-5" style={{ borderRadius: '12px' }}>
           <h2 className="text-2xl font-bold mb-2">🎉 Congratulations!</h2>
           <p className="mb-4">
-            You've successfully registered a service, created a pipeline, ran it, and deployed your service.
-            You're now ready to explore more advanced features.
+            {`You've successfully registered a service, created a pipeline, ran it, and deployed your service.`}
+            {`You're now ready to explore more advanced features.`}
           </p>
           <div className="flex gap-3">
             <Link

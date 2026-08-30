@@ -73,6 +73,8 @@ type Dependencies struct {
 	EventBus         *events.Bus
 	JobQueue         *queue.Queue
 	AIManager        *ai.Manager
+	IngestionEngine  *ai.IngestionEngine
+	RAGPipeline      *ai.RAGPipeline
 	RBAC             *rbacengine.Engine
 	Storage          storage.Storage
 	LoginLimiter     *auth.LoginRateLimiter
@@ -278,9 +280,14 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 			if deps.Repos != nil && deps.Repos.RAG != nil && deps.AIManager != nil {
 				tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 				ragHandlers := NewRAGHandlers(deps.Repos.RAG, deps.AIManager, tenantID)
+				ragHandlers.SetIngestionEngine(deps.IngestionEngine)
+				ragHandlers.SetPipeline(deps.RAGPipeline)
 				v1.POST("/rag/ingest", ragHandlers.IngestDocument)
 				v1.POST("/rag/search", ragHandlers.Search)
 				v1.GET("/rag/documents", ragHandlers.ListDocuments)
+				v1.GET("/rag/documents/:id", ragHandlers.GetDocument)
+				v1.PUT("/rag/documents/:id", ragHandlers.UpdateDocument)
+				v1.POST("/rag/documents", ragHandlers.CreateDocument)
 				v1.DELETE("/rag/documents/:id", ragHandlers.DeleteDocument)
 				v1.GET("/rag/stats", ragHandlers.GetStats)
 				v1.POST("/rag/reindex", ragHandlers.Reindex)

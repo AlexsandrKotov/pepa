@@ -367,6 +367,7 @@ var knownWeakKeys = []string{
 	"changeme",
 	"password",
 	"secret",
+	"CHANGE_ME_generate_with_openssl_rand_hex_32",
 }
 
 // ValidateKeyStrength checks whether the encryption key meets security requirements.

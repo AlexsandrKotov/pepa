@@ -37,6 +37,7 @@ const SOURCE_COLORS: Record<string, string> = {
   kubernetes: '#3B82F6',
   documentation: '#6366F1',
   logs: '#EF4444',
+  custom: '#F472B6',
 };
 
 export default function KnowledgeBasePage() {
@@ -48,6 +49,12 @@ export default function KnowledgeBasePage() {
   const [searching, setSearching] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'search'>('overview');
   const [reindexing, setReindexing] = useState(false);
+  const [editDoc, setEditDoc] = useState<RAGDocument | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ title: '', source: 'custom', content: '' });
+  const [createLoading, setCreateLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -85,7 +92,7 @@ export default function KnowledgeBasePage() {
     setReindexing(true);
     try {
       await rag.reindex();
-      setTimeout(loadData, 5000); // Wait for background reindex
+      setTimeout(loadData, 5000);
     } catch (err) {
       console.error('Reindex failed:', err);
     } finally {
@@ -100,6 +107,50 @@ export default function KnowledgeBasePage() {
       setDocuments(prev => prev.filter(d => d.id !== id));
     } catch (err) {
       console.error('Delete failed:', err);
+    }
+  };
+
+  const handleEditOpen = async (doc: RAGDocument) => {
+    setEditDoc(doc);
+    try {
+      const full = await rag.getDocument(doc.id) as Record<string, unknown>;
+      setEditContent((full.content as string) || doc.content || '');
+    } catch {
+      setEditContent(doc.content || '');
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!editDoc) return;
+    setEditLoading(true);
+    try {
+      await rag.updateDocument(editDoc.id, { content: editContent });
+      setEditDoc(null);
+      setEditContent('');
+      loadData();
+    } catch (err) {
+      console.error('Update failed:', err);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!createForm.title.trim() || !createForm.content.trim()) return;
+    setCreateLoading(true);
+    try {
+      await rag.createDocument({
+        title: createForm.title,
+        source: createForm.source || 'custom',
+        content: createForm.content,
+      });
+      setShowCreate(false);
+      setCreateForm({ title: '', source: 'custom', content: '' });
+      loadData();
+    } catch (err) {
+      console.error('Create failed:', err);
+    } finally {
+      setCreateLoading(false);
     }
   };
 
@@ -165,6 +216,20 @@ export default function KnowledgeBasePage() {
         ))}
         <div style={{ flex: 1 }} />
         <button
+          onClick={() => setShowCreate(true)}
+          style={{
+            padding: '8px 16px',
+            borderRadius: 8,
+            border: 'none',
+            background: '#6366F1',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: 14,
+          }}
+        >
+          + Add Document
+        </button>
+        <button
           onClick={handleReindex}
           disabled={reindexing}
           style={{
@@ -192,6 +257,7 @@ export default function KnowledgeBasePage() {
           </p>
           <ul style={{ color: 'var(--text-secondary, #888)', lineHeight: 2, fontSize: 14, paddingLeft: 20 }}>
             <li><strong>Auto-ingestion:</strong> Services, entities, and pipeline runs are indexed automatically</li>
+            <li><strong>Custom documents:</strong> Add your own documentation, runbooks, and guides</li>
             <li><strong>Hybrid search:</strong> Combines vector similarity + keyword matching for best results</li>
             <li><strong>Event-driven:</strong> Re-indexing happens when resources change</li>
             <li><strong>Periodic refresh:</strong> Documents expire after 30 days and are re-indexed</li>
@@ -213,7 +279,7 @@ export default function KnowledgeBasePage() {
             </thead>
             <tbody>
               {documents.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary, #888)' }}>No documents indexed yet. Click &quot;Re-index All&quot; to start.</td></tr>
+                <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary, #888)' }}>No documents indexed yet. Click &quot;Re-index All&quot; or &quot;+ Add Document&quot; to start.</td></tr>
               ) : documents.map(doc => (
                 <tr key={doc.id} style={{ borderBottom: '1px solid var(--border-primary, #222)' }}>
                   <td style={{ padding: '10px 16px' }}>
@@ -230,6 +296,7 @@ export default function KnowledgeBasePage() {
                     {doc.ingested_at ? new Date(doc.ingested_at).toLocaleDateString() : '-'}
                   </td>
                   <td style={{ padding: '10px 16px', textAlign: 'right' }}>
+                    <button onClick={() => handleEditOpen(doc)} style={{ background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer', fontSize: 13, marginRight: 8 }}>Edit</button>
                     <button onClick={() => handleDelete(doc.id)} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 13 }}>Delete</button>
                   </td>
                 </tr>
@@ -300,6 +367,121 @@ export default function KnowledgeBasePage() {
               No results found. Try a different query.
             </div>
           )}
+        </div>
+      )}
+
+      {/* Edit Document Modal */}
+      {editDoc && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'var(--bg-primary, #0f0f1a)', borderRadius: 16, padding: 24, width: '90%', maxWidth: 800, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, color: 'var(--text-primary, #fff)', fontSize: 18 }}>
+                Edit Document
+                <span style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginLeft: 8, fontWeight: 400 }}>
+                  {editDoc.source}/{editDoc.source_type}
+                </span>
+              </h2>
+              <button onClick={() => setEditDoc(null)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
+            </div>
+            <textarea
+              value={editContent}
+              onChange={e => setEditContent(e.target.value)}
+              style={{
+                flex: 1,
+                minHeight: 300,
+                padding: 16,
+                borderRadius: 8,
+                border: '1px solid var(--border-primary, #333)',
+                background: 'var(--bg-secondary, #1a1a2e)',
+                color: 'var(--text-primary, #fff)',
+                fontSize: 14,
+                fontFamily: 'monospace',
+                lineHeight: 1.6,
+                resize: 'vertical',
+                outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button onClick={() => setEditDoc(null)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-primary, #333)', background: 'transparent', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+              <button onClick={handleEditSave} disabled={editLoading} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#3B82F6', color: '#fff', cursor: editLoading ? 'not-allowed' : 'pointer', fontSize: 14 }}>
+                {editLoading ? 'Saving...' : 'Save & Re-index'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Document Modal */}
+      {showCreate && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: 'var(--bg-primary, #0f0f1a)', borderRadius: 16, padding: 24, width: '90%', maxWidth: 800, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h2 style={{ margin: 0, color: 'var(--text-primary, #fff)', fontSize: 18 }}>Add Document</h2>
+              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
+            </div>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+              <input
+                type="text"
+                value={createForm.title}
+                onChange={e => setCreateForm(f => ({ ...f, title: e.target.value }))}
+                placeholder="Document title"
+                style={{
+                  flex: 2,
+                  padding: '10px 16px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-primary, #333)',
+                  background: 'var(--bg-secondary, #1a1a2e)',
+                  color: 'var(--text-primary, #fff)',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+              <select
+                value={createForm.source}
+                onChange={e => setCreateForm(f => ({ ...f, source: e.target.value }))}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  borderRadius: 8,
+                  border: '1px solid var(--border-primary, #333)',
+                  background: 'var(--bg-secondary, #1a1a2e)',
+                  color: 'var(--text-primary, #fff)',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              >
+                <option value="custom">Custom</option>
+                <option value="documentation">Documentation</option>
+                <option value="runbook">Runbook</option>
+                <option value="guide">Guide</option>
+              </select>
+            </div>
+            <textarea
+              value={createForm.content}
+              onChange={e => setCreateForm(f => ({ ...f, content: e.target.value }))}
+              placeholder="Document content (Markdown supported)..."
+              style={{
+                flex: 1,
+                minHeight: 300,
+                padding: 16,
+                borderRadius: 8,
+                border: '1px solid var(--border-primary, #333)',
+                background: 'var(--bg-secondary, #1a1a2e)',
+                color: 'var(--text-primary, #fff)',
+                fontSize: 14,
+                fontFamily: 'monospace',
+                lineHeight: 1.6,
+                resize: 'vertical',
+                outline: 'none',
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button onClick={() => setShowCreate(false)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-primary, #333)', background: 'transparent', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+              <button onClick={handleCreate} disabled={createLoading || !createForm.title.trim() || !createForm.content.trim()} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#6366F1', color: '#fff', cursor: (createLoading || !createForm.title.trim() || !createForm.content.trim()) ? 'not-allowed' : 'pointer', fontSize: 14 }}>
+                {createLoading ? 'Creating...' : 'Create & Index'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

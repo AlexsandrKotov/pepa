@@ -111,6 +111,37 @@ func (r *RAGRepository) DeleteDocument(ctx context.Context, id uuid.UUID) error 
 	return nil
 }
 
+// GetDocument retrieves a single document by ID.
+func (r *RAGRepository) GetDocument(ctx context.Context, id uuid.UUID) (*RAGDocument, error) {
+	var d RAGDocument
+	var metaBytes []byte
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, source, source_type, COALESCE(source_id,''), COALESCE(source_url,''),
+		       content, metadata, ingested_at, updated_at, expires_at, created_at
+		FROM rag_documents WHERE id = $1
+	`, id).Scan(&d.ID, &d.TenantID, &d.Source, &d.SourceType,
+		&d.SourceID, &d.SourceURL, &d.Content, &metaBytes,
+		&d.IngestedAt, &d.UpdatedAt, &d.ExpiresAt, &d.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get rag document: %w", err)
+	}
+	_ = json.Unmarshal(metaBytes, &d.Metadata)
+	return &d, nil
+}
+
+// UpdateDocumentContent updates a document's content and metadata, then resets expiration.
+func (r *RAGRepository) UpdateDocumentContent(ctx context.Context, id uuid.UUID, content string, metadata map[string]interface{}) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE rag_documents
+		SET content = $2, metadata = $3, updated_at = NOW(), expires_at = NOW() + INTERVAL '30 days'
+		WHERE id = $1
+	`, id, content, mustJSON(metadata))
+	if err != nil {
+		return fmt.Errorf("update rag document: %w", err)
+	}
+	return nil
+}
+
 // DeleteDocumentsBySource removes all documents matching a source filter.
 func (r *RAGRepository) DeleteDocumentsBySource(ctx context.Context, tenantID uuid.UUID, source, sourceType, sourceID string) (int64, error) {
 	query := `DELETE FROM rag_documents WHERE tenant_id = $1 AND source = $2`

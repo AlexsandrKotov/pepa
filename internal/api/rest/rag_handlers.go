@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/ai"
-	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/repository"
 )
 
@@ -188,6 +188,175 @@ func (h *RAGHandlers) DeleteDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Document deleted", "id": idStr})
 }
 
+// GetDocument retrieves a single document by ID.
+func (h *RAGHandlers) GetDocument(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document ID"})
+		return
+	}
+
+	doc, err := h.ragRepo.GetDocument(c.Request.Context(), id)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, doc)
+}
+
+// UpdateDocument updates a document's content and re-chunks/re-embeds it.
+func (h *RAGHandlers) UpdateDocument(c *gin.Context) {
+	if h.ingestion == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "RAG ingestion engine not initialized"})
+		return
+	}
+
+	idStr := c.Param("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document ID"})
+		return
+	}
+
+	var req struct {
+		Content  string                 `json:"content" binding:"required"`
+		Metadata map[string]interface{} `json:"metadata"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	// Update the document content
+	if err := h.ragRepo.UpdateDocumentContent(ctx, id, req.Content, req.Metadata); err != nil {
+		respondInternalError(c, err)
+		return
+	}
+
+	// Delete old chunks and re-ingest to re-chunk and re-embed
+	_ = h.ragRepo.DeleteChunksByDocument(ctx, id)
+
+	// Re-fetch the updated document to get the new content for ingestion
+	doc, err := h.ragRepo.GetDocument(ctx, id)
+	if err != nil {
+		respondInternalError(c, err)
+		return
+	}
+
+	aiDoc := &ai.Document{
+		ID:       doc.ID.String(),
+		Source:   doc.Source,
+		Type:     doc.SourceType,
+		Content:  doc.Content,
+		Metadata: toStringMap(doc.Metadata),
+	}
+	if err := h.ingestion.IngestDocument(ctx, aiDoc, h.tenantID); err != nil {
+		slog.Warn("RAG: re-ingestion after update failed", "error", err)
+	}
+
+	logAudit(h.deps(), c, "rag_update", "rag_document", idStr, nil, gin.H{"content_length": len(req.Content)})
+
+	c.JSON(http.StatusOK, gin.H{"message": "Document updated and re-indexed", "id": idStr})
+}
+
+// CreateDocument creates a new custom document in the knowledge base.
+func (h *RAGHandlers) CreateDocument(c *gin.Context) {
+	if h.ingestion == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "RAG ingestion engine not initialized"})
+		return
+	}
+
+	var req struct {
+		Title      string            `json:"title" binding:"required"`
+		Source     string            `json:"source"`
+		SourceType string            `json:"source_type"`
+		Content    string            `json:"content" binding:"required"`
+		Metadata   map[string]string `json:"metadata"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	source := req.Source
+	if source == "" {
+		source = "custom"
+	}
+	sourceType := req.SourceType
+	if sourceType == "" {
+		sourceType = "documentation"
+	}
+
+	meta := req.Metadata
+	if meta == nil {
+		meta = make(map[string]string)
+	}
+	meta["title"] = req.Title
+
+	doc := &ai.Document{
+		ID:       "custom-" + sanitizeID(req.Title),
+		Source:   source,
+		Type:     sourceType,
+		Content:  req.Content,
+		Metadata: meta,
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+	defer cancel()
+
+	if err := h.ingestion.IngestDocument(ctx, doc, h.tenantID); err != nil {
+		respondInternalError(c, err)
+		return
+	}
+
+	logAudit(h.deps(), c, "rag_create", "rag_document", doc.ID, nil, gin.H{
+		"title": req.Title, "source": source,
+	})
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "Document created and indexed",
+		"id":      doc.ID,
+		"title":   req.Title,
+	})
+}
+
+// sanitizeID creates a safe document ID from a title.
+func sanitizeID(s string) string {
+	s = strings.ToLower(s)
+	s = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+		if r == ' ' {
+			return '-'
+		}
+		return -1
+	}, s)
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	return strings.Trim(s, "-")
+}
+
+// toStringMap converts map[string]interface{} to map[string]string.
+func toStringMap(m map[string]interface{}) map[string]string {
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			result[k] = val
+		default:
+			result[k] = fmt.Sprintf("%v", v)
+		}
+	}
+	return result
+}
+
 // GetStats returns knowledge base statistics.
 func (h *RAGHandlers) GetStats(c *gin.Context) {
 	stats, err := h.ragRepo.GetDocumentStats(c.Request.Context(), h.tenantID)
@@ -198,12 +367,20 @@ func (h *RAGHandlers) GetStats(c *gin.Context) {
 
 	providers := h.aiManager.ListProviders()
 
+	// Sum all source types dynamically (includes pepa-docs, custom, etc.)
+	totalDocs := 0
+	for k, v := range stats {
+		if !strings.HasPrefix(k, "_") {
+			totalDocs += v
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"stats":             stats,
-		"total_documents":   stats["service"] + stats["entity"] + stats["pipeline"] + stats["kubernetes"] + stats["documentation"] + stats["logs"],
-		"total_chunks":      stats["_chunks"],
-		"ai_providers":      len(providers),
-		"rag_enabled":       h.ingestion != nil && len(providers) > 0,
+		"stats":           stats,
+		"total_documents": totalDocs,
+		"total_chunks":    stats["_chunks"],
+		"ai_providers":    len(providers),
+		"rag_enabled":     h.ingestion != nil && len(providers) > 0,
 	})
 }
 
@@ -349,14 +526,4 @@ func (h *RAGHandlers) ChatStreamWithRAG(c *gin.Context) {
 // This is a workaround since RAGHandlers doesn't store deps directly.
 func (h *RAGHandlers) deps() Dependencies {
 	return Dependencies{}
-}
-
-// tenantIDFromContext extracts tenant ID from gin context.
-func tenantIDFromContext(c *gin.Context) uuid.UUID {
-	tid := auth.GetTenantID(c)
-	if tid == uuid.Nil {
-		// Fall back to default tenant
-		return uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	}
-	return tid
 }

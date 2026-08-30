@@ -197,7 +197,8 @@ func rbacMiddleware(deps Dependencies) gin.HandlerFunc {
 		}
 
 		tenantID := auth.GetTenantID(c)
-		cacheKey := tenantID.String() + "|" + userID.String() + "|" + resource + "|" + action
+		orgID := auth.GetOrgID(c)
+		cacheKey := tenantID.String() + "|" + orgID.String() + "|" + userID.String() + "|" + resource + "|" + action
 		if allowed, hit := cache.get(cacheKey); hit {
 			if !allowed {
 				c.JSON(http.StatusForbidden, gin.H{"error": "permission denied: requires " + resource + ":" + action})

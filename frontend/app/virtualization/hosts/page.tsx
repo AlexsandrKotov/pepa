@@ -138,7 +138,7 @@ export default function ProxmoxHostsPage() {
           <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">How to configure Proxmox</h3>
           <div className="text-[12px] text-[var(--text-secondary)] space-y-1">
             <p>1. Go to Proxmox VE web interface → Datacenter → Permissions → API Tokens</p>
-            <p>2. Create a new API Token for a user (uncheck "Privilege Separation" for full access)</p>
+            <p>{`2. Create a new API Token for a user (uncheck "Privilege Separation" for full access)`}</p>
             <p>3. Copy the Token ID (format: user@realm!tokenname) and Token Secret</p>
             <p>4. Add a new Proxmox connection in the Connections page with these credentials</p>
           </div>

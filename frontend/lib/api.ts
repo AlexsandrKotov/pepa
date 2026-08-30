@@ -2011,9 +2011,9 @@ export const gitops = {
     fetchAPI<{ repos: GitopsRepo[]; total: number }>('/api/v1/gitops/repos'),
   getRepo: (id: string) =>
     fetchAPI<GitopsRepo>(`/api/v1/gitops/repos/${id}`),
-  createRepo: (data: { name: string; repo_url: string; branch?: string; path?: string; engine_type?: string; connection_id?: string; token?: string }) =>
+  createRepo: (data: { name: string; repo_url: string; branch?: string; path?: string; engine_type?: string; connection_id?: string; token?: string; argocd_server_url?: string; argocd_auth_token?: string }) =>
     fetchAPI<GitopsRepo>('/api/v1/gitops/repos', { method: 'POST', body: JSON.stringify(data) }),
-  updateRepo: (id: string, data: { name?: string; repo_url?: string; branch?: string; path?: string; engine_type?: string; token?: string; connection_id?: string }) =>
+  updateRepo: (id: string, data: { name?: string; repo_url?: string; branch?: string; path?: string; engine_type?: string; token?: string; connection_id?: string; argocd_server_url?: string; argocd_auth_token?: string }) =>
     fetchAPI<GitopsRepo>(`/api/v1/gitops/repos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRepo: (id: string) =>
     fetchAPI<{ message: string }>(`/api/v1/gitops/repos/${id}`, { method: 'DELETE' }),
@@ -2589,6 +2589,11 @@ export const rag = {
     return fetchAPI<{ documents: Array<Record<string, unknown>>; total: number }>(`/api/v1/rag/documents${qs}`);
   },
   deleteDocument: (id: string) => fetchAPI<{ message: string }>(`/api/v1/rag/documents/${id}`, { method: 'DELETE' }),
+  getDocument: (id: string) => fetchAPI<Record<string, unknown>>(`/api/v1/rag/documents/${id}`),
+  updateDocument: (id: string, data: { content: string; metadata?: Record<string, unknown> }) =>
+    fetchAPI<{ message: string }>(`/api/v1/rag/documents/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  createDocument: (data: { title: string; source?: string; source_type?: string; content: string; metadata?: Record<string, string> }) =>
+    fetchAPI<{ message: string; id: string; title: string }>('/api/v1/rag/documents', { method: 'POST', body: JSON.stringify(data) }),
   stats: () => fetchAPI<{ stats: Record<string, number>; total_documents: number; total_chunks: number; rag_enabled: boolean }>('/api/v1/rag/stats'),
   reindex: () => fetchAPI<{ message: string }>('/api/v1/rag/reindex', { method: 'POST' }),
   ingest: (data: { source: string; source_type?: string; content: string; metadata?: Record<string, string> }) =>

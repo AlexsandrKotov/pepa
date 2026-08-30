@@ -14,6 +14,8 @@ const defaultForm = {
   engine_type: 'auto',
   connection_id: '',
   token: '',
+  argocd_server_url: '',
+  argocd_auth_token: '',
 };
 
 function scanStatusBadge(status: string) {
@@ -181,6 +183,8 @@ export default function GitOpsPage() {
       engine_type: r.engine_type,
       connection_id: r.connection_id || '',
       token: '',
+      argocd_server_url: r.config?.argocd_server_url || '',
+      argocd_auth_token: '',
     });
     setError('');
     setGitInputMode('manual');
@@ -203,6 +207,8 @@ export default function GitOpsPage() {
       };
       if (form.connection_id) data.connection_id = form.connection_id;
       if (form.token) data.token = form.token;
+      if (form.argocd_server_url) data.argocd_server_url = form.argocd_server_url;
+      if (form.argocd_auth_token) data.argocd_auth_token = form.argocd_auth_token;
 
       if (editing) {
         await gitops.updateRepo(editing.id, data);
@@ -429,6 +435,16 @@ export default function GitOpsPage() {
                 <div className="flex items-center gap-2 text-[11px]">
                   <span className="text-[var(--text-tertiary)] w-14">Engine:</span>
                   {engineBadge(r.engine_type)}
+                  {r.engine_type === 'argocd' && r.config?.argocd_server_url && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-600 font-medium" title="ArgoCD REST API configured">
+                      🚀 API
+                    </span>
+                  )}
+                  {r.engine_type === 'argocd' && !r.config?.argocd_server_url && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--border-light)] text-[var(--text-tertiary)] font-medium" title="ArgoCD CRD mode (kubeconfig)">
+                      🔧 CRD
+                    </span>
+                  )}
                 </div>
                 {r.scan_error && (
                   <div className="text-[10px] text-red-500 mt-1 truncate" title={r.scan_error}>
@@ -920,6 +936,37 @@ export default function GitOpsPage() {
                   ))}
                 </div>
               </div>
+
+              {form.engine_type === 'argocd' && (
+                <div className="space-y-3 p-3 rounded-lg border border-orange-500/20 bg-orange-500/5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-orange-600">🚀 ArgoCD REST API Configuration</span>
+                    <span className="text-[10px] text-[var(--text-tertiary)]">(optional — falls back to CRD mode via kubeconfig)</span>
+                  </div>
+                  <div>
+                    <label className="label text-[11px]">Server URL</label>
+                    <input
+                      value={form.argocd_server_url}
+                      onChange={e => setForm({ ...form, argocd_server_url: e.target.value })}
+                      className="input font-mono text-[12px]"
+                      placeholder="https://argocd.example.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="label text-[11px]">Auth Token</label>
+                    <input
+                      type="password"
+                      value={form.argocd_auth_token}
+                      onChange={e => setForm({ ...form, argocd_auth_token: e.target.value })}
+                      className="input font-mono text-[12px]"
+                      placeholder={editing ? '(unchanged)' : 'ArgoCD API token'}
+                    />
+                  </div>
+                  <p className="text-[10px] text-[var(--text-tertiary)]">
+                    {`💡 If not configured, ArgoCD will be accessed via Kubernetes CRD using the cluster's kubeconfig`}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-[var(--border)] shrink-0">

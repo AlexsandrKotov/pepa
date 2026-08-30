@@ -165,6 +165,8 @@ func main() {
 		EventBus:         comp.EventBus,
 		JobQueue:         comp.JobQueue,
 		AIManager:        comp.AIManager,
+		IngestionEngine:  comp.IngestionEngine,
+		RAGPipeline:      comp.RAGPipeline,
 		RBAC:             rbacEngine,
 		Storage:          comp.Storage,
 		Version:          version,

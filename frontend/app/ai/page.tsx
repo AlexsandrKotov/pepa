@@ -940,6 +940,10 @@ function CodeBlock({ className, children, ...props }: {
   const match = /language-(\w+)/.exec(className || '');
   const codeText = String(children).replace(/\n$/, '');
   const isInline = !match && !codeText.includes('\n');
+  const lang = match?.[1] || 'code';
+  const isLong = codeText.split('\n').length > 5;
+  const [copied, setCopied] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   if (isInline) {
     return (
@@ -951,11 +955,6 @@ function CodeBlock({ className, children, ...props }: {
       </code>
     );
   }
-
-  const lang = match?.[1] || 'code';
-  const isLong = codeText.split('\n').length > 5;
-  const [copied, setCopied] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(codeText);

@@ -142,7 +142,7 @@ func runAIStream(query string) error {
 	if err != nil {
 		return fmt.Errorf("stream request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
@@ -305,7 +305,7 @@ func getToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("login failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Token string `json:"token"`

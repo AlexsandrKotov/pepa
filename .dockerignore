@@ -22,9 +22,9 @@ deployments/
 Dockerfile*
 docker-compose*
 
-# Documentation
-docs/
-*.md
+# Documentation (excluded — but docs/ is needed for embedded RAG seed)
+# docs/
+# *.md
 LICENSE
 
 # CI/CD

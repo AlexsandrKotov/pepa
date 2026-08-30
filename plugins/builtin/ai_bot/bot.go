@@ -178,7 +178,7 @@ func (b *Bot) queryPEPA(query string) string {
 	if err != nil {
 		return fmt.Sprintf("AI request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
@@ -232,7 +232,7 @@ func (b *Bot) handleDeploy(text string) string {
 	if err != nil {
 		return fmt.Sprintf("Deploy request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 		return fmt.Sprintf("Deployment initiated: %s@%s", service, version)
@@ -252,7 +252,7 @@ func (b *Bot) handleStatus() string {
 	if err != nil {
 		return fmt.Sprintf("PEPA status: unreachable (%v)", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		Status  string `json:"status"`
@@ -303,7 +303,7 @@ func (b *Bot) telegramGetUpdates(ctx context.Context, offset int64) ([]telegramU
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		OK     bool             `json:"ok"`
@@ -339,7 +339,7 @@ func (b *Bot) telegramSendMessage(ctx context.Context, chatID int64, text string
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return nil
 }
