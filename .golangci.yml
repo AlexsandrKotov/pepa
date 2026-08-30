@@ -16,15 +16,6 @@ linters:
     errcheck:
       check-type-assertions: false
       check-blank: false
-    gosec:
-      excludes:
-        - G101
-        - G204
-        - G304
-        - G402
-        - G703
-        - G122
-        - G115
     govet:
       enable:
         - assign

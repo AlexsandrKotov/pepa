@@ -194,17 +194,25 @@ jobs:
         if: env.HAS_SIGNING_KEY == 'true'
         env:
           PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
-        run: echo "$PEPA_SIGNING_KEY" > pepa-plugins-private.pem
+        run: |
+          PEPA_KEY_FILE="$(mktemp)"
+          chmod 600 "$PEPA_KEY_FILE"
+          echo "$PEPA_SIGNING_KEY" > "$PEPA_KEY_FILE"
+          echo "PEPA_KEY_FILE=$PEPA_KEY_FILE" >> "$GITHUB_ENV"
 
       - name: Sign plugins
         if: env.HAS_SIGNING_KEY == 'true'
-        run: |
-          make sign-plugins
-          rm -f pepa-plugins-private.pem
+        env:
+          PEPA_PLUGINS_PRIVATE_KEY: ${{ env.PEPA_KEY_FILE }}
+        run: make sign-plugins
 
       - name: Verify plugin signatures
         if: env.HAS_SIGNING_KEY == 'true'
         run: make verify-plugins
+
+      - name: Cleanup signing key
+        if: always() && env.HAS_SIGNING_KEY == 'true' && env.PEPA_KEY_FILE
+        run: rm -f "$PEPA_KEY_FILE"
 
       - name: Upload plugin artifacts
         uses: actions/upload-artifact@v5
@@ -491,20 +499,6 @@ jobs:
               driver: local
             nginx-logs:
               driver: local
-          x-common-env: &common-env
-            POSTGRES_HOST: postgres
-            POSTGRES_PORT: "5432"
-            POSTGRES_DB: pepa
-            POSTGRES_USER: pepa
-            POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
-            POSTGRES_SSLMODE: disable
-            REDIS_HOST: redis
-            REDIS_PORT: "6379"
-            REDIS_PASSWORD: \${REDIS_PASSWORD}
-            ENCRYPTION_KEY: \${ENCRYPTION_KEY}
-            AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
-            PLUGIN_DIR: /plugins
-            VAULT_ALLOW_PRIVATE_IPS: false
           services:
             postgres:
               image: pgvector/pgvector:pg18
@@ -554,7 +548,19 @@ jobs:
               container_name: pepa-api
               restart: unless-stopped
               environment:
-                <<: *common-env
+                POSTGRES_HOST: postgres
+                POSTGRES_PORT: "5432"
+                POSTGRES_DB: pepa
+                POSTGRES_USER: pepa
+                POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+                POSTGRES_SSLMODE: disable
+                REDIS_HOST: redis
+                REDIS_PORT: "6379"
+                REDIS_PASSWORD: \${REDIS_PASSWORD}
+                ENCRYPTION_KEY: \${ENCRYPTION_KEY}
+                AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
+                PLUGIN_DIR: /plugins
+                VAULT_ALLOW_PRIVATE_IPS: false
                 SERVER_PORT: "8080"
                 SERVER_HOST: "0.0.0.0"
                 SERVER_ENV: production
@@ -584,7 +590,19 @@ jobs:
               container_name: pepa-worker
               restart: unless-stopped
               environment:
-                <<: *common-env
+                POSTGRES_HOST: postgres
+                POSTGRES_PORT: "5432"
+                POSTGRES_DB: pepa
+                POSTGRES_USER: pepa
+                POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
+                POSTGRES_SSLMODE: disable
+                REDIS_HOST: redis
+                REDIS_PORT: "6379"
+                REDIS_PASSWORD: \${REDIS_PASSWORD}
+                ENCRYPTION_KEY: \${ENCRYPTION_KEY}
+                AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
+                PLUGIN_DIR: /plugins
+                VAULT_ALLOW_PRIVATE_IPS: false
                 CUSTOM_PLUGIN_DIR: /custom-plugins
                 SERVER_ENV: production
                 LOG_LEVEL: info

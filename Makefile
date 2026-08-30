@@ -160,7 +160,7 @@ helm-uninstall:
 
 # ── Verify ──────────────────────────────────────────────────
 
-verify: build build-plugin-example
+verify: build build-plugin-example deps-ui
 	@echo "→ Running full verification..."
 	@cd frontend && npx next build
 	@echo "✓ All builds passed"
@@ -236,7 +236,7 @@ plugins-all: plugins plugins-premium
 
 clean-plugins:
 	@echo "→ Cleaning plugins..."
-	@rm -rf plugins/bin/*
+	@rm -rf plugins/bin/* plugins/premium-bin/*
 
 # ── Plugin Signing ─────────────────────────────────────────────
 
@@ -325,7 +325,7 @@ release-helm:
 		--version "$(RELEASE_VERSION)" \
 		--app-version "$(RELEASE_TAG)" \
 		-d .helm-charts/
-	@echo "$(GITHUB_TOKEN)" | helm registry login $(GHCR_REGISTRY) -u "$(shell git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]\(.*\)\.git/\1/' | cut -d/ -f1)" --password-stdin 2>/dev/null || true
+	@echo "$(GITHUB_TOKEN)" | helm registry login $(GHCR_REGISTRY) -u "$(shell git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]\(.*\)\.git/\1/' | cut -d/ -f1)" --password-stdin
 	@helm push .helm-charts/pepa-$(RELEASE_VERSION).tgz "oci://$(GHCR_REGISTRY)/$(shell git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]\(.*\)\.git/\1/' | cut -d/ -f1)/charts"
 	@rm -rf .helm-charts/
 	@echo "✓ Helm chart pushed"

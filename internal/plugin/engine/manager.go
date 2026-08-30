@@ -385,7 +385,9 @@ func (m *Manager) Shutdown(ctx context.Context) {
 	for name, lp := range m.plugins {
 		log.Printf("[plugin-manager] stopping plugin %s", name)
 		lp.client.Kill()
-		lp.model.Status = models.PluginStatusStopped
+		stopped := *lp.model
+		stopped.Status = models.PluginStatusStopped
+		lp.model = &stopped
 	}
 }
 

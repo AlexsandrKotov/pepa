@@ -128,22 +128,24 @@ jobs:
         env:
           PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
         run: |
-          echo "$PEPA_SIGNING_KEY" > pepa-plugins-private.pem
+          PEPA_KEY_FILE="$(mktemp)"
+          chmod 600 "$PEPA_KEY_FILE"
+          echo "$PEPA_SIGNING_KEY" > "$PEPA_KEY_FILE"
+          echo "PEPA_KEY_FILE=$PEPA_KEY_FILE" >> "$GITHUB_ENV"
 
       - name: Sign plugins
         if: env.PEPA_SIGNING_KEY != ''
         env:
-          PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
-        run: |
-          echo "$PEPA_SIGNING_KEY" > pepa-plugins-private.pem
-          make sign-plugins
-          rm -f pepa-plugins-private.pem
+          PEPA_PLUGINS_PRIVATE_KEY: ${{ env.PEPA_KEY_FILE }}
+        run: make sign-plugins
 
       - name: Verify plugin signatures
         if: env.PEPA_SIGNING_KEY != ''
-        env:
-          PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
         run: make verify-plugins
+
+      - name: Cleanup signing key
+        if: always() && env.PEPA_SIGNING_KEY != '' && env.PEPA_KEY_FILE
+        run: rm -f "$PEPA_KEY_FILE"
 
       - name: Upload signed plugins
         if: startsWith(github.ref, 'refs/tags/')
