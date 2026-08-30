@@ -350,37 +350,21 @@ func Bootstrap() (*Components, error) {
 }
 
 // AutoRegisterPlugins reconciles plugins discovered on disk with the database.
-// Plugins with binaries on disk but no DB row are auto-registered (enabled,
-// status=running) so the Marketplace correctly reflects their active state.
-// Only explicitly "uninstalled" plugins are unloaded. Plugins that already
-// have a DB row preserve the admin's enabled/disabled choice across restarts.
+// Discovery alone does NOT activate a plugin: binaries that were never installed
+// (or were uninstalled) are unloaded so they cannot serve any actions — an
+// explicit install from the Marketplace is required. Plugins that are already
+// registered keep the admin's enabled/disabled choice across restarts.
 func (c *Components) AutoRegisterPlugins() {
 	for name, info := range c.PluginMgr.ListLoadedPlugins() {
 		existing, _ := c.PluginRepo.GetByName(context.Background(), name)
 
-		if existing != nil && existing.Status == "uninstalled" {
-			// Explicitly uninstalled by admin — keep unloaded.
+		if existing == nil || existing.Status == "uninstalled" {
+			// Discovered on disk but never installed (or explicitly uninstalled).
+			// Unload the subprocess and drop it from the provider registry so it
+			// stays inactive until an admin installs it from the Marketplace.
 			_ = c.PluginMgr.UnloadPlugin(name)
 			c.ProviderRegistry.Unregister(name)
-			slog.Info("plugin uninstalled, kept inactive", "plugin", name)
-			continue
-		}
-
-		if existing == nil {
-			// Plugin binary found on disk but no DB row — auto-register it
-			// so the Marketplace shows it as installed (not orphaned).
-			plugin := &repository.Plugin{
-				Name:    name,
-				Version: info.Version,
-				Type:    info.PluginType,
-				Status:  "running",
-				Enabled: true,
-			}
-			if err := c.PluginRepo.Register(context.Background(), plugin); err != nil {
-				slog.Warn("failed to auto-register plugin", "plugin", name, "error", err)
-			} else {
-				slog.Info("plugin auto-registered", "plugin", name, "version", info.Version)
-			}
+			slog.Info("plugin discovered but not installed, kept inactive", "plugin", name, "version", info.Version)
 			continue
 		}
 
