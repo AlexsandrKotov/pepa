@@ -24,10 +24,13 @@ LABEL org.opencontainers.image.title="PEPA API Server" \
       org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
 
 RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git && \
-    mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa
+    mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa && \
+    addgroup -S pepa && adduser -S pepa -G pepa && \
+    chown -R pepa:pepa /plugins /custom-plugins /var/run/pepa
 
 COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
 COPY --from=builder /out/api-server /api-server
 
+USER pepa:pepa
 EXPOSE 8080
 ENTRYPOINT ["/api-server"]

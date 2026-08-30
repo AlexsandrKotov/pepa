@@ -41,6 +41,32 @@ run-worker:
 	@echo "→ Starting worker locally..."
 	@go run ./cmd/worker
 
+# Start infra (postgres + redis) via Docker, run API + worker locally
+dev:
+	@echo "→ Starting infrastructure services..."
+	@docker compose -f $(COMPOSE_FILE) up -d postgres redis
+	@echo "→ Waiting for PostgreSQL..."
+	@for i in $$(seq 1 30); do \
+		if docker compose -f $(COMPOSE_FILE) exec -T postgres pg_isready -U pepa -d pepa >/dev/null 2>&1; then \
+			echo "  ✓ PostgreSQL ready"; break; \
+		fi; \
+		sleep 1; \
+	done
+	@echo "→ Waiting for Redis..."
+	@for i in $$(seq 1 15); do \
+		if docker compose -f $(COMPOSE_FILE) exec -T redis redis-cli ping >/dev/null 2>&1; then \
+			echo "  ✓ Redis ready"; break; \
+		fi; \
+		sleep 1; \
+	done
+	@echo ""
+	@echo "  Infrastructure running. Start services with:"
+	@echo "    make run-api     # API server (terminal 1)"
+	@echo "    make run-worker  # Background worker (terminal 2)"
+	@echo ""
+	@echo "  Stop infra:  docker compose -f $(COMPOSE_FILE) down"
+	@echo ""
+
 # ── Test & Lint ──────────────────────────────────────────────
 
 test:

@@ -15,6 +15,8 @@ import (
 // Editor handles YAML patching and Git commit/push for GitOps manifests.
 type Editor struct {
 	CacheDir string
+	// sem limits concurrent edit operations (full clones are expensive).
+	sem chan struct{}
 }
 
 // NewEditor creates a new Editor.
@@ -22,7 +24,10 @@ func NewEditor(cacheDir string) *Editor {
 	if cacheDir == "" {
 		cacheDir = filepath.Join(os.TempDir(), "pepa-gitops-cache")
 	}
-	return &Editor{CacheDir: cacheDir}
+	return &Editor{
+		CacheDir: cacheDir,
+		sem:      make(chan struct{}, 2), // max 2 concurrent edits
+	}
 }
 
 // EditRequest describes a value change to a manifest file.
@@ -46,6 +51,14 @@ type CommitResult struct {
 
 // ApplyEdit clones the repo, applies the edit, commits, and pushes.
 func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*CommitResult, error) {
+	// Acquire semaphore to limit concurrent edits
+	select {
+	case e.sem <- struct{}{}:
+		defer func() { <-e.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	// Build authenticated URL
 	repoURL := repo.RepoURL
 	token, _ := repo.Config["token"]
@@ -65,10 +78,13 @@ func (e *Editor) ApplyEdit(ctx context.Context, repo *Repo, req *EditRequest) (*
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
+	// Shallow clone with fetch depth 50 (enough history for push, but much faster)
 	cloneArgs := []string{
 		"clone",
+		"--depth", "50",
 		"--branch", repo.Branch,
 		"--single-branch",
+		"--no-tags",
 		repoURL,
 		tmpDir,
 	}

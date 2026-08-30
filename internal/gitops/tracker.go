@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
@@ -211,13 +213,24 @@ func (t *DeployTracker) checkStatus(ctx context.Context, repo *Repo, commitSHA s
 }
 
 // checkCIStatus checks if CI pipeline has passed for the commit.
+// Uses Git provider APIs (GitLab, GitHub, Gitea) when a token is available,
+// falling back to git ls-remote for basic connectivity.
 func (t *DeployTracker) checkCIStatus(ctx context.Context, repo *Repo, commitSHA string) *DeployEvent {
+	token, hasToken := repo.Config["token"]
+
+	// Try provider-specific API if token is available
+	if hasToken && token != "" {
+		if event := t.checkCIviaAPI(ctx, repo, commitSHA, token); event != nil {
+			return event
+		}
+	}
+
+	// Fallback: basic connectivity check via git ls-remote
 	repoURL := repo.RepoURL
-	if token, ok := repo.Config["token"]; ok && token != "" {
+	if hasToken && token != "" {
 		repoURL = injectToken(repoURL, token)
 	}
 
-	// Use git ls-remote to check if commit is visible (basic connectivity)
 	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, commitSHA) //nolint:gosec // G204: git ls-remote with validated args
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
@@ -226,7 +239,6 @@ func (t *DeployTracker) checkCIStatus(ctx context.Context, repo *Repo, commitSHA
 		return nil
 	}
 
-	// If the commit is found in remote, CI is likely running/passed
 	if strings.Contains(string(out), commitSHA) {
 		return &DeployEvent{
 			Phase:     "ci_running",
@@ -236,6 +248,186 @@ func (t *DeployTracker) checkCIStatus(ctx context.Context, repo *Repo, commitSHA
 	}
 
 	return nil
+}
+
+// checkCIviaAPI queries Git provider APIs for actual CI pipeline status.
+func (t *DeployTracker) checkCIviaAPI(ctx context.Context, repo *Repo, commitSHA, token string) *DeployEvent {
+	repoURL := repo.RepoURL
+
+	// Detect provider from URL pattern
+	switch {
+	case strings.Contains(repoURL, "gitlab"):
+		return t.checkGitLabCI(ctx, repoURL, commitSHA, token)
+	case strings.Contains(repoURL, "github"):
+		return t.checkGitHubCI(ctx, repoURL, commitSHA, token)
+	case strings.Contains(repoURL, "gitea"):
+		return t.checkGiteaCI(ctx, repoURL, commitSHA, token)
+	}
+	return nil
+}
+
+// checkGitLabCI queries GitLab API for pipeline status.
+func (t *DeployTracker) checkGitLabCI(ctx context.Context, repoURL, commitSHA, token string) *DeployEvent {
+	// Extract project path from URL: https://gitlab.com/org/repo.git -> org/repo
+	projectPath := extractProjectPath(repoURL, "gitlab")
+	if projectPath == "" {
+		return nil
+	}
+
+	apiURL := fmt.Sprintf("https://%s/api/v4/projects/%s/pipelines?sha=%s&per_page=1",
+		extractHost(repoURL), url.PathEscape(projectPath), commitSHA)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("PRIVATE-TOKEN", token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[gitops-tracker] GitLab CI check failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil
+	}
+
+	var pipelines []struct {
+		Status string `json:"status"`
+		SHA    string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&pipelines); err != nil || len(pipelines) == 0 {
+		return nil
+	}
+
+	switch pipelines[0].Status {
+	case "success":
+		return &DeployEvent{Phase: "ci_running", Message: "GitLab CI pipeline passed", Timestamp: time.Now()}
+	case "failed":
+		return &DeployEvent{Phase: "failed", Message: "GitLab CI pipeline failed", Timestamp: time.Now()}
+	case "running", "pending":
+		return &DeployEvent{Phase: "ci_running", Message: fmt.Sprintf("GitLab CI pipeline %s", pipelines[0].Status), Timestamp: time.Now()}
+	}
+	return nil
+}
+
+// checkGitHubCI queries GitHub API for commit status.
+func (t *DeployTracker) checkGitHubCI(ctx context.Context, repoURL, commitSHA, token string) *DeployEvent {
+	ownerRepo := extractProjectPath(repoURL, "github")
+	if ownerRepo == "" {
+		return nil
+	}
+
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/commits/%s/status", ownerRepo, commitSHA)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[gitops-tracker] GitHub CI check failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil
+	}
+
+	var status struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil
+	}
+
+	switch status.State {
+	case "success":
+		return &DeployEvent{Phase: "ci_running", Message: "GitHub CI checks passed", Timestamp: time.Now()}
+	case "failure", "error":
+		return &DeployEvent{Phase: "failed", Message: fmt.Sprintf("GitHub CI checks: %s", status.State), Timestamp: time.Now()}
+	case "pending":
+		return &DeployEvent{Phase: "ci_running", Message: "GitHub CI checks pending", Timestamp: time.Now()}
+	}
+	return nil
+}
+
+// checkGiteaCI queries Gitea API for commit status.
+func (t *DeployTracker) checkGiteaCI(ctx context.Context, repoURL, commitSHA, token string) *DeployEvent {
+	ownerRepo := extractProjectPath(repoURL, "gitea")
+	if ownerRepo == "" {
+		return nil
+	}
+	host := extractHost(repoURL)
+
+	apiURL := fmt.Sprintf("https://%s/api/v1/repos/%s/commits/%s/status", host, ownerRepo, commitSHA)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "token "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("[gitops-tracker] Gitea CI check failed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil
+	}
+
+	var status struct {
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil
+	}
+
+	switch status.State {
+	case "success":
+		return &DeployEvent{Phase: "ci_running", Message: "Gitea CI checks passed", Timestamp: time.Now()}
+	case "error", "failure":
+		return &DeployEvent{Phase: "failed", Message: fmt.Sprintf("Gitea CI checks: %s", status.State), Timestamp: time.Now()}
+	case "pending":
+		return &DeployEvent{Phase: "ci_running", Message: "Gitea CI checks pending", Timestamp: time.Now()}
+	}
+	return nil
+}
+
+// extractProjectPath extracts "org/repo" from a git URL for a given provider.
+func extractProjectPath(repoURL, provider string) string {
+	// Remove .git suffix
+	repoURL = strings.TrimSuffix(repoURL, ".git")
+	// Find the provider host and extract the path after it
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(repoURL, prefix) {
+			path := strings.TrimPrefix(repoURL, prefix)
+			parts := strings.SplitN(path, "/", 2)
+			if len(parts) == 2 {
+				return parts[1]
+			}
+		}
+	}
+	return ""
+}
+
+// extractHost extracts the hostname from a git URL.
+func extractHost(repoURL string) string {
+	for _, prefix := range []string{"https://", "http://"} {
+		if strings.HasPrefix(repoURL, prefix) {
+			path := strings.TrimPrefix(repoURL, prefix)
+			parts := strings.SplitN(path, "/", 2)
+			return parts[0]
+		}
+	}
+	return ""
 }
 
 // checkFluxStatus checks FluxCD resource status via kubectl (if available).

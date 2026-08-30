@@ -17,14 +17,15 @@ LABEL org.opencontainers.image.title="PEPA Frontend" \
 WORKDIR /app
 
 # Copy standalone output and static assets
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
 
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV NEXT_PUBLIC_API_URL=
 
+USER node:node
 EXPOSE 3000
 
 CMD ["node", "server.js"]

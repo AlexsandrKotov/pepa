@@ -52,7 +52,7 @@ jobs:
       - name: Backend - security scan
         uses: securego/gosec@master
         with:
-          args: '-exclude-generated -exclude=G101,G115,G122,G204,G304,G402,G703 ./...'
+          args: '-exclude-generated -exclude=G115,G122,G204,G304,G703 ./...'
 
       - name: Backend - vulnerability check
         run: |
@@ -67,7 +67,6 @@ jobs:
 
       - name: Frontend - audit
         run: cd frontend && npm audit --audit-level=high
-        continue-on-error: true
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5
@@ -148,7 +147,10 @@ jobs:
           TRIVY_IMAGE_TAG="${TRIVY_IMAGE_TAG#v}"
           IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${TRIVY_IMAGE_TAG}"
           echo "Scanning ${IMAGE_REF}"
-          trivy image --format sarif --output "trivy-${{ matrix.target }}.sarif" --severity CRITICAL,HIGH "${IMAGE_REF}" || true
+          # Fail on CRITICAL vulnerabilities — block release
+          trivy image --exit-code 1 --format sarif --output "trivy-${{ matrix.target }}.sarif" --severity CRITICAL "${IMAGE_REF}"
+          # Also generate full report for HIGH severity (non-blocking)
+          trivy image --format sarif --output "trivy-${{ matrix.target }}-high.sarif" --severity HIGH "${IMAGE_REF}" || true
 
       - name: Check Trivy output
         id: trivy-check

@@ -165,6 +165,7 @@ services:
     networks:
       - pepa-net
     # Security hardening
+    read_only: true
     security_opt:
       - no-new-privileges:true
     tmpfs:
@@ -204,6 +205,8 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:noexec,nosuid,size=64m
+    # Note: Worker uses distroless image (no shell), so Docker healthcheck is not possible.
+    # Liveness is ensured via restart: unless-stopped policy.
     deploy:
       resources:
         limits:
@@ -223,7 +226,8 @@ services:
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
-      - api-server
+      api-server:
+        condition: service_healthy
     networks:
       - pepa-net
       - pepa-frontend
@@ -243,7 +247,7 @@ services:
       resources:
         limits:
           cpus: '${FRONTEND_CPUS_LIMIT:-0.5}'
-          memory: ${FRONTEND_MEMORY_LIMIT:-128M}
+          memory: ${FRONTEND_MEMORY_LIMIT:-256M}
 
 
   # ── Nginx Reverse Proxy (Production only) ─────────────────

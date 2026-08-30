@@ -22,7 +22,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
         - name: init-plugins
-          image: "{{ .Values.plugins.image.repository }}:{{ .Values.plugins.image.tag }}"
+          image: "{{ .Values.plugins.image.repository }}:{{ .Values.plugins.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.plugins.image.pullPolicy }}
           command:
             - sh
@@ -38,7 +38,7 @@ spec:
             {{- toYaml .Values.plugins.initResources | nindent 12 }}
       containers:
         - name: api
-          image: "{{ .Values.apiServer.image.repository }}:{{ .Values.apiServer.image.tag }}"
+          image: "{{ .Values.apiServer.image.repository }}:{{ .Values.apiServer.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.apiServer.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.apiServer.port }}
@@ -104,7 +104,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
         - name: init-plugins
-          image: "{{ .Values.plugins.image.repository }}:{{ .Values.plugins.image.tag }}"
+          image: "{{ .Values.plugins.image.repository }}:{{ .Values.plugins.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.plugins.image.pullPolicy }}
           command:
             - sh
@@ -120,7 +120,7 @@ spec:
             {{- toYaml .Values.plugins.initResources | nindent 12 }}
       containers:
         - name: worker
-          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+          image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
           env:
             {{- range $key, $value := .Values.worker.env }}
@@ -171,7 +171,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: frontend
-          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.frontend.port }}

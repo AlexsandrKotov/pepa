@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pepa/pepa/internal/crypto"
 	"github.com/pepa/pepa/internal/database"
 )
 
@@ -188,7 +190,7 @@ func (r *Repository) List(ctx context.Context, tenantID uuid.UUID) ([]Repo, erro
 			&r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan gitops repo: %w", err)
 		}
-		r.Config = parseStringMap(configJSON)
+		r.Config = decryptConfig(parseStringMap(configJSON))
 		items = append(items, r)
 	}
 	return items, nil
@@ -220,7 +222,7 @@ func (r *Repository) Get(ctx context.Context, id uuid.UUID) (*Repo, error) {
 		}
 		return nil, fmt.Errorf("get gitops repo: %w", err)
 	}
-	r2.Config = parseStringMap(configJSON)
+	r2.Config = decryptConfig(parseStringMap(configJSON))
 	return &r2, nil
 }
 
@@ -243,7 +245,7 @@ func (r *Repository) Create(ctx context.Context, r2 *Repo) error {
 		r2.EngineType = "auto"
 	}
 
-	configJSON, _ := json.Marshal(r2.Config)
+	configJSON, _ := json.Marshal(encryptConfig(r2.Config))
 
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO gitops_repositories (id, tenant_id, name, connection_id, repo_url, branch, path,
@@ -260,7 +262,7 @@ func (r *Repository) Create(ctx context.Context, r2 *Repo) error {
 // Update modifies an existing GitOps repo.
 func (r *Repository) Update(ctx context.Context, r2 *Repo) error {
 	r2.UpdatedAt = time.Now().UTC()
-	configJSON, _ := json.Marshal(r2.Config)
+	configJSON, _ := json.Marshal(encryptConfig(r2.Config))
 
 	_, err := r.pool.Exec(ctx, `
 		UPDATE gitops_repositories
@@ -318,4 +320,36 @@ func nullString(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+// encryptConfig encrypts sensitive fields (token) in the config map before storage.
+func encryptConfig(cfg map[string]string) map[string]string {
+	if cfg == nil {
+		return cfg
+	}
+	if token, ok := cfg["token"]; ok && token != "" {
+		encrypted, err := crypto.Encrypt(token)
+		if err != nil {
+			log.Printf("WARNING: failed to encrypt gitops token: %v", err)
+			return cfg
+		}
+		cfg["token"] = encrypted
+	}
+	return cfg
+}
+
+// decryptConfig decrypts sensitive fields (token) in the config map after retrieval.
+func decryptConfig(cfg map[string]string) map[string]string {
+	if cfg == nil {
+		return cfg
+	}
+	if token, ok := cfg["token"]; ok && token != "" {
+		decrypted, err := crypto.Decrypt(token)
+		if err != nil {
+			log.Printf("WARNING: failed to decrypt gitops token: %v", err)
+			return cfg
+		}
+		cfg["token"] = decrypted
+	}
+	return cfg
 }

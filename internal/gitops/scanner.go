@@ -17,6 +17,8 @@ type Scanner struct {
 	// CacheDir is the base directory for cached bare clones.
 	// If empty, a temp directory is used each time.
 	CacheDir string
+	// sem limits concurrent git clone operations to prevent resource exhaustion.
+	sem chan struct{}
 }
 
 // NewScanner creates a new Scanner.
@@ -24,11 +26,22 @@ func NewScanner(cacheDir string) *Scanner {
 	if cacheDir == "" {
 		cacheDir = filepath.Join(os.TempDir(), "pepa-gitops-cache")
 	}
-	return &Scanner{CacheDir: cacheDir}
+	return &Scanner{
+		CacheDir: cacheDir,
+		sem:      make(chan struct{}, 3), // max 3 concurrent clones
+	}
 }
 
 // Scan clones the repository and discovers all GitOps manifest files.
 func (s *Scanner) Scan(ctx context.Context, repo *Repo) (*ScanResult, error) {
+	// Acquire semaphore to limit concurrent clones
+	select {
+	case s.sem <- struct{}{}:
+		defer func() { <-s.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+
 	// Build authenticated URL if token is provided
 	repoURL := repo.RepoURL
 	token, _ := repo.Config["token"]

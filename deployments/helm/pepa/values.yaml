@@ -14,7 +14,7 @@ replicaCount: 1
 apiServer:
   image:
     repository: ghcr.io/alexsandrkotov/pepa/pepa-api-server
-    tag: "0.1.0"
+    tag: ""  # Defaults to Chart.appVersion if empty
     pullPolicy: IfNotPresent
   port: 8080
   replicaCount: 2
@@ -44,7 +44,7 @@ apiServer:
 worker:
   image:
     repository: ghcr.io/alexsandrkotov/pepa/pepa-worker
-    tag: "0.1.0"
+    tag: ""  # Defaults to Chart.appVersion if empty
     pullPolicy: IfNotPresent
   replicaCount: 2
   resources:
@@ -69,7 +69,7 @@ worker:
 frontend:
   image:
     repository: ghcr.io/alexsandrkotov/pepa/pepa-frontend
-    tag: "0.1.0"
+    tag: ""  # Defaults to Chart.appVersion if empty
     pullPolicy: IfNotPresent
   port: 80
   replicaCount: 2
@@ -91,7 +91,7 @@ frontend:
 plugins:
   image:
     repository: ghcr.io/alexsandrkotov/pepa/pepa-plugins
-    tag: "0.1.0"
+    tag: ""  # Defaults to Chart.appVersion if empty
     pullPolicy: IfNotPresent
   # -- Resource limits for the init-plugins initContainer
   initResources:
