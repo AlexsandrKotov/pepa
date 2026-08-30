@@ -58,23 +58,10 @@ func githubAPIRequest(ctx context.Context, baseURL, token, path string) ([]byte,
 	return body, nil
 }
 
-// listGroups returns organizations the authenticated user belongs to.
+// listGroups returns the authenticated user as a personal group plus any organizations.
+// GitHub personal accounts may not have organizations, so we always include the user's
+// own account and gracefully handle org listing failures.
 func (p *GitHubPlugin) listGroups(ctx context.Context, baseURL, token string) ([]byte, error) {
-	data, err := githubAPIRequest(ctx, baseURL, token, "/user/orgs?per_page=100")
-	if err != nil {
-		return nil, fmt.Errorf("list orgs: %w", err)
-	}
-
-	var orgs []struct {
-		Login     string `json:"login"`
-		ID        int    `json:"id"`
-		AvatarURL string `json:"avatar_url"`
-		URL       string `json:"html_url"`
-	}
-	if err := json.Unmarshal(data, &orgs); err != nil {
-		return nil, fmt.Errorf("parse orgs: %w", err)
-	}
-
 	type group struct {
 		ID       string `json:"id"`
 		Name     string `json:"name"`
@@ -82,20 +69,65 @@ func (p *GitHubPlugin) listGroups(ctx context.Context, baseURL, token string) ([
 		URL      string `json:"url"`
 		Kind     string `json:"kind"`
 	}
-	groups := make([]group, 0, len(orgs))
-	for _, o := range orgs {
-		groups = append(groups, group{
-			ID:       fmt.Sprintf("%d", o.ID),
-			Name:     o.Login,
-			FullName: o.Login,
-			URL:      o.URL,
-			Kind:     "organization",
-		})
+
+	// First, get the authenticated user's info
+	userData, err := githubAPIRequest(ctx, baseURL, token, "/user")
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
 	}
+
+	var user struct {
+		Login     string `json:"login"`
+		ID        int    `json:"id"`
+		AvatarURL string `json:"avatar_url"`
+		HTMLURL   string `json:"html_url"`
+		Name      string `json:"name"`
+	}
+	if err := json.Unmarshal(userData, &user); err != nil {
+		return nil, fmt.Errorf("parse user: %w", err)
+	}
+
+	groups := make([]group, 0)
+	// Add the user's personal account as the first group
+	displayName := user.Login
+	if user.Name != "" {
+		displayName = user.Name
+	}
+	groups = append(groups, group{
+		ID:       user.Login,
+		Name:     user.Login,
+		FullName: displayName + " (personal)",
+		URL:      user.HTMLURL,
+		Kind:     "user",
+	})
+
+	// Try to list organizations; if it fails (e.g. 404 for accounts without orgs), just return personal
+	orgData, err := githubAPIRequest(ctx, baseURL, token, "/user/orgs?per_page=100")
+	if err == nil {
+		var orgs []struct {
+			Login     string `json:"login"`
+			ID        int    `json:"id"`
+			AvatarURL string `json:"avatar_url"`
+			URL       string `json:"html_url"`
+		}
+		if json.Unmarshal(orgData, &orgs) == nil {
+			for _, o := range orgs {
+				groups = append(groups, group{
+					ID:       o.Login,
+					Name:     o.Login,
+					FullName: o.Login,
+					URL:      o.URL,
+					Kind:     "organization",
+				})
+			}
+		}
+	}
+
 	return actionOutput(map[string]any{"groups": groups, "total": len(groups)})
 }
 
-// listRepos returns repositories. If group_id is provided, lists org repos; otherwise user repos.
+// listRepos returns repositories. If group_id matches the authenticated user, lists user repos;
+// if group_id is an org, lists org repos; otherwise lists all user repos.
 func (p *GitHubPlugin) listRepos(ctx context.Context, baseURL, token string, params []byte) ([]byte, error) {
 	var req struct {
 		GroupID string `json:"group_id"`
@@ -104,7 +136,25 @@ func (p *GitHubPlugin) listRepos(ctx context.Context, baseURL, token string, par
 
 	var path string
 	if req.GroupID != "" {
-		path = fmt.Sprintf("/orgs/%s/repos?per_page=100&sort=updated", url.PathEscape(req.GroupID))
+		// Check if group_id is the authenticated user's login (personal account)
+		userData, userErr := githubAPIRequest(ctx, baseURL, token, "/user")
+		userLogin := ""
+		if userErr == nil {
+			var u struct {
+				Login string `json:"login"`
+			}
+			if json.Unmarshal(userData, &u) == nil {
+				userLogin = u.Login
+			}
+		}
+
+		if req.GroupID == userLogin {
+			// Personal account — use /users/{username}/repos
+			path = fmt.Sprintf("/users/%s/repos?per_page=100&sort=updated&type=all", url.PathEscape(req.GroupID))
+		} else {
+			// Organization — use /orgs/{org}/repos
+			path = fmt.Sprintf("/orgs/%s/repos?per_page=100&sort=updated", url.PathEscape(req.GroupID))
+		}
 	} else {
 		path = "/user/repos?per_page=100&sort=updated&type=all"
 	}
@@ -139,7 +189,7 @@ func (p *GitHubPlugin) listRepos(ctx context.Context, baseURL, token string, par
 	repos := make([]repo, 0, len(ghRepos))
 	for _, r := range ghRepos {
 		repos = append(repos, repo{
-			ID:            fmt.Sprintf("%d", r.ID),
+			ID:            r.FullName,
 			Name:          r.Name,
 			FullName:      r.FullName,
 			Description:   r.Description,

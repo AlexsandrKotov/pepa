@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	sdk "github.com/pepa/pepa/internal/plugin/sdk-go"
 	"github.com/pepa/pepa/internal/provider"
@@ -38,6 +39,8 @@ func (p *GitHubPlugin) Execute(ctx context.Context, action string, params []byte
 	baseURL := config["url"]
 	if baseURL == "" {
 		baseURL = "https://api.github.com"
+	} else {
+		baseURL = normalizeGitHubURL(baseURL)
 	}
 
 	switch action {
@@ -73,4 +76,20 @@ func actionOutput(v interface{}) ([]byte, error) {
 // actionInput is a helper to decode action params.
 func actionInput(data []byte, v interface{}) error {
 	return sdk.JSONUnmarshal(data, v)
+}
+
+// normalizeGitHubURL converts a user-entered GitHub URL to the correct API base URL.
+// - Public GitHub (github.com) -> https://api.github.com
+// - GitHub Enterprise (github.mycompany.com) -> appends /api/v3
+func normalizeGitHubURL(rawURL string) string {
+	u := strings.TrimRight(rawURL, "/")
+	// Public github.com — the API lives at api.github.com
+	if strings.HasSuffix(u, "github.com") || strings.Contains(u, "github.com/") {
+		return "https://api.github.com"
+	}
+	// GitHub Enterprise — API is at <host>/api/v3
+	if !strings.HasSuffix(u, "/api/v3") {
+		return u + "/api/v3"
+	}
+	return u
 }

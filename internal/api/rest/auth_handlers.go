@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/api/rest/dto"
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/database"
 )
@@ -118,13 +119,8 @@ func requireAdminRole(deps Dependencies) gin.HandlerFunc {
 // loginHandler authenticates a user with email and password, returning a JWT.
 func loginHandler(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-
-		var req struct {
-			Email    string `json:"email" binding:"required"`
-			Password string `json:"password" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+		req, ok := bindAndValidate[dto.LoginRequest](c)
+		if !ok {
 			return
 		}
 
@@ -621,14 +617,8 @@ func listUsersHandler(deps Dependencies) gin.HandlerFunc {
 // createUserHandler creates a new user account (admin only).
 func createUserHandler(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var req struct {
-			Email    string   `json:"email" binding:"required"`
-			Name     string   `json:"name" binding:"required"`
-			Password string   `json:"password" binding:"required"`
-			Roles    []string `json:"roles"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "email, name, and password are required"})
+		req, ok := bindAndValidate[dto.CreateUserRequest](c)
+		if !ok {
 			return
 		}
 

@@ -171,16 +171,16 @@ func (p *OIDCProvider) BuildAuthURL(ctx context.Context, state, nonce string) (s
 		scopes = []string{"openid", "profile", "email"}
 	}
 
-	params := []string{
-		"client_id=" + p.config.ClientID,
-		"response_type=code",
-		"redirect_uri=" + p.config.RedirectURL,
-		"scope=" + strings.Join(scopes, " "),
-		"state=" + state,
-		"nonce=" + nonce,
+	params := url.Values{
+		"client_id":     {p.config.ClientID},
+		"response_type": {"code"},
+		"redirect_uri":  {p.config.RedirectURL},
+		"scope":         {strings.Join(scopes, " ")},
+		"state":         {state},
+		"nonce":         {nonce},
 	}
 
-	return discovery.AuthorizationEndpoint + "?" + strings.Join(params, "&"), nil
+	return discovery.AuthorizationEndpoint + "?" + params.Encode(), nil
 }
 
 // ExchangeCode exchanges the authorization code for tokens.
@@ -190,15 +190,15 @@ func (p *OIDCProvider) ExchangeCode(ctx context.Context, code string) (*OIDCToke
 		return nil, err
 	}
 
-	data := strings.NewReader(strings.Join([]string{
-		"grant_type=authorization_code",
-		"code=" + code,
-		"redirect_uri=" + p.config.RedirectURL,
-		"client_id=" + p.config.ClientID,
-		"client_secret=" + p.config.ClientSecret,
-	}, "&"))
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {p.config.RedirectURL},
+		"client_id":     {p.config.ClientID},
+		"client_secret": {p.config.ClientSecret},
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, discovery.TokenEndpoint, data)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, discovery.TokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create token request: %w", err)
 	}

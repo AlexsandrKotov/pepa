@@ -358,6 +358,18 @@ export async function getOIDCLoginURL(): Promise<{ redirect_url: string }> {
   return res.json();
 }
 
+// Admin: get full OID config (client_secret is masked)
+export async function getOIDCAdminConfig(): Promise<{
+  enabled: boolean;
+  issuer: string;
+  client_id: string;
+  client_secret: string;
+  redirect_url: string;
+  scopes: string[];
+}> {
+  return fetchAPI('/api/v1/settings/oidc/config');
+}
+
 export async function getMe(): Promise<{ user: { id: string; email: string; name: string; is_active: boolean }; roles: string[]; permissions: string[] }> {
   // Use raw fetch instead of fetchAPI to avoid the global 401→redirect behavior.
   // getMe() is called on page load to check session validity — a 401 here

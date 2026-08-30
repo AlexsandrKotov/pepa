@@ -179,7 +179,7 @@ export default function GitRepoPicker({ value, onChange, label = 'Git Repository
     if (!conn) return 'Group / Organization';
     const provider = (conn.config as any)?.provider || conn.type;
     switch (provider) {
-      case 'github': return 'Organization';
+      case 'github': return 'Owner';
       case 'bitbucket': return 'Workspace';
       case 'gitea': return 'Organization';
       case 'gitlab': return 'Group';

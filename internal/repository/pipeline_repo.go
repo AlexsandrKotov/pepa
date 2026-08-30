@@ -787,7 +787,8 @@ func scanRun(rows pgx.Rows) (*models.PipelineRun, error) {
 }
 
 // UpsertByExternalRunID creates or updates a run matched by source_id + external_run_id.
-// Returns the run with its ID populated.
+// Uses a deterministic UUID v5 derived from (source_id, external_run_id) so the row ID
+// is predictable without a separate lookup query.
 func (r *PipelineRunRepository) UpsertByExternalRunID(ctx context.Context, run *models.PipelineRun) error {
 	now := time.Now().UTC()
 
@@ -802,6 +803,9 @@ func (r *PipelineRunRepository) UpsertByExternalRunID(ctx context.Context, run *
 		run.TriggerType = "sync"
 	}
 
+	// Deterministic UUID v5 — same (source_id, external_run_id) always maps to the same row ID.
+	runID := uuid.NewSHA1(uuid.UUID(run.SourceID), []byte(run.ExternalRunID))
+
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO pipeline_runs (id, tenant_id, source_id, preset_id, external_run_id,
 		                          external_url, parameters, status, external_status,
@@ -812,13 +816,14 @@ func (r *PipelineRunRepository) UpsertByExternalRunID(ctx context.Context, run *
 		ON CONFLICT (source_id, external_run_id) WHERE external_run_id != ''
 		DO UPDATE SET status=$8, external_status=$9, external_url=$6,
 		              duration_ms=$12, updated_at=$20
-	`, uuid.New(), run.TenantID, run.SourceID, run.PresetID, run.ExternalRunID,
+	`, runID, run.TenantID, run.SourceID, run.PresetID, run.ExternalRunID,
 		run.ExternalURL, params, run.Status, run.ExternalStatus, run.StartedAt,
 		run.CompletedAt, run.DurationMs, run.Logs, run.LogsURL, run.JobDetails,
 		run.TriggeredBy, run.TriggerType, run.ErrorMessage, now, now)
 	if err != nil {
 		return fmt.Errorf("upsert pipeline run by external id: %w", err)
 	}
+	run.ID = runID
 	return nil
 }
 

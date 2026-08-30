@@ -235,7 +235,7 @@ func (t *DeployTracker) checkCIStatus(ctx context.Context, repo *Repo, commitSHA
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		slog.Info("CI check failed for ", "arg1", shortSHA(commitSHA), err)
+		slog.Info("CI check failed", "sha", shortSHA(commitSHA), "error", err)
 		return nil
 	}
 

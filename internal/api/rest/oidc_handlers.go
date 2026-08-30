@@ -25,6 +25,17 @@ type oidcStateData struct {
 	CreatedAt time.Time
 }
 
+// cleanupTicker fires periodically to remove expired OIDC states.
+var cleanupTicker = time.NewTicker(5 * time.Minute)
+
+func init() {
+	go func() {
+		for range cleanupTicker.C {
+			cleanupOldStates()
+		}
+	}()
+}
+
 // oidcLoginHandler initiates the OIDC authentication flow.
 func oidcLoginHandler(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -54,9 +65,6 @@ func oidcLoginHandler(deps Dependencies) gin.HandlerFunc {
 			CreatedAt: time.Now(),
 		}
 		oidcStatesMu.Unlock()
-
-		// Clean up old states (older than 10 minutes)
-		go cleanupOldStates()
 
 		provider := auth.NewOIDCProvider(deps.Config.Auth.OIDC)
 		authURL, err := provider.BuildAuthURL(c.Request.Context(), state, nonce)
@@ -163,8 +171,9 @@ func oidcCallbackHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Set auth cookie
-		setAuthCookie(c, deps, token, deps.Config.Auth.TokenExpiry)
+		// Set auth cookie — use the same expiry as the JWT
+		cookieExpiry := tokenExpiry
+		setAuthCookie(c, deps, token, cookieExpiry)
 
 		slog.Info("OIDC login successful", "user_id", user.ID, "email", user.Email)
 

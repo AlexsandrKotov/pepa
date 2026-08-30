@@ -381,6 +381,7 @@ export default function LoginPage() {
 
           {/* Normal login form */}
           {phase === 'login' && (
+            <>
             <form onSubmit={handleLogin} className="space-y-5">
               {error && (
                 <div className="bg-red-500/10 border border-red-500/20 text-red-500 px-4 py-3 rounded-lg text-sm">
@@ -479,6 +480,7 @@ export default function LoginPage() {
                 </button>
               </div>
             )}
+            </>
           )}
 
           {/* Change password form */}

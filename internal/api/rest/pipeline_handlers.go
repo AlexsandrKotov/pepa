@@ -289,6 +289,7 @@ func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
 		}
 
 		synced := 0
+		skipped := 0
 		for _, rs := range remoteRuns {
 			// Parse created_at from remote
 			var createdAt time.Time
@@ -312,27 +313,32 @@ func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
 				UpdatedAt:      time.Now().UTC(),
 			}
 
+			// Check if this run already exists and is in a terminal state.
+			// Completed runs' jobs don't change, so we can skip the expensive job re-sync.
+			existing, _ := deps.Repos.PipelineRun.FindByExternalRunID(c.Request.Context(), sourceID, rs.ExternalRunID)
+			isTerminal := run.Status == models.PipelineRunSuccess || run.Status == models.PipelineRunFailed ||
+				run.Status == models.PipelineRunCancelled || run.Status == models.PipelineRunTimeout
+			if existing != nil && existing.Status == run.Status && isTerminal {
+				skipped++
+				continue
+			}
+
 			if err := deps.Repos.PipelineRun.UpsertByExternalRunID(c.Request.Context(), run); err != nil {
 				continue
 			}
 			synced++
 
-			// Find the run we just upserted to get its ID
-			existing, findErr := deps.Repos.PipelineRun.FindByExternalRunID(c.Request.Context(), sourceID, rs.ExternalRunID)
-			if findErr != nil || existing == nil {
-				continue
-			}
-
-			// Sync jobs: delete old, insert new
+			// Sync jobs: delete old, insert new.
+			// run.ID is now populated by UpsertByExternalRunID (deterministic UUID v5).
 			if len(rs.Jobs) > 0 {
-				_ = deps.Repos.PipelineRun.DeleteJobsByRunID(c.Request.Context(), existing.ID)
+				_ = deps.Repos.PipelineRun.DeleteJobsByRunID(c.Request.Context(), run.ID)
 				for _, j := range rs.Jobs {
 					stepsJSON, _ := json.Marshal(j.Steps)
 					if stepsJSON == nil {
 						stepsJSON = json.RawMessage("[]")
 					}
 					job := &models.PipelineRunJob{
-						RunID:         existing.ID,
+						RunID:         run.ID,
 						ExternalJobID: j.ExternalJobID,
 						Name:          j.Name,
 						Stage:         j.Stage,
@@ -346,8 +352,8 @@ func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		logAudit(deps, c, "sync", "pipeline_runs", sourceID.String(), nil, gin.H{"synced": synced})
-		c.JSON(http.StatusOK, gin.H{"synced": synced, "total_remote": len(remoteRuns)})
+		logAudit(deps, c, "sync", "pipeline_runs", sourceID.String(), nil, gin.H{"synced": synced, "skipped": skipped})
+		c.JSON(http.StatusOK, gin.H{"synced": synced, "skipped": skipped, "total_remote": len(remoteRuns)})
 	}
 }
 

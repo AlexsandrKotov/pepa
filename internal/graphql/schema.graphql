@@ -1,0 +1,433 @@
+# GraphQL Schema for PEPA
+
+type Query {
+  # Services
+  services(filter: ServiceFilter): ServiceConnection!
+  service(id: ID!): Service
+  
+  # Pipelines
+  pipelines(filter: PipelineFilter): PipelineConnection!
+  pipeline(id: ID!): Pipeline
+  
+  # Workflows
+  workflows(filter: WorkflowFilter): WorkflowConnection!
+  workflow(id: ID!): Workflow
+  
+  # Entities
+  entities(filter: EntityFilter): EntityConnection!
+  entity(id: ID!): Entity
+  
+  # Users
+  me: User!
+  users(filter: UserFilter): UserConnection!
+  
+  # Teams
+  teams: TeamConnection!
+  team(id: ID!): Team
+  
+  # Clusters
+  clusters: ClusterConnection!
+  cluster(id: ID!): Cluster
+  
+  # Environments
+  environments: EnvironmentConnection!
+  environment(id: ID!): Environment
+}
+
+type Mutation {
+  # Services
+  createService(input: CreateServiceInput!): Service!
+  updateService(id: ID!, input: UpdateServiceInput!): Service!
+  deleteService(id: ID!): Boolean!
+  
+  # Pipelines
+  createPipeline(input: CreatePipelineInput!): Pipeline!
+  updatePipeline(id: ID!, input: UpdatePipelineInput!): Pipeline!
+  deletePipeline(id: ID!): Boolean!
+  runPipeline(id: ID!, input: RunPipelineInput!): PipelineRun!
+  
+  # Workflows
+  createWorkflow(input: CreateWorkflowInput!): Workflow!
+  updateWorkflow(id: ID!, input: UpdateWorkflowInput!): Workflow!
+  deleteWorkflow(id: ID!): Boolean!
+  executeWorkflow(id: ID!, input: ExecuteWorkflowInput!): WorkflowExecution!
+  
+  # Entities
+  createEntity(input: CreateEntityInput!): Entity!
+  updateEntity(id: ID!, input: UpdateEntityInput!): Entity!
+  deleteEntity(id: ID!): Boolean!
+  
+  # Users
+  updateUser(id: ID!, input: UpdateUserInput!): User!
+  
+  # Teams
+  createTeam(input: CreateTeamInput!): Team!
+  updateTeam(id: ID!, input: UpdateTeamInput!): Team!
+  deleteTeam(id: ID!): Boolean!
+  addTeamMember(teamId: ID!, userId: ID!, role: String): Boolean!
+  removeTeamMember(teamId: ID!, userId: ID!): Boolean!
+}
+
+# Scalars
+scalar Time
+scalar JSON
+
+# Service Types
+type Service {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  language: String
+  framework: String
+  namespace: String
+  owner: User
+  team: Team
+  template: ServiceTemplate
+  deployments: [Deployment!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type ServiceTemplate {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  language: String
+  framework: String
+}
+
+type ServiceConnection {
+  nodes: [Service!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+input ServiceFilter {
+  team: String
+  language: String
+  search: String
+}
+
+input CreateServiceInput {
+  name: String!
+  slug: String
+  description: String
+  language: String
+  framework: String
+  templateSlug: String
+  teamId: ID
+}
+
+input UpdateServiceInput {
+  name: String
+  description: String
+  language: String
+  framework: String
+  teamId: ID
+}
+
+# Pipeline Types
+type Pipeline {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  stages: [PipelineStage!]!
+  runs: [PipelineRun!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type PipelineStage {
+  name: String!
+  jobs: [PipelineJob!]!
+}
+
+type PipelineJob {
+  name: String!
+  image: String
+  script: String
+  environment: JSON
+}
+
+type PipelineRun {
+  id: ID!
+  pipelineId: ID!
+  status: String!
+  startedAt: Time
+  completedAt: Time
+  logs: String
+}
+
+type PipelineConnection {
+  nodes: [Pipeline!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+input PipelineFilter {
+  search: String
+  status: String
+}
+
+input CreatePipelineInput {
+  name: String!
+  slug: String
+  description: String
+  stages: [PipelineStageInput!]!
+}
+
+input PipelineStageInput {
+  name: String!
+  jobs: [PipelineJobInput!]!
+}
+
+input PipelineJobInput {
+  name: String!
+  image: String
+  script: String
+  environment: JSON
+}
+
+input UpdatePipelineInput {
+  name: String
+  description: String
+  stages: [PipelineStageInput!]
+}
+
+input RunPipelineInput {
+  environment: JSON
+}
+
+# Workflow Types
+type Workflow {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  stages: [WorkflowStage!]!
+  executions: [WorkflowExecution!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type WorkflowStage {
+  name: String!
+  steps: [WorkflowStep!]!
+}
+
+type WorkflowStep {
+  name: String!
+  action: String!
+  config: JSON
+}
+
+type WorkflowExecution {
+  id: ID!
+  workflowId: ID!
+  status: String!
+  startedAt: Time
+  completedAt: Time
+  logs: String
+}
+
+type WorkflowConnection {
+  nodes: [Workflow!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+input WorkflowFilter {
+  search: String
+  status: String
+}
+
+input CreateWorkflowInput {
+  name: String!
+  slug: String
+  description: String
+  stages: [WorkflowStageInput!]!
+}
+
+input WorkflowStageInput {
+  name: String!
+  steps: [WorkflowStepInput!]!
+}
+
+input WorkflowStepInput {
+  name: String!
+  action: String!
+  config: JSON
+}
+
+input UpdateWorkflowInput {
+  name: String
+  description: String
+  stages: [WorkflowStageInput!]
+}
+
+input ExecuteWorkflowInput {
+  parameters: JSON
+}
+
+# Entity Types
+type Entity {
+  id: ID!
+  name: String!
+  slug: String!
+  type: String!
+  description: String
+  metadata: JSON
+  owner: User
+  team: Team
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type EntityConnection {
+  nodes: [Entity!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+input EntityFilter {
+  type: String
+  search: String
+}
+
+input CreateEntityInput {
+  name: String!
+  slug: String
+  type: String!
+  description: String
+  metadata: JSON
+  teamId: ID
+}
+
+input UpdateEntityInput {
+  name: String
+  description: String
+  metadata: JSON
+  teamId: ID
+}
+
+# User Types
+type User {
+  id: ID!
+  email: String!
+  name: String!
+  isActive: Boolean!
+  roles: [String!]!
+  permissions: [String!]!
+  createdAt: Time!
+}
+
+type UserConnection {
+  nodes: [User!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+input UserFilter {
+  search: String
+  isActive: Boolean
+}
+
+input UpdateUserInput {
+  name: String
+  email: String
+  isActive: Boolean
+  roles: [String!]
+}
+
+# Team Types
+type Team {
+  id: ID!
+  name: String!
+  slug: String!
+  description: String
+  members: [TeamMember!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type TeamMember {
+  userId: ID!
+  user: User!
+  role: String!
+  joinedAt: Time!
+}
+
+type TeamConnection {
+  nodes: [Team!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+input CreateTeamInput {
+  name: String!
+  slug: String
+  description: String
+}
+
+input UpdateTeamInput {
+  name: String
+  description: String
+}
+
+# Cluster Types
+type Cluster {
+  id: ID!
+  name: String!
+  type: String!
+  endpoint: String!
+  status: String!
+  metadata: JSON
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type ClusterConnection {
+  nodes: [Cluster!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+# Environment Types
+type Environment {
+  id: ID!
+  name: String!
+  slug: String!
+  type: String!
+  description: String
+  metadata: JSON
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type EnvironmentConnection {
+  nodes: [Environment!]!
+  totalCount: Int!
+  pageInfo: PageInfo!
+}
+
+# Deployment Types
+type Deployment {
+  id: ID!
+  serviceId: ID!
+  environment: String!
+  version: String!
+  status: String!
+  deployedAt: Time!
+  metadata: JSON
+}
+
+# Pagination
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}

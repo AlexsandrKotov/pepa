@@ -140,6 +140,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
     adminOnly: true,
     items: [
       { href: '/settings', label: 'Settings', permission: 'settings', adminOnly: true },
+      { href: '/settings/authentication', label: 'Authentication', permission: 'settings', adminOnly: true },
       { href: '/settings/users', label: 'Users', permission: 'settings', adminOnly: true },
       { href: '/settings/teams', label: 'Teams', permission: 'settings', adminOnly: true },
       { href: '/settings/workspaces', label: 'Workspaces', permission: 'settings', adminOnly: true },

@@ -30,6 +30,11 @@ func parseGitHubConfig(raw json.RawMessage) (*GitHubActionsConfig, error) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("invalid github_actions config: %w", err)
 	}
+
+	// Sanitize: users may paste a full GitHub URL into owner or repo.
+	// Extract owner/repo from URLs like https://github.com/owner/repo[/...]
+	cfg.Owner, cfg.Repo = ghNormalizeOwnerRepo(cfg.Owner, cfg.Repo)
+
 	if cfg.Owner == "" || cfg.Repo == "" {
 		return nil, fmt.Errorf("github_actions config: owner and repo are required")
 	}
@@ -43,6 +48,38 @@ func parseGitHubConfig(raw json.RawMessage) (*GitHubActionsConfig, error) {
 		cfg.Ref = "main"
 	}
 	return &cfg, nil
+}
+
+// ghNormalizeOwnerRepo extracts owner/repo when the user pastes a full GitHub URL
+// into either field. Handles:
+//   - owner="AlexsandrKotov", repo="pepa" → unchanged
+//   - owner="", repo="https://github.com/pepa/pepa" → owner="AlexsandrKotov", repo="pepa"
+//   - owner="https://github.com/pepa/pepa", repo="" → owner="AlexsandrKotov", repo="pepa"
+//   - repo="https://github.com/pepa/pepa/actions" → owner="AlexsandrKotov", repo="pepa"
+func ghNormalizeOwnerRepo(owner, repo string) (string, string) {
+	// If repo looks like a URL, parse it
+	if strings.Contains(repo, "://") || strings.HasPrefix(repo, "github.com") {
+		repo = strings.TrimPrefix(repo, "https://")
+		repo = strings.TrimPrefix(repo, "http://")
+		repo = strings.TrimPrefix(repo, "github.com/")
+		parts := strings.SplitN(repo, "/", 3)
+		if len(parts) >= 2 {
+			return parts[0], strings.TrimSuffix(parts[1], ".git")
+		}
+	}
+	// If owner looks like a URL, parse it
+	if strings.Contains(owner, "://") || strings.HasPrefix(owner, "github.com") {
+		owner = strings.TrimPrefix(owner, "https://")
+		owner = strings.TrimPrefix(owner, "http://")
+		owner = strings.TrimPrefix(owner, "github.com/")
+		parts := strings.SplitN(owner, "/", 3)
+		if len(parts) >= 2 {
+			return parts[0], strings.TrimSuffix(parts[1], ".git")
+		}
+	}
+	// Strip .git suffix from repo if present
+	repo = strings.TrimSuffix(repo, ".git")
+	return owner, repo
 }
 
 // GitHubActionsAdapter implements Provider for GitHub Actions pipelines.
@@ -314,19 +351,30 @@ func (a *GitHubActionsAdapter) ListRemoteRuns(ctx context.Context, raw json.RawM
 		perPage = 30
 	}
 
-	// If a specific workflow is configured, scope to that workflow
-	var runsURL string
-	if cfg.Workflow != "" && cfg.Workflow != "ci.yml" {
-		runsURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/runs?per_page=%d",
+	// If a specific workflow is configured, scope to that workflow.
+	// Fall back to listing all runs if the workflow-specific URL fails (e.g. wrong filename).
+	var body []byte
+	if cfg.Workflow != "" {
+		workflowURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/runs?per_page=%d",
 			cfg.Owner, cfg.Repo, cfg.Workflow, perPage)
+		body, err = ghAPIGet(ctx, workflowURL, cfg.Token)
+		if err != nil {
+			// Workflow file not found or other error — fall back to all runs
+			fallbackURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs?per_page=%d",
+				cfg.Owner, cfg.Repo, perPage)
+			body, err = ghAPIGet(ctx, fallbackURL, cfg.Token)
+			if err != nil {
+				return nil, fmt.Errorf("list workflow runs: %w", err)
+			}
+		}
 	} else {
+		var runsURL string
 		runsURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs?per_page=%d",
 			cfg.Owner, cfg.Repo, perPage)
-	}
-
-	body, err := ghAPIGet(ctx, runsURL, cfg.Token)
-	if err != nil {
-		return nil, fmt.Errorf("list workflow runs: %w", err)
+		body, err = ghAPIGet(ctx, runsURL, cfg.Token)
+		if err != nil {
+			return nil, fmt.Errorf("list workflow runs: %w", err)
+		}
 	}
 
 	var resp struct {

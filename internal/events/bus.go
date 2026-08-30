@@ -52,6 +52,14 @@ func NewBus(client *redis.Client) *Bus {
 	}
 }
 
+// Ping checks if the Redis connection is healthy.
+func (b *Bus) Ping(ctx context.Context) error {
+	if b.client == nil {
+		return fmt.Errorf("redis client not configured")
+	}
+	return b.client.Ping(ctx).Err()
+}
+
 // Event represents a platform event.
 type Event struct {
 	Type       string                 `json:"type"`

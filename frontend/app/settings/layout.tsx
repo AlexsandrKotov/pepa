@@ -7,6 +7,7 @@ import { ForbiddenPage } from '@/components/PermissionGuard';
 
 const tabs = [
   { href: '/settings', label: 'General' },
+  { href: '/settings/authentication', label: 'Authentication' },
   { href: '/settings/workspaces', label: 'Workspaces' },
   { href: '/settings/users', label: 'Users' },
   { href: '/settings/teams', label: 'Teams' },

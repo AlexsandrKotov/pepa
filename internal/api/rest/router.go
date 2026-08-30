@@ -160,6 +160,45 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		})
 	})
 
+	// Readiness probe — checks dependencies (PostgreSQL, Redis)
+	// K8s uses this to determine if the pod should receive traffic
+	r.GET("/readyz", func(c *gin.Context) {
+		ctx := c.Request.Context()
+		checks := make(map[string]string)
+		healthy := true
+
+		// PostgreSQL check
+		if deps.DB != nil && deps.DB.Pool != nil {
+			if err := deps.DB.Pool.Ping(ctx); err != nil {
+				checks["postgres"] = "unhealthy: " + err.Error()
+				healthy = false
+			} else {
+				checks["postgres"] = "ok"
+			}
+		} else {
+			checks["postgres"] = "not configured"
+			healthy = false
+		}
+
+		// Redis check (via EventBus)
+		if deps.EventBus != nil {
+			if err := deps.EventBus.Ping(ctx); err != nil {
+				checks["redis"] = "unhealthy: " + err.Error()
+				healthy = false
+			} else {
+				checks["redis"] = "ok"
+			}
+		} else {
+			checks["redis"] = "not configured"
+		}
+
+		status := http.StatusOK
+		if !healthy {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"status": checks, "healthy": healthy})
+	})
+
 	// Prometheus metrics endpoint (no auth required)
 	r.GET("/metrics", gin.WrapH(observability.Handler()))
 

@@ -36,6 +36,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Run database migrations
+	if err := comp.DB.RunMigrations(context.Background()); err != nil {
+		slog.Error("database migrations failed", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("database migrations completed")
+
 	// Auto-register plugins in DB
 	comp.AutoRegisterPlugins()
 	// Migrate plain text credentials to encrypted storage

@@ -1,16 +1,10 @@
-import { SkeletonTable } from '@/components/Skeleton';
-
 export default function Loading() {
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <div className="animate-pulse rounded-md bg-[var(--border)]/60 h-5 w-24" />
-          <div className="animate-pulse rounded-md bg-[var(--border)]/60 h-3 w-48" />
-        </div>
-        <div className="animate-pulse rounded-md bg-[var(--border)]/60 h-8 w-28 rounded-lg" />
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center">
+        <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <p className="mt-4 text-gray-600 dark:text-gray-400">Loading services...</p>
       </div>
-      <SkeletonTable rows={6} cols={6} />
     </div>
   );
 }

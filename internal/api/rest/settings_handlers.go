@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ func registerSettingsRoutes(r *gin.RouterGroup, deps Dependencies) {
 	settings := r.Group("/settings")
 	{
 		settings.GET("", listSettings(deps))
+		settings.GET("/oidc/config", getOIDCAdminConfig(deps))
 		settings.GET("/:key", getSetting(deps))
 		settings.PUT("/:key", updateSetting(deps))
 		settings.DELETE("/:key", deleteSetting(deps))
@@ -78,22 +80,32 @@ func updateSetting(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Persist to DB
-		if err := deps.Repos.Settings.Set(c.Request.Context(), key, req.Value); err != nil {
-			respondInternalError(c, err)
-			return
-		}
-
-		// Apply runtime changes for known keys
+		// Apply runtime changes for known keys (before any sanitisation)
 		switch key {
 		case "ai":
 			tenantID := auth.GetTenantID(c)
 			applyAISettings(deps, c.Request.Context(), req.Value, tenantID)
+		case "oidc":
+			applyOIDCSettings(deps, req.Value)
+		}
+
+		// For OIDC, strip client_secret from the value persisted in the DB
+		// so it is never stored in plaintext. The runtime config already holds
+		// the real secret; the admin endpoint re-masks it on read.
+		storeValue := req.Value
+		if key == "oidc" {
+			storeValue = stripOIDCSecret(req.Value)
+		}
+
+		// Persist to DB
+		if err := deps.Repos.Settings.Set(c.Request.Context(), key, storeValue); err != nil {
+			respondInternalError(c, err)
+			return
 		}
 
 		logAudit(deps, c, "update", "setting", key, nil, gin.H{"key": key})
 
-		c.JSON(http.StatusOK, gin.H{"key": key, "value": req.Value, "message": "saved"})
+		c.JSON(http.StatusOK, gin.H{"key": key, "value": storeValue, "message": "saved"})
 	}
 }
 
@@ -345,6 +357,72 @@ func applyAISettings(deps Dependencies, ctx context.Context, value json.RawMessa
 	}
 	if aiSettings.DefaultProvider != "" {
 		deps.AIManager.SetDefaultProvider(aiSettings.DefaultProvider)
+	}
+}
+
+// applyOIDCSettings reads the OIDC settings JSON and updates the runtime config.
+func applyOIDCSettings(deps Dependencies, value json.RawMessage) {
+	var oidcSettings struct {
+		Enabled       bool     `json:"enabled"`
+		Issuer        string   `json:"issuer"`
+		ClientID      string   `json:"client_id"`
+		ClientSecret  string   `json:"client_secret"`
+		RedirectURL   string   `json:"redirect_url"`
+		Scopes        []string `json:"scopes"`
+	}
+	if err := json.Unmarshal(value, &oidcSettings); err != nil {
+		slog.Error("failed to unmarshal OIDC settings", "error", err)
+		return
+	}
+	deps.Config.Auth.OIDC.Enabled = oidcSettings.Enabled
+	deps.Config.Auth.OIDC.Issuer = oidcSettings.Issuer
+	deps.Config.Auth.OIDC.ClientID = oidcSettings.ClientID
+	// If the client_secret contains mask characters, keep the existing secret
+	if oidcSettings.ClientSecret != "" && !strings.Contains(oidcSettings.ClientSecret, "\u2022") {
+		deps.Config.Auth.OIDC.ClientSecret = oidcSettings.ClientSecret
+	}
+	deps.Config.Auth.OIDC.RedirectURL = oidcSettings.RedirectURL
+	if len(oidcSettings.Scopes) > 0 {
+		deps.Config.Auth.OIDC.Scopes = oidcSettings.Scopes
+	}
+	slog.Info("OIDC settings updated at runtime", "enabled", oidcSettings.Enabled, "issuer", oidcSettings.Issuer)
+}
+
+// stripOIDCSecret removes client_secret from the JSON so it is not persisted in the DB.
+func stripOIDCSecret(value json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(value, &m); err != nil {
+		return value
+	}
+	delete(m, "client_secret")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return value
+	}
+	return out
+}
+
+// getOIDCAdminConfig returns the current OIDC configuration for the admin settings page.
+// The client_secret is masked for security.
+func getOIDCAdminConfig(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		oidc := deps.Config.Auth.OIDC
+		maskedSecret := ""
+		if oidc.ClientSecret != "" {
+			if len(oidc.ClientSecret) > 4 {
+				maskedSecret = oidc.ClientSecret[:4] + "••••••••"
+			} else {
+				maskedSecret = "••••••••"
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":       oidc.Enabled,
+			"issuer":        oidc.Issuer,
+			"client_id":     oidc.ClientID,
+			"client_secret": maskedSecret,
+			"redirect_url":  oidc.RedirectURL,
+			"scopes":        oidc.Scopes,
+		})
 	}
 }
 
