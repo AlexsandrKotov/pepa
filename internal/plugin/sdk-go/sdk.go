@@ -17,7 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	hcplugin "github.com/hashicorp/go-plugin"
@@ -38,7 +38,7 @@ var Handshake = hcplugin.HandshakeConfig{
 // Serve starts the plugin as a go-plugin subprocess and blocks until shutdown.
 // The provided Provider implementation handles all actions dispatched by the host.
 func Serve(p provider.Provider) {
-	log.Printf("[sdk] starting plugin %s@%s type=%s", p.Name(), p.Version(), p.PluginType())
+	slog.Info("starting plugin @ type=", "name", p.Name(), p.Version(), p.PluginType())
 
 	hcplugin.Serve(&hcplugin.ServeConfig{
 		HandshakeConfig: Handshake,

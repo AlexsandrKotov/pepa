@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,12 +27,13 @@ var (
 )
 
 func main() {
-	log.Printf("PEPA — Platform Engineering & Pipeline Automator starting... (version=%s, built=%s)", version, buildTime)
+	slog.Info("PEPA API server starting", "version", version, "build_time", buildTime)
 
 	// Bootstrap all shared components
 	comp, err := bootstrap.Bootstrap()
 	if err != nil {
-		log.Fatalf("Bootstrap failed: %v", err)
+		slog.Error("bootstrap failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Auto-register plugins in DB
@@ -56,15 +57,15 @@ func main() {
 	rbacEngine := rbacengine.New(comp.DB.Pool)
 	defaultTenantID := uuid.MustParse(database.DefaultTenantID)
 	if err := rbacEngine.SeedDefaultRoles(context.Background(), defaultTenantID); err != nil {
-		log.Printf("Warning: failed to seed default roles: %v", err)
+		slog.Warn("failed to seed default roles", "error", err)
 	} else {
-		log.Println("RBAC default roles seeded")
+		slog.Info("RBAC default roles seeded")
 	}
 	// Ensure all system roles have correct base permissions (idempotent).
 	if err := rbacEngine.EnsureBasePermissions(context.Background(), defaultTenantID); err != nil {
-		log.Printf("Warning: failed to ensure base permissions: %v", err)
+		slog.Warn("failed to ensure base permissions", "error", err)
 	} else {
-		log.Println("RBAC base permissions verified")
+		slog.Info("RBAC base permissions verified")
 	}
 
 	// Seed bootstrap token for first-run setup
@@ -75,7 +76,7 @@ func main() {
 		RBAC:   rbacEngine,
 	}
 	if rawToken, err := rest.SeedBootstrapToken(bootstrapDeps); err != nil {
-		log.Printf("Warning: failed to seed bootstrap token: %v", err)
+		slog.Warn("failed to seed bootstrap token", "error", err)
 	} else if rawToken != "" {
 		fmt.Fprintln(os.Stderr, "============================================================")
 		fmt.Fprintln(os.Stderr, "  FIRST-RUN SETUP — Bootstrap Token Generated")
@@ -89,10 +90,10 @@ func main() {
 			tokenPath = "/var/run/pepa/bootstrap_token.txt" //nolint:gosec // G101: not a credential, just a default file path
 		}
 		if writeErr := os.MkdirAll(filepath.Dir(tokenPath), 0700); writeErr != nil { //nolint:gosec // G703: tokenPath is admin-controlled (env var or hardcoded default)
-			log.Printf("Warning: failed to create token directory: %v", writeErr)
+			slog.Warn("failed to create token directory", "error", writeErr)
 		}
 		if writeErr := os.WriteFile(tokenPath, []byte(rawToken+"\n"), 0600); writeErr != nil { //nolint:gosec // G703: tokenPath is admin-controlled (env var or hardcoded default)
-			log.Printf("Warning: failed to write bootstrap token file: %v", writeErr)
+			slog.Warn("failed to write bootstrap token file", "error", writeErr)
 			fmt.Fprintln(os.Stderr, "  ERROR: could not write token file — check BOOTSTRAP_TOKEN_PATH")
 		} else {
 			fmt.Fprintf(os.Stderr, "  Token written to: %s\n", tokenPath)
@@ -177,14 +178,15 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("PEPA API listening on %s", srv.Addr)
+		slog.Info("PEPA API listening", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server failed: %v", err)
+			slog.Error("server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-done
-	log.Println("Shutting down gracefully...")
+	slog.Info("shutting down gracefully")
 
 	// Write shutdown audit event
 	writeSystemAuditEvent(comp, "shutdown", "system", nil)
@@ -196,10 +198,11 @@ func main() {
 	shutdownRouter()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shutdown failed: %v", err)
+		slog.Error("server shutdown failed", "error", err)
+		os.Exit(1)
 	}
 
-	log.Println("PEPA stopped")
+	slog.Info("PEPA stopped")
 }
 
 // writeSystemAuditEvent writes a system-level audit event (no HTTP context).
@@ -220,6 +223,6 @@ func writeSystemAuditEvent(comp *bootstrap.Components, action, entityType string
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := comp.AuditRepo.Create(ctx, entry); err != nil {
-		log.Printf("Warning: failed to write system audit event (%s): %v", action, err)
+		slog.Warn("failed to write system audit event", "action", action, "error", err)
 	}
 }

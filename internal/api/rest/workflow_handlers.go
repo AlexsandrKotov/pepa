@@ -2,7 +2,7 @@ package rest
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -182,7 +182,7 @@ func executeWorkflow(deps Dependencies) gin.HandlerFunc {
 				"execution_id": exec.ID.String(),
 			})
 		} else {
-			log.Printf("[WARNING] JobQueue is nil, workflow %s execution %s will not be processed", id, exec.ID)
+			slog.Info("JobQueue is nil, workflow execution will not be processed", "id", id, "id", exec.ID)
 		}
 
 		// Emit event

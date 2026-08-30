@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -235,7 +235,7 @@ func (t *DeployTracker) checkCIStatus(ctx context.Context, repo *Repo, commitSHA
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[gitops-tracker] CI check failed for %s: %v", shortSHA(commitSHA), err)
+		slog.Info("CI check failed for ", "arg1", shortSHA(commitSHA), err)
 		return nil
 	}
 
@@ -285,7 +285,7 @@ func (t *DeployTracker) checkGitLabCI(ctx context.Context, repoURL, commitSHA, t
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("[gitops-tracker] GitLab CI check failed: %v", err)
+		slog.Info("GitLab CI check failed", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
@@ -330,7 +330,7 @@ func (t *DeployTracker) checkGitHubCI(ctx context.Context, repoURL, commitSHA, t
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("[gitops-tracker] GitHub CI check failed: %v", err)
+		slog.Info("GitHub CI check failed", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()
@@ -374,7 +374,7 @@ func (t *DeployTracker) checkGiteaCI(ctx context.Context, repoURL, commitSHA, to
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("[gitops-tracker] Gitea CI check failed: %v", err)
+		slog.Info("Gitea CI check failed", "error", err)
 		return nil
 	}
 	defer resp.Body.Close()

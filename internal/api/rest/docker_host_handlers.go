@@ -2,7 +2,7 @@ package rest
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -265,7 +265,7 @@ func testDockerHost(deps Dependencies) gin.HandlerFunc {
 			now := time.Now()
 			host.LastCheckedAt = &now
 			_ = deps.Repos.DockerHost.UpdateHost(c.Request.Context(), host)
-			log.Printf("testDockerHost: connection test failed for host %s: %v", id, err)
+			slog.Info("testDockerHost: connection test failed for host ", "id", id, "error", err)
 			c.JSON(http.StatusOK, gin.H{"status": "error", "error": "connection test failed"})
 			return
 		}

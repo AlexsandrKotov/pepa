@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -284,22 +284,22 @@ func fetchHelmIndex(repo *repository.HelmRepo) (*helmIndex, error) {
 	applyHelmAuth(req, repo)
 
 	// Debug: log auth headers being sent
-	log.Printf("DEBUG: Fetching helm index from %s", url)
-	log.Printf("DEBUG: Has PRIVATE-TOKEN: %v", req.Header.Get("PRIVATE-TOKEN") != "")
-	log.Printf("DEBUG: Has Authorization: %v", req.Header.Get("Authorization") != "")
-	log.Printf("DEBUG: Has BasicAuth: %v", req.Header.Get("Authorization") != "" && strings.HasPrefix(req.Header.Get("Authorization"), "Basic"))
+	slog.Info("DEBUG: Fetching helm index from", "arg1", url)
+	slog.Info("DEBUG: Has PRIVATE-TOKEN", "arg1", req.Header.Get("PRIVATE-TOKEN") != "")
+	slog.Info("DEBUG: Has Authorization", "arg1", req.Header.Get("Authorization") != "")
+	slog.Info("DEBUG: Has BasicAuth", "arg1", req.Header.Get("Authorization") != "" && strings.HasPrefix(req.Header.Get("Authorization"), "Basic"))
 	// Masked token for debugging
 	if repo.Token != "" {
 		maskedToken := repo.Token
 		if len(maskedToken) > 8 {
 			maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
 		}
-		log.Printf("DEBUG: Token (masked): %s", maskedToken)
+		slog.Info("DEBUG: Token (masked)", "arg1", maskedToken)
 	} else {
-		log.Printf("DEBUG: Token is EMPTY")
+		slog.Info("DEBUG: Token is EMPTY")
 	}
 	if repo.Username != "" {
-		log.Printf("DEBUG: Username: %s", repo.Username)
+		slog.Info("DEBUG: Username", "name", repo.Username)
 	}
 
 	resp, err := client.Do(req)
@@ -311,7 +311,7 @@ func fetchHelmIndex(repo *repository.HelmRepo) (*helmIndex, error) {
 	if resp.StatusCode != http.StatusOK {
 		// Read error response body for debugging
 		errorBody, _ := io.ReadAll(resp.Body)
-		log.Printf("DEBUG: Helm repo error response (%s): %s", resp.Status, string(errorBody))
+		slog.Info("DEBUG: Helm repo error response ()", "arg1", resp.Status, "error", string(errorBody))
 		return nil, fmt.Errorf("fetch index from %s returned %s: %s", url, resp.Status, string(errorBody))
 	}
 

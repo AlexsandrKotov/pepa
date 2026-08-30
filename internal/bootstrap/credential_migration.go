@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/pkg/utils"
@@ -28,7 +28,7 @@ func (c *Components) migrateHelmRepoCredentials(ctx context.Context) {
 		FROM helm_repositories
 	`)
 	if err != nil {
-		log.Printf("Warning: failed to list helm repos for migration: %v", err)
+		slog.Warn("failed to list helm repos for migration", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -47,9 +47,9 @@ func (c *Components) migrateHelmRepoCredentials(ctx context.Context) {
 			continue
 		}
 		if err := c.HelmRepo.Update(ctx, repo); err != nil {
-			log.Printf("Warning: failed to encrypt helm repo %s credentials: %v", name, err)
+			slog.Warn("failed to encrypt helm repo credentials", "repo", name, "error", err)
 		} else {
-			log.Printf("Encrypted credentials for helm repo: %s", name)
+			slog.Info("encrypted credentials for helm repo", "repo", name)
 		}
 	}
 }
@@ -60,7 +60,7 @@ func (c *Components) migrateConnectionCredentials(ctx context.Context) {
 		FROM connections
 	`)
 	if err != nil {
-		log.Printf("Warning: failed to list connections for migration: %v", err)
+		slog.Warn("failed to list connections for migration", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -75,7 +75,7 @@ func (c *Components) migrateConnectionCredentials(ctx context.Context) {
 		}
 		var config map[string]any
 		if err := json.Unmarshal(configJSON, &config); err != nil {
-			log.Printf("Warning: failed to parse connection %s config: %v", name, err)
+			slog.Warn("failed to parse connection config", "connection", name, "error", err)
 			continue
 		}
 		needsUpdate := false
@@ -93,9 +93,9 @@ func (c *Components) migrateConnectionCredentials(ctx context.Context) {
 			continue
 		}
 		if err := c.ConnectionRepo.Update(ctx, conn); err != nil {
-			log.Printf("Warning: failed to encrypt connection %s credentials: %v", name, err)
+			slog.Warn("failed to encrypt connection credentials", "connection", name, "error", err)
 		} else {
-			log.Printf("Encrypted credentials for connection: %s", name)
+			slog.Info("encrypted credentials for connection", "connection", name)
 		}
 	}
 }
@@ -106,7 +106,7 @@ func (c *Components) migrateClusterCredentials(ctx context.Context) {
 		FROM clusters
 	`)
 	if err != nil {
-		log.Printf("Warning: failed to list clusters for migration: %v", err)
+		slog.Warn("failed to list clusters for migration", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -121,9 +121,9 @@ func (c *Components) migrateClusterCredentials(ctx context.Context) {
 			continue
 		}
 		if err := c.ClusterRepo.SaveKubeconfig(ctx, id, kubeconfig); err != nil {
-			log.Printf("Warning: failed to encrypt cluster %s kubeconfig: %v", name, err)
+			slog.Warn("failed to encrypt cluster kubeconfig", "cluster", name, "error", err)
 		} else {
-			log.Printf("Encrypted kubeconfig for cluster: %s", name)
+			slog.Info("encrypted kubeconfig for cluster", "cluster", name)
 		}
 	}
 }
@@ -134,7 +134,7 @@ func (c *Components) migrateDockerHostCredentials(ctx context.Context) {
 		FROM docker_hosts
 	`)
 	if err != nil {
-		log.Printf("Warning: failed to list docker hosts for migration: %v", err)
+		slog.Warn("failed to list docker hosts for migration", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -155,9 +155,9 @@ func (c *Components) migrateDockerHostCredentials(ctx context.Context) {
 			continue
 		}
 		if err := c.DockerHostRepo.UpdateHost(ctx, host); err != nil {
-			log.Printf("Warning: failed to encrypt docker host %s credentials: %v", name, err)
+			slog.Warn("failed to encrypt docker host credentials", "host", name, "error", err)
 		} else {
-			log.Printf("Encrypted credentials for docker host: %s", name)
+			slog.Info("encrypted credentials for docker host", "host", name)
 		}
 	}
 }
@@ -168,7 +168,7 @@ func (c *Components) migratePluginCredentials(ctx context.Context) {
 		FROM plugins
 	`)
 	if err != nil {
-		log.Printf("Warning: failed to list plugins for migration: %v", err)
+		slog.Warn("failed to list plugins for migration", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -184,7 +184,7 @@ func (c *Components) migratePluginCredentials(ctx context.Context) {
 		}
 		var config map[string]any
 		if err := json.Unmarshal(configJSON, &config); err != nil {
-			log.Printf("Warning: failed to parse plugin %s config: %v", name, err)
+			slog.Warn("failed to parse plugin config", "plugin", name, "error", err)
 			continue
 		}
 		needsUpdate := false
@@ -204,9 +204,9 @@ func (c *Components) migratePluginCredentials(ctx context.Context) {
 			continue
 		}
 		if err := c.PluginRepo.Register(ctx, plugin); err != nil {
-			log.Printf("Warning: failed to encrypt plugin %s config: %v", name, err)
+			slog.Warn("failed to encrypt plugin config", "plugin", name, "error", err)
 		} else {
-			log.Printf("Encrypted config for plugin: %s", name)
+			slog.Info("encrypted config for plugin", "plugin", name)
 		}
 	}
 }

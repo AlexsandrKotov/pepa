@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -69,6 +69,16 @@ type AuthConfig struct {
 	BCryptCost      int           `mapstructure:"bcrypt_cost"`
 	TokenExpiry     time.Duration `mapstructure:"token_expiry"`
 	RefreshExpiry   time.Duration `mapstructure:"refresh_expiry"`
+	OIDC            OIDCConfig    `mapstructure:"oidc"`
+}
+
+type OIDCConfig struct {
+	Enabled      bool     `mapstructure:"enabled"`
+	Issuer       string   `mapstructure:"issuer"`
+	ClientID     string   `mapstructure:"client_id"`
+	ClientSecret string   `mapstructure:"client_secret"`
+	RedirectURL  string   `mapstructure:"redirect_url"`
+	Scopes       []string `mapstructure:"scopes"`
 }
 
 type PluginConfig struct {
@@ -130,6 +140,10 @@ func DefaultConfig() *Config {
 			TokenExpiry:     24 * time.Hour,     // 24 hours
 			RefreshExpiry:   7 * 24 * time.Hour, // 7 days
 			BCryptCost:      10,
+			OIDC: OIDCConfig{
+				Enabled: false,
+				Scopes:  []string{"openid", "profile", "email"},
+			},
 		},
 		Plugin: PluginConfig{
 			Dir:             "./plugins",
@@ -226,7 +240,7 @@ func (c *Config) LoadFromEnv() {
 				cost = 4
 			}
 			if cost > 16 {
-				log.Printf("Warning: AUTH_BCRYPT_COST=%d is too high, clamping to 16", cost)
+				slog.Warn("AUTH_BCRYPT_COST too high, clamping to 16", "cost", cost)
 				cost = 16
 			}
 			c.Auth.BCryptCost = cost

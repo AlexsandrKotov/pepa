@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -149,7 +149,7 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 	)
 
 	if !result.Success {
-		log.Printf("Deployment %s failed: %s", deploymentID, result.Message)
+		slog.Info("Deployment failed", "id", deploymentID, "arg2", result.Message)
 	}
 }
 

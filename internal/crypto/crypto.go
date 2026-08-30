@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -63,8 +63,7 @@ func getMasterSecret() (string, error) {
 
 	// Deprecated fallback — log once.
 	fallbackWarned.Do(func() {
-		log.Println("WARNING: ENCRYPTION_KEY is not set; falling back to AUTH_JWT_SECRET. " +
-			"This is deprecated and violates domain separation. Set ENCRYPTION_KEY explicitly.")
+		slog.Warn("ENCRYPTION_KEY is not set; falling back to AUTH_JWT_SECRET. This is deprecated and violates domain separation. Set ENCRYPTION_KEY explicitly.")
 	})
 
 	secret = os.Getenv("AUTH_JWT_SECRET")

@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 
 	sdk "github.com/pepa/pepa/internal/plugin/sdk-go"
 	"github.com/pepa/pepa/internal/provider"
@@ -45,7 +45,7 @@ func (p *ExamplePlugin) send(params []byte, config map[string]string) ([]byte, e
 		return nil, fmt.Errorf("parse params: %w", err)
 	}
 
-	log.Printf("[example] sending to %s: %s", input.Channel, input.Message)
+	slog.Info("sending to ", "arg1", input.Channel, "arg2", input.Message)
 
 	return sdk.ActionOutput(map[string]string{
 		"channel": input.Channel,

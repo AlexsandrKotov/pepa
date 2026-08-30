@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -327,11 +327,11 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 	// Step A: Try quick intent match first
 	if quick := matchQuickIntent(userMessage); quick != nil {
 		intents := []classifiedIntent{*quick}
-		log.Printf("[IntentRouter] Quick intent match: %s (reason: %s)", quick.ToolName, quick.Reason)
+		slog.Info("Quick intent match: (reason: )", "name", quick.ToolName, "arg2", quick.Reason)
 
 		// Process the matched intent
 		for _, intent := range intents {
-			log.Printf("[IntentRouter] Step 0: classified as %s (confidence: %s, reason: %s)", intent.ToolName, intent.Confidence, intent.Reason)
+			slog.Info("Step 0: classified as (confidence: , reason: )", "name", intent.ToolName, "id", intent.Confidence, "arg3", intent.Reason)
 			if intent.ToolName == "__knowledge__" || intent.ToolName == "__direct__" {
 				knowledgeMode = true
 				continue
@@ -340,7 +340,7 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 				break
 			}
 			if !r.toolNames[intent.ToolName] {
-				log.Printf("[IntentRouter] Model hallucinated tool name: %s — skipping", intent.ToolName)
+				slog.Info("Model hallucinated tool name: — skipping", "name", intent.ToolName)
 				allResults = append(allResults, AgentActionResult{
 					ToolName: intent.ToolName, ToolArgs: mustMarshalJSON(intent.Params),
 					Error: "This tool does not exist.", Policy: "forbidden", Timestamp: time.Now(),
@@ -371,7 +371,7 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 				}
 				continue
 			}
-			log.Printf("[IntentRouter] Step 0: executing tool %s with params: %s", intent.ToolName, string(paramsJSON))
+			slog.Info("Step 0: executing tool with params", "name", intent.ToolName, "arg2", string(paramsJSON))
 			toolResult, execErr := r.tools.Execute(ctx, intent.ToolName, paramsJSON)
 			result := AgentActionResult{
 				ToolName: intent.ToolName, ToolArgs: paramsJSON,
@@ -379,9 +379,9 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 			}
 			if execErr != nil {
 				result.Error = execErr.Error()
-				log.Printf("[IntentRouter] Tool %s failed: %v", intent.ToolName, execErr)
+				slog.Info("Tool failed", "name", intent.ToolName, "error", execErr)
 			} else {
-				log.Printf("[IntentRouter] Tool %s returned %d bytes", intent.ToolName, len(toolResult))
+				slog.Info("Tool returned bytes", "name", intent.ToolName, "count", len(toolResult))
 			}
 			allResults = append(allResults, result)
 		}
@@ -393,7 +393,7 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 		totalTokens.TotalTokens += classifyTokens.TotalTokens
 
 		if err != nil {
-			log.Printf("[IntentRouter] Classification failed: %v", err)
+			slog.Info("Classification failed", "error", err)
 			return &AgentResponse{
 				Answer:     fmt.Sprintf("I couldn't determine what you're asking for. Please try rephrasing your question. Error: %v", err),
 				ToolCalls:  allResults,
@@ -402,11 +402,11 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 		} else {
 			// Process all intents from classification
 			for _, intent := range intents {
-				log.Printf("[IntentRouter] Step 0: classified as %s (confidence: %s, reason: %s)", intent.ToolName, intent.Confidence, intent.Reason)
+				slog.Info("Step 0: classified as (confidence: , reason: )", "name", intent.ToolName, "id", intent.Confidence, "arg3", intent.Reason)
 
 				if intent.ToolName == "__knowledge__" || intent.ToolName == "__direct__" {
 					knowledgeMode = true
-					log.Printf("[IntentRouter] Knowledge/direct mode: will synthesize from LLM knowledge")
+					slog.Info("Knowledge/direct mode: will synthesize from LLM knowledge")
 					continue
 				}
 
@@ -420,7 +420,7 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 				}
 
 				if !r.toolNames[intent.ToolName] {
-					log.Printf("[IntentRouter] Model hallucinated tool name: %s — skipping", intent.ToolName)
+					slog.Info("Model hallucinated tool name: — skipping", "name", intent.ToolName)
 					allResults = append(allResults, AgentActionResult{
 						ToolName:  intent.ToolName,
 						ToolArgs:  mustMarshalJSON(intent.Params),
@@ -457,7 +457,7 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 					continue
 				}
 
-				log.Printf("[IntentRouter] Step 0: executing tool %s with params: %s", intent.ToolName, string(paramsJSON))
+				slog.Info("Step 0: executing tool with params", "name", intent.ToolName, "arg2", string(paramsJSON))
 				toolResult, execErr := r.tools.Execute(ctx, intent.ToolName, paramsJSON)
 
 				result := AgentActionResult{
@@ -466,9 +466,9 @@ func (r *IntentRouter) Run(ctx context.Context, userMessage string, opts *RunOpt
 				}
 				if execErr != nil {
 					result.Error = execErr.Error()
-					log.Printf("[IntentRouter] Tool %s failed: %v", intent.ToolName, execErr)
+					slog.Info("Tool failed", "name", intent.ToolName, "error", execErr)
 				} else {
-					log.Printf("[IntentRouter] Tool %s returned %d bytes", intent.ToolName, len(toolResult))
+					slog.Info("Tool returned bytes", "name", intent.ToolName, "count", len(toolResult))
 				}
 				allResults = append(allResults, result)
 			}
@@ -496,7 +496,7 @@ func (r *IntentRouter) RunStream(ctx context.Context, userMessage string, opts *
 		defer close(ch)
 		defer func() {
 			if rv := recover(); rv != nil {
-				log.Printf("[IntentRouter] PANIC in RunStream goroutine: %v", rv)
+				slog.Info("PANIC in RunStream goroutine", "arg1", rv)
 				ch <- &StreamChunk{Type: "text", Content: fmt.Sprintf("Internal error: %v", rv)}
 			}
 		}()
@@ -520,7 +520,7 @@ func (r *IntentRouter) RunStream(ctx context.Context, userMessage string, opts *
 			totalTokens.OutputTokens += classifyTokens.OutputTokens
 			totalTokens.TotalTokens += classifyTokens.TotalTokens
 			if err != nil {
-				log.Printf("[IntentRouter] Classification failed, falling back to direct response: %v", err)
+				slog.Info("Classification failed, falling back to direct response", "error", err)
 				knowledgeMode = true
 				intents = nil // ensure we skip intent processing
 			}
@@ -659,7 +659,7 @@ func (r *IntentRouter) classifyWithRetry(ctx context.Context, userMessage string
 		return intents, tokens, nil
 	}
 
-	log.Printf("[IntentRouter] Classification parse failed, retrying with correction prompt")
+	slog.Info("Classification parse failed, retrying with correction prompt")
 	failedInput := tokens.InputTokens
 	failedOutput := tokens.OutputTokens
 	failedTotal := tokens.TotalTokens
@@ -749,7 +749,7 @@ func (r *IntentRouter) classify(ctx context.Context, userMessage string, prevRes
 			}
 			return result, resp.TokensUsed, nil
 		}
-		log.Printf("[IntentRouter] Failed to parse classification: %v (content: %s)", err, truncate(resp.Content, 200))
+		slog.Info("failed to parse classification", "error", err, "content", truncate(resp.Content, 200))
 		return nil, resp.TokensUsed, fmt.Errorf("failed to parse intent from model response: %w", err)
 	}
 

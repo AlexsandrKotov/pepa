@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -251,7 +251,7 @@ func (r *ScorecardRepository) ListTenantEntityIDs(ctx context.Context, tenantID 
 	// First try entities table
 	rows, err := r.db.Pool.Query(ctx, `SELECT id FROM entities WHERE tenant_id = $1 AND deleted_at IS NULL`, tenantID)
 	if err != nil {
-		log.Printf("[scorecard] entities query failed, falling back to services: %v", err)
+		slog.Info("entities query failed, falling back to services", "error", err)
 	} else {
 		defer rows.Close()
 		var ids []uuid.UUID

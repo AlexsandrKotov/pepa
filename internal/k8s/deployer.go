@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -73,7 +73,7 @@ func (c *Client) Deploy(ctx context.Context, spec DeploySpec) (*DeployResult, er
 
 	// Ensure namespace exists
 	if err := c.ensureNamespace(ctx, spec.Namespace); err != nil {
-		log.Printf("WARN: ensure namespace %q: %v", spec.Namespace, err)
+		slog.Info("WARN: ensure namespace ", "name", spec.Namespace, "error", err)
 		// Continue anyway — namespace might already exist or be auto-created
 	}
 
@@ -94,7 +94,7 @@ func (c *Client) Deploy(ctx context.Context, spec DeploySpec) (*DeployResult, er
 			if err != nil {
 				return nil, fmt.Errorf("create deployment %s/%s: %w", spec.Namespace, deploy.Name, err)
 			}
-			log.Printf("Created deployment %s/%s", spec.Namespace, deploy.Name)
+			slog.Info("Created deployment /", "name", spec.Namespace, "name", deploy.Name)
 		} else {
 			return nil, fmt.Errorf("get deployment %s/%s: %w", spec.Namespace, deploy.Name, err)
 		}
@@ -105,7 +105,7 @@ func (c *Client) Deploy(ctx context.Context, spec DeploySpec) (*DeployResult, er
 		if err != nil {
 			return nil, fmt.Errorf("update deployment %s/%s: %w", spec.Namespace, deploy.Name, err)
 		}
-		log.Printf("Updated deployment %s/%s", spec.Namespace, deploy.Name)
+		slog.Info("Updated deployment /", "name", spec.Namespace, "name", deploy.Name)
 	}
 
 	// Create Service if specified
@@ -119,7 +119,7 @@ func (c *Client) Deploy(ctx context.Context, spec DeploySpec) (*DeployResult, er
 				if err != nil {
 					return nil, fmt.Errorf("create service %s/%s: %w", spec.Namespace, svc.Name, err)
 				}
-				log.Printf("Created service %s/%s", spec.Namespace, svc.Name)
+				slog.Info("Created service /", "name", spec.Namespace, "name", svc.Name)
 			} else {
 				return nil, fmt.Errorf("get service %s/%s: %w", spec.Namespace, svc.Name, err)
 			}
@@ -131,7 +131,7 @@ func (c *Client) Deploy(ctx context.Context, spec DeploySpec) (*DeployResult, er
 			if err != nil {
 				return nil, fmt.Errorf("update service %s/%s: %w", spec.Namespace, svc.Name, err)
 			}
-			log.Printf("Updated service %s/%s", spec.Namespace, svc.Name)
+			slog.Info("Updated service /", "name", spec.Namespace, "name", svc.Name)
 		}
 	}
 
@@ -161,7 +161,7 @@ func (c *Client) ensureNamespace(ctx context.Context, namespace string) error {
 			if err != nil && !errors.IsAlreadyExists(err) {
 				return fmt.Errorf("create namespace %s: %w", namespace, err)
 			}
-			log.Printf("Created namespace %s", namespace)
+			slog.Info("Created namespace", "name", namespace)
 		} else {
 			return fmt.Errorf("get namespace %s: %w", namespace, err)
 		}

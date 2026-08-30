@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/pipeline"
 	"github.com/pepa/pepa/pkg/models"
 )
 
@@ -22,6 +23,7 @@ func registerPipelineSourceRoutes(r *gin.RouterGroup, deps Dependencies) {
 		sources.PUT("/:id", updatePipelineSource(deps))
 		sources.DELETE("/:id", deletePipelineSource(deps))
 		sources.POST("/:id/resolve-schema", resolvePipelineSchema(deps))
+		sources.POST("/:id/sync-runs", syncPipelineRuns(deps))
 	}
 }
 
@@ -235,6 +237,117 @@ func resolvePipelineSchema(deps Dependencies) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, schema)
+	}
+}
+
+// ── Pipeline Runs ────────────────────────────────────────────────────────────
+
+func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sourceID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+
+		source, err := deps.Repos.PipelineSource.Get(c.Request.Context(), sourceID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.PipelineRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "pipeline registry not available"})
+			return
+		}
+
+		provider, err := deps.PipelineRegistry.Get(source.SourceType)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Check if the provider supports listing remote runs
+		listProvider, ok := provider.(pipeline.ListRunsProvider)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "this engine type does not support syncing runs"})
+			return
+		}
+
+		config := resolvePipelineConfig(c.Request.Context(), deps, source, tenantID)
+
+		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
+		if perPage > 100 {
+			perPage = 100
+		}
+
+		remoteRuns, err := listProvider.ListRemoteRuns(c.Request.Context(), config, perPage)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		synced := 0
+		for _, rs := range remoteRuns {
+			// Parse created_at from remote
+			var createdAt time.Time
+			if rs.CreatedAt != "" {
+				createdAt, _ = time.Parse(time.RFC3339, rs.CreatedAt)
+			}
+			if createdAt.IsZero() {
+				createdAt = time.Now().UTC()
+			}
+
+			run := &models.PipelineRun{
+				TenantID:       tenantID,
+				SourceID:       sourceID,
+				ExternalRunID:  rs.ExternalRunID,
+				ExternalURL:    rs.ExternalURL,
+				Status:         models.PipelineRunStatus(rs.Status),
+				ExternalStatus: rs.Status,
+				DurationMs:     rs.DurationMs,
+				TriggerType:    "sync",
+				CreatedAt:      createdAt,
+				UpdatedAt:      time.Now().UTC(),
+			}
+
+			if err := deps.Repos.PipelineRun.UpsertByExternalRunID(c.Request.Context(), run); err != nil {
+				continue
+			}
+			synced++
+
+			// Find the run we just upserted to get its ID
+			existing, findErr := deps.Repos.PipelineRun.FindByExternalRunID(c.Request.Context(), sourceID, rs.ExternalRunID)
+			if findErr != nil || existing == nil {
+				continue
+			}
+
+			// Sync jobs: delete old, insert new
+			if len(rs.Jobs) > 0 {
+				_ = deps.Repos.PipelineRun.DeleteJobsByRunID(c.Request.Context(), existing.ID)
+				for _, j := range rs.Jobs {
+					stepsJSON, _ := json.Marshal(j.Steps)
+					if stepsJSON == nil {
+						stepsJSON = json.RawMessage("[]")
+					}
+					job := &models.PipelineRunJob{
+						RunID:         existing.ID,
+						ExternalJobID: j.ExternalJobID,
+						Name:          j.Name,
+						Stage:         j.Stage,
+						Status:        j.Status,
+						LogURL:        j.LogURL,
+						RunnerName:    j.RunnerName,
+						Steps:         stepsJSON,
+					}
+					_ = deps.Repos.PipelineRun.CreateJob(c.Request.Context(), job)
+				}
+			}
+		}
+
+		logAudit(deps, c, "sync", "pipeline_runs", sourceID.String(), nil, gin.H{"synced": synced})
+		c.JSON(http.StatusOK, gin.H{"synced": synced, "total_remote": len(remoteRuns)})
 	}
 }
 

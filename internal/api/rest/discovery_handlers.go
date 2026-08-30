@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -149,7 +149,7 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 					results := make([]clusterResult, len(clusterList))
 					for i := range clusterList {
 						if !clusterList[i].IsActive {
-							log.Printf("discovery: skipping cluster %s (not active)", clusterList[i].Name)
+							slog.Info("discovery: skipping cluster (not active)", "name", clusterList[i].Name)
 							continue
 						}
 						wg.Add(1)
@@ -158,7 +158,7 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 							cluster := clusterList[idx]
 							kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(ctx, cluster.ID, uuid.Nil)
 							if err != nil || kubeconfig == "" {
-								log.Printf("discovery: skipping cluster %s (kubeconfig unavailable: err=%v, empty=%v)", cluster.Name, err, kubeconfig == "")
+								slog.Info("discovery: skipping cluster (kubeconfig unavailable: err=, empty=)", "name", cluster.Name, "error", err, "arg3", kubeconfig == "")
 								return
 							}
 							var clusterSvcs []DiscoveredService
@@ -166,9 +166,9 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 							// Discover FluxCD resources — try for all clusters (auto-detect)
 							fluxSvcs, err := discoverFromFluxCD(ctx, kubeconfig, cluster.Name)
 							if err != nil {
-								log.Printf("discovery: fluxcd error for cluster %s: %v", cluster.Name, err)
+								slog.Info("discovery: fluxcd error for cluster ", "name", cluster.Name, "error", err)
 							} else {
-								log.Printf("discovery: fluxcd found %d services for cluster %s", len(fluxSvcs), cluster.Name)
+								slog.Info("discovery: fluxcd found services for cluster", "count", len(fluxSvcs), "cluster", cluster.Name)
 								clusterSvcs = append(clusterSvcs, fluxSvcs...)
 							}
 
@@ -177,14 +177,14 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 							if err != nil {
 								// ArgoCD CRDs not installed — this is normal, no need to log
 							} else {
-								log.Printf("discovery: argocd found %d services for cluster %s", len(argoSvcs), cluster.Name)
+								slog.Info("discovery: argocd found services for cluster", "count", len(argoSvcs), "cluster", cluster.Name)
 								clusterSvcs = append(clusterSvcs, argoSvcs...)
 							}
 
 							// Discover Kubernetes deployments
 							k8sSvcs, err := discoverFromKubernetesCluster(ctx, kubeconfig, cluster.Name)
 							if err != nil {
-								log.Printf("discovery: k8s error for %s: %v", cluster.Name, err)
+								slog.Info("discovery: k8s error for ", "name", cluster.Name, "error", err)
 							}
 							// Filter out already discovered within this cluster
 							k8sAdded := 0
@@ -204,7 +204,7 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 									k8sSkipped++
 								}
 							}
-							log.Printf("discovery: k8s found %d deployments for cluster %s (%d added, %d deduplicated)", len(k8sSvcs), cluster.Name, k8sAdded, k8sSkipped)
+							slog.Info("discovery: k8s found deployments for cluster", "total", len(k8sSvcs), "cluster", cluster.Name, "added", k8sAdded, "deduplicated", k8sSkipped)
 							results[idx] = clusterResult{services: clusterSvcs}
 						}(i)
 					}
@@ -217,14 +217,7 @@ func discoverServices(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 
-			log.Printf("discovery: total services discovered: %d (pepa: %d, argocd: %d, fluxcd: %d, docker: %d, manual: %d)",
-				len(allServices),
-				countBySource(allServices, "pepa"),
-				countBySource(allServices, "argocd"),
-				countBySource(allServices, "fluxcd"),
-				countBySource(allServices, "docker")+countBySource(allServices, "docker-container"),
-				countBySource(allServices, "manual"),
-			)
+			slog.Info("discovery: total services discovered", "total", len(allServices), "pepa", countBySource(allServices, "pepa"), "argocd", countBySource(allServices, "argocd"), "fluxcd", countBySource(allServices, "fluxcd"), "docker", countBySource(allServices, "docker")+countBySource(allServices, "docker-container"), "manual", countBySource(allServices, "manual"))
 
 			// Update cache
 			discoveryCacheMu.Lock()
@@ -934,7 +927,7 @@ func getPEPAServices(ctx context.Context, deps Dependencies) ([]DiscoveredServic
 		// RLS will scope to the current tenant automatically
 		clusterList, err := deps.Repos.Cluster.List(ctx, uuid.UUID{})
 		if err != nil {
-			log.Printf("discovery: failed to list clusters for PEPA services: %v", err)
+			slog.Info("discovery: failed to list clusters for PEPA services", "error", err)
 		} else {
 			clusterNames = make(map[string]string, len(clusterList))
 			for _, c := range clusterList {
@@ -995,7 +988,7 @@ func getPEPAServices(ctx context.Context, deps Dependencies) ([]DiscoveredServic
 		})
 	}
 
-	log.Printf("discovery: found %d PEPA services in database", len(services))
+	slog.Info("discovery: found PEPA services in database", "count", len(services))
 	return services, nil
 }
 
@@ -1122,7 +1115,7 @@ func discoverDockerContainers(ctx context.Context, deps Dependencies, tenantID u
 		// Get decrypted credentials for Docker CLI connection
 		decrypted, err := deps.Repos.DockerHost.GetHostDecrypted(ctx, host.ID, tenantID)
 		if err != nil {
-			log.Printf("discovery: failed to decrypt host %s: %v", host.Name, err)
+			slog.Info("discovery: failed to decrypt host ", "name", host.Name, "error", err)
 			continue
 		}
 
@@ -1140,7 +1133,7 @@ func discoverDockerContainers(ctx context.Context, deps Dependencies, tenantID u
 		containers, err := client.ListContainers(discCtx, false)
 		cancel()
 		if err != nil {
-			log.Printf("discovery: docker ps error for %s: %v", host.Name, err)
+			slog.Info("discovery: docker ps error for ", "name", host.Name, "error", err)
 			continue
 		}
 
@@ -1244,7 +1237,7 @@ func getDiscoveryNamespaces(deps Dependencies) gin.HandlerFunc {
 					}
 					ns, err := getNamespacesFromCluster(ctx, kubeconfig)
 					if err != nil {
-						log.Printf("discovery: namespaces error for %s: %v", cluster.Name, err)
+						slog.Info("discovery: namespaces error for ", "name", cluster.Name, "error", err)
 						continue
 					}
 					for _, n := range ns {

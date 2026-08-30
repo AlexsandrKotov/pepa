@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -158,7 +158,7 @@ func (q *Queue) PromoteDelayedJobs(ctx context.Context) error {
 	}
 
 	if result > 0 {
-		log.Printf("queue: promoted %d delayed job(s)", result)
+		slog.Info("queue: promoted delayed job(s)", "arg1", result)
 	}
 	return nil
 }

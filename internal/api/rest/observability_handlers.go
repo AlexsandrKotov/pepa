@@ -2,7 +2,7 @@ package rest
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -187,7 +187,7 @@ func observabilityLogs(deps Dependencies) gin.HandlerFunc {
 			LIMIT $2 OFFSET $3
 		`, tenantID, limit, offset)
 		if err != nil {
-			log.Printf("observabilityLogs: query error: %v", err)
+			slog.Info("observabilityLogs: query error", "error", err)
 			c.JSON(http.StatusOK, gin.H{"logs": []interface{}{}, "total": 0})
 			return
 		}
@@ -240,7 +240,7 @@ func observabilityTraces(deps Dependencies) gin.HandlerFunc {
 			LIMIT $1
 		`, limit)
 		if err != nil {
-			log.Printf("observabilityTraces: query error: %v", err)
+			slog.Info("observabilityTraces: query error", "error", err)
 			c.JSON(http.StatusOK, gin.H{"traces": []interface{}{}, "total": 0})
 			return
 		}

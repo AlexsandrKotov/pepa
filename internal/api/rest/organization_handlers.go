@@ -1,7 +1,7 @@
 package rest
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -338,7 +338,7 @@ func createWorkspace(deps Dependencies) gin.HandlerFunc {
 		// Seed default RBAC roles for the new workspace (idempotent).
 		if deps.RBAC != nil {
 			if err := deps.RBAC.SeedDefaultRoles(ctx, id); err != nil {
-				log.Printf("createWorkspace: failed to seed RBAC roles: %v", err)
+				slog.Info("createWorkspace: failed to seed RBAC roles", "error", err)
 				// Non-fatal: workspace is already created, roles can be seeded later.
 			}
 		}

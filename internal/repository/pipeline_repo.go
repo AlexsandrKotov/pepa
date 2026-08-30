@@ -641,14 +641,19 @@ func (r *PipelineRunRepository) CreateJob(ctx context.Context, job *models.Pipel
 		job.CreatedAt = now
 	}
 
+	steps := job.Steps
+	if steps == nil {
+		steps = json.RawMessage("[]")
+	}
+
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO pipeline_run_jobs (id, run_id, external_job_id, name, stage, status,
 		                              started_at, completed_at, duration_ms, log_text,
-		                              log_url, runner_name, allow_failure, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		                              log_url, runner_name, allow_failure, steps, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 	`, job.ID, job.RunID, job.ExternalJobID, job.Name, job.Stage, job.Status,
 		job.StartedAt, job.CompletedAt, job.DurationMs, job.LogText, job.LogURL,
-		job.RunnerName, job.AllowFailure, job.CreatedAt)
+		job.RunnerName, job.AllowFailure, steps, job.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("create run job: %w", err)
 	}
@@ -665,17 +670,22 @@ func (r *PipelineRunRepository) UpsertJob(ctx context.Context, job *models.Pipel
 		job.CreatedAt = now
 	}
 
+	steps := job.Steps
+	if steps == nil {
+		steps = json.RawMessage("[]")
+	}
+
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO pipeline_run_jobs (id, run_id, external_job_id, name, stage, status,
 		                              started_at, completed_at, duration_ms, log_text,
-		                              log_url, runner_name, allow_failure, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		                              log_url, runner_name, allow_failure, steps, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		ON CONFLICT (run_id, external_job_id) WHERE external_job_id != ''
 		DO UPDATE SET status=$6, started_at=$7, completed_at=$8, duration_ms=$9,
-		              log_text=$10, log_url=$11, runner_name=$12
+		              log_text=$10, log_url=$11, runner_name=$12, steps=$14
 	`, job.ID, job.RunID, job.ExternalJobID, job.Name, job.Stage, job.Status,
 		job.StartedAt, job.CompletedAt, job.DurationMs, job.LogText, job.LogURL,
-		job.RunnerName, job.AllowFailure, job.CreatedAt)
+		job.RunnerName, job.AllowFailure, steps, job.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert run job: %w", err)
 	}
@@ -687,7 +697,8 @@ func (r *PipelineRunRepository) ListJobs(ctx context.Context, runID uuid.UUID) (
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, run_id, COALESCE(external_job_id,''), name, COALESCE(stage,''),
 		       status, started_at, completed_at, duration_ms, COALESCE(log_text,''),
-		       COALESCE(log_url,''), COALESCE(runner_name,''), allow_failure, created_at
+		       COALESCE(log_url,''), COALESCE(runner_name,''), allow_failure,
+		       COALESCE(steps,'[]'::jsonb), created_at
 		FROM pipeline_run_jobs
 		WHERE run_id = $1
 		ORDER BY created_at ASC
@@ -704,7 +715,7 @@ func (r *PipelineRunRepository) ListJobs(ctx context.Context, runID uuid.UUID) (
 
 		err := rows.Scan(&j.ID, &j.RunID, &extJobID, &j.Name, &stage, &j.Status,
 			&j.StartedAt, &j.CompletedAt, &j.DurationMs, &logText, &logURL,
-			&runnerName, &j.AllowFailure, &j.CreatedAt)
+			&runnerName, &j.AllowFailure, &j.Steps, &j.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("scan run job: %w", err)
 		}
@@ -773,4 +784,111 @@ func scanRun(rows pgx.Rows) (*models.PipelineRun, error) {
 		run.ErrorMessage = errMsg.String
 	}
 	return &run, nil
+}
+
+// UpsertByExternalRunID creates or updates a run matched by source_id + external_run_id.
+// Returns the run with its ID populated.
+func (r *PipelineRunRepository) UpsertByExternalRunID(ctx context.Context, run *models.PipelineRun) error {
+	now := time.Now().UTC()
+
+	params := run.Parameters
+	if params == nil {
+		params = json.RawMessage("{}")
+	}
+	if run.Status == "" {
+		run.Status = models.PipelineRunPending
+	}
+	if run.TriggerType == "" {
+		run.TriggerType = "sync"
+	}
+
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO pipeline_runs (id, tenant_id, source_id, preset_id, external_run_id,
+		                          external_url, parameters, status, external_status,
+		                          started_at, completed_at, duration_ms, logs, logs_url,
+		                          job_details, triggered_by, trigger_type, error_message,
+		                          created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+		ON CONFLICT (source_id, external_run_id) WHERE external_run_id != ''
+		DO UPDATE SET status=$8, external_status=$9, external_url=$6,
+		              duration_ms=$12, updated_at=$20
+	`, uuid.New(), run.TenantID, run.SourceID, run.PresetID, run.ExternalRunID,
+		run.ExternalURL, params, run.Status, run.ExternalStatus, run.StartedAt,
+		run.CompletedAt, run.DurationMs, run.Logs, run.LogsURL, run.JobDetails,
+		run.TriggeredBy, run.TriggerType, run.ErrorMessage, now, now)
+	if err != nil {
+		return fmt.Errorf("upsert pipeline run by external id: %w", err)
+	}
+	return nil
+}
+
+// FindByExternalRunID looks up a run by source_id + external_run_id.
+func (r *PipelineRunRepository) FindByExternalRunID(ctx context.Context, sourceID uuid.UUID, externalRunID string) (*models.PipelineRun, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, source_id, preset_id, COALESCE(external_run_id,''),
+		       COALESCE(external_url,''), COALESCE(parameters,'{}'::jsonb), status,
+		       COALESCE(external_status,''), started_at, completed_at, duration_ms,
+		       COALESCE(logs,''), COALESCE(logs_url,''), job_details,
+		       triggered_by, trigger_type, COALESCE(error_message,''),
+		       created_at, updated_at
+		FROM pipeline_runs
+		WHERE source_id = $1 AND external_run_id = $2
+	`, sourceID, externalRunID)
+
+	var run models.PipelineRun
+	var paramsJSON, jobDetails []byte
+	var presetID, extRunID, extURL, extStatus, logs, logsURL, triggeredBy, errMsg sql.NullString
+
+	err := row.Scan(&run.ID, &run.TenantID, &run.SourceID, &presetID, &extRunID,
+		&extURL, &paramsJSON, &run.Status, &extStatus, &run.StartedAt,
+		&run.CompletedAt, &run.DurationMs, &logs, &logsURL, &jobDetails,
+		&triggeredBy, &run.TriggerType, &errMsg, &run.CreatedAt, &run.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find run by external id: %w", err)
+	}
+	if presetID.Valid {
+		uid := uuid.MustParse(presetID.String)
+		run.PresetID = &uid
+	}
+	if extRunID.Valid {
+		run.ExternalRunID = extRunID.String
+	}
+	if extURL.Valid {
+		run.ExternalURL = extURL.String
+	}
+	if paramsJSON != nil {
+		run.Parameters = paramsJSON
+	}
+	if extStatus.Valid {
+		run.ExternalStatus = extStatus.String
+	}
+	if logs.Valid {
+		run.Logs = logs.String
+	}
+	if logsURL.Valid {
+		run.LogsURL = logsURL.String
+	}
+	if jobDetails != nil {
+		run.JobDetails = jobDetails
+	}
+	if triggeredBy.Valid {
+		uid := uuid.MustParse(triggeredBy.String)
+		run.TriggeredBy = &uid
+	}
+	if errMsg.Valid {
+		run.ErrorMessage = errMsg.String
+	}
+	return &run, nil
+}
+
+// DeleteJobsByRunID removes all jobs for a run (used before re-syncing).
+func (r *PipelineRunRepository) DeleteJobsByRunID(ctx context.Context, runID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, "DELETE FROM pipeline_run_jobs WHERE run_id = $1", runID)
+	if err != nil {
+		return fmt.Errorf("delete run jobs: %w", err)
+	}
+	return nil
 }

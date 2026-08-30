@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -124,7 +124,7 @@ func (a *Agent) SetSystemInstruction(instruction string) {
 // Run executes the agent using the configured mode.
 func (a *Agent) Run(ctx context.Context, task *AgentTask, userMessage string) (*AgentResponse, error) {
 	if a.mode == AgentModePrompt {
-		log.Printf("[AI Agent] Running in PROMPT mode (intent classification + synthesis)")
+		slog.Info("Running in PROMPT mode (intent classification + synthesis)")
 		var history []Message
 		var sysInstruction string
 		if task != nil {
@@ -139,7 +139,7 @@ func (a *Agent) Run(ctx context.Context, task *AgentTask, userMessage string) (*
 		return a.router.Run(ctx, userMessage, &RunOptions{History: history, SystemInstruction: sysInstruction})
 	}
 
-	log.Printf("[AI Agent] Running in NATIVE mode (function calling)")
+	slog.Info("Running in NATIVE mode (function calling)")
 	resp, err := a.runNative(ctx, task, userMessage)
 	if err != nil {
 		// Auto-fallback: if native mode fails with 413 (token overflow) and we
@@ -147,7 +147,7 @@ func (a *Agent) Run(ctx context.Context, task *AgentTask, userMessage string) (*
 		// definitions and thus uses far fewer tokens.
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "too large") && a.router != nil {
-			log.Printf("[AI Agent] Native mode failed with 413, falling back to prompt mode")
+			slog.Info("Native mode failed with 413, falling back to prompt mode")
 			var history []Message
 			var sysInstruction string
 			if task != nil {
@@ -209,7 +209,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 	// This dramatically reduces token usage (e.g. "what is K8s?" → 0 tools,
 	// "list services" → 4 tools instead of 30+).
 	selectedTools := selectToolsForMessage(a.tools, userMessage)
-	log.Printf("[AI Agent] Dynamic tool selection: %d/%d tools selected for message", len(selectedTools), len(a.tools.List()))
+	slog.Info("dynamic tool selection", "selected", len(selectedTools), "total", len(a.tools.List()))
 
 	opts := &ChatOptions{
 		MaxTokens:  4096,
@@ -230,11 +230,11 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 			errMsg := err.Error()
 			// Provide actionable messages for common provider errors
 			if strings.Contains(errMsg, "413") || strings.Contains(errMsg, "too large") || strings.Contains(errMsg, "rate_limit") {
-				log.Printf("[AI Agent] Token limit exceeded: %v", err)
+				slog.Info("Token limit exceeded", "error", err)
 				return nil, fmt.Errorf("the request is too large for this model. Try switching to 'Prompt' mode in the toolbar above, or start a new chat to clear conversation history")
 			}
 			if strings.Contains(errMsg, "404") {
-				log.Printf("[AI Agent] Model not found (404): %v", err)
+				slog.Info("Model not found (404)", "error", err)
 				return nil, fmt.Errorf("the selected model or endpoint was not found. Please check your AI provider settings in Connections")
 			}
 			return nil, fmt.Errorf("agent LLM call failed: %w", err)
@@ -245,7 +245,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 		totalTokens.TotalTokens += resp.TokensUsed.TotalTokens
 		modelUsed = resp.ModelUsed
 
-		log.Printf("[AI Agent] Iteration %d: LLM returned %d tool calls, finish_reason=%s, content_len=%d", iteration, len(resp.ToolCalls), resp.FinishReason, len(resp.Content))
+		slog.Info("Iteration : LLM returned tool calls, finish_reason=, content_len=", "arg1", iteration, "count", len(resp.ToolCalls), resp.FinishReason, len(resp.Content))
 
 		// If no tool calls — we have the final answer
 		if len(resp.ToolCalls) == 0 {
@@ -254,7 +254,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 				// Only re-prompt if the message looks like it needs platform data.
 				needsData := looksLikeDataQuery(userMessage)
 				if needsData {
-					log.Printf("[AI Agent] WARNING: LLM answered without calling tools for data query — re-prompting")
+					slog.Info("WARNING: LLM answered without calling tools for data query — re-prompting")
 					messages = append(messages, Message{Role: "assistant", Content: resp.Content})
 					messages = append(messages, Message{
 						Role:    "user",
@@ -269,7 +269,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 					totalTokens.TotalTokens += resp2.TokensUsed.TotalTokens
 					modelUsed = resp2.ModelUsed
 					if len(resp2.ToolCalls) == 0 {
-						log.Printf("[AI Agent] WARNING: Model did not call tools after re-prompt (model=%s)", resp2.ModelUsed)
+						slog.Info("WARNING: Model did not call tools after re-prompt (model=)", "arg1", resp2.ModelUsed)
 						return &nativeToolLoopResult{
 							messages:    messages,
 							results:     results,
@@ -346,7 +346,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 					return
 				}
 
-				log.Printf("[AI Agent] Calling tool: %s with args: %s", tc.Function.Name, string(toolArgs))
+				slog.Info("Calling tool: with args", "name", tc.Function.Name, "arg2", string(toolArgs))
 				toolResult, execErr := a.tools.Execute(ctx, tc.Function.Name, toolArgs)
 
 				r := AgentActionResult{
@@ -357,9 +357,9 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 				if execErr != nil {
 					r.Error = execErr.Error()
 					content = "Error: " + execErr.Error()
-					log.Printf("[AI Agent] Tool %s failed: %v", tc.Function.Name, execErr)
+					slog.Info("Tool failed", "name", tc.Function.Name, "error", execErr)
 				} else {
-					log.Printf("[AI Agent] Tool %s returned %d bytes", tc.Function.Name, len(toolResult))
+					slog.Info("Tool returned bytes", "name", tc.Function.Name, "count", len(toolResult))
 				}
 				outcomes[idx] = toolOutcome{
 					result: r,
@@ -578,7 +578,7 @@ func (a *Agent) Stream(ctx context.Context, task *AgentTask, userMessage string)
 			// Auto-fallback: if native mode fails with 413, retry via prompt mode streaming
 			errMsg := err.Error()
 			if strings.Contains(errMsg, "too large") && a.router != nil {
-				log.Printf("[AI Agent] Native streaming failed with 413, falling back to prompt mode")
+				slog.Info("Native streaming failed with 413, falling back to prompt mode")
 				var history []Message
 				var sysInstruction string
 				if task != nil {

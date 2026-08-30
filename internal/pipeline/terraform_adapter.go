@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // TerraformConfig is the expected shape of PipelineSource.Config for terraform sources.
@@ -38,7 +40,21 @@ func (c *TerraformConfig) isLocal() bool {
 	return c.LocalPath != "" && c.RepoURL == ""
 }
 
-// TerraformAdapter implements Provider for Terraform pipelines.
+// ── Active run tracking ────────────────────────────────────────
+
+// tfRun tracks an in-flight terraform execution.
+type tfRun struct {
+	cancel context.CancelFunc
+	logBuf *bytes.Buffer
+	status string // pending, running, success, failed, cancelled
+}
+
+var (
+	tfRunsMu sync.RWMutex
+	tfRuns   = make(map[string]*tfRun)
+)
+
+// TerraformAdapter implements Provider and EnhancedProvider for Terraform pipelines.
 type TerraformAdapter struct{}
 
 func NewTerraformAdapter() *TerraformAdapter {
@@ -182,6 +198,7 @@ func (a *TerraformAdapter) ResolveSchema(ctx context.Context, raw json.RawMessag
 }
 
 // Trigger runs terraform commands with the given parameters.
+// Output is captured and stored for later retrieval via Logs().
 func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, params map[string]any) (*TriggerResult, error) {
 	cfg, err := parseTerraformConfig(raw)
 	if err != nil {
@@ -213,15 +230,36 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 		action = fmt.Sprintf("%v", a)
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	logBuf := &bytes.Buffer{}
+	runID := fmt.Sprintf("tf-%s", randomRunID())
+
+	// Register the run for tracking
+	tfRunsMu.Lock()
+	tfRuns[runID] = &tfRun{cancel: cancel, logBuf: logBuf, status: "running"}
+	tfRunsMu.Unlock()
+	defer func() {
+		tfRunsMu.Lock()
+		delete(tfRuns, runID)
+		tfRunsMu.Unlock()
+	}()
+
 	// Run terraform init
-	initCmd := exec.CommandContext(ctx, "terraform", "init", "-input=false")
+	initCmd := exec.CommandContext(runCtx, "terraform", "init", "-input=false")
 	initCmd.Dir = workDir
-	if output, err := initCmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("terraform init failed: %s: %w", string(output), err)
+	initCmd.Stdout = logBuf
+	initCmd.Stderr = logBuf
+	if err := initCmd.Run(); err != nil {
+		tfRunsMu.Lock()
+		tfRuns[runID].status = "failed"
+		tfRunsMu.Unlock()
+		return nil, fmt.Errorf("terraform init failed: %s: %w", logBuf.String(), err)
 	}
 
 	// Build terraform command args
-	args := []string{action, "-input=false"}
+	args := []string{action, "-input=false", "-no-color"}
 
 	if autoApprove, ok := params["auto_approve"]; ok && (autoApprove == "true" || autoApprove == true) {
 		args = append(args, "-auto-approve")
@@ -235,14 +273,25 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 		args = append(args, "-var", fmt.Sprintf("%s=%v", k, v))
 	}
 
-	tfCmd := exec.CommandContext(ctx, "terraform", args...)
+	tfCmd := exec.CommandContext(runCtx, "terraform", args...)
 	tfCmd.Dir = workDir
-	if output, err := tfCmd.CombinedOutput(); err != nil {
-		_ = output
-		return nil, fmt.Errorf("terraform %s failed: %w", action, err)
+	tfCmd.Stdout = logBuf
+	tfCmd.Stderr = logBuf
+	if err := tfCmd.Run(); err != nil {
+		tfRunsMu.Lock()
+		tfRuns[runID].status = "failed"
+		tfRunsMu.Unlock()
+		return &TriggerResult{
+			ExternalRunID: runID,
+			ExternalURL:   "",
+			Status:        "failed",
+		}, fmt.Errorf("terraform %s failed: %w", action, err)
 	}
 
-	runID := fmt.Sprintf("tf-%d", os.Getpid())
+	tfRunsMu.Lock()
+	tfRuns[runID].status = "success"
+	tfRunsMu.Unlock()
+
 	return &TriggerResult{
 		ExternalRunID: runID,
 		ExternalURL:   "",
@@ -250,27 +299,226 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 	}, nil
 }
 
-// Status returns the status of a Terraform run (not tracked externally).
+// Plan runs terraform plan and returns a structured preview of changes.
+func (a *TerraformAdapter) Plan(ctx context.Context, raw json.RawMessage, params map[string]any) (*PlanResult, error) {
+	cfg, err := parseTerraformConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	baseDir, cleanup, err := resolveTerraformDir(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	workDir := filepath.Join(baseDir, filepath.Clean(cfg.WorkingDir))
+	if cfg.isLocal() && filepath.IsAbs(cfg.WorkingDir) {
+		workDir = filepath.Clean(cfg.WorkingDir)
+	}
+	if !cfg.isLocal() {
+		absWorkDir, _ := filepath.Abs(workDir)
+		absBaseDir, _ := filepath.Abs(baseDir)
+		if !strings.HasPrefix(absWorkDir, absBaseDir) {
+			return nil, fmt.Errorf("invalid working_dir path")
+		}
+	}
+
+	// terraform init
+	initCmd := exec.CommandContext(ctx, "terraform", "init", "-input=false", "-no-color")
+	initCmd.Dir = workDir
+	if output, err := initCmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("terraform init failed: %s: %w", string(output), err)
+	}
+
+	// terraform plan with JSON output
+	// planFile is written to a validated workDir (already checked above), so the path is safe.
+	planFile := filepath.Join(workDir, "tfplan")
+	planArgs := []string{"plan", "-input=false", "-no-color", "-out=" + planFile}
+	for k, v := range params {
+		if k == "tf_action" || k == "auto_approve" || k == "ref" {
+			continue
+		}
+		planArgs = append(planArgs, "-var", fmt.Sprintf("%s=%v", k, v))
+	}
+
+	planCmd := exec.CommandContext(ctx, "terraform", planArgs...)
+	planCmd.Dir = workDir
+	planOutput, planErr := planCmd.CombinedOutput()
+
+	// Try to parse the plan file for structured output
+	result := &PlanResult{
+		OutputText: string(planOutput),
+	}
+
+	// Parse summary from plan output text
+	if planErr != nil {
+		// exit code 2 means changes detected (not an error)
+		exitErr, ok := planErr.(*exec.ExitError)
+		if !ok || exitErr.ExitCode() != 2 {
+			return result, nil
+		}
+	}
+
+	// Parse add/change/destroy counts from plan output
+	// Terraform v1.x format: "Plan: 1 to add, 2 to change, 3 to destroy."
+	addRe := regexp.MustCompile(`(\d+)\s+to add`)
+	changeRe := regexp.MustCompile(`(\d+)\s+to change`)
+	destroyRe := regexp.MustCompile(`(\d+)\s+to destroy`)
+	// Fallback for newer Terraform formats
+	createRe := regexp.MustCompile(`Create:\s*(\d+)`)
+	updateRe := regexp.MustCompile(`Update:\s*(\d+)`)
+	deleteRe := regexp.MustCompile(`Delete:\s*(\d+)`)
+
+	if m := addRe.FindSubmatch(planOutput); len(m) > 1 {
+		fmt.Sscanf(string(m[1]), "%d", &result.AddCount)
+	} else if m := createRe.FindSubmatch(planOutput); len(m) > 1 {
+		fmt.Sscanf(string(m[1]), "%d", &result.AddCount)
+	}
+	if m := changeRe.FindSubmatch(planOutput); len(m) > 1 {
+		fmt.Sscanf(string(m[1]), "%d", &result.ChangeCount)
+	} else if m := updateRe.FindSubmatch(planOutput); len(m) > 1 {
+		fmt.Sscanf(string(m[1]), "%d", &result.ChangeCount)
+	}
+	if m := destroyRe.FindSubmatch(planOutput); len(m) > 1 {
+		fmt.Sscanf(string(m[1]), "%d", &result.DestroyCount)
+	} else if m := deleteRe.FindSubmatch(planOutput); len(m) > 1 {
+		fmt.Sscanf(string(m[1]), "%d", &result.DestroyCount)
+	}
+
+	result.HasChanges = result.AddCount > 0 || result.ChangeCount > 0 || result.DestroyCount > 0
+
+	// Try to get JSON representation via show
+	showCmd := exec.CommandContext(ctx, "terraform", "show", "-json", planFile)
+	showCmd.Dir = workDir
+	if jsonOutput, err := showCmd.Output(); err == nil {
+		result.OutputJSON = string(jsonOutput)
+	}
+
+	// Clean up plan file
+	_ = os.Remove(planFile)
+
+	return result, nil
+}
+
+// State returns the current terraform state as structured data.
+func (a *TerraformAdapter) State(ctx context.Context, raw json.RawMessage) (*StateResult, error) {
+	cfg, err := parseTerraformConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	baseDir, cleanup, err := resolveTerraformDir(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	workDir := filepath.Join(baseDir, filepath.Clean(cfg.WorkingDir))
+	if cfg.isLocal() && filepath.IsAbs(cfg.WorkingDir) {
+		workDir = filepath.Clean(cfg.WorkingDir)
+	}
+	// Validate path is within baseDir
+	absWorkDir, _ := filepath.Abs(workDir)
+	absBaseDir, _ := filepath.Abs(baseDir)
+	if !strings.HasPrefix(absWorkDir, absBaseDir) {
+		return nil, fmt.Errorf("invalid working_dir path")
+	}
+
+	// terraform show -json
+	showCmd := exec.CommandContext(ctx, "terraform", "show", "-json")
+	showCmd.Dir = workDir
+	jsonOutput, err := showCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("terraform show failed: %w", err)
+	}
+
+	result := &StateResult{
+		RawJSON: string(jsonOutput),
+	}
+
+	// Parse the JSON to extract resources
+	var stateDoc struct {
+		Values struct {
+			RootModule struct {
+				Resources []struct {
+					Type    string `json:"type"`
+					Name    string `json:"name"`
+					Value   map[string]interface{} `json:"values"`
+				} `json:"resources"`
+			} `json:"root_module"`
+		} `json:"values"`
+	}
+	if json.Unmarshal(jsonOutput, &stateDoc) == nil {
+		for _, r := range stateDoc.Values.RootModule.Resources {
+			id := ""
+			if v, ok := r.Value["id"].(string); ok {
+				id = v
+			}
+			result.Resources = append(result.Resources, StateResource{
+				Type:   r.Type,
+				Name:   r.Name,
+				ID:     id,
+				Status: "created",
+			})
+		}
+	}
+
+	return result, nil
+}
+
+// Status returns the status of a Terraform run.
 func (a *TerraformAdapter) Status(ctx context.Context, raw json.RawMessage, externalRunID string) (*RunStatus, error) {
+	tfRunsMu.RLock()
+	run, ok := tfRuns[externalRunID]
+	tfRunsMu.RUnlock()
+
+	status := "success"
+	if ok {
+		status = run.status
+	}
+
 	return &RunStatus{
 		ExternalRunID: externalRunID,
-		Status:        "success",
+		Status:        status,
 	}, nil
 }
 
-// Jobs returns no job info for Terraform.
+// Jobs returns no job info for Terraform (single-command execution).
 func (a *TerraformAdapter) Jobs(ctx context.Context, raw json.RawMessage, externalRunID string) ([]JobInfo, error) {
 	return []JobInfo{}, nil
 }
 
-// Logs returns empty logs for Terraform.
+// Logs returns captured output from a Terraform run.
 func (a *TerraformAdapter) Logs(ctx context.Context, raw json.RawMessage, externalRunID string, jobID string) (string, error) {
+	tfRunsMu.RLock()
+	run, ok := tfRuns[externalRunID]
+	tfRunsMu.RUnlock()
+
+	if ok && run.logBuf != nil {
+		return run.logBuf.String(), nil
+	}
 	return "", nil
 }
 
-// Cancel is a no-op for Terraform.
+// Cancel cancels a running Terraform execution.
 func (a *TerraformAdapter) Cancel(ctx context.Context, raw json.RawMessage, externalRunID string) error {
-	return nil
+	tfRunsMu.RLock()
+	run, ok := tfRuns[externalRunID]
+	tfRunsMu.RUnlock()
+
+	if ok && run.cancel != nil {
+		run.cancel()
+		tfRunsMu.Lock()
+		run.status = "cancelled"
+		tfRunsMu.Unlock()
+		return nil
+	}
+	return fmt.Errorf("no active run found for %s", externalRunID)
 }
 
 // resolveTerraformDir returns the base directory for terraform operations.

@@ -77,6 +77,11 @@ This document tracks the implementation progress of PEPA against the roadmap def
 | Environment Management | ✅ Done | `/environments` — deployment targets with variables |
 | Security Scanning | ✅ Done | `/security` — security scan integration |
 | Documentation Portal | ✅ Done | `/docs` — built-in documentation viewer |
+| Plugin: Trivy | ✅ Compiled | `plugins/builtin/trivy/` — vulnerability scanning for images, filesystem, repos, IaC (free) |
+| Pipeline: GitHub Actions | ✅ Done | `internal/pipeline/github_actions_adapter.go` — workflow dispatch, status tracking |
+| Pipeline: Trivy Scanner | ✅ Done | `internal/pipeline/trivy_adapter.go` — security scanning as pipeline engine |
+| Pipeline: Enhanced Terraform | ✅ Done | Plan/State preview, log capture, async execution, drift detection support |
+| Pipeline: Enhanced Ansible | ✅ Done | Dry-run mode, output parsing, per-host results, log capture |
 
 ## Phase 4: CNCF Sandbox — `v0.1.0`
 

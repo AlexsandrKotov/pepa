@@ -1,13 +1,16 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,7 +43,22 @@ func (c *AnsibleConfig) isLocal() bool {
 	return c.LocalPath != "" && c.RepoURL == ""
 }
 
-// AnsibleAdapter implements Provider for Ansible pipelines.
+// ── Active run tracking ────────────────────────────────────────
+
+// ansibleRun tracks an in-flight ansible-playbook execution.
+type ansibleRun struct {
+	cancel context.CancelFunc
+	logBuf *bytes.Buffer
+	status string // pending, running, success, failed, cancelled
+	result *AnsibleResult
+}
+
+var (
+	ansibleRunsMu sync.RWMutex
+	ansibleRuns   = make(map[string]*ansibleRun)
+)
+
+// AnsibleAdapter implements Provider and EnhancedProvider for Ansible pipelines.
 type AnsibleAdapter struct{}
 
 func NewAnsibleAdapter() *AnsibleAdapter {
@@ -149,6 +167,13 @@ func (a *AnsibleAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 	if _, ok := props["tags"]; !ok {
 		props["tags"] = PropertyDef{Type: "string", Description: "Only run plays/tasks with these tags"}
 	}
+	if _, ok := props["dry_run"]; !ok {
+		props["dry_run"] = PropertyDef{
+			Type:        "boolean",
+			Description: "Run in check mode (--check) without making changes",
+			Default:     "false",
+		}
+	}
 
 	return &ParameterSchema{
 		Type:       "object",
@@ -158,6 +183,7 @@ func (a *AnsibleAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 }
 
 // Trigger runs an Ansible playbook with the given parameters.
+// Output is captured and parsed for per-host results.
 func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, params map[string]any) (*TriggerResult, error) {
 	cfg, err := parseAnsibleConfig(raw)
 	if err != nil {
@@ -172,8 +198,107 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		defer cleanup()
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	logBuf := &bytes.Buffer{}
+	runID := fmt.Sprintf("ansible-%s", randomRunID())
+
+	// Register the run for tracking
+	ansibleRunsMu.Lock()
+	ansibleRuns[runID] = &ansibleRun{cancel: cancel, logBuf: logBuf, status: "running"}
+	ansibleRunsMu.Unlock()
+	defer func() {
+		ansibleRunsMu.Lock()
+		delete(ansibleRuns, runID)
+		ansibleRunsMu.Unlock()
+	}()
+
 	// Build ansible-playbook command
-	args := []string{cfg.Playbook}
+	// Validate playbook path to prevent path traversal
+	cleanPlaybook := filepath.Clean(cfg.Playbook)
+	if strings.Contains(cleanPlaybook, "..") {
+		cleanPlaybook = filepath.Base(cleanPlaybook)
+	}
+	playbookPath := filepath.Join(workDir, cleanPlaybook)
+	absPlaybook, _ := filepath.Abs(playbookPath)
+	absWorkDir, _ := filepath.Abs(workDir)
+	if !strings.HasPrefix(absPlaybook, absWorkDir) {
+		return nil, fmt.Errorf("invalid playbook path")
+	}
+
+	args := []string{cleanPlaybook, "--no-color"}
+
+	if inv, ok := params["inventory"]; ok && inv != "" {
+		args = append(args, "-i", fmt.Sprintf("%v", inv))
+	}
+	if limit, ok := params["limit"]; ok && limit != "" {
+		args = append(args, "--limit", fmt.Sprintf("%v", limit))
+	}
+	if tags, ok := params["tags"]; ok && tags != "" {
+		args = append(args, "--tags", fmt.Sprintf("%v", tags))
+	}
+	// Dry-run / check mode
+	if dryRun, ok := params["dry_run"]; ok && (dryRun == "true" || dryRun == true) {
+		args = append(args, "--check")
+	}
+
+	// Add extra vars
+	for k, v := range params {
+		if k == "inventory" || k == "limit" || k == "tags" || k == "ref" || k == "dry_run" {
+			continue
+		}
+		args = append(args, "-e", fmt.Sprintf("%s=%v", k, v))
+	}
+
+	cmd := exec.CommandContext(runCtx, "ansible-playbook", args...) //nolint:gosec // G204: ansible-playbook is an admin-configured binary
+	cmd.Dir = workDir
+	cmd.Stdout = logBuf
+	cmd.Stderr = logBuf
+	cmdErr := cmd.Run()
+
+	// Parse the output for per-host results
+	parsed := parseAnsibleOutput(logBuf.String(), cfg.Playbook)
+
+	ansibleRunsMu.Lock()
+	ansibleRun := ansibleRuns[runID]
+	if cmdErr != nil {
+		ansibleRun.status = "failed"
+	} else {
+		ansibleRun.status = "success"
+	}
+	ansibleRun.result = parsed
+	ansibleRunsMu.Unlock()
+
+	status := "success"
+	if cmdErr != nil {
+		status = "failed"
+	}
+
+	return &TriggerResult{
+		ExternalRunID: runID,
+		ExternalURL:   "",
+		Status:        status,
+	}, nil
+}
+
+// Plan runs the playbook in --check mode (dry-run) and returns a preview.
+func (a *AnsibleAdapter) Plan(ctx context.Context, raw json.RawMessage, params map[string]any) (*PlanResult, error) {
+	cfg, err := parseAnsibleConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	workDir, cleanup, err := resolveAnsibleDir(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	// Build ansible-playbook --check command
+	args := []string{cfg.Playbook, "--check", "--no-color", "--diff"}
 
 	if inv, ok := params["inventory"]; ok && inv != "" {
 		args = append(args, "-i", fmt.Sprintf("%v", inv))
@@ -185,9 +310,8 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		args = append(args, "--tags", fmt.Sprintf("%v", tags))
 	}
 
-	// Add extra vars
 	for k, v := range params {
-		if k == "inventory" || k == "limit" || k == "tags" || k == "ref" {
+		if k == "inventory" || k == "limit" || k == "tags" || k == "ref" || k == "dry_run" {
 			continue
 		}
 		args = append(args, "-e", fmt.Sprintf("%s=%v", k, v))
@@ -195,26 +319,35 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 
 	cmd := exec.CommandContext(ctx, "ansible-playbook", args...) //nolint:gosec // G204: ansible-playbook is an admin-configured binary
 	cmd.Dir = workDir
-	_, err = cmd.CombinedOutput()
+	output, _ := cmd.CombinedOutput()
 
-	runID := fmt.Sprintf("ansible-%d", os.Getpid())
-	status := "success"
-	if err != nil {
-		status = "failed"
-	}
-
-	return &TriggerResult{
-		ExternalRunID: runID,
-		ExternalURL:   "",
-		Status:        status,
+	return &PlanResult{
+		HasChanges: true, // check mode always reports potential changes
+		OutputText: string(output),
 	}, nil
 }
 
-// Status returns the status of an Ansible run (not tracked externally).
+// State is a no-op for Ansible (configuration management, not infrastructure state).
+func (a *AnsibleAdapter) State(ctx context.Context, raw json.RawMessage) (*StateResult, error) {
+	return &StateResult{
+		Resources: []StateResource{},
+	}, nil
+}
+
+// Status returns the status of an Ansible run.
 func (a *AnsibleAdapter) Status(ctx context.Context, raw json.RawMessage, externalRunID string) (*RunStatus, error) {
+	ansibleRunsMu.RLock()
+	run, ok := ansibleRuns[externalRunID]
+	ansibleRunsMu.RUnlock()
+
+	status := "success"
+	if ok {
+		status = run.status
+	}
+
 	return &RunStatus{
 		ExternalRunID: externalRunID,
-		Status:        "success",
+		Status:        status,
 	}, nil
 }
 
@@ -223,14 +356,70 @@ func (a *AnsibleAdapter) Jobs(ctx context.Context, raw json.RawMessage, external
 	return []JobInfo{}, nil
 }
 
-// Logs returns empty logs for Ansible.
+// Logs returns captured output from an Ansible run.
 func (a *AnsibleAdapter) Logs(ctx context.Context, raw json.RawMessage, externalRunID string, jobID string) (string, error) {
+	ansibleRunsMu.RLock()
+	run, ok := ansibleRuns[externalRunID]
+	ansibleRunsMu.RUnlock()
+
+	if ok && run.logBuf != nil {
+		return run.logBuf.String(), nil
+	}
 	return "", nil
 }
 
-// Cancel is a no-op for Ansible.
+// Cancel cancels a running Ansible execution.
 func (a *AnsibleAdapter) Cancel(ctx context.Context, raw json.RawMessage, externalRunID string) error {
-	return nil
+	ansibleRunsMu.RLock()
+	run, ok := ansibleRuns[externalRunID]
+	ansibleRunsMu.RUnlock()
+
+	if ok && run.cancel != nil {
+		run.cancel()
+		ansibleRunsMu.Lock()
+		run.status = "cancelled"
+		ansibleRunsMu.Unlock()
+		return nil
+	}
+	return fmt.Errorf("no active run found for %s", externalRunID)
+}
+
+// ── Output parsing helpers ──────────────────────────────────────
+
+// parseAnsibleOutput extracts per-host task summary from ansible-playbook stdout.
+// It looks for the PLAY RECAP section and parses lines like:
+//
+//	host1 : ok=3 changed=1 unreachable=0 failed=0 skipped=1
+func parseAnsibleOutput(output, playbook string) *AnsibleResult {
+	result := &AnsibleResult{
+		Hosts:    make(map[string]HostResult),
+		Playbook: playbook,
+	}
+
+	// Find PLAY RECAP section
+	recapIdx := strings.Index(output, "PLAY RECAP")
+	if recapIdx < 0 {
+		return result
+	}
+	recapSection := output[recapIdx:]
+
+	// Parse each host line: hostname : ok=N changed=N unreachable=N failed=N skipped=N
+	hostLineRe := regexp.MustCompile(`(?m)^(\S+)\s+:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)\s+skipped=(\d+)`)
+	matches := hostLineRe.FindAllStringSubmatch(recapSection, -1)
+	for _, m := range matches {
+		if len(m) < 7 {
+			continue
+		}
+		host := m[1]
+		var hr HostResult
+		fmt.Sscanf(m[2], "%d", &hr.OK)
+		fmt.Sscanf(m[3], "%d", &hr.Changed)
+		fmt.Sscanf(m[5], "%d", &hr.Failed)
+		fmt.Sscanf(m[6], "%d", &hr.Skipped)
+		result.Hosts[host] = hr
+	}
+
+	return result
 }
 
 // resolveAnsibleDir returns the working directory for ansible operations.

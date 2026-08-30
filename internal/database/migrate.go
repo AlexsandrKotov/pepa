@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -49,7 +49,7 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 			return fmt.Errorf("read %s: %w", entry, err)
 		}
 
-		log.Printf("Applying migration %s...", entry)
+		slog.Info("applying migration", "file", entry)
 		start := time.Now()
 
 		// Wrap each migration in a transaction so partial failures roll back.
@@ -72,7 +72,7 @@ func (d *DB) RunMigrations(ctx context.Context) error {
 			return fmt.Errorf("commit %s: %w", entry, err)
 		}
 
-		log.Printf("Migration %s applied in %v", entry, time.Since(start).Round(time.Millisecond))
+		slog.Info("migration applied", "file", entry, "duration", time.Since(start).Round(time.Millisecond))
 	}
 
 	return nil

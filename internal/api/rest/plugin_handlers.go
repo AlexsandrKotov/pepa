@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -237,7 +237,7 @@ func enablePlugin(deps Dependencies) gin.HandlerFunc {
 		// Also enable in the live Manager (gRPC subprocess model).
 		// If the binary was unloaded (e.g. after uninstall), load it back.
 		if err := loadPluginBinary(deps, name); err != nil {
-			log.Printf("Warning: could not activate plugin %s: %v", name, err)
+			slog.Warn("could not activate plugin ", "name", name, "error", err)
 		}
 
 		// Also enable in provider registry if available.

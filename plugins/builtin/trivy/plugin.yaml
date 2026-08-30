@@ -1,0 +1,120 @@
+name: trivy
+version: "0.1.0"
+display_name: "Trivy Security Scanner"
+description: "Vulnerability scanner for container images, filesystem, git repositories, and IaC configurations. Detects CVEs, misconfigurations, and secrets."
+category: security_scanner
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+icon: trivy
+
+config_schema:
+  type: object
+  properties:
+    target:
+      type: string
+      description: "Default target to scan (image name, filesystem path, or repo URL)"
+    scan_type:
+      type: string
+      description: "Type of scan to perform"
+      enum: ["image", "fs", "repo", "config"]
+      default: "image"
+    severity:
+      type: string
+      description: "Comma-separated list of severity levels to report"
+      default: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
+    ignore_unfixed:
+      type: boolean
+      description: "Only show vulnerabilities with available fixes"
+      default: false
+    format:
+      type: string
+      description: "Output format for reports"
+      enum: ["json", "table", "sarif"]
+      default: "json"
+  required:
+    - target
+
+actions:
+  - name: scan
+    description: "Run a vulnerability scan on the configured target"
+    parameters:
+      type: object
+      properties:
+        target:
+          type: string
+          description: "Override target (image name, path, or repo URL)"
+        scan_type:
+          type: string
+          enum: ["image", "fs", "repo", "config"]
+          description: "Override scan type"
+        severity:
+          type: string
+          description: "Override severity filter"
+        ignore_unfixed:
+          type: boolean
+          description: "Only show fixed vulnerabilities"
+
+  - name: scan_image
+    description: "Scan a container image for vulnerabilities"
+    parameters:
+      type: object
+      properties:
+        image:
+          type: string
+          description: "Container image name (e.g., nginx:latest)"
+        severity:
+          type: string
+          default: "HIGH,CRITICAL"
+      required:
+        - image
+
+  - name: scan_filesystem
+    description: "Scan a filesystem path for vulnerabilities and misconfigurations"
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          description: "Filesystem path to scan"
+        severity:
+          type: string
+      required:
+        - path
+
+  - name: scan_repo
+    description: "Scan a remote git repository for vulnerabilities"
+    parameters:
+      type: object
+      properties:
+        url:
+          type: string
+          description: "Git repository URL"
+        branch:
+          type: string
+          default: "main"
+        severity:
+          type: string
+      required:
+        - url
+
+  - name: scan_config
+    description: "Scan IaC configurations (Terraform, Kubernetes, Dockerfile, etc.)"
+    parameters:
+      type: object
+      properties:
+        path:
+          type: string
+          description: "Path to IaC files"
+      required:
+        - path
+
+  - name: get_results
+    description: "Get structured results from the last scan"
+
+  - name: export_sarif
+    description: "Export scan results in SARIF format for GitHub Security Tab"
+
+health_check:
+  endpoint: /health
+  interval: 60s

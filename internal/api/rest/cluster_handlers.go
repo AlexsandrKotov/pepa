@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -997,7 +997,7 @@ func getGitOpsEngine(deps Dependencies) gin.HandlerFunc {
 		}
 		engine, err := client.DetectGitOpsEngine(c.Request.Context())
 		if err != nil {
-			log.Printf("getGitOpsEngine: gitops engine detection failed: %v", err)
+			slog.Info("getGitOpsEngine: gitops engine detection failed", "error", err)
 			c.JSON(http.StatusOK, gin.H{"fluxcd": false, "argocd": false, "error": "gitops engine detection failed"})
 			return
 		}

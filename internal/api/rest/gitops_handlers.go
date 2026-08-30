@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
@@ -240,7 +240,7 @@ func simulateDeployLifecycle(deps Dependencies, deploymentID uuid.UUID) {
 			d.Status = status
 			d.UpdatedAt = time.Now()
 			if err := deps.Repos.Deployment.Update(ctx, d); err != nil {
-				log.Printf("[gitops] lifecycle transition to %s failed for %s: %v", status, deploymentID, err)
+				slog.Info("lifecycle transition to failed for ", "arg1", status, "id", deploymentID, "error", err)
 				return false
 			}
 			return true
@@ -704,7 +704,7 @@ func resolveConnectionToken(ctx context.Context, deps Dependencies, repo *gitops
 				if email != "" {
 					repo.Config["git_user_email"] = email
 				}
-				log.Printf("[gitops] using personal credential for user %s on %s", userID, providerURL)
+				slog.Info("using personal credential for user on", "id", userID, "id", providerURL)
 				return
 			}
 		}
@@ -719,7 +719,7 @@ func resolveConnectionToken(ctx context.Context, deps Dependencies, repo *gitops
 	}
 	conn, err := deps.Repos.Connection.GetDecrypted(ctx, *repo.ConnectionID, tenantID)
 	if err != nil {
-		log.Printf("[gitops] failed to resolve connection %s for repo %s: %v", repo.ConnectionID, repo.Name, err)
+		slog.Info("failed to resolve connection for repo ", "id", repo.ConnectionID, "name", repo.Name, "error", err)
 		return
 	}
 	if token, ok := conn.Config["token"]; ok {
@@ -806,7 +806,7 @@ func gitopsScanRepo(deps Dependencies) gin.HandlerFunc {
 			_ = deps.Repos.GitopsRepo.Update(ctx, repo)
 		}
 
-		log.Printf("[gitops] scanned repo %s: %d resources found, engine=%s", repo.Name, len(result.Resources), result.Engine)
+		slog.Info("scanned repo: resources found", "name", repo.Name, "count", len(result.Resources), "engine", result.Engine)
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":    "Scan completed",
@@ -971,8 +971,7 @@ func gitopsEditValues(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		log.Printf("[gitops] edit repo=%s file=%s commit=%s branch=%s mr_needed=%v",
-			repo.Name, req.FilePath, result.CommitSHA, result.Branch, result.MRNeeded)
+		slog.Info("edit repo= file= commit= branch= mr_needed=", "name", repo.Name, "path", req.FilePath, "arg3", result.CommitSHA, "arg4", result.Branch, "arg5", result.MRNeeded)
 
 		c.JSON(http.StatusOK, result)
 	}
@@ -1124,8 +1123,7 @@ func gitopsSuspendResource(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		log.Printf("[gitops] suspend repo=%s file=%s suspend=%v commit=%s",
-			repo.Name, req.FilePath, req.Suspend, result.CommitSHA)
+		slog.Info("suspend repo= file= suspend= commit=", "name", repo.Name, "path", req.FilePath, "arg3", req.Suspend, "arg4", result.CommitSHA)
 
 		c.JSON(http.StatusOK, result)
 	}
@@ -1273,8 +1271,7 @@ func gitopsCreateResource(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		log.Printf("[gitops] create resource repo=%s kind=%s name=%s file=%s commit=%s",
-			repo.Name, req.Kind, req.Name, filePath, result.CommitSHA)
+		slog.Info("create resource repo= kind= name= file= commit=", "name", repo.Name, "arg2", req.Kind, "name", req.Name, "path", filePath, "arg5", result.CommitSHA)
 
 		c.JSON(http.StatusCreated, gin.H{
 			"resource": gin.H{
@@ -1688,7 +1685,7 @@ func gitopsDetectDrift(deps Dependencies) gin.HandlerFunc {
 		for _, cl := range targetClusters {
 			liveResources, err := queryLiveFluxResources(ctx, deps, &cl)
 			if err != nil {
-				log.Printf("Warning: failed to query cluster %s for drift: %v", cl.Name, err)
+				slog.Warn("failed to query cluster for drift", "name", cl.Name, "error", err)
 				continue
 			}
 			liveByCluster[cl.Name] = toLiveResources(liveResources)

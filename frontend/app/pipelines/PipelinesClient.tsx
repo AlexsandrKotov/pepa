@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable } from '@/lib/api';
+import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import { VaultInput, useVaultPicker } from '@/components/VaultInput';
 import GitRepoPicker from '@/components/GitRepoPicker';
@@ -29,12 +29,16 @@ const sourceTypeLabels: Record<string, string> = {
   gitlab_ci: 'GitLab CI',
   ansible: 'Ansible',
   terraform: 'Terraform',
+  github_actions: 'GitHub Actions',
+  trivy: 'Trivy Scanner',
 };
 
 const ENGINE_TYPE_INFO: Record<string, { icon: string; label: string; color: string; bgColor: string; borderColor: string; description: string }> = {
   gitlab_ci: { icon: 'gitlab', label: 'GitLab CI', color: 'text-[var(--accent)]', bgColor: 'bg-[var(--accent-subtle)]', borderColor: 'border-[var(--accent)]/20', description: 'CI/CD pipelines from Git repositories' },
+  github_actions: { icon: 'github', label: 'GitHub Actions', color: 'text-[var(--text-primary)]', bgColor: 'bg-[var(--border-light)]', borderColor: 'border-[var(--border)]', description: 'CI/CD workflows from GitHub repositories' },
   ansible: { icon: 'ansible', label: 'Ansible', color: 'text-emerald-600', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20', description: 'Playbooks via repository or local path' },
   terraform: { icon: 'terraform', label: 'Terraform', color: 'text-purple-500', bgColor: 'bg-purple-500/10', borderColor: 'border-purple-500/20', description: 'Infrastructure stacks via repository or local path' },
+  trivy: { icon: 'trivy', label: 'Trivy Scanner', color: 'text-cyan-600', bgColor: 'bg-cyan-500/10', borderColor: 'border-cyan-500/20', description: 'Security vulnerability scanning for images and code' },
 };
 
 const PROVIDER_STATUS_COLORS: Record<string, string> = {
@@ -60,6 +64,24 @@ function getConnTypeInfo(conn: Connection) {
 }
 
 // ── Main Component ─────────────────────────────────────────
+
+function StepStatusIcon({ status }: { status: string }) {
+  const s = status.toLowerCase();
+  if (s === 'success' || s === 'completed') {
+    return <span className="text-emerald-500 text-[10px]">&#10003;</span>;
+  }
+  if (s === 'failed' || s === 'failure') {
+    return <span className="text-red-500 text-[10px]">&#10007;</span>;
+  }
+  if (s === 'running' || s === 'in_progress') {
+    return <span className="inline-block w-2.5 h-2.5 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />;
+  }
+  if (s === 'cancelled' || s === 'skipped') {
+    return <span className="text-[var(--text-tertiary)] text-[10px]">&#8212;</span>;
+  }
+  // pending / queued / unknown
+  return <span className="text-amber-500 text-[10px]">&#9679;</span>;
+}
 
 export default function PipelinesClient({
   initialSources,
@@ -141,6 +163,13 @@ function PipelinesClientContent({
   const [loadingCIVars, setLoadingCIVariables] = useState(false);
   const [engineCIVariables, setEngineCIVariables] = useState<CIVariable[]>([]);
   const [loadingEngineCIVars, setLoadingEngineCIVariables] = useState(false);
+
+  // Engine runs: sync + expandable jobs/steps
+  const [syncing, setSyncing] = useState(false);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [runJobs, setRunJobs] = useState<Record<string, PipelineRunJob[]>>({});
+  const [loadingRunJobs, setLoadingRunJobs] = useState<string | null>(null);
+  const [expandedJobKey, setExpandedJobKey] = useState<string | null>(null);
 
   // Fetch connections client-side (server-side has no auth token)
   useEffect(() => {
@@ -293,6 +322,40 @@ function PipelinesClientContent({
       await loadSources();
       setFeedback({ ok: true, text: 'Engine deleted' });
     } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+  };
+
+  const handleSyncRuns = async () => {
+    if (!selectedSource) return;
+    setSyncing(true);
+    try {
+      const result = await pipelineRuns.sync(selectedSource.id);
+      await loadRuns(selectedSource.id);
+      setFeedback({ ok: true, text: `Synced ${result.synced} runs from remote` });
+    } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+    finally { setSyncing(false); }
+  };
+
+  const toggleRunExpansion = async (runId: string) => {
+    if (expandedRunId === runId) {
+      setExpandedRunId(null);
+      return;
+    }
+    setExpandedRunId(runId);
+    if (!runJobs[runId] && selectedSource) {
+      setLoadingRunJobs(runId);
+      try {
+        const data = await pipelineRuns.jobs(selectedSource.id, runId);
+        setRunJobs(prev => ({ ...prev, [runId]: data.jobs || [] }));
+      } catch {
+        setRunJobs(prev => ({ ...prev, [runId]: [] }));
+      } finally {
+        setLoadingRunJobs(null);
+      }
+    }
+  };
+
+  const toggleJobExpansion = (key: string) => {
+    setExpandedJobKey(prev => prev === key ? null : key);
   };
 
   // Provider handlers
@@ -579,8 +642,10 @@ function PipelinesClientContent({
                     <select value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value }))} className="w-full px-3 py-2 border border-[var(--border)] rounded-md text-sm">
                       <option value="">All Types</option>
                       <option value="gitlab_ci">GitLab CI</option>
+                      <option value="github_actions">GitHub Actions</option>
                       <option value="ansible">Ansible</option>
                       <option value="terraform">Terraform</option>
+                      <option value="trivy">Trivy Scanner</option>
                     </select>
                   </div>
                   <div className="flex items-end">
@@ -687,6 +752,13 @@ function PipelinesClientContent({
                           >
                             Run Pipeline
                           </button>
+                          <button
+                            onClick={handleSyncRuns}
+                            disabled={syncing}
+                            className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm disabled:opacity-50"
+                          >
+                            {syncing ? 'Syncing...' : 'Sync Runs'}
+                          </button>
                           <button onClick={() => handleResolveSchema(selectedSource)} className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm">Refresh Schema</button>
                           <button onClick={() => handleDeleteSource(selectedSource)} className="px-3 py-1.5 bg-red-500/10 text-red-500 rounded-md hover:bg-red-500/20 text-sm">Delete</button>
                         </div>
@@ -706,32 +778,107 @@ function PipelinesClientContent({
                       <div className="p-4">
                         {detailTab === 'runs' && (
                           <div className="space-y-2">
-                            {runs.length === 0 && <p className="text-sm text-[var(--text-secondary)] text-center py-4">No runs yet</p>}
-                            {runs.map(run => (
-                              <div key={run.id} className="flex items-center justify-between p-3 bg-[var(--bg)] rounded-md">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[run.status] || 'bg-[var(--border-light)]'}`}>{run.status}</span>
-                                    <span className="text-sm text-[var(--text-primary)] truncate">#{run.external_run_id || run.id.slice(0, 8)}</span>
-                                  </div>
-                                  <p className="text-xs text-[var(--text-secondary)] mt-1">
-                                    {new Date(run.created_at).toLocaleString()}
-                                    {run.duration_ms ? ` — ${(run.duration_ms / 1000).toFixed(1)}s` : ''}
-                                  </p>
-                                </div>
-                                <div className="flex gap-1">
-                                  {run.external_url && (
-                                    <a href={run.external_url} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-[var(--accent)] hover:underline">External</a>
-                                  )}
-                                  {(run.status === 'running' || run.status === 'pending') && (
-                                    <>
-                                      <button onClick={() => handleRefresh(run.id)} className="px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--border)] rounded">Refresh</button>
-                                      <button onClick={() => handleCancel(run.id)} className="px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 rounded">Cancel</button>
-                                    </>
-                                  )}
-                                </div>
+                            {runs.length === 0 && (
+                              <div className="text-center py-6">
+                                <p className="text-sm text-[var(--text-secondary)] mb-2">No runs yet</p>
+                                <button
+                                  onClick={handleSyncRuns}
+                                  disabled={syncing}
+                                  className="text-sm text-[var(--accent)] hover:underline disabled:opacity-50"
+                                >
+                                  {syncing ? 'Syncing...' : 'Sync runs from remote →'}
+                                </button>
                               </div>
-                            ))}
+                            )}
+                            {runs.map(run => {
+                              const isExpanded = expandedRunId === run.id;
+                              const jobs = runJobs[run.id];
+                              const isLoadingJobs = loadingRunJobs === run.id;
+                              return (
+                                <div key={run.id} className="bg-[var(--bg)] rounded-md overflow-hidden">
+                                  <div
+                                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-[var(--border-light)] transition-colors"
+                                    onClick={() => toggleRunExpansion(run.id)}
+                                  >
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <svg className={`w-3.5 h-3.5 text-[var(--text-tertiary)] transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                      </svg>
+                                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[run.status] || 'bg-[var(--border-light)]'}`}>{run.status}</span>
+                                      <span className="text-sm text-[var(--text-primary)] truncate">#{run.external_run_id || run.id.slice(0, 8)}</span>
+                                      <span className="text-xs text-[var(--text-tertiary)]">
+                                        {new Date(run.created_at).toLocaleString()}
+                                        {run.duration_ms ? ` — ${(run.duration_ms / 1000).toFixed(1)}s` : ''}
+                                      </span>
+                                    </div>
+                                    <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                                      {run.external_url && (
+                                        <a href={run.external_url} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-[var(--accent)] hover:underline">External</a>
+                                      )}
+                                      {(run.status === 'running' || run.status === 'pending') && (
+                                        <>
+                                          <button onClick={() => handleRefresh(run.id)} className="px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--border)] rounded">Refresh</button>
+                                          <button onClick={() => handleCancel(run.id)} className="px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 rounded">Cancel</button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Expanded: Jobs & Steps */}
+                                  {isExpanded && (
+                                    <div className="border-t px-3 py-2 space-y-2">
+                                      {isLoadingJobs && (
+                                        <div className="flex items-center gap-2 py-2">
+                                          <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-600" />
+                                          <span className="text-xs text-[var(--text-secondary)]">Loading jobs...</span>
+                                        </div>
+                                      )}
+                                      {!isLoadingJobs && jobs && jobs.length === 0 && (
+                                        <p className="text-xs text-[var(--text-tertiary)] py-1">No jobs recorded for this run</p>
+                                      )}
+                                      {!isLoadingJobs && jobs && jobs.map((job, ji) => {
+                                        const jobKey = `${run.id}:${job.id || ji}`;
+                                        const jobExpanded = expandedJobKey === jobKey;
+                                        const steps = job.steps || [];
+                                        return (
+                                          <div key={job.id || ji} className="ml-4">
+                                            <div
+                                              className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-[var(--surface)] rounded px-2 -mx-2 transition-colors"
+                                              onClick={() => steps.length > 0 ? toggleJobExpansion(jobKey) : undefined}
+                                            >
+                                              {steps.length > 0 && (
+                                                <svg className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform ${jobExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                                </svg>
+                                              )}
+                                              {steps.length === 0 && <span className="w-3" />}
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${statusColors[job.status] || 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>{job.status}</span>
+                                              <span className="text-xs font-medium text-[var(--text-primary)]">{job.name}</span>
+                                              {job.runner_name && <span className="text-[10px] text-[var(--text-tertiary)]">{job.runner_name}</span>}
+                                              {job.log_url && (
+                                                <a href={job.log_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[var(--accent)] hover:underline ml-auto" onClick={e => e.stopPropagation()}>logs</a>
+                                              )}
+                                            </div>
+
+                                            {/* Steps */}
+                                            {jobExpanded && steps.length > 0 && (
+                                              <div className="ml-8 mt-1 space-y-0.5">
+                                                {steps.map((step, si) => (
+                                                  <div key={si} className="flex items-center gap-2 py-0.5">
+                                                    <StepStatusIcon status={step.status} />
+                                                    <span className="text-[11px] text-[var(--text-secondary)]">{step.name}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                         {detailTab === 'presets' && (
@@ -1316,6 +1463,19 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
   const [tfWorkDir, setTfWorkDir] = useState('.');
   const [tfToken, setTfToken] = useState('');
 
+  // GitHub Actions form state
+  const [ghOwner, setGhOwner] = useState('');
+  const [ghRepo, setGhRepo] = useState('');
+  const [ghToken, setGhToken] = useState('');
+  const [ghWorkflow, setGhWorkflow] = useState('');
+  const [ghRef, setGhRef] = useState('main');
+
+  // Trivy form state
+  const [trivyTarget, setTrivyTarget] = useState('');
+  const [trivyScanType, setTrivyScanType] = useState<'image' | 'fs' | 'repo' | 'config'>('image');
+  const [trivySeverity, setTrivySeverity] = useState('MEDIUM,HIGH,CRITICAL');
+  const [trivyIgnoreUnfixed, setTrivyIgnoreUnfixed] = useState(false);
+
   const selectedProvider = connections.find(c => c.id === selectedProviderId) || null;
 
   const handleProviderSelect = (providerId: string) => {
@@ -1346,6 +1506,12 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
           ? { local_path: tfLocalPath, working_dir: tfWorkDir }
           : { repo_url: tfRepoUrl, working_dir: tfWorkDir, token: tfToken };
         break;
+      case 'github_actions':
+        baseConfig = { owner: ghOwner, repo: ghRepo, token: ghToken, workflow: ghWorkflow, ref: ghRef };
+        break;
+      case 'trivy':
+        baseConfig = { target: trivyTarget, scan_type: trivyScanType, severity: trivySeverity, ignore_unfixed: trivyIgnoreUnfixed ? 'true' : 'false' };
+        break;
       default:
         baseConfig = {};
     }
@@ -1362,6 +1528,8 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
     if (sourceType === 'ansible' && ansSourceMode === 'local' && (!ansLocalPath || !ansPlaybook)) return 'Local Path and Playbook are required for Ansible';
     if (sourceType === 'terraform' && tfSourceMode === 'repo' && !tfRepoUrl) return 'Repository URL is required for Terraform';
     if (sourceType === 'terraform' && tfSourceMode === 'local' && !tfLocalPath) return 'Local Path is required for Terraform';
+    if (sourceType === 'github_actions' && (!ghOwner || !ghRepo || (!ghToken && !vaultRefs.token) || !ghWorkflow)) return 'Owner, Repo, Token, and Workflow are required for GitHub Actions';
+    if (sourceType === 'trivy' && !trivyTarget) return 'Target is required for Trivy';
     return '';
   };
 
@@ -1399,7 +1567,7 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
           {/* Engine type visual selector */}
           <div>
             <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">Engine Type</label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {Object.entries(ENGINE_TYPE_INFO).map(([type, info]) => (
                 <button
                   key={type}
@@ -1565,6 +1733,59 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
               </div>
             </>
           )}
+
+          {sourceType === 'github_actions' && (
+            <>
+              <div className="pt-2 border-t"><p className="text-xs text-[var(--text-secondary)] mb-2">GitHub Actions Configuration</p></div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Owner <span className="text-red-500">*</span></label>
+                <input type="text" value={ghOwner} onChange={e => setGhOwner(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm" placeholder="octocat" />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">GitHub repository owner (user or organization)</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Repository <span className="text-red-500">*</span></label>
+                <input type="text" value={ghRepo} onChange={e => setGhRepo(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm" placeholder="hello-world" />
+              </div>
+              <VaultInput label="GitHub Token" field="token" value={ghToken} onChange={setGhToken} vaultRef={vaultRefs.token} onOpenVault={onOpenVaultPicker} onRemoveVault={removeVaultRef} placeholder="ghp_..." required />
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Workflow File <span className="text-red-500">*</span></label>
+                <input type="text" value={ghWorkflow} onChange={e => setGhWorkflow(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm" placeholder="ci.yml" />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">Workflow filename from .github/workflows/</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Ref (branch/tag)</label>
+                <input type="text" value={ghRef} onChange={e => setGhRef(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm" placeholder="main" />
+              </div>
+            </>
+          )}
+
+          {sourceType === 'trivy' && (
+            <>
+              <div className="pt-2 border-t"><p className="text-xs text-[var(--text-secondary)] mb-2">Trivy Scanner Configuration</p></div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Target <span className="text-red-500">*</span></label>
+                <input type="text" value={trivyTarget} onChange={e => setTrivyTarget(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm" placeholder="nginx:latest" />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">Image name, filesystem path, or repository URL</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Scan Type</label>
+                <select value={trivyScanType} onChange={e => setTrivyScanType(e.target.value as 'image' | 'fs' | 'repo' | 'config')} className="w-full px-3 py-2 border rounded-md text-sm">
+                  <option value="image">Image</option>
+                  <option value="fs">Filesystem</option>
+                  <option value="repo">Repository</option>
+                  <option value="config">Config (IaC)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Severity Levels</label>
+                <input type="text" value={trivySeverity} onChange={e => setTrivySeverity(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm" placeholder="UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL" />
+              </div>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={trivyIgnoreUnfixed} onChange={e => setTrivyIgnoreUnfixed(e.target.checked)} className="rounded" />
+                <span className="text-sm text-[var(--text-secondary)]">Ignore unfixed vulnerabilities</span>
+              </label>
+            </>
+          )}
         </div>
         <div className="flex justify-end gap-2 mt-6">
           <button onClick={onClose} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">Cancel</button>
@@ -1676,7 +1897,7 @@ function TriggerModal({
         <div className="p-6 pb-3 shrink-0">
           <h3 className="text-lg font-semibold mb-1">Run Pipeline: {source.name}</h3>
           <p className="text-xs text-[var(--text-secondary)]">
-            {source.source_type === 'gitlab_ci' ? 'GitLab CI' : source.source_type === 'ansible' ? 'Ansible' : 'Terraform'}
+            {source.source_type === 'gitlab_ci' ? 'GitLab CI' : source.source_type === 'github_actions' ? 'GitHub Actions' : source.source_type === 'ansible' ? 'Ansible' : source.source_type === 'terraform' ? 'Terraform' : source.source_type === 'trivy' ? 'Trivy Scanner' : source.source_type}
             {' '}&mdash; Parameters auto-detected from config files
           </p>
         </div>

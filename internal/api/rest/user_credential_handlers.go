@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -143,7 +143,7 @@ func createMyCredential(deps Dependencies) gin.HandlerFunc {
 					req.Email = email
 				}
 			} else {
-				log.Printf("[credential] could not fetch user info from %s: %v", req.Provider, fetchErr)
+				slog.Info("could not fetch user info from ", "id", req.Provider, "error", fetchErr)
 			}
 		}
 
@@ -157,7 +157,7 @@ func createMyCredential(deps Dependencies) gin.HandlerFunc {
 		// If this is set as default, unset other defaults for this provider
 		if req.IsDefault {
 			if err := deps.Repos.UserCredential.UnsetDefaults(ctx, *userID, req.Provider); err != nil {
-				log.Printf("[credential] failed to unset other defaults for user %s, provider %s: %v", *userID, req.Provider, err)
+				slog.Info("failed to unset other defaults for user , provider ", "id", *userID, "id", req.Provider, "error", err)
 			}
 		}
 
@@ -232,7 +232,7 @@ func updateMyCredential(deps Dependencies) gin.HandlerFunc {
 			provider, err := deps.Repos.UserCredential.GetProvider(ctx, credID)
 			if err == nil {
 				if err := deps.Repos.UserCredential.UnsetDefaults(ctx, *userID, provider); err != nil {
-					log.Printf("[credential] failed to unset other defaults for user %s, provider %s: %v", *userID, provider, err)
+					slog.Info("failed to unset other defaults for user , provider ", "id", *userID, "id", provider, "error", err)
 				}
 			}
 		}
@@ -342,11 +342,11 @@ func verifyMyCredential(deps Dependencies) gin.HandlerFunc {
 			// instead of a manually entered login like "your-username").
 			if name, email, fetchErr := fetchExternalUserInfo(ctx, cred.Provider, cred.ProviderURL, cred.Username, token); fetchErr == nil {
 				if err := deps.Repos.UserCredential.UpdateVerification(ctx, credID, name, email); err != nil {
-					log.Printf("[credential] failed to update user info for credential %s: %v", credID, err)
+					slog.Info("failed to update user info for credential ", "id", credID, "error", err)
 				}
 			} else {
 				if err := deps.Repos.UserCredential.UpdateVerification(ctx, credID, "", ""); err != nil {
-					log.Printf("[credential] failed to update last_verified for credential %s: %v", credID, err)
+					slog.Info("failed to update last_verified for credential ", "id", credID, "error", err)
 				}
 			}
 		}

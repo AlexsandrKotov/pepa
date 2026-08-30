@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -99,7 +99,7 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 	builtinDir := filepath.Join(pluginDir, "builtin")
 	entries, err := os.ReadDir(builtinDir)
 	if err != nil {
-		log.Printf("[marketplace] warning: cannot read builtin plugins dir %s: %v", builtinDir, err)
+		slog.Info("warning: cannot read builtin plugins dir ", "path", builtinDir, "error", err)
 		marketplaceCache = []MarketplacePlugin{}
 		return marketplaceCache
 	}
@@ -112,7 +112,7 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 		yamlPath := filepath.Join(builtinDir, entry.Name(), "plugin.yaml")
 		data, err := os.ReadFile(yamlPath) //nolint:gosec // G304: yamlPath is from a controlled builtin plugins directory
 		if err != nil {
-			log.Printf("[marketplace] skip %s: no plugin.yaml", entry.Name())
+			slog.Info("skip : no plugin.yaml", "name", entry.Name())
 			continue
 		}
 
@@ -124,7 +124,7 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 				if err == io.EOF {
 					break
 				}
-				log.Printf("[marketplace] skip document in %s: %v", yamlPath, err)
+				slog.Info("skip document in ", "path", yamlPath, "error", err)
 				continue
 			}
 			if def.Name == "" {
@@ -179,7 +179,7 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 		}
 	}
 
-	log.Printf("[marketplace] loaded %d real plugin definition(s) from %s", len(plugins), builtinDir)
+	slog.Info("loaded real plugin definitions from builtin dir", "count", len(plugins), "dir", builtinDir)
 	marketplaceCache = plugins
 	return marketplaceCache
 }
@@ -429,7 +429,7 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		binaryLoaded := false
 		if found.BinaryAvailable {
 			if err := loadPluginBinary(deps, found.ID); err != nil {
-				log.Printf("[marketplace] plugin %s registered but failed to load binary: %v", id, err)
+				slog.Info("plugin registered but failed to load binary", "id", id, "error", err)
 			} else {
 				binaryLoaded = true
 			}
@@ -454,7 +454,7 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		if binaryLoaded {
 			plugin.Status = "running"
 			if err := deps.Repos.Plugin.Register(c.Request.Context(), plugin); err != nil {
-				log.Printf("[marketplace] plugin %s loaded but failed to persist status: %v", id, err)
+				slog.Info("plugin loaded but failed to persist status", "id", id, "error", err)
 			}
 		}
 

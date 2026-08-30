@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -727,7 +727,7 @@ func checkVaultPathAccess(deps Dependencies, c *gin.Context, path, action string
 	if len(ownerCheckPaths) > 0 {
 		ownerCount, err := deps.Repos.VaultConfig.CountSecretOwner(ctx, tenantID, *userID, ownerCheckPaths)
 		if err != nil {
-			log.Printf("[vault-acl] owner count error: %v", err)
+			slog.Info("owner count error", "error", err)
 		} else if ownerCount > 0 {
 			return true // user owns a secret at this path or parent → full access
 		}
@@ -739,7 +739,7 @@ func checkVaultPathAccess(deps Dependencies, c *gin.Context, path, action string
 	if action == "create" {
 		aclCount, err := deps.Repos.VaultConfig.CountACLEntries(ctx, tenantID, prefixes)
 		if err != nil {
-			log.Printf("[vault-acl] acl count error: %v", err)
+			slog.Info("acl count error", "error", err)
 			return false
 		}
 		if aclCount == 0 {
@@ -750,7 +750,7 @@ func checkVaultPathAccess(deps Dependencies, c *gin.Context, path, action string
 	// Query ACL entries that match any of these prefixes.
 	aclEntries, err := deps.Repos.VaultConfig.ListACLEntriesForPaths(ctx, tenantID, prefixes)
 	if err != nil {
-		log.Printf("[vault-acl] query error: %v", err)
+		slog.Info("query error", "error", err)
 		return false
 	}
 
@@ -772,7 +772,7 @@ func checkVaultPathAccess(deps Dependencies, c *gin.Context, path, action string
 	// Check team-based entries
 	hasAccess, err := deps.Repos.VaultConfig.CheckTeamACLAccess(ctx, tenantID, *userID, prefixes, action)
 	if err != nil {
-		log.Printf("[vault-acl] team query error: %v", err)
+		slog.Info("team query error", "error", err)
 		return false
 	}
 	if hasAccess {
@@ -780,7 +780,7 @@ func checkVaultPathAccess(deps Dependencies, c *gin.Context, path, action string
 	}
 
 	// No owner match and no ACL grant → denied
-	log.Printf("[vault-acl] DENIED: user=%s path=%q action=%s prefixes=%v", userID.String(), path, action, prefixes)
+	slog.Info("vault access denied", "user_id", userID.String(), "path", path, "action", action, "prefixes", prefixes)
 	return false
 }
 
@@ -810,7 +810,7 @@ func filterPathsByACL(deps Dependencies, c *gin.Context, paths []map[string]inte
 		SELECT path_prefix, user_id, team_id, can_read FROM vault_acl WHERE tenant_id = $1
 	`, tenantID)
 	if err != nil {
-		log.Printf("[vault-acl] filter query error: %v", err)
+		slog.Info("filter query error", "error", err)
 		return nil
 	}
 	defer rows.Close()
@@ -829,7 +829,7 @@ func filterPathsByACL(deps Dependencies, c *gin.Context, paths []map[string]inte
 		SELECT team_id FROM team_memberships WHERE user_id = $1
 	`, *userID)
 	if err != nil {
-		log.Printf("[vault-acl] team membership query error: %v", err)
+		slog.Info("team membership query error", "error", err)
 		return nil
 	}
 	defer teamRows.Close()

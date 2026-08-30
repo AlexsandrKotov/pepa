@@ -3,7 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -188,7 +188,7 @@ func (h *AIHandlers) Chat(c *gin.Context) {
 
 		resp, err := agent.Run(c.Request.Context(), task, req.Message)
 		if err != nil {
-			log.Printf("[AI Chat] Agent error: %v", err)
+			slog.Info("Agent error", "error", err)
 			respondInternalError(c, err)
 			return
 		}
@@ -225,7 +225,7 @@ func (h *AIHandlers) Chat(c *gin.Context) {
 			MaxTokens: 4096,
 		})
 		if err != nil {
-			log.Printf("[AI Chat] Provider error: %v", err)
+			slog.Info("Provider error", "error", err)
 			respondInternalError(c, err)
 			return
 		}

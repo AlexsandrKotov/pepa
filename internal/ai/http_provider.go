@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -166,7 +166,7 @@ func (p *httpProvider) doChat(ctx context.Context, body map[string]any) (*ChatRe
 	// Debug logging for tool calls
 	if tools, ok := body["tools"]; ok {
 		toolsJSON, _ := json.Marshal(tools)
-		log.Printf("[AI Provider] Sending %d tools (%d bytes)", len(tools.([]map[string]any)), len(toolsJSON))
+		slog.Info("sending tools", "count", len(tools.([]map[string]any)), "bytes", len(toolsJSON))
 	}
 
 	url := p.baseURL + "/chat/completions"
@@ -195,7 +195,7 @@ func (p *httpProvider) doChat(ctx context.Context, body map[string]any) (*ChatRe
 			// Rate limited — retry with backoff
 			if attempt < maxRetries {
 				wait := time.Duration((attempt+1)*3) * time.Second
-				log.Printf("[AI Provider] Rate limited (429). Retrying in %v (attempt %d/%d)", wait, attempt+1, maxRetries)
+				slog.Info("Rate limited (429). Retrying in (attempt /)", "arg1", wait, "arg2", attempt+1, "arg3", maxRetries)
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -236,12 +236,12 @@ func (p *httpProvider) doChat(ctx context.Context, body map[string]any) (*ChatRe
 
 		// Debug logging for tool calls in response
 		if len(result.Choices[0].Message.ToolCalls) > 0 {
-			log.Printf("[AI Provider] Received %d tool calls from LLM", len(result.Choices[0].Message.ToolCalls))
+			slog.Info("Received tool calls from LLM", "count", len(result.Choices[0].Message.ToolCalls))
 			for _, tc := range result.Choices[0].Message.ToolCalls {
-				log.Printf("[AI Provider]   - %s(%s)", tc.Function.Name, tc.Function.Arguments)
+				slog.Info("- ()", "name", tc.Function.Name, "arg2", tc.Function.Arguments)
 			}
 		} else {
-			log.Printf("[AI Provider] No tool calls in response, finish_reason: %s", result.Choices[0].FinishReason)
+			slog.Info("No tool calls in response, finish_reason", "arg1", result.Choices[0].FinishReason)
 		}
 
 		return &ChatResponse{
@@ -330,7 +330,7 @@ func (p *httpProvider) Stream(ctx context.Context, messages []Message, opts *Cha
 
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			wait := time.Duration((attempt+1)*3) * time.Second
-			log.Printf("[AI Provider] Stream rate limited (429). Retrying in %v (attempt %d/%d)", wait, attempt+1, maxRetries)
+			slog.Info("Stream rate limited (429). Retrying in (attempt /)", "arg1", wait, "arg2", attempt+1, "arg3", maxRetries)
 			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():

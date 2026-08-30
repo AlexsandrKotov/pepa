@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,7 +119,7 @@ func (b *Bus) Start() {
 				}
 				var event Event
 				if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
-					log.Printf("events: unmarshal error: %v", err)
+					slog.Info("events: unmarshal error", "error", err)
 					continue
 				}
 				// Send to worker pool with timeout; fall back to dead-letter queue.
@@ -127,7 +127,7 @@ func (b *Bus) Start() {
 				case b.eventCh <- event:
 				case <-time.After(dispatchTimeout):
 					b.droppedCount.Add(1)
-					log.Printf("events: worker pool saturated after %v, sending event type=%s to dead-letter queue", dispatchTimeout, event.Type)
+					slog.Info("events: worker pool saturated after , sending event type= to dead-letter queue", "arg1", dispatchTimeout, "type", event.Type)
 					b.sendToDeadLetter(event)
 				}
 			}
@@ -172,10 +172,10 @@ func (b *Bus) DroppedCount() uint64 {
 func (b *Bus) sendToDeadLetter(event Event) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("events: failed to marshal dead-letter event: %v", err)
+		slog.Info("events: failed to marshal dead-letter event", "error", err)
 		return
 	}
 	if err := b.client.LPush(b.ctx, DeadLetterChannel, data).Err(); err != nil {
-		log.Printf("events: failed to push dead-letter event: %v", err)
+		slog.Info("events: failed to push dead-letter event", "error", err)
 	}
 }

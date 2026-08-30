@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -29,12 +29,13 @@ var (
 )
 
 func main() {
-	log.Printf("PEPA Worker starting... (version=%s, built=%s)", version, buildTime)
+	slog.Info("PEPA Worker starting", "version", version, "build_time", buildTime)
 
 	// Bootstrap all shared components
 	comp, err := bootstrap.Bootstrap()
 	if err != nil {
-		log.Fatalf("Bootstrap failed: %v", err)
+		slog.Error("bootstrap failed", "error", err)
+		os.Exit(1)
 	}
 
 	// Reconcile discovered plugins with the DB: only explicitly installed
@@ -70,7 +71,7 @@ func main() {
 		}(i)
 	}
 
-	log.Printf("Started %d workers", numWorkers)
+	slog.Info("workers started", "count", numWorkers)
 
 	// Start delayed job promoter
 	wg.Add(1)
@@ -81,23 +82,23 @@ func main() {
 
 	// Wait for shutdown signal
 	<-done
-	log.Println("Shutting down worker...")
+	slog.Info("shutting down worker")
 	cancel()
 
 	// Wait for workers to finish
 	wg.Wait()
 	comp.Shutdown(ctx)
-	log.Println("PEPA Worker stopped")
+	slog.Info("PEPA Worker stopped")
 }
 
 func runWorker(ctx context.Context, id int, client *redis.Client, db *database.DB, bus *events.Bus, wfEngine *workflow.Engine, entityRepo *repository.EntityRepository, jobQueue *queue.Queue, aiManager *ai.Manager) {
 	queueKey := "pepa:jobs"
-	log.Printf("Worker %d started", id)
+	slog.Info("worker started", "id", id)
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Worker %d stopping", id)
+			slog.Info("worker stopping", "id", id)
 			return
 		default:
 			// Block-pop from queue with 5s timeout
@@ -109,37 +110,37 @@ func runWorker(ctx context.Context, id int, client *redis.Client, db *database.D
 				if ctx.Err() != nil {
 					return // Shutting down
 				}
-				log.Printf("Worker %d: queue error: %v", id, err)
+				slog.Error("queue error", "id", id, "error", err)
 				time.Sleep(time.Second)
 				continue
 			}
 
 			var job queue.Job
 			if err := json.Unmarshal([]byte(result[1]), &job); err != nil {
-				log.Printf("Worker %d: unmarshal job: %v", id, err)
+				slog.Error("failed to unmarshal job", "id", id, "error", err)
 				continue
 			}
 
-			log.Printf("Worker %d: processing job %s (type=%s)", id, job.ID, job.Type)
+			slog.Info("processing job", "id", id, "job", job.ID, "type", job.Type)
 			if err := processJob(ctx, &job, db, bus, wfEngine, entityRepo, aiManager); err != nil {
-				log.Printf("Worker %d: job %s failed: %v", id, job.ID, err)
+				slog.Error("job failed", "id", id, "job", job.ID, "error", err)
 				// Re-queue with exponential backoff if retries remain
 				if job.Retries < 3 {
 					job.Retries++
 					backoff := time.Duration(job.Retries*job.Retries) * 10 * time.Second
 					if enqueueErr := jobQueue.EnqueueJobWithDelay(&job, backoff); enqueueErr != nil {
-						log.Printf("Worker %d: failed to requeue job %s: %v", id, job.ID, enqueueErr)
+						slog.Error("failed to requeue job", "id", id, "job", job.ID, "error", enqueueErr)
 					} else {
-						log.Printf("Worker %d: job %s requeued with %v backoff (retry %d/3)", id, job.ID, backoff, job.Retries)
+						slog.Info("job requeued with backoff", "id", id, "job", job.ID, "backoff", backoff, "retry", job.Retries)
 					}
 				} else {
-					log.Printf("Worker %d: job %s exhausted retries, moving to dead letter", id, job.ID)
+					slog.Warn("job exhausted retries, moving to dead letter", "id", id, "job", job.ID)
 					if err := jobQueue.MoveToDeadLetter(&job); err != nil {
-						log.Printf("Worker %d: failed to dead-letter job %s: %v", id, job.ID, err)
+						slog.Error("failed to dead-letter job", "id", id, "job", job.ID, "error", err)
 					}
 				}
 			} else {
-				log.Printf("Worker %d: job %s completed", id, job.ID)
+				slog.Info("job completed", "id", id, "job", job.ID)
 			}
 		}
 	}
@@ -175,7 +176,7 @@ func processEntitySync(ctx context.Context, job *queue.Job, db *database.DB, bus
 		return fmt.Errorf("entity.sync: load entity: %w", err)
 	}
 
-	log.Printf("Syncing entity %s (%s/%s)", entity.Name, entity.TypeKey, entity.Status)
+	slog.Info("syncing entity", "entity", entity.Name, "type", entity.TypeKey, "status", entity.Status)
 
 	// Update sync status
 	_, err = entityRepo.Update(ctx, entityID, models.UpdateEntityRequest{
@@ -217,7 +218,7 @@ func processWorkflowExecute(ctx context.Context, job *queue.Job, wfEngine *workf
 		return fmt.Errorf("workflow.execute: invalid execution_id: %w", err)
 	}
 
-	log.Printf("Executing workflow %s (execution %s)", workflowID, executionID)
+	slog.Info("executing workflow", "workflow", workflowID, "execution", executionID)
 	return wfEngine.Execute(ctx, workflowID, executionID)
 }
 
@@ -233,7 +234,7 @@ func processEntityIndex(ctx context.Context, job *queue.Job, entityRepo *reposit
 	}
 
 	if aiManager == nil {
-		log.Printf("entity.index: AI manager not configured, skipping embedding for %s", entityIDStr)
+		slog.Info("entity.index: AI manager not configured, skipping", "entity", entityIDStr)
 		return nil
 	}
 
@@ -269,7 +270,7 @@ func processEntityIndex(ctx context.Context, job *queue.Job, entityRepo *reposit
 		return fmt.Errorf("entity.index: store embedding: %w", err)
 	}
 
-	log.Printf("Entity %s indexed (embedding: %d dims, tokens: %d)", entityIDStr, len(resp.Vectors[0]), resp.TokensUsed)
+	slog.Info("entity indexed", "entity", entityIDStr, "dims", len(resp.Vectors[0]), "tokens", resp.TokensUsed)
 	return nil
 }
 
@@ -288,7 +289,7 @@ func runDelayedJobPromoter(ctx context.Context, jobQueue *queue.Queue) {
 			return
 		case <-ticker.C:
 			if err := jobQueue.PromoteDelayedJobs(ctx); err != nil {
-				log.Printf("Delayed job promoter error: %v", err)
+				slog.Error("delayed job promoter error", "error", err)
 			}
 		}
 	}

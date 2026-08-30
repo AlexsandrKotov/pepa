@@ -2,7 +2,7 @@ package rest
 
 import (
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -130,7 +130,7 @@ func downloadPlugin(deps Dependencies) gin.HandlerFunc {
 		c.Status(http.StatusOK)
 
 		if _, err := io.Copy(c.Writer, reader); err != nil {
-			log.Printf("download stream error: %v", err)
+			slog.Info("download stream error", "error", err)
 		}
 	}
 }

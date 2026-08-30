@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { login, bootstrapActivate, getBootstrapStatus, resetMyPassword, getMe, setStoredUser } from '@/lib/api';
+import { login, bootstrapActivate, getBootstrapStatus, resetMyPassword, getMe, setStoredUser, getOIDCConfig, getOIDCLoginURL } from '@/lib/api';
 
 type Phase = 'loading' | 'login' | 'bootstrap' | 'change-password' | 'connecting';
 
@@ -17,6 +17,9 @@ export default function LoginPage() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // OIDC state
+  const [oidcEnabled, setOIDCEnabled] = useState(false);
 
   // Refs to read actual DOM values — guards against browser autofill
   // not triggering React's onChange (controlled input desync).
@@ -54,6 +57,15 @@ export default function LoginPage() {
     };
     check();
     return () => { cancelled = true; };
+  }, []);
+
+  // Check OIDC configuration on mount
+  useEffect(() => {
+    getOIDCConfig().then((config) => {
+      setOIDCEnabled(config.enabled);
+    }).catch(() => {
+      setOIDCEnabled(false);
+    });
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -434,6 +446,39 @@ export default function LoginPage() {
                 ) : 'Sign in'}
               </button>
             </form>
+
+            {/* OIDC/SSO button */}
+            {oidcEnabled && (
+              <div className="mt-6">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-white/10"></div>
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-2 text-white/40 bg-[#0d1520]">Or continue with</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      setError('');
+                      const { redirect_url } = await getOIDCLoginURL();
+                      window.location.href = redirect_url;
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'SSO login failed');
+                    }
+                  }}
+                  className="mt-4 w-full bg-white/5 border border-white/10 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 transition-all flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                  </svg>
+                  Sign in with SSO
+                </button>
+              </div>
+            )}
           )}
 
           {/* Change password form */}

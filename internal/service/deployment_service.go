@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -43,13 +43,13 @@ type DeploymentResult struct {
 func (s *DeploymentService) updateStatusWithLogs(deploymentID uuid.UUID, status, logs string) {
 	deployment, err := s.deploymentRepo.Get(context.Background(), deploymentID)
 	if err != nil {
-		log.Printf("ERROR: deployment %s: get for status update: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : get for status update", "id", deploymentID, "error", err)
 		return
 	}
 	deployment.Status = status
 	deployment.Logs = logs
 	if err := s.deploymentRepo.Update(context.Background(), deployment); err != nil {
-		log.Printf("ERROR: deployment %s: update status: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : update status", "id", deploymentID, "error", err)
 	}
 }
 
@@ -57,14 +57,14 @@ func (s *DeploymentService) updateStatusWithLogs(deploymentID uuid.UUID, status,
 func (s *DeploymentService) updateStatusWithError(deploymentID uuid.UUID, status, errorMsg, logs string) {
 	deployment, err := s.deploymentRepo.Get(context.Background(), deploymentID)
 	if err != nil {
-		log.Printf("ERROR: deployment %s: get for status update: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : get for status update", "id", deploymentID, "error", err)
 		return
 	}
 	deployment.Status = status
 	deployment.ErrorMessage = errorMsg
 	deployment.Logs = logs
 	if err := s.deploymentRepo.Update(context.Background(), deployment); err != nil {
-		log.Printf("ERROR: deployment %s: update status: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : update status", "id", deploymentID, "error", err)
 	}
 }
 
@@ -109,12 +109,12 @@ func (s *DeploymentService) PerformDeployment(
 	logsBuilder.WriteString(fmt.Sprintf("Getting kubeconfig for cluster %s...\n", clusterID))
 	kubeconfig, err := s.clusterRepo.GetKubeconfig(ctx, clusterID, uuid.Nil)
 	if err != nil {
-		log.Printf("ERROR: deployment %s: get kubeconfig: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : get kubeconfig", "id", deploymentID, "error", err)
 		updateStatus("failed", fmt.Sprintf("Failed to get kubeconfig: %v", err), logsBuilder.String())
 		return &DeploymentResult{Success: false, Message: err.Error(), Logs: logsBuilder.String()}
 	}
 	if kubeconfig == "" {
-		log.Printf("ERROR: deployment %s: cluster %s has no kubeconfig", deploymentID, clusterID)
+		slog.Info("ERROR: deployment : cluster has no kubeconfig", "id", deploymentID, "id", clusterID)
 		updateStatus("failed", "Cluster has no kubeconfig configured", logsBuilder.String())
 		return &DeploymentResult{Success: false, Message: "Cluster has no kubeconfig configured", Logs: logsBuilder.String()}
 	}
@@ -138,7 +138,7 @@ func (s *DeploymentService) PerformDeployment(
 		client, err = k8s.NewClient(kubeconfig)
 	}
 	if err != nil {
-		log.Printf("ERROR: deployment %s: create k8s client: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : create k8s client", "id", deploymentID, "error", err)
 		updateStatus("failed", fmt.Sprintf("Failed to create k8s client: %v", err), logsBuilder.String())
 		return &DeploymentResult{Success: false, Message: err.Error(), Logs: logsBuilder.String()}
 	}
@@ -154,7 +154,7 @@ func (s *DeploymentService) PerformDeployment(
 	}
 	deploySpec, err := k8s.ParseDeploySpec(specJSON, releaseName, namespace, replicas)
 	if err != nil {
-		log.Printf("ERROR: deployment %s: parse spec: %v", deploymentID, err)
+		slog.Info("ERROR: deployment : parse spec", "id", deploymentID, "error", err)
 		updateStatus("failed", fmt.Sprintf("Failed to parse deployment spec: %v", err), logsBuilder.String())
 		return &DeploymentResult{Success: false, Message: err.Error(), Logs: logsBuilder.String()}
 	}
@@ -167,7 +167,7 @@ func (s *DeploymentService) PerformDeployment(
 			updateStatus("cancelled", "", logsBuilder.String())
 			return &DeploymentResult{Success: false, Message: "Deployment cancelled by user", Logs: logsBuilder.String()}
 		}
-		log.Printf("Deployment %s: using Helm deploy for chart %s/%s", deploymentID, deploySpec.Chart.ChartURL, deploySpec.Chart.ChartName)
+		slog.Info("Deployment : using Helm deploy for chart /", "id", deploymentID, "arg2", deploySpec.Chart.ChartURL, "name", deploySpec.Chart.ChartName)
 		logsBuilder.WriteString(fmt.Sprintf("Deploying Helm chart: %s/%s (version: %s)\n", deploySpec.Chart.ChartURL, deploySpec.Chart.ChartName, deploySpec.Chart.ChartVersion))
 		logsBuilder.WriteString(fmt.Sprintf("Release: %s, Namespace: %s, Timeout: %ds\n", releaseName, namespace, timeoutSeconds))
 		
@@ -207,12 +207,12 @@ func (s *DeploymentService) PerformDeployment(
 		result, err := client.HelmDeploy(ctx, helmSpec)
 		if err != nil {
 			errMsg := fmt.Sprintf("Helm deploy failed: %v", err)
-			log.Printf("ERROR: deployment %s: %s", deploymentID, errMsg)
+			slog.Info("ERROR: deployment ", "id", deploymentID, "error", errMsg)
 			logsBuilder.WriteString(fmt.Sprintf("ERROR: %s\n", errMsg))
 			updateStatus("failed", errMsg, logsBuilder.String())
 			return &DeploymentResult{Success: false, Message: errMsg, Logs: logsBuilder.String()}
 		}
-		log.Printf("Deployment %s succeeded (Helm): %s", deploymentID, result.Message)
+		slog.Info("Deployment succeeded (Helm)", "id", deploymentID, "arg2", result.Message)
 		logsBuilder.WriteString(fmt.Sprintf("SUCCESS: %s\n", result.Message))
 		updateStatus("deployed", "", logsBuilder.String())
 		return &DeploymentResult{Success: true, Message: result.Message, Logs: logsBuilder.String()}
@@ -230,13 +230,13 @@ func (s *DeploymentService) PerformDeployment(
 	result, err := client.Deploy(ctx, deploySpec)
 	if err != nil {
 		errMsg := fmt.Sprintf("Deploy failed: %v", err)
-		log.Printf("ERROR: deployment %s: %s", deploymentID, errMsg)
+		slog.Info("ERROR: deployment ", "id", deploymentID, "error", errMsg)
 		logsBuilder.WriteString(fmt.Sprintf("ERROR: %s\n", errMsg))
 		updateStatus("failed", errMsg, logsBuilder.String())
 		return &DeploymentResult{Success: false, Message: errMsg, Logs: logsBuilder.String()}
 	}
 
-	log.Printf("Deployment %s succeeded: %s", deploymentID, result.Message)
+	slog.Info("Deployment succeeded", "id", deploymentID, "arg2", result.Message)
 	logsBuilder.WriteString(fmt.Sprintf("SUCCESS: %s\n", result.Message))
 	updateStatus("deployed", "", logsBuilder.String())
 	return &DeploymentResult{Success: true, Message: result.Message, Logs: logsBuilder.String()}

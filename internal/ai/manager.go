@@ -3,7 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 )
 
@@ -177,9 +177,9 @@ func (m *Manager) CreateAgentForProvider(name string) (*Agent, error) {
 	mode := AgentModeNative
 	if !providerSupportsFunctionCalling(name) {
 		mode = AgentModePrompt
-		log.Printf("[AI Manager] Provider %q may not support function calling — using prompt-based agent mode", name)
+		slog.Info("Provider may not support function calling — using prompt-based agent mode", "name", name)
 	} else {
-		log.Printf("[AI Manager] Provider %q supports function calling — using native agent mode", name)
+		slog.Info("Provider supports function calling — using native agent mode", "name", name)
 	}
 
 	return NewAgent(p, m.toolRegistry, m.agentPolicy, mode), nil

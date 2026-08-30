@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -40,7 +40,7 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 
 	// Ensure namespace exists before Helm deploy
 	if err := c.ensureNamespace(ctx, spec.Namespace); err != nil {
-		log.Printf("WARN: ensure namespace %q for helm deploy: %v", spec.Namespace, err)
+		slog.Info("WARN: ensure namespace for helm deploy", "name", spec.Namespace, "error", err)
 		// Continue anyway — namespace might already exist or be auto-created by Helm
 	}
 
@@ -94,7 +94,7 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 		if spec.ChartName == "" {
 			return nil, fmt.Errorf("chart_name is required for %s source type (the Helm chart name within the repository, e.g. 'my-app', 'nginx', 'postgresql')", spec.SourceType)
 		}
-		log.Printf("Helm deploy: repo=%s chart=%s version=%s release=%s", spec.ChartURL, spec.ChartName, spec.ChartVersion, spec.ReleaseName)
+		slog.Info("Helm deploy: repo= chart= version= release=", "arg1", spec.ChartURL, "name", spec.ChartName, "version", spec.ChartVersion, "name", spec.ReleaseName)
 		// Add repo with credentials if provided
 		addArgs := []string{"repo", "add", repoName, spec.ChartURL, "--force-update",
 			"--kubeconfig", kubeconfigFile.Name()}
@@ -111,7 +111,7 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 		updateArgs := []string{"repo", "update",
 			"--kubeconfig", kubeconfigFile.Name()}
 		if err := c.runHelm(ctx, updateArgs...); err != nil {
-			log.Printf("WARN: helm repo update: %v", err)
+			slog.Info("WARN: helm repo update", "error", err)
 			// Continue anyway — chart might be cached
 		}
 		chartRef = repoName + "/" + spec.ChartName
@@ -169,7 +169,7 @@ func (c *Client) runHelm(ctx context.Context, args ...string) error {
 		return fmt.Errorf("helm %s: %s: %w", cmdDesc, strings.TrimSpace(detail), err)
 	}
 	if stdout.Len() > 0 {
-		log.Printf("helm output: %s", strings.TrimSpace(stdout.String()))
+		slog.Info("helm output", "arg1", strings.TrimSpace(stdout.String()))
 	}
 	return nil
 }

@@ -94,6 +94,15 @@ const BRAND_ICONS: Record<string, React.ReactNode> = {
     <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.568 18.216c-.264.456-.756.684-1.26.684H7.692c-.504 0-.996-.228-1.26-.684L4.164 14.4c-.264-.456-.264-1.02 0-1.476L9.432 4.2c.264-.456.756-.684 1.26-.684h2.616c.504 0 .996.228 1.26.684l5.268 8.724c.264.456.264 1.02 0 1.476l-2.268 3.816z" fill="#EE0000" />
   ),
 
+  // Trivy — shield with magnifier in cyan
+  trivy: (
+    <>
+      <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5zm0 2.18l7 3.82v5c0 4.52-3.13 8.69-7 9.93-3.87-1.24-7-5.41-7-9.93V8l7-3.82z" fill="#1904DA" />
+      <circle cx="12" cy="12" r="3" fill="none" stroke="#00BFF3" strokeWidth="1.5" />
+      <path d="M14.5 14.5l2 2" stroke="#00BFF3" strokeWidth="1.5" strokeLinecap="round" />
+    </>
+  ),
+
   // ArgoCD — arrow/loop in teal
   argocd: (
     <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3.6l6.8 11.4H5.2L12 3.6zM7.2 13.2h9.6L12 5.4 7.2 13.2z" fill="#EF7B4D" />
@@ -348,6 +357,7 @@ export function getBrandIconKey(name: string): string {
   const aliases: Record<string, string> = {
     'git_provider': 'git',
     'gitlab_ci': 'gitlab',
+    'github_actions': 'github',
     'task_tracker': 'jira',
     'notification': 'slack',
     'cd_engine': 'cicd',

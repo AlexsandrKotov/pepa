@@ -1,7 +1,7 @@
 package rest
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -83,7 +83,7 @@ func listTeams(deps Dependencies) gin.HandlerFunc {
 			ORDER BY parent_team_id NULLS FIRST, name
 		`, tenantID)
 		if err != nil {
-			log.Printf("listTeams: query error: %v", err)
+			slog.Info("listTeams: query error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list teams"})
 			return
 		}
@@ -95,7 +95,7 @@ func listTeams(deps Dependencies) gin.HandlerFunc {
 			var metadataJSON []byte
 			if err := rows.Scan(&t.ID, &t.TenantID, &t.Name, &t.Slug, &t.Description,
 				&t.ParentTeamID, &metadataJSON, &t.CreatedAt); err != nil {
-				log.Printf("listTeams: scan error: %v", err)
+				slog.Info("listTeams: scan error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read team data"})
 				return
 			}
@@ -145,7 +145,7 @@ func createTeam(deps Dependencies) gin.HandlerFunc {
 			VALUES ($1, $2, $3, $4, $5, $6)
 		`, teamID, tenantID, req.Name, req.Slug, req.Description, req.ParentTeamID)
 		if err != nil {
-			log.Printf("createTeam: insert error: %v", err)
+			slog.Info("createTeam: insert error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create team"})
 			return
 		}
@@ -232,7 +232,7 @@ func updateTeam(deps Dependencies) gin.HandlerFunc {
 			WHERE id = $1
 		`, id, nilIfEmpty(req.Name), nilIfEmpty(req.Description), req.ParentTeamID)
 		if err != nil {
-			log.Printf("updateTeam: exec error: %v", err)
+			slog.Info("updateTeam: exec error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update team"})
 			return
 		}
@@ -258,13 +258,13 @@ func deleteTeam(deps Dependencies) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		// Delete memberships first (in case ON DELETE CASCADE is not set)
 		if _, err := deps.DB.Pool.Exec(ctx, `DELETE FROM team_memberships WHERE team_id = $1`, id); err != nil {
-			log.Printf("deleteTeam: membership delete error: %v", err)
+			slog.Info("deleteTeam: membership delete error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete team memberships"})
 			return
 		}
 		_, err = deps.DB.Pool.Exec(ctx, `DELETE FROM teams WHERE id = $1`, id)
 		if err != nil {
-			log.Printf("deleteTeam: exec error: %v", err)
+			slog.Info("deleteTeam: exec error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete team"})
 			return
 		}
@@ -306,7 +306,7 @@ func listTeamMembers(deps Dependencies) gin.HandlerFunc {
 		for rows.Next() {
 			var m TeamMember
 			if err := rows.Scan(&m.ID, &m.TeamID, &m.UserID, &m.Email, &m.Name, &m.Role, &m.JoinedAt); err != nil {
-				log.Printf("listTeamMembers: scan error: %v", err)
+				slog.Info("listTeamMembers: scan error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read member data"})
 				return
 			}
@@ -362,7 +362,7 @@ func addTeamMember(deps Dependencies) gin.HandlerFunc {
 			ON CONFLICT (team_id, user_id) DO UPDATE SET role = $4
 		`, membershipID, teamID, userID, role)
 		if err != nil {
-			log.Printf("addTeamMember: insert error: %v", err)
+			slog.Info("addTeamMember: insert error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add team member"})
 			return
 		}
@@ -396,7 +396,7 @@ func removeTeamMember(deps Dependencies) gin.HandlerFunc {
 			DELETE FROM team_memberships WHERE team_id = $1 AND user_id = $2
 		`, teamID, userID)
 		if err != nil {
-			log.Printf("removeTeamMember: exec error: %v", err)
+			slog.Info("removeTeamMember: exec error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove team member"})
 			return
 		}
@@ -442,7 +442,7 @@ func getTeamRoles(deps Dependencies) gin.HandlerFunc {
 			var assignID, roleID uuid.UUID
 			var name, slug string
 			if err := rows.Scan(&assignID, &roleID, &name, &slug); err != nil {
-				log.Printf("getTeamRoles: scan error: %v", err)
+				slog.Info("getTeamRoles: scan error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read role data"})
 				return
 			}
@@ -505,7 +505,7 @@ func assignTeamRole(deps Dependencies) gin.HandlerFunc {
 			VALUES ($1, $2, $3, $4, 'team', $5, true, $6)
 		`, assignID, tenantID, teamID, roleID, teamID.String(), userID)
 		if err != nil {
-			log.Printf("assignTeamRole: insert error: %v", err)
+			slog.Info("assignTeamRole: insert error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to assign role"})
 			return
 		}
@@ -539,7 +539,7 @@ func removeTeamRole(deps Dependencies) gin.HandlerFunc {
 			DELETE FROM role_assignments WHERE team_id = $1 AND role_id = $2 AND is_active = true
 		`, teamID, roleID)
 		if err != nil {
-			log.Printf("removeTeamRole: exec error: %v", err)
+			slog.Info("removeTeamRole: exec error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove role"})
 			return
 		}

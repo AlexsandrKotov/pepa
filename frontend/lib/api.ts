@@ -334,6 +334,30 @@ export async function logout(): Promise<void> {
   removeToken();
 }
 
+// ── OIDC/SSO API ─────────────────────────────────────────────
+
+export async function getOIDCConfig(): Promise<{ enabled: boolean; issuer?: string; client_id?: string; redirect_url?: string; scopes?: string[] }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/oidc/config`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    return { enabled: false };
+  }
+  return res.json();
+}
+
+export async function getOIDCLoginURL(): Promise<{ redirect_url: string }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/oidc/login`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to get OIDC login URL');
+  }
+  return res.json();
+}
+
 export async function getMe(): Promise<{ user: { id: string; email: string; name: string; is_active: boolean }; roles: string[]; permissions: string[] }> {
   // Use raw fetch instead of fetchAPI to avoid the global 401→redirect behavior.
   // getMe() is called on page load to check session validity — a 401 here
@@ -2978,7 +3002,16 @@ export interface PipelineRunJob {
   log_url?: string;
   runner_name?: string;
   allow_failure: boolean;
+  steps?: PipelineJobStep[];
   created_at: string;
+}
+
+export interface PipelineJobStep {
+  name: string;
+  status: string;
+  number: number;
+  started_at?: string;
+  completed_at?: string;
 }
 
 export const pipelineSources = {
@@ -3011,6 +3044,10 @@ export const pipelineRuns = {
     fetchAPI<PipelineRun>(`/api/v1/pipeline-sources/${sourceId}/runs/${runId}/refresh`, { method: 'POST' }),
   cancel: (sourceId: string, runId: string) =>
     fetchAPI<PipelineRun>(`/api/v1/pipeline-sources/${sourceId}/runs/${runId}/cancel`, { method: 'POST' }),
+  sync: (sourceId: string, perPage = 30) =>
+    fetchAPI<{ synced: number; total_remote: number }>(`/api/v1/pipeline-sources/${sourceId}/sync-runs?per_page=${perPage}`, { method: 'POST' }),
+  jobs: (sourceId: string, runId: string) =>
+    fetchAPI<{ jobs: PipelineRunJob[] }>(`/api/v1/pipeline-sources/${sourceId}/runs/${runId}/jobs`),
   logs: (sourceId: string, runId: string, jobId?: string) => {
     const qs = jobId ? `?job_id=${jobId}` : '';
     return fetchAPI<{ logs: string; run_id: string }>(`/api/v1/pipeline-sources/${sourceId}/runs/${runId}/logs${qs}`);

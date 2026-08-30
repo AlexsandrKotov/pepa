@@ -1,7 +1,7 @@
 package rest
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +15,6 @@ func respondInternalError(c *gin.Context, err error) {
 		return
 	}
 	reqID, _ := c.Get("request_id")
-	log.Printf("[ERROR] request_id=%v path=%s error=%v", reqID, c.FullPath(), err)
+	slog.Info("internal error", "request_id", reqID, "path", c.FullPath(), "error", err)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error, please try again later"})
 }

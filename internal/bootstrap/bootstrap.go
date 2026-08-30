@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 
@@ -18,6 +18,7 @@ import (
 	"github.com/pepa/pepa/internal/database"
 	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/gitops"
+	"github.com/pepa/pepa/internal/logging"
 	"github.com/pepa/pepa/internal/pipeline"
 	"github.com/pepa/pepa/internal/plugin/engine"
 	"github.com/pepa/pepa/internal/provider"
@@ -79,9 +80,12 @@ func Bootstrap() (*Components, error) {
 	cfg := config.DefaultConfig()
 	cfg.LoadFromEnv()
 
+	// Initialize structured logging
+	logging.Init(cfg.Server.Env, cfg.Server.LogLevel)
+
 	// Warn about insecure defaults
 	for _, w := range cfg.Validate() {
-		log.Printf("WARNING: %s", w)
+		slog.Warn("insecure default detected", "warning", w)
 	}
 
 	// Validate encryption key strength
@@ -90,9 +94,9 @@ func Bootstrap() (*Components, error) {
 		if isProduction {
 			return nil, fmt.Errorf("encryption key validation failed: %w", err)
 		}
-		log.Printf("WARNING: Encryption key validation: %v", err)
+		slog.Warn("encryption key validation warning", "error", err)
 	} else {
-		log.Println("Encryption key validation passed")
+		slog.Debug("encryption key validation passed")
 	}
 
 	// Initialize PostgreSQL
@@ -100,14 +104,14 @@ func Bootstrap() (*Components, error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("PostgreSQL connected: %s:%d/%s", cfg.Database.Host, cfg.Database.Port, cfg.Database.DBName)
+	slog.Info("PostgreSQL connected", "host", cfg.Database.Host, "port", cfg.Database.Port, "db", cfg.Database.DBName)
 
 	// Run database migrations
 	if err := db.RunMigrations(context.Background()); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
-	log.Println("Database migrations up to date")
+	slog.Info("database migrations up to date")
 
 	// Initialize Redis
 	redis, err := database.NewRedis(cfg.Redis.Addr(), cfg.Redis.Password, cfg.Redis.DB)
@@ -115,7 +119,7 @@ func Bootstrap() (*Components, error) {
 		db.Close()
 		return nil, err
 	}
-	log.Printf("Redis connected: %s", cfg.Redis.Addr())
+	slog.Info("Redis connected", "addr", cfg.Redis.Addr())
 
 	// Initialize plugin storage
 	// S3 is optional: set S3_ENDPOINT to enable, otherwise local filesystem is used.
@@ -123,13 +127,13 @@ func Bootstrap() (*Components, error) {
 	if cfg.S3.Endpoint != "" {
 		s3Client, err := storage.NewS3Client(cfg.S3)
 		if err != nil {
-			log.Printf("Warning: S3 storage unavailable: %v", err)
+			slog.Warn("S3 storage unavailable", "error", err)
 		} else {
 			if err := s3Client.EnsureBuckets(context.Background()); err != nil {
-				log.Printf("Warning: S3 bucket init failed: %v", err)
+				slog.Warn("S3 bucket init failed", "error", err)
 			} else {
 				pluginStorage = s3Client
-				log.Println("Using S3 storage for plugin binaries")
+				slog.Info("using S3 storage for plugin binaries")
 			}
 		}
 	}
@@ -145,7 +149,7 @@ func Bootstrap() (*Components, error) {
 			return nil, fmt.Errorf("init local storage: %w", err)
 		}
 		pluginStorage = localStorage
-		log.Println("Using local filesystem storage for plugin binaries")
+		slog.Info("using local filesystem storage for plugin binaries")
 	}
 
 	// Initialize plugin manager and discover plugins
@@ -158,14 +162,14 @@ func Bootstrap() (*Components, error) {
 	// thread-safe, so plugins become available as they finish loading.
 	go func() {
 		if err := pluginMgr.DiscoverAndLoad(); err != nil {
-			log.Printf("Warning: plugin discovery failed: %v", err)
+			slog.Warn("plugin discovery failed", "error", err)
 		}
 
 		// Sync loaded plugins into the provider registry
 		for name, info := range pluginMgr.ListLoadedPlugins() {
 			grpcClient, err := pluginMgr.GetGRPCClient(name)
 			if err != nil {
-				log.Printf("Warning: could not get gRPC client for plugin %s: %v", name, err)
+				slog.Warn("could not get gRPC client for plugin", "plugin", name, "error", err)
 				continue
 			}
 			providerRegistry.Register(&provider.PluginEntry{
@@ -176,10 +180,10 @@ func Bootstrap() (*Components, error) {
 				Enabled:  true,
 			})
 		}
-		log.Printf("Provider registry: %d plugin(s) loaded", len(providerRegistry.List()))
+		slog.Info("provider registry loaded", "count", len(providerRegistry.List()))
 	}()
 
-	log.Printf("Provider registry initialized, plugins loading in background")
+	slog.Info("provider registry initialized, plugins loading in background")
 
 	// Initialize event bus and job queue
 	eventBus := events.NewBus(redis.Client)
@@ -229,8 +233,10 @@ func Bootstrap() (*Components, error) {
 	pipelineRegistry.Register("gitlab", pipeline.NewGitLabAdapter())
 	pipelineRegistry.Register("ansible", pipeline.NewAnsibleAdapter())
 	pipelineRegistry.Register("terraform", pipeline.NewTerraformAdapter())
+	pipelineRegistry.Register("github_actions", pipeline.NewGitHubActionsAdapter())
+	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
 	c.PipelineRegistry = pipelineRegistry
-	log.Printf("Pipeline registry initialized with adapters: %v", pipelineRegistry.List())
+	slog.Info("pipeline registry initialized", "adapters", pipelineRegistry.List())
 
 	// Initialize AI manager
 	aiManager := ai.NewManager()
@@ -256,23 +262,23 @@ func Bootstrap() (*Components, error) {
 							secretKey := raw[idx+1:]
 							secret, err := c.VaultRepo.GetAnyTenant(context.Background(), secretPath)
 							if err != nil {
-								log.Printf("Warning: cannot resolve vault reference for AI provider %s: %v", name, err)
+								slog.Warn("cannot resolve vault reference for AI provider", "provider", name, "error", err)
 							} else if val, ok := secret.Data[secretKey]; ok {
 								apiKey = val
 							} else {
-								log.Printf("Warning: key %q not found in vault secret %q for AI provider %s", secretKey, secretPath, name)
+								slog.Warn("vault key not found in secret for AI provider", "key", secretKey, "path", secretPath, "provider", name)
 							}
 						}
 					}
 					if err := aiManager.ConfigureProvider(name, apiKey, pCfg.BaseURL, pCfg.Model); err != nil {
-						log.Printf("Warning: failed to configure AI provider %s: %v", name, err)
+						slog.Warn("failed to configure AI provider", "provider", name, "error", err)
 					}
 				}
 			}
 			if aiCfg.DefaultProvider != "" {
 				aiManager.SetDefaultProvider(aiCfg.DefaultProvider)
 			}
-			log.Printf("AI configured from settings: %d provider(s)", len(aiCfg.Providers))
+			slog.Info("AI configured from settings", "providers", len(aiCfg.Providers))
 		}
 	}
 
@@ -298,21 +304,21 @@ func Bootstrap() (*Components, error) {
 					secretPath := raw[:idx]
 					secretKey := raw[idx+1:]
 					if secret, err := c.VaultRepo.GetAnyTenant(context.Background(), secretPath); err != nil {
-						log.Printf("Warning: cannot resolve vault reference for AI connection %s: %v", conn.Name, err)
+						slog.Warn("cannot resolve vault reference for AI connection", "connection", conn.Name, "error", err)
 					} else if val, ok := secret.Data[secretKey]; ok {
 						apiKey = val
 					}
 				}
 			}
 			if err := aiManager.ConfigureProvider(name, apiKey, baseURL, model); err != nil {
-				log.Printf("Warning: failed to configure AI provider %s from connection %s: %v", name, conn.Name, err)
+				slog.Warn("failed to configure AI provider from connection", "provider", name, "connection", conn.Name, "error", err)
 				continue
 			}
 			aiManager.SetDefaultProvider(name)
 			applied++
 		}
 		if applied > 0 {
-			log.Printf("AI configured from connections: %d provider(s)", applied)
+			slog.Info("AI configured from connections", "providers", applied)
 		}
 	}
 	c.AIManager = aiManager
@@ -334,7 +340,7 @@ func Bootstrap() (*Components, error) {
 		DBPool:          c.DB.Pool,
 		TenantID:        uuid.MustParse(database.DefaultTenantID),
 	})
-	log.Printf("AI manager initialized with %d tools", len(aiManager.ToolRegistry().List()))
+	slog.Info("AI manager initialized", "tools", len(aiManager.ToolRegistry().List()))
 
 	return c, nil
 }
@@ -354,7 +360,7 @@ func (c *Components) AutoRegisterPlugins() {
 			// stays inactive until an admin installs it from the Marketplace.
 			_ = c.PluginMgr.UnloadPlugin(name)
 			c.ProviderRegistry.Unregister(name)
-			log.Printf("[plugin-manager] plugin %s@%s discovered but not installed — kept inactive (install via Marketplace)", name, info.Version)
+			slog.Info("plugin discovered but not installed, kept inactive", "plugin", name, "version", info.Version)
 			continue
 		}
 
@@ -388,7 +394,7 @@ func (c *Components) SeedDefaultHelmRepos() {
 	tenantID := uuid.MustParse(database.DefaultTenantID)
 	existing, err := c.HelmRepo.List(context.Background(), tenantID)
 	if err != nil {
-		log.Printf("Warning: failed to list helm repos for seeding: %v", err)
+		slog.Warn("failed to list helm repos for seeding", "error", err)
 		return
 	}
 	if len(existing) > 0 {
@@ -437,20 +443,20 @@ func (c *Components) SeedDefaultHelmRepos() {
 	seeded := 0
 	for i := range defaults {
 		if err := c.HelmRepo.Create(context.Background(), &defaults[i]); err != nil {
-			log.Printf("Warning: failed to seed default helm repo %s: %v", defaults[i].Name, err)
+			slog.Warn("failed to seed default helm repo", "repo", defaults[i].Name, "error", err)
 		} else {
 			seeded++
 		}
 	}
 	if seeded > 0 {
-		log.Printf("Seeded %d default public Helm repositories", seeded)
+		slog.Info("seeded default public Helm repositories", "count", seeded)
 	}
 }
 
 // StartEventBus begins listening for events.
 func (c *Components) StartEventBus() {
 	c.EventBus.Start()
-	log.Println("Event bus started")
+	slog.Info("event bus started")
 }
 
 // Shutdown gracefully stops all components.

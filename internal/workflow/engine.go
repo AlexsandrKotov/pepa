@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -141,7 +141,7 @@ func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID)
 			"error":        firstErr.Error(),
 			"duration_ms":  duration,
 		})
-		log.Printf("Workflow %q execution %s failed in %dms: %v", wf.Name, executionID, duration, firstErr)
+		slog.Info("Workflow execution failed in ms", "name", wf.Name, "id", executionID, "duration", duration, "error", firstErr)
 		return firstErr
 	}
 
@@ -155,13 +155,13 @@ func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID)
 		"steps_total":  len(spec.Steps),
 	})
 
-	log.Printf("Workflow %q execution %s completed in %dms (%d steps)", wf.Name, executionID, duration, len(spec.Steps))
+	slog.Info("Workflow execution completed in ms ( steps)", "name", wf.Name, "id", executionID, "duration", duration, "count", len(spec.Steps))
 	return nil
 }
 
 // executeStep dispatches a single step to the appropriate handler.
 func (e *Engine) executeStep(ctx context.Context, step *models.StepSpec, executionID uuid.UUID, prev map[string]*stepResult, tenantID uuid.UUID, inputs map[string]string) (json.RawMessage, error) {
-	log.Printf("Executing step %q (type=%s, plugin=%s, action=%s)", step.Name, step.Type, step.Plugin, step.Action)
+	slog.Info("Executing step (type=, plugin=, action=)", "name", step.Name, "type", step.Type, "arg3", step.Plugin, "arg4", step.Action)
 
 	switch {
 	case step.Type == "condition":
@@ -196,7 +196,7 @@ func (e *Engine) executeCondition(step *models.StepSpec, prev map[string]*stepRe
 
 func (e *Engine) executeApproval(ctx context.Context, step *models.StepSpec, executionID uuid.UUID) (json.RawMessage, error) {
 	// Create an approval request in the workflow execution result
-	log.Printf("Step %q: creating approval request for execution %s", step.Name, executionID)
+	slog.Info("Step : creating approval request for execution", "name", step.Name, "id", executionID)
 
 	// Parse approval metadata
 	var approvalReq struct {
@@ -221,7 +221,7 @@ func (e *Engine) executeApproval(ctx context.Context, step *models.StepSpec, exe
 }
 
 func (e *Engine) executeEntityUpdate(ctx context.Context, step *models.StepSpec, tenantID uuid.UUID) (json.RawMessage, error) {
-	log.Printf("Step %q: entity_update (params=%s)", step.Name, redactParams(step.Params))
+	slog.Info("Step : entity_update (params=)", "name", step.Name, "arg2", redactParams(step.Params))
 	var params struct {
 		EntityID string          `json:"entity_id"`
 		Status   string          `json:"status"`
@@ -253,7 +253,7 @@ func (e *Engine) executeEntityUpdate(ctx context.Context, step *models.StepSpec,
 		return nil, fmt.Errorf("update entity %s: %w", params.EntityID, err)
 	}
 
-	log.Printf("Step %q: entity %s updated successfully", step.Name, params.EntityID)
+	slog.Info("Step : entity updated successfully", "name", step.Name, "id", params.EntityID)
 	out, _ := json.Marshal(map[string]interface{}{
 		"entity_id": params.EntityID,
 		"updated":   true,
@@ -292,7 +292,7 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 		params.Namespace = "app-" + params.Stage
 	}
 
-	log.Printf("Step %q: deploy project=%s image=%s team=%s stage=%s", step.Name, params.ProjectName, params.ImageTag, params.TeamName, params.Stage)
+	slog.Info("Step : deploy project= image= team= stage=", "name", step.Name, "name", params.ProjectName, "arg3", params.ImageTag, "name", params.TeamName, "arg5", params.Stage)
 
 	if e.deploymentRepo == nil {
 		return nil, fmt.Errorf("deployment repository not available")
@@ -328,7 +328,7 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 }
 
 func (e *Engine) executeDeploySim(step *models.StepSpec) (json.RawMessage, error) {
-	log.Printf("Step %q: deploy_sim (simulated deployment)", step.Name)
+	slog.Info("Step : deploy_sim (simulated deployment)", "name", step.Name)
 	// Parse params for deployment simulation
 	var params struct {
 		ServiceName string `json:"service_name"`
@@ -364,21 +364,21 @@ func (e *Engine) executePluginAction(ctx context.Context, step *models.StepSpec,
 		actionName = parts[1]
 	}
 
-	log.Printf("Step %q: plugin=%s action=%s params=%s", step.Name, pluginName, actionName, redactParams(step.Params))
+	slog.Info("Step : plugin= action= params=", "name", step.Name, "name", pluginName, "name", actionName, "arg4", redactParams(step.Params))
 
 	// Try real plugin dispatch via provider registry
 	if e.providerRegistry != nil {
 		resp, err := e.providerRegistry.ExecuteAction(ctx, pluginName, actionName, step.Params, nil)
 		if err == nil && resp.Success {
-			log.Printf("Step %q: plugin %s action %s succeeded (%d bytes output)", step.Name, pluginName, actionName, len(resp.Output))
+			slog.Info("Step : plugin action succeeded ( bytes output)", "name", step.Name, "name", pluginName, "name", actionName, "count", len(resp.Output))
 			return json.RawMessage(resp.Output), nil
 		}
 		if err != nil {
-			log.Printf("Step %q: plugin dispatch to %s failed: %v (falling back to simulated)", step.Name, pluginName, err)
+			slog.Info("Step : plugin dispatch to failed: (falling back to simulated)", "name", step.Name, "name", pluginName, "error", err)
 		} else {
 			// The engine does not pass connection config, so an unconfigured
 			// plugin (e.g. Slack without webhook) must not break the pipeline.
-			log.Printf("Step %q: plugin %s action %s reported failure: %s (falling back to simulated)", step.Name, pluginName, actionName, resp.Error)
+			slog.Info("Step : plugin action reported failure: (falling back to simulated)", "name", step.Name, "name", pluginName, "name", actionName, "error", resp.Error)
 		}
 	}
 
@@ -406,7 +406,7 @@ func (e *Engine) executeStepWithConditions(ctx context.Context, step *models.Ste
 	// Check skip condition
 	if step.SkipWhen != "" {
 		if evaluateCondition(step.SkipWhen, results, inputs) {
-			log.Printf("Step %q skipped (skip_when: %s)", step.Name, step.SkipWhen)
+			slog.Info("Step skipped (skip_when: )", "name", step.Name, "arg2", step.SkipWhen)
 			e.recordStepExecution(ctx, execID, step, models.ExecutionSuccess, nil, nil, "skipped by condition", 0)
 			return nil, "skipped", nil
 		}
@@ -429,7 +429,7 @@ func (e *Engine) executeStepWithConditions(ctx context.Context, step *models.Ste
 	stepDuration := int(time.Since(stepStart).Milliseconds())
 
 	if err != nil {
-		log.Printf("Step %q failed: %v", step.Name, err)
+		slog.Info("Step failed", "name", step.Name, "error", err)
 		e.recordStepExecution(ctx, execID, step, models.ExecutionFailed, nil, nil, err.Error(), stepDuration)
 		return nil, "failed", err
 	}
@@ -465,7 +465,7 @@ func (e *Engine) recordStepExecution(ctx context.Context, execID uuid.UUID, step
 	}
 
 	if err := e.workflowRepo.CreateStepExecution(ctx, stepExec); err != nil {
-		log.Printf("Failed to record step execution for %q: %v", step.Name, err)
+		slog.Info("Failed to record step execution for ", "name", step.Name, "error", err)
 	}
 }
 

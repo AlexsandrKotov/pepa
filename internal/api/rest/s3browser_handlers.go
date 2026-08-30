@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -55,7 +55,7 @@ func s3ClientFromConnection(ctx context.Context, deps Dependencies, connID uuid.
 			useSSL = true
 		}
 	}
-	log.Printf("[s3browser] connection config: endpoint=%s type=%s", endpoint, conn.Type)
+	slog.Info("connection config: endpoint= type=", "arg1", endpoint, "type", conn.Type)
 
 	if endpoint == "" {
 		return nil, "", "", fmt.Errorf("S3 endpoint is not configured in this connection")
@@ -69,7 +69,7 @@ func s3ClientFromConnection(ctx context.Context, deps Dependencies, connID uuid.
 			if err == nil {
 				return client, "user", accessKey, nil
 			}
-			log.Printf("[s3browser] user credential failed for user %s, falling back to admin: %v", *userID, err)
+			slog.Info("user credential failed for user , falling back to admin", "id", *userID, "error", err)
 		}
 	}
 
@@ -261,14 +261,14 @@ func s3ListObjects(deps Dependencies) gin.HandlerFunc {
 			for _, obj := range topLevel {
 				keys = append(keys, obj.Key)
 			}
-			log.Printf("[s3browser] LIST objects: bucket=%s prefix=%q returned %d objects: %v", bucketName, prefix, len(topLevel), keys)
+			slog.Info("LIST objects", "bucket", bucketName, "prefix", prefix, "count", len(topLevel), "keys", keys)
 		}
 		if len(folders) > 0 {
 			names := make([]string, 0, len(folders))
 			for _, f := range folders {
 				names = append(names, f.Name)
 			}
-			log.Printf("[s3browser] LIST folders: bucket=%s prefix=%q returned %d folders: %v", bucketName, prefix, len(folders), names)
+			slog.Info("LIST folders", "bucket", bucketName, "prefix", prefix, "count", len(folders), "names", names)
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -447,7 +447,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "object key is required"})
 			return
 		}
-		log.Printf("[s3browser] GET object: bucket=%s key=%s preview=%s download=%s", bucketName, key, c.Query("preview"), c.Query("download"))
+		slog.Info("GET object", "bucket", bucketName, "key", key, "preview", c.Query("preview"), "download", c.Query("download"))
 
 		client, _, _, err := s3ClientFromConnection(c.Request.Context(), deps, connID, tenantID, auth.GetUserID(c))
 		if err != nil {
@@ -460,7 +460,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		if c.Query("preview") == "true" {
 			meta, err := client.StatObjectInBucket(c.Request.Context(), bucketName, key)
 			if err != nil {
-				log.Printf("[s3browser] StatObject error: bucket=%s key=%s err=%v", bucketName, key, err)
+				slog.Info("StatObject error: bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot stat object: %v", err)})
 				return
 			}
@@ -482,7 +482,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 
 			reader, err := client.DownloadFromBucket(c.Request.Context(), bucketName, key)
 			if err != nil {
-				log.Printf("[s3browser] Download error (preview): bucket=%s key=%s err=%v", bucketName, key, err)
+				slog.Info("Download error (preview): bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot download object: %v", err)})
 				return
 			}
@@ -496,7 +496,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 			c.Header("X-Content-Type-Options", "nosniff")
 			c.Status(http.StatusOK)
 			if _, err := io.Copy(c.Writer, reader); err != nil {
-				log.Printf("s3browser preview stream error: %v", err)
+				slog.Info("s3browser preview stream error", "error", err)
 			}
 			return
 		}
@@ -505,7 +505,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		if c.Query("download") == "true" {
 			reader, err := client.DownloadFromBucket(c.Request.Context(), bucketName, key)
 			if err != nil {
-				log.Printf("[s3browser] Download error: bucket=%s key=%s err=%v", bucketName, key, err)
+				slog.Info("Download error: bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot download object: %v", err)})
 				return
 			}
@@ -518,7 +518,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 			c.Header("Content-Type", "application/octet-stream")
 			c.Status(http.StatusOK)
 			if _, err := io.Copy(c.Writer, reader); err != nil {
-				log.Printf("s3browser download stream error: %v", err)
+				slog.Info("s3browser download stream error", "error", err)
 			}
 			return
 		}
@@ -526,14 +526,14 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		// Otherwise return metadata + presigned URL
 		meta, err := client.StatObjectInBucket(c.Request.Context(), bucketName, key)
 		if err != nil {
-			log.Printf("[s3browser] StatObject error (meta): bucket=%s key=%s err=%v", bucketName, key, err)
+			slog.Info("StatObject error (meta): bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot stat object: %v", err)})
 			return
 		}
 
 		presignedURL, err := client.PresignedURL(c.Request.Context(), bucketName, key, 15*time.Minute)
 		if err != nil {
-			log.Printf("s3browser presigned URL error: %v", err)
+			slog.Info("s3browser presigned URL error", "error", err)
 			// Non-fatal — return metadata without URL
 		}
 

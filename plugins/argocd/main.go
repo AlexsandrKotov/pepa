@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -284,7 +284,7 @@ func getString(m map[string]interface{}, key string) string {
 }
 
 func main() {
-	log.Println("[argocd-plugin] starting ArgoCD plugin v1.0.0")
+	slog.Info("[argocd-plugin] starting ArgoCD plugin v1.0.0")
 	plugin := &ArgoCDPlugin{}
 	sdk.Serve(plugin)
 }

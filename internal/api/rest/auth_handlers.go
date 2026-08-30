@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -28,6 +28,11 @@ func registerAuthRoutes(r *gin.Engine, deps Dependencies) {
 		public.POST("/logout", logoutHandler(deps))
 		public.GET("/bootstrap/status", bootstrapStatusHandler(deps))
 		public.POST("/bootstrap/activate", bootstrapActivateHandler(deps))
+		
+		// OIDC routes (public, no JWT required)
+		public.GET("/oidc/config", oidcConfigHandler(deps))
+		public.GET("/oidc/login", oidcLoginHandler(deps))
+		public.GET("/oidc/callback", oidcCallbackHandler(deps))
 	}
 
 	// Protected routes (JWT required)
@@ -261,7 +266,7 @@ func loginHandler(deps Dependencies) gin.HandlerFunc {
 
 		// Update last_login_at
 		if err := deps.Repos.Auth.UpdateLastLogin(ctx, user.ID); err != nil {
-			log.Printf("[auth] failed to update last_login_at for user %s: %v", user.ID, err)
+			slog.Info("failed to update last_login_at for user ", "id", user.ID, "error", err)
 		}
 
 		logAudit(deps, c, "login", "user", user.ID.String(), nil, gin.H{"email": user.Email})
@@ -476,7 +481,7 @@ func resetMyPasswordHandler(deps Dependencies) gin.HandlerFunc {
 
 		// Update password
 		if err := deps.Repos.Auth.UpdatePassword(ctx, *userID, newHash); err != nil {
-			log.Printf("resetMyPassword: update error: %v", err)
+			slog.Info("resetMyPassword: update error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
 			return
 		}
@@ -551,7 +556,7 @@ func listUsersHandler(deps Dependencies) gin.HandlerFunc {
 
 		rows, err := deps.DB.Pool.Query(ctx, query, args...)
 		if err != nil {
-			log.Printf("listUsers: query error: %v", err)
+			slog.Info("listUsers: query error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
 			return
 		}
@@ -575,7 +580,7 @@ func listUsersHandler(deps Dependencies) gin.HandlerFunc {
 		for rows.Next() {
 			var u userInfo
 			if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.IsActive, &u.AuthProvider, &u.LastLoginAt, &u.CreatedAt); err != nil {
-				log.Printf("listUsers: scan error: %v", err)
+				slog.Info("listUsers: scan error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read user data"})
 				return
 			}
@@ -589,7 +594,7 @@ func listUsersHandler(deps Dependencies) gin.HandlerFunc {
 		if deps.RBAC != nil && len(userIDs) > 0 {
 			bulkRoles, err := deps.RBAC.GetBulkUserRoles(ctx, tenantID, userIDs)
 			if err != nil {
-				log.Printf("listUsers: bulk role fetch error: %v", err)
+				slog.Info("listUsers: bulk role fetch error", "error", err)
 			} else {
 				for i := range users {
 					if assignments, ok := bulkRoles[users[i].ID]; ok {
@@ -651,7 +656,7 @@ func createUserHandler(deps Dependencies) gin.HandlerFunc {
 
 		userID := uuid.New()
 		if err := deps.Repos.Auth.CreateUser(ctx, userID, email, req.Name, hash); err != nil {
-			log.Printf("createUser: insert error: %v", err)
+			slog.Info("createUser: insert error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 			return
 		}
@@ -821,7 +826,7 @@ func updateUserHandler(deps Dependencies) gin.HandlerFunc {
 			args = append(args, id)
 			_, err := deps.DB.Pool.Exec(ctx, query, args...)
 			if err != nil {
-				log.Printf("updateUser: exec error: %v", err)
+				slog.Info("updateUser: exec error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update user"})
 				return
 			}
@@ -834,7 +839,7 @@ func updateUserHandler(deps Dependencies) gin.HandlerFunc {
 
 			tx, err := deps.DB.Pool.Begin(ctx)
 			if err != nil {
-				log.Printf("updateUser: begin tx error: %v", err)
+				slog.Info("updateUser: begin tx error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update roles"})
 				return
 			}
@@ -845,7 +850,7 @@ func updateUserHandler(deps Dependencies) gin.HandlerFunc {
 				UPDATE role_assignments SET is_active = false
 				WHERE tenant_id = $1 AND user_id = $2 AND is_active = true
 			`, tenantID, id); err != nil {
-				log.Printf("updateUser: revoke error: %v", err)
+				slog.Info("updateUser: revoke error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update roles"})
 				return
 			}
@@ -865,14 +870,14 @@ func updateUserHandler(deps Dependencies) gin.HandlerFunc {
 					INSERT INTO role_assignments (id, tenant_id, user_id, role_id, is_active, granted_by)
 					VALUES ($1, $2, $3, $4, true, $5)
 				`, uuid.New(), tenantID, id, roleID, auth.GetUserID(c)); err != nil {
-					log.Printf("updateUser: assign error: %v", err)
+					slog.Info("updateUser: assign error", "error", err)
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update roles"})
 					return
 				}
 			}
 
 			if err := tx.Commit(ctx); err != nil {
-				log.Printf("updateUser: commit error: %v", err)
+				slog.Info("updateUser: commit error", "error", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update roles"})
 				return
 			}
@@ -961,7 +966,7 @@ func deactivateUserHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if err := deps.Repos.Auth.DeactivateUser(ctx, id); err != nil {
-			log.Printf("deactivateUser: update error: %v", err)
+			slog.Info("deactivateUser: update error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to deactivate user"})
 			return
 		}
@@ -1027,7 +1032,7 @@ func resetUserPasswordHandler(deps Dependencies) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 		if err := deps.Repos.Auth.ResetUserPassword(ctx, id, hash); err != nil {
-			log.Printf("resetUserPassword: update error: %v", err)
+			slog.Info("resetUserPassword: update error", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 			return
 		}
@@ -1046,7 +1051,7 @@ func bumpTokenVersion(deps Dependencies, ctx context.Context, userID uuid.UUID) 
 	if _, err := deps.DB.Pool.Exec(ctx, `
 		UPDATE users SET token_version = COALESCE(token_version, 0) + 1, updated_at = NOW() WHERE id = $1
 	`, userID); err != nil {
-		log.Printf("bumpTokenVersion: failed for user %s: %v", userID, err)
+		slog.Info("bumpTokenVersion: failed for user ", "id", userID, "error", err)
 	}
 }
 

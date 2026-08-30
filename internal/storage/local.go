@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +26,7 @@ func NewLocalStorage(rootDir string) (*LocalStorage, error) {
 	if err := os.MkdirAll(rootDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create storage dir %s: %w", rootDir, err)
 	}
-	log.Printf("[storage] local storage initialized at %s", rootDir)
+	slog.Info("local storage initialized at", "path", rootDir)
 	return &LocalStorage{rootDir: rootDir}, nil
 }
 

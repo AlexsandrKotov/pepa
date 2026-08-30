@@ -3,7 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -189,7 +189,7 @@ func (h *ServiceHandlers) CreateService(c *gin.Context) {
 			}
 			deployment, depErr := h.repo.CreateDeployment(c.Request.Context(), service.ID, deployReq, tenantID)
 			if depErr != nil {
-				log.Printf("ERROR: create deployment record for cluster %s: %v", clusterUUID, depErr)
+				slog.Info("ERROR: create deployment record for cluster ", "id", clusterUUID, "error", depErr)
 				continue
 			}
 			go func() {
@@ -198,7 +198,7 @@ func (h *ServiceHandlers) CreateService(c *gin.Context) {
 					deployment.ID, service.ID, clusterUUID, service.Namespace,
 					service.Name, spec,
 				); err != nil {
-					log.Printf("ERROR: service deployment %s failed: %v", deployment.ID, err)
+					slog.Info("ERROR: service deployment failed", "id", deployment.ID, "error", err)
 				}
 			}()
 			_ = deployment
@@ -291,7 +291,7 @@ func (h *ServiceHandlers) DeployService(c *gin.Context) {
 						deployment.ID, serviceID, clusterUUID, svc.Namespace,
 						releaseName, spec,
 					); err != nil {
-						log.Printf("ERROR: service deployment %s failed: %v", deployment.ID, err)
+						slog.Info("ERROR: service deployment failed", "id", deployment.ID, "error", err)
 					}
 				}()
 			}

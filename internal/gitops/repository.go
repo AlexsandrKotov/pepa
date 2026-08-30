@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -330,7 +330,7 @@ func encryptConfig(cfg map[string]string) map[string]string {
 	if token, ok := cfg["token"]; ok && token != "" {
 		encrypted, err := crypto.Encrypt(token)
 		if err != nil {
-			log.Printf("WARNING: failed to encrypt gitops token: %v", err)
+			slog.Info("WARNING: failed to encrypt gitops token", "error", err)
 			return cfg
 		}
 		cfg["token"] = encrypted
@@ -346,7 +346,7 @@ func decryptConfig(cfg map[string]string) map[string]string {
 	if token, ok := cfg["token"]; ok && token != "" {
 		decrypted, err := crypto.Decrypt(token)
 		if err != nil {
-			log.Printf("WARNING: failed to decrypt gitops token: %v", err)
+			slog.Info("WARNING: failed to decrypt gitops token", "error", err)
 			return cfg
 		}
 		cfg["token"] = decrypted

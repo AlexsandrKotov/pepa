@@ -3,7 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -26,7 +26,7 @@ func init() {
 				// The repo is set on the entry via a small wrapper; we use a package-level ref.
 				if auditRepo != nil {
 					if err := auditRepo.Create(ctx, entry); err != nil {
-						log.Printf("audit log write failed: %v", err)
+						slog.Info("audit log write failed", "error", err)
 					}
 				}
 				cancel()
@@ -96,12 +96,12 @@ func logAudit(deps Dependencies, c *gin.Context, action, entityType, entityID st
 	case auditLogCh <- entry:
 	default:
 		// Channel full — log synchronously as fallback to avoid losing audit entries.
-		log.Printf("audit log channel full, writing synchronously")
+		slog.Info("audit log channel full, writing synchronously")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if auditRepo != nil {
 			if err := auditRepo.Create(ctx, entry); err != nil {
-				log.Printf("audit log write failed: %v", err)
+				slog.Info("audit log write failed", "error", err)
 			}
 		}
 	}
@@ -213,7 +213,7 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := deps.Repos.Audit.Create(ctx, entry); err != nil {
-				log.Printf("api audit middleware write failed: %v", err)
+				slog.Info("api audit middleware write failed", "error", err)
 			}
 		}()
 	}

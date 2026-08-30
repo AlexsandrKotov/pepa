@@ -11,10 +11,12 @@ import (
 type PipelineSourceType string
 
 const (
-	PipelineSourceGitLabCI  PipelineSourceType = "gitlab_ci"
-	PipelineSourceGitLab    PipelineSourceType = "gitlab"
-	PipelineSourceAnsible   PipelineSourceType = "ansible"
-	PipelineSourceTerraform PipelineSourceType = "terraform"
+	PipelineSourceGitLabCI      PipelineSourceType = "gitlab_ci"
+	PipelineSourceGitLab        PipelineSourceType = "gitlab"
+	PipelineSourceAnsible       PipelineSourceType = "ansible"
+	PipelineSourceTerraform     PipelineSourceType = "terraform"
+	PipelineSourceGitHubActions PipelineSourceType = "github_actions"
+	PipelineSourceTrivy         PipelineSourceType = "trivy"
 )
 
 // PipelineSource represents a connection to an external pipeline definition.
@@ -89,20 +91,21 @@ type PipelineRun struct {
 
 // PipelineRunJob represents a single job/step within a pipeline run.
 type PipelineRunJob struct {
-	ID            uuid.UUID  `json:"id" db:"id"`
-	RunID         uuid.UUID  `json:"run_id" db:"run_id"`
-	ExternalJobID string     `json:"external_job_id,omitempty" db:"external_job_id"`
-	Name          string     `json:"name" db:"name"`
-	Stage         string     `json:"stage,omitempty" db:"stage"`
-	Status        string     `json:"status" db:"status"`
-	StartedAt     *time.Time `json:"started_at,omitempty" db:"started_at"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-	DurationMs    *int       `json:"duration_ms,omitempty" db:"duration_ms"`
-	LogText       string     `json:"log_text,omitempty" db:"log_text"`
-	LogURL        string     `json:"log_url,omitempty" db:"log_url"`
-	RunnerName    string     `json:"runner_name,omitempty" db:"runner_name"`
-	AllowFailure  bool       `json:"allow_failure" db:"allow_failure"`
-	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	ID            uuid.UUID       `json:"id" db:"id"`
+	RunID         uuid.UUID       `json:"run_id" db:"run_id"`
+	ExternalJobID string          `json:"external_job_id,omitempty" db:"external_job_id"`
+	Name          string          `json:"name" db:"name"`
+	Stage         string          `json:"stage,omitempty" db:"stage"`
+	Status        string          `json:"status" db:"status"`
+	StartedAt     *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	CompletedAt   *time.Time      `json:"completed_at,omitempty" db:"completed_at"`
+	DurationMs    *int            `json:"duration_ms,omitempty" db:"duration_ms"`
+	LogText       string          `json:"log_text,omitempty" db:"log_text"`
+	LogURL        string          `json:"log_url,omitempty" db:"log_url"`
+	RunnerName    string          `json:"runner_name,omitempty" db:"runner_name"`
+	AllowFailure  bool            `json:"allow_failure" db:"allow_failure"`
+	Steps         json.RawMessage `json:"steps,omitempty" db:"steps"`
+	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
 }
 
 // ── Request types ────────────────────────────────────────────

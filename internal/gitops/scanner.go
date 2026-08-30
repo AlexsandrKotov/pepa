@@ -3,7 +3,7 @@ package gitops
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -122,7 +122,7 @@ func (s *Scanner) Scan(ctx context.Context, repo *Repo) (*ScanResult, error) {
 		// Read and classify the file
 		data, err := os.ReadFile(path) //nolint:gosec // G122,G304: path comes from filepath.Walk within a controlled temp clone
 		if err != nil {
-			log.Printf("gitops scanner: skip %s: %v", relPath, err)
+			slog.Info("gitops scanner: skip ", "path", relPath, "error", err)
 			return nil
 		}
 

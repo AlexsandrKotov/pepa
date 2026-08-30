@@ -3,8 +3,9 @@ package rest
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -96,10 +97,12 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	// Validate JWT secret in production — refuse to start with insecure defaults.
 	if deps.Config.Server.Env == "production" {
 		if deps.Config.Auth.JWTSecret == "" || deps.Config.Auth.JWTSecret == "dev-jwt-secret-change-in-production" {
-			log.Fatal("FATAL: AUTH_JWT_SECRET must be set to a secure random value in production (min 32 characters)")
+			slog.Error("AUTH_JWT_SECRET must be set to a secure random value in production (min 32 characters)")
+			os.Exit(1)
 		}
 		if len(deps.Config.Auth.JWTSecret) < 32 {
-			log.Fatal("FATAL: AUTH_JWT_SECRET must be at least 32 characters long")
+			slog.Error("AUTH_JWT_SECRET must be at least 32 characters long")
+			os.Exit(1)
 		}
 	}
 
@@ -331,12 +334,12 @@ func requestLogger() gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 		reqID, _ := c.Get("request_id")
-		log.Printf("[%v] %s %s %d %s",
-			reqID,
-			c.Request.Method,
-			c.Request.URL.Path,
-			c.Writer.Status(),
-			time.Since(start),
+		slog.Info("http request",
+			"request_id", reqID,
+			"method", c.Request.Method,
+			"path", c.Request.URL.Path,
+			"status", c.Writer.Status(),
+			"duration", time.Since(start),
 		)
 	}
 }

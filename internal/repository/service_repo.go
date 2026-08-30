@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -447,7 +447,7 @@ func (r *ServiceRepository) CreateDeployment(ctx context.Context, serviceID uuid
 	// Only update service status when deploying to a real cluster
 	if req.ClusterID != "" {
 		if _, err := r.pool.Exec(ctx, "UPDATE services SET status = 'deploying', updated_at = $1 WHERE id = $2", now, serviceID); err != nil {
-			log.Printf("[service] failed to update status to 'deploying' for service %s: %v", serviceID, err)
+			slog.Info("failed to update status to 'deploying' for service ", "id", serviceID, "error", err)
 		}
 	}
 

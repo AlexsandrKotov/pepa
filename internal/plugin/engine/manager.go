@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,12 +82,12 @@ func (m *Manager) LoadPlugin(name string, binaryPath string) error {
 		}
 		if sigErr := signature.VerifyPluginBinary(absPath, pubKey); sigErr != nil {
 			if m.cfg.SignatureEnforce {
-				log.Printf("[SECURITY] rejecting unsigned plugin %s: %v", name, sigErr)
+				slog.Warn("rejecting unsigned plugin", "plugin", name, "error", sigErr)
 				return fmt.Errorf("plugin %s rejected: %w", name, sigErr)
 			}
-			log.Printf("[SECURITY] WARNING: plugin %s failed signature check: %v (loading anyway — enforce mode off)", name, sigErr)
+			slog.Warn("plugin failed signature check, loading anyway (enforce mode off)", "plugin", name, "error", sigErr)
 		} else {
-			log.Printf("[plugin-manager] plugin %s signature verified", name)
+			slog.Debug("plugin signature verified", "plugin", name)
 		}
 	}
 
@@ -145,8 +145,7 @@ func (m *Manager) LoadPlugin(name string, binaryPath string) error {
 		},
 	}
 
-	log.Printf("[plugin-manager] loaded plugin %s@%s type=%s actions=%v",
-		info.Name, info.Version, info.PluginType, actionNames(info.Actions))
+	slog.Info("loaded plugin", "plugin", info.Name, "version", info.Version, "type", info.PluginType, "actions", actionNames(info.Actions))
 
 	return nil
 }
@@ -163,7 +162,7 @@ func (m *Manager) UnloadPlugin(name string) error {
 
 	lp.client.Kill()
 	delete(m.plugins, name)
-	log.Printf("[plugin-manager] unloaded plugin %s", name)
+	slog.Info("unloaded plugin", "plugin", name)
 	return nil
 }
 
@@ -313,14 +312,34 @@ func (m *Manager) DiscoverAndLoad() error {
 	}
 
 	// Also scan the bin/ sub-directory (output of `make plugins`).
-	// Binaries live at <dir>/bin/<name>/<name>.
+	// Binaries live at <dir>/bin/<name>/<name> or <dir>/bin/builtin/<name>/<name>.
 	binSubdir := filepath.Join(dir, "bin")
 	if info, err := os.Stat(binSubdir); err == nil && info.IsDir() {
 		binLoaded, err := m.scanDir(binSubdir)
 		if err != nil {
-			log.Printf("[plugin-manager] warning: bin/ scan failed: %v", err)
+			slog.Warn("bin/ scan failed", "error", err)
 		} else {
 			loaded += binLoaded
+		}
+		// Also scan bin/builtin/ for built-in plugins
+		builtinSubdir := filepath.Join(binSubdir, "builtin")
+		if info, err := os.Stat(builtinSubdir); err == nil && info.IsDir() {
+			builtinLoaded, err := m.scanDir(builtinSubdir)
+			if err != nil {
+				slog.Warn("bin/builtin/ scan failed", "error", err)
+			} else {
+				loaded += builtinLoaded
+			}
+		}
+		// Also scan bin/community/ for community plugins
+		communitySubdir := filepath.Join(binSubdir, "community")
+		if info, err := os.Stat(communitySubdir); err == nil && info.IsDir() {
+			communityLoaded, err := m.scanDir(communitySubdir)
+			if err != nil {
+				slog.Warn("bin/community/ scan failed", "error", err)
+			} else {
+				loaded += communityLoaded
+			}
 		}
 	}
 
@@ -328,13 +347,13 @@ func (m *Manager) DiscoverAndLoad() error {
 	if m.cfg.CustomDir != "" {
 		customLoaded, err := m.scanDir(m.cfg.CustomDir)
 		if err != nil {
-			log.Printf("[plugin-manager] warning: custom plugin dir scan failed: %v", err)
+			slog.Warn("custom plugin dir scan failed", "dir", m.cfg.CustomDir, "error", err)
 		} else {
 			loaded += customLoaded
 		}
 	}
 
-	log.Printf("[plugin-manager] discovered and loaded %d plugin(s) total", loaded)
+	slog.Info("plugin discovery complete", "total", loaded)
 	return nil
 }
 
@@ -343,7 +362,7 @@ func (m *Manager) scanDir(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Printf("[plugin-manager] plugin directory %s does not exist, skipping discovery", dir)
+			slog.Debug("plugin directory does not exist, skipping", "dir", dir)
 			return 0, nil
 		}
 		return 0, fmt.Errorf("failed to read plugin directory %s: %w", dir, err)
@@ -356,7 +375,7 @@ func (m *Manager) scanDir(dir string) (int, error) {
 			binPath := filepath.Join(dir, entry.Name(), entry.Name())
 			if _, err := os.Stat(binPath); err == nil {
 				if err := m.LoadPlugin(entry.Name(), binPath); err != nil {
-					log.Printf("[plugin-manager] failed to load plugin %s: %v", entry.Name(), err)
+					slog.Warn("failed to load plugin", "plugin", entry.Name(), "error", err)
 					continue
 				}
 				loaded++
@@ -366,14 +385,14 @@ func (m *Manager) scanDir(dir string) (int, error) {
 			name := entry.Name()
 			binPath := filepath.Join(dir, name)
 			if err := m.LoadPlugin(name, binPath); err != nil {
-				log.Printf("[plugin-manager] failed to load plugin %s: %v", name, err)
+				slog.Warn("failed to load plugin", "plugin", name, "error", err)
 				continue
 			}
 			loaded++
 		}
 	}
 
-	log.Printf("[plugin-manager] discovered and loaded %d plugin(s) from %s", loaded, dir)
+	slog.Info("plugins loaded from directory", "count", loaded, "dir", dir)
 	return loaded, nil
 }
 
@@ -383,7 +402,7 @@ func (m *Manager) Shutdown(ctx context.Context) {
 	defer m.mu.Unlock()
 
 	for name, lp := range m.plugins {
-		log.Printf("[plugin-manager] stopping plugin %s", name)
+		slog.Info("stopping plugin", "plugin", name)
 		lp.client.Kill()
 		stopped := *lp.model
 		stopped.Status = models.PluginStatusStopped

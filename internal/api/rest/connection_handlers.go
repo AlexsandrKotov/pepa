@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -292,16 +292,16 @@ func applyAIConnection(deps Dependencies, ctx context.Context, conn *repository.
 		if resolved, err := resolveVaultRef(deps, ctx, apiKey, conn.TenantID); err == nil {
 			apiKey = resolved
 		} else {
-			log.Printf("Warning: cannot resolve vault reference for AI connection %q: %v", conn.Name, err)
+			slog.Warn("cannot resolve vault reference for AI connection ", "name", conn.Name, "error", err)
 		}
 	}
 
 	if err := deps.AIManager.ConfigureProvider(provider, apiKey, baseURL, model); err != nil {
-		log.Printf("Warning: failed to apply AI connection %q: %v", conn.Name, err)
+		slog.Warn("failed to apply AI connection ", "name", conn.Name, "error", err)
 		return
 	}
 	deps.AIManager.SetDefaultProvider(provider)
-	log.Printf("AI provider %q configured from connection %q", provider, conn.Name)
+	slog.Info("AI provider configured from connection", "id", provider, "name", conn.Name)
 }
 
 // resyncAIProviderAfterDelete keeps the AI manager in sync after an AI
@@ -321,7 +321,7 @@ func resyncAIProviderAfterDelete(deps Dependencies, ctx context.Context, provide
 		}
 	}
 	deps.AIManager.UnregisterProvider(provider)
-	log.Printf("AI provider %q unregistered (connection deleted)", provider)
+	slog.Info("AI provider unregistered (connection deleted)", "id", provider)
 }
 
 func testConnection(deps Dependencies) gin.HandlerFunc {
@@ -601,7 +601,7 @@ func syncClusterFromConnection(deps Dependencies, c *gin.Context, conn *reposito
 	// Check if a cluster already exists for this connection
 	existing, err := deps.Repos.Cluster.FindByConnectionID(ctx, conn.ID)
 	if err != nil {
-		log.Printf("Warning: failed to find cluster by connection ID %s: %v", conn.ID, err)
+		slog.Warn("failed to find cluster by connection ID ", "id", conn.ID, "error", err)
 		return
 	}
 
@@ -621,13 +621,13 @@ func syncClusterFromConnection(deps Dependencies, c *gin.Context, conn *reposito
 			existing.NodeCount = 3
 		}
 		if err := deps.Repos.Cluster.Update(ctx, existing); err != nil {
-			log.Printf("Warning: failed to update cluster %s from connection: %v", existing.ID, err)
+			slog.Warn("failed to update cluster from connection", "id", existing.ID, "error", err)
 		}
 
 		// Transfer kubeconfig from connection to cluster and detect GitOps engines
 		if kubeconfig, ok := conn.Config["kubeconfig"].(string); ok && kubeconfig != "" {
 			if err := deps.Repos.Cluster.SaveKubeconfig(ctx, existing.ID, kubeconfig); err != nil {
-				log.Printf("Warning: failed to save kubeconfig to cluster %s: %v", existing.ID, err)
+				slog.Warn("failed to save kubeconfig to cluster ", "id", existing.ID, "error", err)
 			}
 			// Detect GitOps engines from kubeconfig
 			if client, err := k8s.NewClient(kubeconfig); err == nil {
@@ -668,14 +668,14 @@ func syncClusterFromConnection(deps Dependencies, c *gin.Context, conn *reposito
 			cluster.Environment = env
 		}
 		if err := deps.Repos.Cluster.Create(ctx, cluster); err != nil {
-			log.Printf("Warning: failed to create cluster from connection %s: %v", conn.ID, err)
+			slog.Warn("failed to create cluster from connection ", "id", conn.ID, "error", err)
 			return
 		}
 
 		// Transfer kubeconfig from connection to cluster and detect GitOps engines
 		if kubeconfig, ok := conn.Config["kubeconfig"].(string); ok && kubeconfig != "" {
 			if err := deps.Repos.Cluster.SaveKubeconfig(ctx, cluster.ID, kubeconfig); err != nil {
-				log.Printf("Warning: failed to save kubeconfig to cluster %s: %v", cluster.ID, err)
+				slog.Warn("failed to save kubeconfig to cluster ", "id", cluster.ID, "error", err)
 			}
 			// Detect GitOps engines from kubeconfig
 			if client, err := k8s.NewClient(kubeconfig); err == nil {
@@ -707,7 +707,7 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 		tenantID := auth.GetTenantID(c)
 		conn, err := deps.Repos.Connection.GetDecrypted(c.Request.Context(), id, tenantID)
 		if err != nil {
-			log.Printf("browseConnection: failed to load credentials for connection %s: %v", id, err)
+			slog.Info("browseConnection: failed to load credentials for connection ", "id", id, "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "failed to load connection credentials"})
 			return
 		}
@@ -787,7 +787,7 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 					if email != "" {
 						connConfig["email"] = email
 					}
-					log.Printf("[browse] using personal credential for user %s on %s", userID, providerURL)
+					slog.Info("using personal credential for user on", "id", userID, "id", providerURL)
 				}
 			}
 		}
@@ -930,7 +930,7 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 					if email != "" {
 						connConfig["email"] = email
 					}
-					log.Printf("[execute] using personal credential for user %s on %s", userID, providerURL)
+					slog.Info("using personal credential for user on", "id", userID, "id", providerURL)
 				}
 			}
 		}

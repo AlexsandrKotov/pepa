@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/url"
 	"time"
 
@@ -74,9 +74,9 @@ func (c *S3Client) EnsureBuckets(ctx context.Context) error {
 		if err := c.mc.MakeBucket(ctx, c.bucketPlugins, minio.MakeBucketOptions{}); err != nil {
 			return fmt.Errorf("create bucket %s: %w", c.bucketPlugins, err)
 		}
-		log.Printf("[storage] created S3 bucket: %s", c.bucketPlugins)
+		slog.Info("created S3 bucket", "arg1", c.bucketPlugins)
 	}
-	log.Printf("[storage] S3 connected, bucket verified: plugins=%s", c.bucketPlugins)
+	slog.Info("S3 connected, bucket verified: plugins=", "arg1", c.bucketPlugins)
 	return nil
 }
 

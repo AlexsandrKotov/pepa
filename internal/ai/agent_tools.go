@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -564,7 +564,7 @@ func (t *listDockerServicesTool) Execute(ctx context.Context, _ json.RawMessage)
 
 	hosts, err := t.deps.DockerHostRepo.ListHosts(ctx, t.deps.TenantID)
 	if err != nil {
-		log.Printf("list_docker_services: failed to list hosts: %v", err)
+		slog.Info("list_docker_services: failed to list hosts", "error", err)
 	} else {
 		// Track which compose projects are already registered in DB
 		trackedProjects := make(map[string]bool)
@@ -578,7 +578,7 @@ func (t *listDockerServicesTool) Execute(ctx context.Context, _ json.RawMessage)
 			}
 			decrypted, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, host.ID, t.deps.TenantID)
 			if err != nil {
-				log.Printf("list_docker_services: failed to decrypt host %s: %v", host.Name, err)
+				slog.Info("list_docker_services: failed to decrypt host ", "name", host.Name, "error", err)
 				continue
 			}
 			cfg := dockerpkg.HostConfig{
@@ -594,7 +594,7 @@ func (t *listDockerServicesTool) Execute(ctx context.Context, _ json.RawMessage)
 			containers, err := client.ListContainers(discCtx, false)
 			cancel()
 			if err != nil {
-				log.Printf("list_docker_services: docker ps error for %s: %v", host.Name, err)
+				slog.Info("list_docker_services: docker ps error for ", "name", host.Name, "error", err)
 				continue
 			}
 			for _, c := range containers {

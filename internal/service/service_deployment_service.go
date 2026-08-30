@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,14 +44,14 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 
 	kubeconfig, err := s.clusterRepo.GetKubeconfig(ctx, clusterID, uuid.Nil)
 	if err != nil {
-		log.Printf("ERROR: service deployment %s: get kubeconfig: %v", deploymentID, err)
+		slog.Info("ERROR: service deployment : get kubeconfig", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {
 			_ = s.serviceRepo.UpdateDeployment(ctx, deploymentID, "failed", "pending")
 		}
 		return fmt.Errorf("get kubeconfig: %w", err)
 	}
 	if kubeconfig == "" {
-		log.Printf("ERROR: service deployment %s: cluster %s has no kubeconfig", deploymentID, clusterID)
+		slog.Info("ERROR: service deployment : cluster has no kubeconfig", "id", deploymentID, "id", clusterID)
 		if s.serviceRepo != nil {
 			_ = s.serviceRepo.UpdateDeployment(ctx, deploymentID, "failed", "pending")
 		}
@@ -67,7 +67,7 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 		client, err = k8s.NewClient(kubeconfig)
 	}
 	if err != nil {
-		log.Printf("ERROR: service deployment %s: create k8s client: %v", deploymentID, err)
+		slog.Info("ERROR: service deployment : create k8s client", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {
 			_ = s.serviceRepo.UpdateDeployment(ctx, deploymentID, "failed", "pending")
 		}
@@ -83,7 +83,7 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 
 	deploySpec, err := k8s.ParseDeploySpec(specJSON, releaseName, namespace, 1)
 	if err != nil {
-		log.Printf("ERROR: service deployment %s: parse spec: %v", deploymentID, err)
+		slog.Info("ERROR: service deployment : parse spec", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {
 			_ = s.serviceRepo.UpdateDeployment(ctx, deploymentID, "failed", "pending")
 		}
@@ -114,13 +114,13 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 		}
 		result, err := client.HelmDeploy(ctx, helmSpec)
 		if err != nil {
-			log.Printf("ERROR: service deployment %s: helm deploy: %v", deploymentID, err)
+			slog.Info("ERROR: service deployment : helm deploy", "id", deploymentID, "error", err)
 			if s.serviceRepo != nil {
 				_ = s.serviceRepo.UpdateDeployment(ctx, deploymentID, "failed", "pending")
 			}
 			return fmt.Errorf("helm deploy: %w", err)
 		}
-		log.Printf("Service deployment %s succeeded (Helm): %s", deploymentID, result.Message)
+		slog.Info("Service deployment succeeded (Helm)", "id", deploymentID, "arg2", result.Message)
 		// Mark deployment as complete
 		if s.serviceRepo != nil {
 			_ = s.serviceRepo.CompleteDeployment(ctx, deploymentID, serviceID)
@@ -131,13 +131,13 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 	// Raw K8s deployment
 	result, err := client.Deploy(ctx, deploySpec)
 	if err != nil {
-		log.Printf("ERROR: service deployment %s: deploy: %v", deploymentID, err)
+		slog.Info("ERROR: service deployment : deploy", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {
 			_ = s.serviceRepo.UpdateDeployment(ctx, deploymentID, "failed", "pending")
 		}
 		return fmt.Errorf("deploy: %w", err)
 	}
-	log.Printf("Service deployment %s succeeded: %s", deploymentID, result.Message)
+	slog.Info("Service deployment succeeded", "id", deploymentID, "arg2", result.Message)
 	// Mark deployment as complete
 	if s.serviceRepo != nil {
 		_ = s.serviceRepo.CompleteDeployment(ctx, deploymentID, serviceID)
