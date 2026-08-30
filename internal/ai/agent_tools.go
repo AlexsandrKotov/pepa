@@ -1163,7 +1163,7 @@ func (t *createBlueprintTool) Definition() ToolDefinition {
 			"category":{"type":"string","enum":["backend","frontend","data","infrastructure","messaging","ml","devops"],"description":"Blueprint category"},
 			"values_yaml":{"type":"string","description":"values.yaml content for Helm deployments"},
 			"compose_yaml":{"type":"string","description":"Docker Compose YAML content when source_type is docker_compose"},
-			"group_id":{"type":"string","description":"Optional blueprint group UUID to assign this blueprint to a group"}
+			"group_ids":{"type":"array","items":{"type":"string"},"description":"Optional list of blueprint group UUIDs to assign this blueprint to (many-to-many)"}
 		},"required":["name"]}`),
 	}
 }
@@ -1183,7 +1183,7 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 		Category     string `json:"category"`
 		ValuesYAML   string `json:"values_yaml"`
 		ComposeYAML  string `json:"compose_yaml"`
-		GroupID      string `json:"group_id"`
+		GroupIDs     []string `json:"group_ids"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
@@ -1220,17 +1220,13 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 
 	var bpID string
 	var createdAt time.Time
-	var groupIDPtr *string
-	if p.GroupID != "" {
-		groupIDPtr = &p.GroupID
-	}
 	err := t.deps.DBPool.QueryRow(ctx, `
 		INSERT INTO service_blueprints
 			(name, description, source_type, helm_repo_id, image, chart_url,
 			 chart_name, chart_version, chart_path, namespace, values_yaml,
 			 cpu, memory, replicas, ports, category, created_by,
-			 group_id, group_position, compose_yaml)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+			 compose_yaml)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		RETURNING id, created_at
 	`,
 		p.Name, p.Description, p.SourceType, nil,
@@ -1238,10 +1234,18 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 		"", p.Namespace, p.ValuesYAML,
 		p.CPU, p.Memory, p.Replicas, p.Ports,
 		p.Category, nil,
-		groupIDPtr, 0, p.ComposeYAML,
+		p.ComposeYAML,
 	).Scan(&bpID, &createdAt)
 	if err != nil {
 		return "", fmt.Errorf("create blueprint: %w", err)
+	}
+
+	// Insert group memberships
+	for i, gid := range p.GroupIDs {
+		_, _ = t.deps.DBPool.Exec(ctx,
+			`INSERT INTO blueprint_group_members (group_id, blueprint_id, position) VALUES ($1,$2,$3)
+			 ON CONFLICT (group_id, blueprint_id) DO UPDATE SET position = $3`,
+			gid, bpID, i)
 	}
 
 	result := map[string]interface{}{

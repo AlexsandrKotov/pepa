@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -20,6 +24,7 @@ type gitlabCIVar struct {
 	Description string   `json:"description"`
 	Type        string   `json:"type"` // "env_var", "file"
 	Options     []string `json:"options,omitempty"`
+	IsInput     bool     `json:"is_input,omitempty"` // true for spec.inputs (component pipeline inputs)
 }
 
 // newClient creates a GitLab API client from connection config.
@@ -368,15 +373,29 @@ func (p *GitLabPlugin) listPipelines(ctx context.Context, baseURL, token string,
 }
 
 // triggerPipeline triggers a new pipeline on a given ref with optional CI variables.
+// Supports passing spec.inputs via the "inputs" field (GitLab 17.10+).
 func (p *GitLabPlugin) triggerPipeline(ctx context.Context, baseURL, token string, params []byte) ([]byte, error) {
 	var req struct {
 		RepoID    string            `json:"repo_id"`
 		Ref       string            `json:"ref"`
 		Variables map[string]string `json:"variables,omitempty"`
+		Inputs    map[string]string `json:"inputs,omitempty"`
 	}
 	if err := actionInput(params, &req); err != nil {
 		return nil, err
 	}
+
+	ref := req.Ref
+	if ref == "" {
+		ref = "main"
+	}
+
+	// When inputs are present, use a direct HTTP request to support the "inputs"
+	// field in the API body (go-gitlab v0.115 CreatePipelineOptions lacks it).
+	if len(req.Inputs) > 0 {
+		return triggerPipelineWithInputs(ctx, baseURL, token, req.RepoID, ref, req.Variables, req.Inputs)
+	}
+
 	pid, err := strconv.Atoi(req.RepoID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid repo_id: %w", err)
@@ -385,11 +404,6 @@ func (p *GitLabPlugin) triggerPipeline(ctx context.Context, baseURL, token strin
 	client, err := newClient(baseURL, token)
 	if err != nil {
 		return nil, err
-	}
-
-	ref := req.Ref
-	if ref == "" {
-		ref = "main"
 	}
 
 	// Build CI variables from request
@@ -415,6 +429,78 @@ func (p *GitLabPlugin) triggerPipeline(ctx context.Context, baseURL, token strin
 		"ref":    pipeline.Ref,
 		"status": string(pipeline.Status),
 		"url":    pipeline.WebURL,
+	})
+}
+
+// triggerPipelineWithInputs triggers a GitLab pipeline passing spec.inputs
+// via the "inputs" field in the API request body (GitLab 17.10+).
+func triggerPipelineWithInputs(ctx context.Context, baseURL, token, repoID, ref string, variables map[string]string, inputs map[string]string) ([]byte, error) {
+	if baseURL == "" {
+		baseURL = "https://gitlab.com"
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/pipeline", baseURL, url.PathEscape(repoID))
+
+	body := map[string]interface{}{"ref": ref}
+
+	if len(variables) > 0 {
+		vars := make([]map[string]string, 0, len(variables))
+		for k, v := range variables {
+			vars = append(vars, map[string]string{"key": k, "value": v})
+		}
+		body["variables"] = vars
+	}
+
+	// Convert inputs to map[string]interface{} for JSON marshalling.
+	inputsAny := make(map[string]interface{}, len(inputs))
+	for k, v := range inputs {
+		inputsAny[k] = v
+	}
+	body["inputs"] = inputsAny
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pipeline request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create pipeline request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("PRIVATE-TOKEN", token)
+
+	httpResp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("trigger pipeline: %w", err)
+	}
+	defer func() { _ = httpResp.Body.Close() }()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read pipeline response: %w", err)
+	}
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("trigger pipeline (%d): %s", httpResp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		ID     int    `json:"id"`
+		SHA    string `json:"sha"`
+		Ref    string `json:"ref"`
+		Status string `json:"status"`
+		WebURL string `json:"web_url"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("parse pipeline response: %w", err)
+	}
+
+	return actionOutput(map[string]any{
+		"id":     result.ID,
+		"sha":    result.SHA,
+		"ref":    result.Ref,
+		"status": result.Status,
+		"url":    result.WebURL,
 	})
 }
 
@@ -463,6 +549,12 @@ func (p *GitLabPlugin) parseCIConfig(ctx context.Context, baseURL, token string,
 		if decErr == nil {
 			var ciConfig map[string]interface{}
 			if yaml.Unmarshal(decoded, &ciConfig) == nil {
+				// Debug: log top-level keys
+				keys := make([]string, 0, len(ciConfig))
+				for k := range ciConfig {
+					keys = append(keys, k)
+				}
+				log.Printf("[parseCIConfig] top-level keys: %v", keys)
 				if vars, ok := ciConfig["variables"].(map[string]interface{}); ok {
 					for k, v := range vars {
 						ciVarEntry := parseGitLabVariable(k, v)
@@ -471,8 +563,16 @@ func (p *GitLabPlugin) parseCIConfig(ctx context.Context, baseURL, token string,
 				}
 				// Also extract workflow:rules:variables for conditional pipeline variables
 				extractWorkflowVariables(ciConfig, varMap)
+				// Parse spec.inputs (component pipeline inputs for Terraform, Ansible, etc.)
+				extractSpecInputs(ciConfig, varMap)
+			} else {
+				log.Printf("[parseCIConfig] YAML unmarshal failed")
 			}
+		} else {
+			log.Printf("[parseCIConfig] base64 decode failed: %v", decErr)
 		}
+	} else {
+		log.Printf("[parseCIConfig] file fetch error: %v", fileErr)
 	}
 
 	// 2. Fetch project-level CI variables to enrich existing ones with descriptions/types.
@@ -586,6 +686,80 @@ func extractWorkflowVariables(ciConfig map[string]interface{}, varMap map[string
 	}
 }
 
+// extractSpecInputs parses the spec.inputs section from a GitLab CI config
+// and adds them to the variable map. Component pipelines (Terraform, Ansible, etc.)
+// declare typed inputs like:
+//
+//	spec:
+//	  inputs:
+//	    pipeline_target:
+//	      description: "Which child pipeline to run"
+//	      default: "terraform_subpipelines"
+//	    terraform_action:
+//	      description: "Terraform action"
+//	      options: ["default", "copy_state", "destroy_recreate"]
+//	    skip_manual:
+//	      description: "Skip manual jobs"
+//	      default: false
+func extractSpecInputs(ciConfig map[string]interface{}, varMap map[string]*gitlabCIVar) {
+	spec, ok := ciConfig["spec"].(map[string]interface{})
+	if !ok {
+		log.Printf("[extractSpecInputs] no 'spec' key found")
+		return
+	}
+	log.Printf("[extractSpecInputs] found 'spec' key, keys: %v", mapKeys(spec))
+	inputs, ok := spec["inputs"].(map[string]interface{})
+	if !ok {
+		log.Printf("[extractSpecInputs] no 'spec.inputs' key found")
+		return
+	}
+	log.Printf("[extractSpecInputs] found %d inputs", len(inputs))
+	for name, raw := range inputs {
+		// Skip if already defined as a regular variable
+		if _, exists := varMap[name]; exists {
+			continue
+		}
+		input, ok := raw.(map[string]interface{})
+		if !ok {
+			// Simple value used as default
+			varMap[name] = &gitlabCIVar{
+				Key:         name,
+				Value:       fmt.Sprintf("%v", raw),
+				Description: fmt.Sprintf("Pipeline input: %s", name),
+				Type:        "env_var",
+				IsInput:     true,
+			}
+			continue
+		}
+		entry := &gitlabCIVar{
+			Key:     name,
+			Type:    "env_var",
+			IsInput: true,
+		}
+		if desc, ok := input["description"].(string); ok {
+			entry.Description = desc
+		} else {
+			entry.Description = fmt.Sprintf("Pipeline input: %s", name)
+		}
+		if def, ok := input["default"]; ok && def != nil {
+			switch v := def.(type) {
+			case bool:
+				entry.Value = fmt.Sprintf("%v", v)
+			case float64:
+				entry.Value = fmt.Sprintf("%v", v)
+			default:
+				entry.Value = fmt.Sprintf("%v", def)
+			}
+		}
+		if opts, ok := input["options"].([]interface{}); ok {
+			for _, o := range opts {
+				entry.Options = append(entry.Options, fmt.Sprintf("%v", o))
+			}
+		}
+		varMap[name] = entry
+	}
+}
+
 // getPipelineJobs returns jobs for a specific pipeline.
 func (p *GitLabPlugin) getPipelineJobs(ctx context.Context, baseURL, token string, params []byte) ([]byte, error) {
 	var req struct {
@@ -688,4 +862,13 @@ func (p *GitLabPlugin) getJobLog(ctx context.Context, baseURL, token string, par
 	}
 
 	return actionOutput(map[string]any{"log": string(data), "job_id": req.JobID})
+}
+
+// mapKeys returns the keys of a map as a sorted slice.
+func mapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }

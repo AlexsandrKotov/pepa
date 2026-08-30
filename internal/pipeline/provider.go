@@ -24,6 +24,7 @@ type PropertyDef struct {
 	Description string   `json:"description,omitempty"`
 	Default     any      `json:"default,omitempty"`
 	Enum        []string `json:"enum,omitempty"`
+	IsInput     bool     `json:"is_input,omitempty"` // true for GitLab CI spec.inputs
 }
 
 // TriggerResult is returned after successfully triggering a pipeline.
@@ -145,6 +146,18 @@ type ListRunsProvider interface {
 	ListRemoteRuns(ctx context.Context, config json.RawMessage, perPage int) ([]RunStatus, error)
 }
 
+// ── InspectableProvider (optional capability) ──────────────────
+
+// InspectableProvider is implemented by adapters that can introspect
+// their source code to discover structure (playbooks, modules, roles).
+type InspectableProvider interface {
+	Provider
+
+	// Inspect returns structured metadata about the pipeline source
+	// (e.g. Ansible playbooks/roles, Terraform modules/resources).
+	Inspect(ctx context.Context, config json.RawMessage) (json.RawMessage, error)
+}
+
 // ── Ansible-specific result types ───────────────────────────────
 
 // AnsibleResult holds parsed output from an ansible-playbook run.
@@ -160,6 +173,69 @@ type HostResult struct {
 	Changed int `json:"changed"`
 	Failed  int `json:"failed"`
 	Skipped int `json:"skipped"`
+}
+
+// AnsibleInspection contains parsed playbook structure.
+type AnsibleInspection struct {
+	Playbooks   []AnsiblePlaybook `json:"playbooks"`
+	Roles       []AnsibleRole     `json:"roles"`
+	Inventories []string          `json:"inventories"`
+}
+
+// AnsiblePlaybook describes a single playbook file.
+type AnsiblePlaybook struct {
+	Name  string        `json:"name"`
+	File  string        `json:"file"`
+	Plays []AnsiblePlay `json:"plays"`
+}
+
+// AnsiblePlay describes a single play within a playbook.
+type AnsiblePlay struct {
+	Name  string   `json:"name"`
+	Hosts string   `json:"hosts"`
+	Roles []string `json:"roles"`
+	Tasks int      `json:"task_count"`
+	Tags  []string `json:"tags,omitempty"`
+}
+
+// AnsibleRole describes a discovered Ansible role.
+type AnsibleRole struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Path        string `json:"path"`
+	Tasks       int    `json:"task_count"`
+}
+
+// ── Terraform-specific inspection types ─────────────────────────
+
+// TerraformInspection contains parsed module and resource structure.
+type TerraformInspection struct {
+	Modules     []TerraformModule     `json:"modules"`
+	Resources   []TerraformResourceDef `json:"resources"`
+	DataSources []TerraformResourceDef `json:"data_sources"`
+	Outputs     []TerraformOutputDef   `json:"outputs"`
+	Backend     string                 `json:"backend,omitempty"`
+	Workspaces  []string               `json:"workspaces,omitempty"`
+}
+
+// TerraformModule describes a module block.
+type TerraformModule struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Version string `json:"version,omitempty"`
+}
+
+// TerraformResourceDef describes a resource or data source block.
+type TerraformResourceDef struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+}
+
+// TerraformOutputDef describes an output block.
+type TerraformOutputDef struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Sensitive   bool   `json:"sensitive"`
 }
 
 // ── Trivy-specific result types ─────────────────────────────────

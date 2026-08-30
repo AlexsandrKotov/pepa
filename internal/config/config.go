@@ -106,6 +106,7 @@ type LDAPConfig struct {
 	NameAttr           string            `mapstructure:"name_attr"`
 	StartTLS           bool              `mapstructure:"start_tls"`
 	InsecureSkipVerify bool              `mapstructure:"insecure_skip_verify"`
+	CACertificate      string            `mapstructure:"ca_certificate"`
 	GroupMapping       map[string]string `mapstructure:"group_mapping"`
 }
 

@@ -74,12 +74,7 @@ export default function BlueprintGroupsPage() {
   const handleAddBlueprints = async (groupId: string) => {
     if (selectedBPIds.size === 0) return;
     try {
-      for (const bpId of selectedBPIds) {
-        const bp = allBlueprints.find(b => b.id === bpId);
-        if (bp) {
-          await blueprintsAPI.update(bpId, { ...bp, group_id: groupId });
-        }
-      }
+      await blueprintGroupsAPI.addBlueprints(groupId, [...selectedBPIds]);
       setShowAddBP(null);
       setSelectedBPIds(new Set());
       load();
@@ -88,12 +83,9 @@ export default function BlueprintGroupsPage() {
     }
   };
 
-  const handleRemoveBlueprint = async (bpId: string) => {
+  const handleRemoveBlueprint = async (groupId: string, bpId: string) => {
     try {
-      const bp = allBlueprints.find(b => b.id === bpId);
-      if (bp) {
-        await blueprintsAPI.update(bpId, { ...bp, group_id: null, group_position: 0 });
-      }
+      await blueprintGroupsAPI.removeBlueprint(groupId, bpId);
       load();
     } catch (err) {
       console.error('Failed to remove blueprint:', err);
@@ -173,10 +165,12 @@ export default function BlueprintGroupsPage() {
     setDeploying(null);
   };
 
-  // Available blueprints (not in any group)
-  const ungroupedBlueprints = allBlueprints.filter(bp => !bp.group_id);
-  const availableForGroup = (groupId: string) =>
-    ungroupedBlueprints.filter(bp => !groups.some(g => g.id !== groupId && g.blueprints.some(b => b.id === bp.id)));
+  // All blueprints are available for any group (many-to-many), just filter out those already in this group
+  const availableForGroup = (groupId: string) => {
+    const group = groups.find(g => g.id === groupId);
+    const memberIds = new Set(group?.blueprints.map(b => b.id) || []);
+    return allBlueprints.filter(bp => !memberIds.has(bp.id));
+  };
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -303,7 +297,7 @@ export default function BlueprintGroupsPage() {
                           <span className="text-[10px] text-[var(--text-tertiary)] ml-2">{bp.source_type}</span>
                         </div>
                         <button
-                          onClick={() => handleRemoveBlueprint(bp.id)}
+                          onClick={() => handleRemoveBlueprint(group.id, bp.id)}
                           className="text-[10px] text-[var(--text-tertiary)] hover:text-red-500 transition-colors"
                           title="Remove from group"
                         >
@@ -374,7 +368,7 @@ export default function BlueprintGroupsPage() {
                   <div className="text-center py-8">
                     <p className="text-[13px] text-[var(--text-secondary)] mb-1">No blueprints available</p>
                     <p className="text-[12px] text-[var(--text-tertiary)]">
-                      All blueprints are already in groups, or none exist yet.{' '}
+                      All blueprints are already in this group.{' '}
                       <Link href="/pipeline-blueprints" className="text-[var(--accent)] hover:underline">Create a blueprint</Link>
                     </p>
                   </div>

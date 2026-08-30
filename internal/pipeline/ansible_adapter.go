@@ -327,11 +327,235 @@ func (a *AnsibleAdapter) Plan(ctx context.Context, raw json.RawMessage, params m
 	}, nil
 }
 
-// State is a no-op for Ansible (configuration management, not infrastructure state).
+// State returns managed hosts discovered from Ansible inventory files.
 func (a *AnsibleAdapter) State(ctx context.Context, raw json.RawMessage) (*StateResult, error) {
-	return &StateResult{
-		Resources: []StateResource{},
-	}, nil
+	cfg, err := parseAnsibleConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	workDir, cleanup, err := resolveAnsibleDir(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	result := &StateResult{}
+
+	// Determine which inventory files to parse
+	var inventoryFiles []string
+	if cfg.Inventory != "" {
+		// Use the configured inventory path
+		invPath := filepath.Join(workDir, cfg.Inventory)
+		if info, statErr := os.Stat(invPath); statErr == nil {
+			if info.IsDir() {
+				// Directory inventory: read all files inside
+				entries, _ := os.ReadDir(invPath)
+				for _, e := range entries {
+					if !e.IsDir() {
+						inventoryFiles = append(inventoryFiles, filepath.Join(invPath, e.Name()))
+					}
+				}
+			} else {
+				inventoryFiles = append(inventoryFiles, invPath)
+			}
+		}
+	}
+
+	// Also discover default inventory locations
+	if len(inventoryFiles) == 0 {
+		candidates := []string{"inventory", "hosts", "hosts.ini", "hosts.yml", "hosts.yaml"}
+		for _, c := range candidates {
+			p := filepath.Join(workDir, c)
+			if _, statErr := os.Stat(p); statErr == nil {
+				inventoryFiles = append(inventoryFiles, p)
+				break
+			}
+		}
+	}
+
+	// Also check inventories/ directory
+	invDir := filepath.Join(workDir, "inventories")
+	if entries, err := os.ReadDir(invDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				inventoryFiles = append(inventoryFiles, filepath.Join(invDir, e.Name()))
+			}
+		}
+	}
+
+	seen := make(map[string]bool)
+	for _, invFile := range inventoryFiles {
+		hosts := parseInventoryFile(invFile)
+		for _, h := range hosts {
+			if !seen[h.Name] {
+				seen[h.Name] = true
+				result.Resources = append(result.Resources, h)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// parseInventoryFile reads an Ansible inventory file (INI or YAML) and returns host resources.
+func parseInventoryFile(path string) []StateResource {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is within validated workDir
+	if err != nil {
+		return nil
+	}
+
+	ext := filepath.Ext(path)
+	if ext == ".yml" || ext == ".yaml" {
+		return parseYAMLInventory(data)
+	}
+	return parseINIInventory(data)
+}
+
+// parseINIInventory parses INI-style Ansible inventory.
+// Format:
+//
+//	[group]
+//	host1 ansible_host=x.x.x.x
+//	host2
+func parseINIInventory(data []byte) []StateResource {
+	var hosts []StateResource
+	currentGroup := "ungrouped"
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+
+		// Group header: [groupname]
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentGroup = strings.TrimSuffix(strings.TrimPrefix(line, "["), "]")
+			// Skip children/group vars sections
+			if strings.HasSuffix(currentGroup, ":children") || strings.HasSuffix(currentGroup, ":vars") {
+				currentGroup = strings.Split(currentGroup, ":")[0]
+			}
+			continue
+		}
+
+		// Host line: hostname [key=value ...]
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		hostname := fields[0]
+		status := "unknown"
+		ansibleHost := ""
+
+		for _, kv := range fields[1:] {
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) == 2 {
+				switch parts[0] {
+				case "ansible_host":
+					ansibleHost = parts[1]
+				case "ansible_connection":
+					if parts[1] == "local" {
+						status = "local"
+					}
+				}
+			}
+		}
+
+		if status == "unknown" {
+			status = "managed"
+		}
+
+		id := hostname
+		if ansibleHost != "" {
+			id = hostname + " (" + ansibleHost + ")"
+		}
+
+		hosts = append(hosts, StateResource{
+			Type:     "host",
+			Name:     hostname,
+			ID:       id,
+			Provider: "ansible/" + currentGroup,
+			Status:   status,
+		})
+	}
+
+	return hosts
+}
+
+// parseYAMLInventory parses YAML-style Ansible inventory.
+// Format:
+//
+//	all:
+//	  hosts:
+//	    host1:
+//	      ansible_host: x.x.x.x
+//	  children:
+//	    webservers:
+//	      hosts:
+//	        host1:
+func parseYAMLInventory(data []byte) []StateResource {
+	var inv map[string]interface{}
+	if err := yaml.Unmarshal(data, &inv); err != nil {
+		return nil
+	}
+
+	var hosts []StateResource
+	seen := make(map[string]bool)
+
+	var extractHosts func(node map[string]interface{}, group string)
+	extractHosts = func(node map[string]interface{}, group string) {
+		// Direct hosts
+		if hostsRaw, ok := node["hosts"]; ok {
+			if hostsMap, ok := hostsRaw.(map[string]interface{}); ok {
+				for name, vars := range hostsMap {
+					if seen[name] {
+						continue
+					}
+					seen[name] = true
+					status := "managed"
+					id := name
+					if varsMap, ok := vars.(map[string]interface{}); ok {
+						if ah, ok := varsMap["ansible_host"].(string); ok && ah != "" {
+							id = name + " (" + ah + ")"
+						}
+						if ac, ok := varsMap["ansible_connection"].(string); ok && ac == "local" {
+							status = "local"
+						}
+					}
+					hosts = append(hosts, StateResource{
+						Type:     "host",
+						Name:     name,
+						ID:       id,
+						Provider: "ansible/" + group,
+						Status:   status,
+					})
+				}
+			}
+		}
+
+		// Children groups
+		if childrenRaw, ok := node["children"]; ok {
+			if children, ok := childrenRaw.(map[string]interface{}); ok {
+				for childName, childNode := range children {
+					if childMap, ok := childNode.(map[string]interface{}); ok {
+						extractHosts(childMap, childName)
+					}
+				}
+			}
+		}
+	}
+
+	// Start from "all" group or root
+	if allGroup, ok := inv["all"].(map[string]interface{}); ok {
+		extractHosts(allGroup, "all")
+	} else {
+		extractHosts(inv, "all")
+	}
+
+	return hosts
 }
 
 // Status returns the status of an Ansible run.
@@ -382,6 +606,195 @@ func (a *AnsibleAdapter) Cancel(ctx context.Context, raw json.RawMessage, extern
 		return nil
 	}
 	return fmt.Errorf("no active run found for %s", externalRunID)
+}
+
+// Inspect parses the Ansible project directory to discover playbooks, roles, and inventories.
+func (a *AnsibleAdapter) Inspect(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	cfg, err := parseAnsibleConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	workDir, cleanup, err := resolveAnsibleDir(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	inspection := &AnsibleInspection{}
+
+	// Discover playbooks: find all .yml/.yaml files and try to parse as playbooks
+	_ = filepath.Walk(workDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			// Skip hidden dirs and common non-playbook dirs
+			if info != nil && info.IsDir() {
+				base := filepath.Base(path)
+				if strings.HasPrefix(base, ".") || base == "roles" || base == "inventories" || base == "inventory" || base == "collection" {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		ext := filepath.Ext(path)
+		if ext != ".yml" && ext != ".yaml" {
+			return nil
+		}
+		// Skip files inside roles/ or inventories/
+		rel, _ := filepath.Rel(workDir, path)
+		if strings.HasPrefix(rel, "roles/") || strings.HasPrefix(rel, "inventories/") || strings.HasPrefix(rel, "inventory/") {
+			return nil
+		}
+
+		data, readErr := os.ReadFile(path) //nolint:gosec // G304: path is within validated workDir
+		if readErr != nil {
+			return nil
+		}
+		var plays []map[string]interface{}
+		if yaml.Unmarshal(data, &plays) != nil {
+			return nil // not a valid playbook
+		}
+		if len(plays) == 0 {
+			return nil
+		}
+		// Check if it looks like a playbook (has hosts key in at least one play)
+		hasHosts := false
+		for _, p := range plays {
+			if _, ok := p["hosts"]; ok {
+				hasHosts = true
+				break
+			}
+		}
+		if !hasHosts {
+			return nil
+		}
+
+		pb := AnsiblePlaybook{
+			Name: strings.TrimSuffix(filepath.Base(path), ext),
+			File: rel,
+		}
+		for _, p := range plays {
+			play := AnsiblePlay{}
+			if n, ok := p["name"].(string); ok {
+				play.Name = n
+			}
+			if h, ok := p["hosts"].(string); ok {
+				play.Hosts = h
+			}
+			// Extract roles
+			if roles, ok := p["roles"].([]interface{}); ok {
+				for _, r := range roles {
+					switch rv := r.(type) {
+					case string:
+						play.Roles = append(play.Roles, rv)
+					case map[string]interface{}:
+						if rn, ok := rv["role"].(string); ok {
+							play.Roles = append(play.Roles, rn)
+						}
+					}
+				}
+			}
+			// Count tasks
+			if tasks, ok := p["tasks"].([]interface{}); ok {
+				play.Tasks = len(tasks)
+			}
+			if preTasks, ok := p["pre_tasks"].([]interface{}); ok {
+				play.Tasks += len(preTasks)
+			}
+			if postTasks, ok := p["post_tasks"].([]interface{}); ok {
+				play.Tasks += len(postTasks)
+			}
+			// Extract tags
+			if tags, ok := p["tags"].([]interface{}); ok {
+				for _, t := range tags {
+					play.Tags = append(play.Tags, fmt.Sprintf("%v", t))
+				}
+			}
+			pb.Plays = append(pb.Plays, play)
+		}
+		inspection.Playbooks = append(inspection.Playbooks, pb)
+		return nil
+	})
+
+	// Discover roles from roles/ directory
+	rolesDir := filepath.Join(workDir, "roles")
+	if entries, err := os.ReadDir(rolesDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			role := AnsibleRole{
+				Name: entry.Name(),
+				Path: "roles/" + entry.Name(),
+			}
+			// Count tasks in the role
+			tasksDir := filepath.Join(rolesDir, entry.Name(), "tasks")
+			if taskEntries, err := os.ReadDir(tasksDir); err == nil {
+				for _, te := range taskEntries {
+					if !te.IsDir() && (filepath.Ext(te.Name()) == ".yml" || filepath.Ext(te.Name()) == ".yaml") {
+						data, readErr := os.ReadFile(filepath.Join(tasksDir, te.Name())) //nolint:gosec // G304: validated path
+						if readErr == nil {
+							var tasks []interface{}
+							if yaml.Unmarshal(data, &tasks) == nil {
+								role.Tasks += len(tasks)
+							}
+						}
+					}
+				}
+			}
+			// Try to read meta/main.yml for description
+			metaPath := filepath.Join(rolesDir, entry.Name(), "meta", "main.yml")
+			if metaData, err := os.ReadFile(metaPath); err == nil { //nolint:gosec // G304: validated path
+				var meta map[string]interface{}
+				if yaml.Unmarshal(metaData, &meta) == nil {
+					if galaxyInfo, ok := meta["galaxy_info"].(map[string]interface{}); ok {
+						if desc, ok := galaxyInfo["description"].(string); ok {
+							role.Description = desc
+						}
+					}
+				}
+			}
+			inspection.Roles = append(inspection.Roles, role)
+		}
+	}
+
+	// Also collect role names referenced in plays that aren't in roles/ dir
+	roleNames := make(map[string]bool)
+	for _, r := range inspection.Roles {
+		roleNames[r.Name] = true
+	}
+	for _, pb := range inspection.Playbooks {
+		for _, play := range pb.Plays {
+			for _, rn := range play.Roles {
+				if !roleNames[rn] {
+					inspection.Roles = append(inspection.Roles, AnsibleRole{
+						Name: rn,
+						Path: "(external)",
+					})
+					roleNames[rn] = true
+				}
+			}
+		}
+	}
+
+	// Discover inventories
+	inventoryCandidates := []string{"inventory", "hosts", "hosts.ini", "hosts.yml", "hosts.yaml"}
+	for _, candidate := range inventoryCandidates {
+		p := filepath.Join(workDir, candidate)
+		if _, err := os.Stat(p); err == nil {
+			inspection.Inventories = append(inspection.Inventories, candidate)
+		}
+	}
+	// Check inventories/ directory
+	invDir := filepath.Join(workDir, "inventories")
+	if entries, err := os.ReadDir(invDir); err == nil {
+		for _, entry := range entries {
+			inspection.Inventories = append(inspection.Inventories, "inventories/"+entry.Name())
+		}
+	}
+
+	return json.Marshal(inspection)
 }
 
 // ── Output parsing helpers ──────────────────────────────────────

@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"strings"
@@ -150,6 +151,15 @@ func (p *LDAPProvider) Authenticate(ctx context.Context, email, password string)
 func (p *LDAPProvider) connect() (*ldap.Conn, error) {
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: p.config.InsecureSkipVerify, //nolint:gosec // configurable for self-signed certs
+	}
+
+	// If a CA certificate is provided, parse it and add to the TLS config.
+	if p.config.CACertificate != "" {
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM([]byte(p.config.CACertificate)) {
+			return nil, fmt.Errorf("failed to parse CA certificate")
+		}
+		tlsConfig.RootCAs = certPool
 	}
 
 	dialOpts := []ldap.DialOpt{

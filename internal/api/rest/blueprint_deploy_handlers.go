@@ -47,16 +47,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 		var bp serviceBlueprintRow
 		var helmRepoID *string
 		err = deps.DB.Pool.QueryRow(c.Request.Context(), `
-			SELECT id, name, COALESCE(description,''), source_type,
-			       helm_repo_id, COALESCE(image,''), COALESCE(chart_url,''),
-			       COALESCE(chart_name,''), COALESCE(chart_version,''),
-			       COALESCE(chart_path,''), COALESCE(namespace,'default'),
-			       COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
-			       COALESCE(memory,'128Mi'), COALESCE(replicas,1),
-			       COALESCE(ports,'{}'), COALESCE(category,'general'),
-			       group_id, COALESCE(group_position,0),
-			       COALESCE(compose_yaml,''),
-			       created_at
+			SELECT `+selectBlueprintCols()+`
 			FROM service_blueprints WHERE id = $1
 		`, bpID).Scan(
 			&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
@@ -64,7 +55,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-			&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
+			&bp.ComposeYAML,
 			&bp.CreatedAt,
 		)
 		if err != nil {
@@ -171,21 +162,13 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Fetch group member blueprints
+		// Fetch group member blueprints via junction table
 		rows, err := deps.DB.Pool.Query(c.Request.Context(), `
-			SELECT id, name, COALESCE(description,''), source_type,
-			       helm_repo_id, COALESCE(image,''), COALESCE(chart_url,''),
-			       COALESCE(chart_name,''), COALESCE(chart_version,''),
-			       COALESCE(chart_path,''), COALESCE(namespace,'default'),
-			       COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
-			       COALESCE(memory,'128Mi'), COALESCE(replicas,1),
-			       COALESCE(ports,'{}'), COALESCE(category,'general'),
-			       group_id, COALESCE(group_position,0),
-			       COALESCE(compose_yaml,''),
-			       created_at
-			FROM service_blueprints
-			WHERE group_id = $1 AND source_type = 'docker_compose' AND compose_yaml != ''
-			ORDER BY group_position ASC
+			SELECT `+selectBlueprintCols("sb")+`
+			FROM service_blueprints sb
+			JOIN blueprint_group_members bgm ON bgm.blueprint_id = sb.id
+			WHERE bgm.group_id = $1 AND sb.source_type = 'docker_compose' AND sb.compose_yaml != ''
+			ORDER BY bgm.position ASC
 		`, groupID)
 		if err != nil {
 			respondInternalError(c, err)
@@ -195,27 +178,12 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 
 		var blueprints []serviceBlueprintRow
 		for rows.Next() {
-			var bp serviceBlueprintRow
-			var helmRepoID *string
-			if err := rows.Scan(
-				&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
-				&helmRepoID, &bp.Image, &bp.ChartURL,
-				&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
-				&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
-				&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-				&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
-				&bp.CreatedAt,
-			); err != nil {
+			bp, err := scanBlueprintRow(rows)
+			if err != nil {
 				respondInternalError(c, err)
 				return
 			}
-			if helmRepoID != nil {
-				bp.HelmRepoID = helmRepoID
-			}
-			if bp.Ports == nil {
-				bp.Ports = []int{}
-			}
-			blueprints = append(blueprints, bp)
+			blueprints = append(blueprints, *bp)
 		}
 
 		if len(blueprints) == 0 {
@@ -331,21 +299,13 @@ func deployBlueprintGroupToKubernetes(deps Dependencies) gin.HandlerFunc {
 			req.Namespace = "default"
 		}
 
-		// Fetch group member blueprints (non-docker_compose ones for K8s)
+		// Fetch group member blueprints (non-docker_compose ones for K8s) via junction table
 		rows, err := deps.DB.Pool.Query(c.Request.Context(), `
-			SELECT id, name, COALESCE(description,''), source_type,
-			       helm_repo_id, COALESCE(image,''), COALESCE(chart_url,''),
-			       COALESCE(chart_name,''), COALESCE(chart_version,''),
-			       COALESCE(chart_path,''), COALESCE(namespace,'default'),
-			       COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
-			       COALESCE(memory,'128Mi'), COALESCE(replicas,1),
-			       COALESCE(ports,'{}'), COALESCE(category,'general'),
-			       group_id, COALESCE(group_position,0),
-			       COALESCE(compose_yaml,''),
-			       created_at
-			FROM service_blueprints
-			WHERE group_id = $1 AND source_type != 'docker_compose'
-			ORDER BY group_position ASC
+			SELECT `+selectBlueprintCols("sb")+`
+			FROM service_blueprints sb
+			JOIN blueprint_group_members bgm ON bgm.blueprint_id = sb.id
+			WHERE bgm.group_id = $1 AND sb.source_type != 'docker_compose'
+			ORDER BY bgm.position ASC
 		`, groupID)
 		if err != nil {
 			respondInternalError(c, err)
@@ -355,27 +315,12 @@ func deployBlueprintGroupToKubernetes(deps Dependencies) gin.HandlerFunc {
 
 		var blueprints []serviceBlueprintRow
 		for rows.Next() {
-			var bp serviceBlueprintRow
-			var helmRepoID *string
-			if err := rows.Scan(
-				&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
-				&helmRepoID, &bp.Image, &bp.ChartURL,
-				&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
-				&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
-				&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-				&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
-				&bp.CreatedAt,
-			); err != nil {
+			bp, err := scanBlueprintRow(rows)
+			if err != nil {
 				respondInternalError(c, err)
 				return
 			}
-			if helmRepoID != nil {
-				bp.HelmRepoID = helmRepoID
-			}
-			if bp.Ports == nil {
-				bp.Ports = []int{}
-			}
-			blueprints = append(blueprints, bp)
+			blueprints = append(blueprints, *bp)
 		}
 
 		if len(blueprints) == 0 {

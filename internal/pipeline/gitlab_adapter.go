@@ -1,11 +1,13 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -67,6 +69,7 @@ func (a *GitLabAdapter) Name() string { return "gitlab_ci" }
 
 // ResolveSchema fetches .gitlab-ci.yml and extracts variables to build a JSON Schema.
 // Handles both simple (KEY: value) and expanded (KEY: {value, description, options}) variable formats.
+// Also parses spec.inputs for component-based pipelines (Terraform, Ansible, etc.).
 func (a *GitLabAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage) (*ParameterSchema, error) {
 	cfg, err := parseGitLabConfig(raw)
 	if err != nil {
@@ -90,6 +93,9 @@ func (a *GitLabAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage) 
 		if decErr == nil {
 			var ciConfig map[string]interface{}
 			if yaml.Unmarshal(decoded, &ciConfig) == nil {
+				// Parse spec.inputs (component pipeline inputs for Terraform, Ansible, etc.)
+				specInputsToProperties(ciConfig, props)
+
 				if vars, ok := ciConfig["variables"].(map[string]interface{}); ok {
 					for k, v := range vars {
 						props[k] = gitlabVarToProperty(k, v)
@@ -195,29 +201,34 @@ func gitlabVarToProperty(key string, raw interface{}) PropertyDef {
 }
 
 // Trigger starts a new GitLab CI pipeline.
+// It separates spec.inputs (marked with IsInput in the schema) from regular
+// CI variables and passes them via the "inputs" field in the API request body,
+// which is supported since GitLab 17.10 (GA in 18.1).
 func (a *GitLabAdapter) Trigger(ctx context.Context, raw json.RawMessage, params map[string]any) (*TriggerResult, error) {
 	cfg, err := parseGitLabConfig(raw)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := newGitLabClient(cfg.BaseURL, cfg.Token)
-	if err != nil {
-		return nil, err
+	// Extract embedded inputs injected by the handler (from schema IsInput metadata).
+	var inputs map[string]any
+	if embedded, ok := params["__gitlab_inputs__"]; ok {
+		if m, ok := embedded.(map[string]any); ok {
+			inputs = m
+		}
 	}
 
-	pid, _ := strconv.Atoi(cfg.ProjectID)
-
-	ref := cfg.Ref
-	if r, ok := params["ref"]; ok && r != "" {
-		ref = fmt.Sprintf("%v", r)
-	}
-
-	// Build CI variables from params
+	// Build CI variables from params (exclude ref and the embedded inputs key).
 	variables := make([]*gitlab.PipelineVariableOptions, 0)
 	for k, v := range params {
-		if k == "ref" {
+		if k == "ref" || k == "__gitlab_inputs__" {
 			continue
+		}
+		// Skip keys that are in the inputs map (they are passed via the inputs field).
+		if inputs != nil {
+			if _, isInput := inputs[k]; isInput {
+				continue
+			}
 		}
 		variables = append(variables, &gitlab.PipelineVariableOptions{
 			Key:   gitlab.Ptr(k),
@@ -225,20 +236,76 @@ func (a *GitLabAdapter) Trigger(ctx context.Context, raw json.RawMessage, params
 		})
 	}
 
-	createOpts := &gitlab.CreatePipelineOptions{
-		Ref:       gitlab.Ptr(ref),
-		Variables: &variables,
+	ref := cfg.Ref
+	if r, ok := params["ref"]; ok && r != "" {
+		ref = fmt.Sprintf("%v", r)
 	}
 
-	pipeline, _, err := client.Pipelines.CreatePipeline(pid, createOpts, gitlab.WithContext(ctx))
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://gitlab.com"
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	// Build the API request body with both variables and inputs.
+	apiURL := fmt.Sprintf("%s/api/v4/projects/%s/pipeline", baseURL, url.PathEscape(cfg.ProjectID))
+	body := map[string]interface{}{
+		"ref": ref,
+	}
+	if len(variables) > 0 {
+		vars := make([]map[string]string, 0, len(variables))
+		for _, v := range variables {
+			vars = append(vars, map[string]string{
+				"key":   *v.Key,
+				"value": *v.Value,
+			})
+		}
+		body["variables"] = vars
+	}
+	if len(inputs) > 0 {
+		body["inputs"] = inputs
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal pipeline request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create pipeline request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("PRIVATE-TOKEN", cfg.Token)
+
+	httpResp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("trigger gitlab pipeline: %w", err)
 	}
+	defer func() { _ = httpResp.Body.Close() }()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read pipeline response: %w", err)
+	}
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return nil, fmt.Errorf("trigger gitlab pipeline (%d): %s", httpResp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		ID     int    `json:"id"`
+		WebURL string `json:"web_url"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("parse pipeline response: %w", err)
+	}
 
 	return &TriggerResult{
-		ExternalRunID: strconv.Itoa(pipeline.ID),
-		ExternalURL:   pipeline.WebURL,
-		Status:        string(pipeline.Status),
+		ExternalRunID: strconv.Itoa(result.ID),
+		ExternalURL:   result.WebURL,
+		Status:        result.Status,
 	}, nil
 }
 
@@ -364,6 +431,118 @@ func (a *GitLabAdapter) Cancel(ctx context.Context, raw json.RawMessage, externa
 		return fmt.Errorf("cancel pipeline: %w", err)
 	}
 	return nil
+}
+
+// ListRemoteRuns fetches recent pipelines from GitLab.
+func (a *GitLabAdapter) ListRemoteRuns(ctx context.Context, raw json.RawMessage, perPage int) ([]RunStatus, error) {
+	cfg, err := parseGitLabConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	if perPage < 1 || perPage > 100 {
+		perPage = 30
+	}
+
+	client, err := newGitLabClient(cfg.BaseURL, cfg.Token)
+	if err != nil {
+		return nil, err
+	}
+
+	pid, _ := strconv.Atoi(cfg.ProjectID)
+
+	pipelines, _, err := client.Pipelines.ListProjectPipelines(pid, &gitlab.ListProjectPipelinesOptions{
+		ListOptions: gitlab.ListOptions{PerPage: perPage},
+	}, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("list pipelines: %w", err)
+	}
+
+	result := make([]RunStatus, 0, len(pipelines))
+	for _, p := range pipelines {
+		rs := RunStatus{
+			ExternalRunID: strconv.Itoa(p.ID),
+			Status:        mapGitLabStatus(string(p.Status)),
+			ExternalURL:   p.WebURL,
+			HeadBranch:    p.Ref,
+			Event:         p.Source,
+		}
+		if p.CreatedAt != nil {
+			rs.CreatedAt = p.CreatedAt.String()
+		}
+		result = append(result, rs)
+	}
+	return result, nil
+}
+
+// specInputsToProperties parses the spec.inputs section from a GitLab CI config
+// and converts each input definition to a PropertyDef.
+// GitLab component pipelines use this to declare typed inputs:
+//
+//	spec:
+//	  inputs:
+//	    pipeline_target:
+//	      description: "Which child pipeline to run"
+//	      default: "terraform_subpipelines"
+//	    terraform_action:
+//	      description: "Terraform action"
+//	      options: ["default", "copy_state", "destroy_recreate"]
+//	    skip_manual:
+//	      description: "Skip manual jobs"
+//	      default: false
+func specInputsToProperties(ciConfig map[string]interface{}, props map[string]PropertyDef) {
+	spec, ok := ciConfig["spec"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	inputs, ok := spec["inputs"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for name, raw := range inputs {
+		input, ok := raw.(map[string]interface{})
+		if !ok {
+			// Simple string value used as default
+			props[name] = PropertyDef{
+				Type:        "string",
+				Description: fmt.Sprintf("Pipeline input: %s", name),
+				Default:     fmt.Sprintf("%v", raw),
+				IsInput:     true,
+			}
+			continue
+		}
+		pd := PropertyDef{Type: "string", IsInput: true}
+		if desc, ok := input["description"].(string); ok {
+			pd.Description = desc
+		} else {
+			pd.Description = fmt.Sprintf("Pipeline input: %s", name)
+		}
+		if def, ok := input["default"]; ok && def != nil {
+			switch v := def.(type) {
+			case bool:
+				pd.Type = "boolean"
+				pd.Default = fmt.Sprintf("%v", v)
+			case float64:
+				pd.Type = "number"
+				pd.Default = fmt.Sprintf("%v", v)
+			default:
+				pd.Default = fmt.Sprintf("%v", def)
+			}
+		}
+		if opts, ok := input["options"].([]interface{}); ok {
+			for _, o := range opts {
+				pd.Enum = append(pd.Enum, fmt.Sprintf("%v", o))
+			}
+			if len(pd.Enum) > 0 {
+				pd.Type = "enum"
+			}
+		}
+		// Infer boolean type from default value even without explicit type
+		if def, ok := input["default"].(bool); ok {
+			pd.Type = "boolean"
+			_ = def
+		}
+		props[name] = pd
+	}
 }
 
 // mapGitLabStatus normalizes GitLab pipeline/job statuses to our internal model.

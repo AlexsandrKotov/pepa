@@ -50,6 +50,7 @@ var rbacResourceMap = map[string]string{
 	"credentials":         "credentials",
 	"user-credentials":    "credentials",
 	"service-blueprints":  "services",
+	"blueprint-groups":    "services",
 	"pipeline-blueprints": "pipelines",
 	"virtualization":      "virtualization",
 	"s3-browser":          "connections",

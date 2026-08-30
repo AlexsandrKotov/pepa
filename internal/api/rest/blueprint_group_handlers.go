@@ -18,6 +18,8 @@ func registerBlueprintGroupRoutes(r *gin.RouterGroup, deps Dependencies) {
 		groups.PUT("/:id", updateBlueprintGroup(deps))
 		groups.DELETE("/:id", deleteBlueprintGroup(deps))
 		groups.PUT("/:id/reorder", reorderBlueprintGroup(deps))
+		groups.POST("/:id/blueprints", addBlueprintsToGroup(deps))
+		groups.DELETE("/:id/blueprints/:bpId", removeBlueprintFromGroup(deps))
 	}
 }
 
@@ -28,6 +30,35 @@ type blueprintGroupRow struct {
 	Position    int                   `json:"position"`
 	Blueprints  []serviceBlueprintRow `json:"blueprints"`
 	CreatedAt   time.Time             `json:"created_at"`
+}
+
+// fetchGroupBlueprints queries blueprints that are members of the given group
+// via the junction table, ordered by junction position.
+func fetchGroupBlueprints(c *gin.Context, deps Dependencies, groupID string) ([]serviceBlueprintRow, error) {
+	rows, err := deps.DB.Pool.Query(c.Request.Context(), `
+		SELECT `+selectBlueprintCols("sb")+`
+		FROM service_blueprints sb
+		JOIN blueprint_group_members bgm ON bgm.blueprint_id = sb.id
+		WHERE bgm.group_id = $1
+		ORDER BY bgm.position ASC, sb.created_at ASC
+	`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bps []serviceBlueprintRow
+	for rows.Next() {
+		bp, err := scanBlueprintRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		bps = append(bps, *bp)
+	}
+	if bps == nil {
+		bps = []serviceBlueprintRow{}
+	}
+	return bps, nil
 }
 
 func listBlueprintGroups(deps Dependencies) gin.HandlerFunc {
@@ -61,55 +92,12 @@ func listBlueprintGroups(deps Dependencies) gin.HandlerFunc {
 			groups = []blueprintGroupRow{}
 		}
 
-		// Fetch member blueprints for each group
+		// Fetch member blueprints for each group via junction table
 		for i, g := range groups {
-			bpRows, err := deps.DB.Pool.Query(c.Request.Context(), `
-				SELECT id, name, COALESCE(description,''), source_type,
-				       helm_repo_id, COALESCE(image,''), COALESCE(chart_url,''),
-				       COALESCE(chart_name,''), COALESCE(chart_version,''),
-				       COALESCE(chart_path,''), COALESCE(namespace,'default'),
-				       COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
-				       COALESCE(memory,'128Mi'), COALESCE(replicas,1),
-				       COALESCE(ports,'{}'), COALESCE(category,'general'),
-				       group_id, COALESCE(group_position,0),
-				       COALESCE(compose_yaml,''),
-				       created_at
-				FROM service_blueprints
-				WHERE group_id = $1
-				ORDER BY group_position ASC, created_at ASC
-			`, g.ID)
+			bps, err := fetchGroupBlueprints(c, deps, g.ID)
 			if err != nil {
 				respondInternalError(c, err)
 				return
-			}
-			var bps []serviceBlueprintRow
-			for bpRows.Next() {
-				var bp serviceBlueprintRow
-				var helmRepoID *string
-				if err := bpRows.Scan(
-					&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
-					&helmRepoID, &bp.Image, &bp.ChartURL,
-					&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
-					&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
-					&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-					&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
-					&bp.CreatedAt,
-				); err != nil {
-					bpRows.Close()
-					respondInternalError(c, err)
-					return
-				}
-				if helmRepoID != nil {
-					bp.HelmRepoID = helmRepoID
-				}
-				if bp.Ports == nil {
-					bp.Ports = []int{}
-				}
-				bps = append(bps, bp)
-			}
-			bpRows.Close()
-			if bps == nil {
-				bps = []serviceBlueprintRow{}
 			}
 			groups[i].Blueprints = bps
 		}
@@ -198,10 +186,7 @@ func deleteBlueprintGroup(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Unlink member blueprints (set group_id to NULL)
-		_, _ = deps.DB.Pool.Exec(c.Request.Context(),
-			`UPDATE service_blueprints SET group_id = NULL, group_position = 0 WHERE group_id = $1`, id)
-
+		// Junction entries are deleted automatically via ON DELETE CASCADE
 		_, err = deps.DB.Pool.Exec(c.Request.Context(), `DELETE FROM blueprint_groups WHERE id=$1`, id)
 		if err != nil {
 			respondInternalError(c, err)
@@ -230,17 +215,89 @@ func reorderBlueprintGroup(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Update each blueprint's group_position
+		// Update each membership's position in the junction table
 		for i, bpIDStr := range req.BlueprintIDs {
 			bpID, parseErr := uuid.Parse(bpIDStr)
 			if parseErr != nil {
 				continue
 			}
 			_, _ = deps.DB.Pool.Exec(c.Request.Context(),
-				`UPDATE service_blueprints SET group_position=$1 WHERE id=$2 AND group_id=$3`,
-				i, bpID, groupID)
+				`UPDATE blueprint_group_members SET position=$1 WHERE group_id=$2 AND blueprint_id=$3`,
+				i, groupID, bpID)
 		}
 
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+}
+
+func addBlueprintsToGroup(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		groupID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+			return
+		}
+
+		var req struct {
+			BlueprintIDs []string `json:"blueprint_ids" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Find current max position in this group
+		var maxPos int
+		_ = deps.DB.Pool.QueryRow(c.Request.Context(),
+			`SELECT COALESCE(MAX(position), -1) FROM blueprint_group_members WHERE group_id = $1`,
+			groupID).Scan(&maxPos)
+
+		added := 0
+		for i, bpIDStr := range req.BlueprintIDs {
+			bpID, parseErr := uuid.Parse(bpIDStr)
+			if parseErr != nil {
+				continue
+			}
+			_, err := deps.DB.Pool.Exec(c.Request.Context(),
+				`INSERT INTO blueprint_group_members (group_id, blueprint_id, position)
+				 VALUES ($1, $2, $3)
+				 ON CONFLICT (group_id, blueprint_id) DO NOTHING`,
+				groupID, bpID, maxPos+1+i)
+			if err == nil {
+				added++
+			}
+		}
+
+		logAudit(deps, c, "add_blueprints", "blueprint_group", groupID.String(), nil,
+			gin.H{"blueprint_ids": req.BlueprintIDs, "added": added})
+		c.JSON(http.StatusOK, gin.H{"ok": true, "added": added})
+	}
+}
+
+func removeBlueprintFromGroup(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		groupID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+			return
+		}
+
+		bpID, err := uuid.Parse(c.Param("bpId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid blueprint ID"})
+			return
+		}
+
+		_, err = deps.DB.Pool.Exec(c.Request.Context(),
+			`DELETE FROM blueprint_group_members WHERE group_id = $1 AND blueprint_id = $2`,
+			groupID, bpID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "remove_blueprint", "blueprint_group", groupID.String(), nil,
+			gin.H{"blueprint_id": bpID.String()})
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	}
 }

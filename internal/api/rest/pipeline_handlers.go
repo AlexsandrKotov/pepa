@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,6 +25,11 @@ func registerPipelineSourceRoutes(r *gin.RouterGroup, deps Dependencies) {
 		sources.DELETE("/:id", deletePipelineSource(deps))
 		sources.POST("/:id/resolve-schema", resolvePipelineSchema(deps))
 		sources.POST("/:id/sync-runs", syncPipelineRuns(deps))
+		sources.GET("/:id/state", getPipelineState(deps))
+		sources.POST("/:id/plan", getPipelinePlan(deps))
+		sources.GET("/:id/inspect", inspectPipelineSource(deps))
+		sources.POST("/trivy/auto-discover", trivyAutoDiscover(deps))
+		sources.POST("/trivy/scan-all", trivyScanAll(deps))
 	}
 }
 
@@ -474,6 +480,34 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 
 		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
 
+		// For GitLab CI sources, separate spec.inputs (marked with is_input in the
+		// parameter schema) from regular CI variables. The inputs are embedded in
+		// the params map so the adapter can pass them via the "inputs" field in
+		// the GitLab API request body (supported since GitLab 17.10+).
+		if source.SourceType == "gitlab_ci" && len(req.Parameters) > 0 {
+			schemaJSON := source.ParameterSchema
+			// If no stored schema, resolve it on-the-fly to identify inputs.
+			if len(schemaJSON) == 0 {
+				if resolved, err := provider.ResolveSchema(c.Request.Context(), config); err == nil && resolved != nil {
+					schemaJSON, _ = json.Marshal(resolved)
+				}
+			}
+			if len(schemaJSON) > 0 {
+				var schema pipeline.ParameterSchema
+				if json.Unmarshal(schemaJSON, &schema) == nil {
+					inputs := make(map[string]any)
+					for k, v := range req.Parameters {
+						if prop, ok := schema.Properties[k]; ok && prop.IsInput {
+							inputs[k] = v
+						}
+					}
+					if len(inputs) > 0 {
+						req.Parameters["__gitlab_inputs__"] = inputs
+					}
+				}
+			}
+		}
+
 		// Trigger via the adapter
 		result, err := provider.Trigger(c.Request.Context(), config, req.Parameters)
 		if err != nil {
@@ -897,5 +931,337 @@ func deletePipelinePreset(deps Dependencies) gin.HandlerFunc {
 
 		logAudit(deps, c, "delete", "pipeline_preset", presetID.String(), nil, nil)
 		c.JSON(http.StatusOK, gin.H{"message": "preset deleted", "id": presetID})
+	}
+}
+
+// ── Pipeline State & Plan (EnhancedProvider) ────────────────────────────────
+
+// getPipelineState returns the current infrastructure state for a pipeline source
+// (e.g. Terraform resources, Ansible host inventory).
+func getPipelineState(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pipeline source ID"})
+			return
+		}
+
+		source, err := deps.Repos.PipelineSource.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.PipelineRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "pipeline registry not available"})
+			return
+		}
+
+		provider, err := deps.PipelineRegistry.Get(source.SourceType)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Check if the provider supports State (EnhancedProvider)
+		enhanced, ok := provider.(pipeline.EnhancedProvider)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s does not support state browsing", source.SourceType)})
+			return
+		}
+
+		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		state, err := enhanced.State(c.Request.Context(), config)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, state)
+	}
+}
+
+// getPipelinePlan runs a plan/preview (e.g. terraform plan, ansible --check)
+// and returns the structured result.
+func getPipelinePlan(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pipeline source ID"})
+			return
+		}
+
+		source, err := deps.Repos.PipelineSource.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.PipelineRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "pipeline registry not available"})
+			return
+		}
+
+		provider, err := deps.PipelineRegistry.Get(source.SourceType)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Check if the provider supports Plan (EnhancedProvider)
+		enhanced, ok := provider.(pipeline.EnhancedProvider)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s does not support plan preview", source.SourceType)})
+			return
+		}
+
+		// Optional parameters from request body
+		var params map[string]any
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&params); err != nil {
+				params = make(map[string]any)
+			}
+		}
+
+		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		plan, err := enhanced.Plan(c.Request.Context(), config, params)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, plan)
+	}
+}
+
+// inspectPipelineSource returns structured metadata about a pipeline source
+// (e.g. Ansible playbooks/roles, Terraform modules/resources).
+func inspectPipelineSource(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pipeline source ID"})
+			return
+		}
+
+		source, err := deps.Repos.PipelineSource.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.PipelineRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "pipeline registry not available"})
+			return
+		}
+
+		provider, err := deps.PipelineRegistry.Get(source.SourceType)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		inspectable, ok := provider.(pipeline.InspectableProvider)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s does not support inspection", source.SourceType)})
+			return
+		}
+
+		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		result, err := inspectable.Inspect(c.Request.Context(), config)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.Data(http.StatusOK, "application/json", result)
+	}
+}
+
+// trivyAutoDiscover discovers git repositories from connections and creates Trivy scan sources.
+func trivyAutoDiscover(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID := auth.GetTenantID(c)
+
+		if deps.Repos.Connection == nil || deps.Repos.PipelineSource == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "repositories not available"})
+			return
+		}
+
+		// List git connections
+		gitlabConns, _ := deps.Repos.Connection.List(c.Request.Context(), tenantID, "gitlab")
+		gitConns, _ := deps.Repos.Connection.List(c.Request.Context(), tenantID, "git")
+
+		type repoInfo struct {
+			URL          string
+			ConnectionID string
+			Name         string
+		}
+
+		var discovered []repoInfo
+
+		// Use provider registry to browse repos
+		if deps.ProviderRegistry != nil {
+			browseConn := func(connID uuid.UUID, pluginName string, connConfig map[string]string) {
+				entry, ok := deps.ProviderRegistry.Get(pluginName)
+				if !ok || entry == nil || !entry.Enabled || entry.Executor == nil {
+					return
+				}
+				resp, err := entry.Executor.Execute(c.Request.Context(), "list_repos", nil, tenantID.String(), connConfig)
+				if err != nil || resp == nil {
+					return
+				}
+				var browseResult struct {
+					Repos []struct {
+						URL      string `json:"url"`
+						Name     string `json:"name"`
+						FullName string `json:"full_name"`
+					} `json:"repos"`
+				}
+				if json.Unmarshal(resp.GetOutput(), &browseResult) == nil {
+					for _, r := range browseResult.Repos {
+						if r.URL != "" {
+							discovered = append(discovered, repoInfo{
+								URL:          r.URL,
+								ConnectionID: connID.String(),
+								Name:         r.FullName,
+							})
+						}
+					}
+				}
+			}
+
+			for _, conn := range gitlabConns {
+				cfg := make(map[string]string)
+				for k, v := range conn.Config {
+					if s, ok := v.(string); ok {
+						cfg[k] = s
+					}
+				}
+				browseConn(conn.ID, "gitlab", cfg)
+			}
+			for _, conn := range gitConns {
+				prov, _ := conn.Config["provider"].(string)
+				if prov == "" {
+					prov = "gitlab"
+				}
+				cfg := make(map[string]string)
+				for k, v := range conn.Config {
+					if s, ok := v.(string); ok {
+						cfg[k] = s
+					}
+				}
+				browseConn(conn.ID, prov, cfg)
+			}
+		}
+
+		// Create trivy pipeline sources for discovered repos
+		// Fetch all existing sources once to avoid N+1 queries
+		allSources, _, _ := deps.Repos.PipelineSource.List(c.Request.Context(), tenantID, 1, 200)
+		existingTrivy := make(map[string]bool) // target URL → already exists
+		for _, s := range allSources {
+			if s.SourceType == "trivy" {
+				var cfg map[string]string
+				if json.Unmarshal(s.Config, &cfg) == nil {
+					if target, ok := cfg["target"]; ok {
+						existingTrivy[target] = true
+					}
+				}
+			}
+		}
+
+		created := 0
+		existing := 0
+		var sources []models.PipelineSource
+
+		for _, repo := range discovered {
+			if existingTrivy[repo.URL] {
+				existing++
+				continue
+			}
+
+			// Create new trivy source
+			connUUID, _ := uuid.Parse(repo.ConnectionID)
+			configJSON, _ := json.Marshal(map[string]string{
+				"target":    repo.URL,
+				"scan_type": "repo",
+				"severity":  "HIGH,CRITICAL",
+				"format":    "json",
+			})
+			newSource := &models.PipelineSource{
+				TenantID:     tenantID,
+				Name:         fmt.Sprintf("Trivy: %s", repo.Name),
+				SourceType:   "trivy",
+				Description:  fmt.Sprintf("Auto-discovered from connection %s", repo.ConnectionID),
+				ConnectionID: &connUUID,
+				Config:       configJSON,
+				Status:       "active",
+			}
+			if err := deps.Repos.PipelineSource.Create(c.Request.Context(), newSource); err == nil {
+				created++
+				sources = append(sources, *newSource)
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"created":  created,
+			"existing": existing,
+			"sources":  sources,
+		})
+	}
+}
+
+// trivyScanAll triggers vulnerability scans for all Trivy pipeline sources.
+func trivyScanAll(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID := auth.GetTenantID(c)
+
+		if deps.Repos.PipelineSource == nil || deps.PipelineRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "services not available"})
+			return
+		}
+
+		allSources, _, _ := deps.Repos.PipelineSource.List(c.Request.Context(), tenantID, 1, 200)
+		trivySources := make([]models.PipelineSource, 0)
+		for _, s := range allSources {
+			if s.SourceType == "trivy" {
+				trivySources = append(trivySources, s)
+			}
+		}
+
+		provider, err := deps.PipelineRegistry.Get("trivy")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "trivy provider not available"})
+			return
+		}
+
+		scanned := 0
+		var results []map[string]interface{}
+
+		for _, src := range trivySources {
+			config := resolvePipelineConfig(c.Request.Context(), deps, &src, tenantID)
+			result, triggerErr := provider.Trigger(c.Request.Context(), config, map[string]any{
+				"severity": "HIGH,CRITICAL",
+			})
+			entry := map[string]interface{}{
+				"source_id":   src.ID,
+				"source_name": src.Name,
+			}
+			if triggerErr != nil {
+				entry["status"] = "error"
+				entry["error"] = triggerErr.Error()
+			} else {
+				entry["status"] = result.Status
+				entry["run_id"] = result.ExternalRunID
+				scanned++
+			}
+			results = append(results, entry)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"scanned": scanned,
+			"total":   len(trivySources),
+			"results": results,
+		})
 	}
 }

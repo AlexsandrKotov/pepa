@@ -277,8 +277,10 @@ function LDAPSettingsPanel() {
     name_attr: 'cn',
     start_tls: false,
     insecure_skip_verify: false,
+    ca_certificate: '',
     group_mappings: [] as { group: string; role: string }[],
   });
+  const [caCertConfigured, setCaCertConfigured] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -293,6 +295,8 @@ function LDAPSettingsPanel() {
         const mappings = cfg.group_mapping
           ? Object.entries(cfg.group_mapping).map(([group, role]) => ({ group, role }))
           : [];
+        const isMasked = (cfg.ca_certificate || '').includes('\u2022');
+        setCaCertConfigured(isMasked);
         setForm({
           enabled: cfg.enabled,
           url: cfg.url || '',
@@ -305,6 +309,7 @@ function LDAPSettingsPanel() {
           name_attr: cfg.name_attr || 'cn',
           start_tls: cfg.start_tls || false,
           insecure_skip_verify: cfg.insecure_skip_verify || false,
+          ca_certificate: isMasked ? '' : (cfg.ca_certificate || ''),
           group_mappings: mappings,
         });
       } catch { /* no config yet */ }
@@ -339,6 +344,7 @@ function LDAPSettingsPanel() {
         name_attr: form.name_attr.trim(),
         start_tls: form.start_tls,
         insecure_skip_verify: form.insecure_skip_verify,
+        ca_certificate: form.ca_certificate || (caCertConfigured ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : ''),
         group_mapping: groupMapping,
       });
       setToast({ message: 'LDAP configuration saved', type: 'success' });
@@ -361,6 +367,7 @@ function LDAPSettingsPanel() {
         base_dn: form.base_dn,
         start_tls: form.start_tls,
         insecure_skip_verify: form.insecure_skip_verify,
+        ca_certificate: form.ca_certificate || (caCertConfigured ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' : ''),
       });
       setTestResult(result);
     } catch (err) {
@@ -459,6 +466,32 @@ function LDAPSettingsPanel() {
               <input type="checkbox" checked={form.insecure_skip_verify} onChange={e => setForm({ ...form, insecure_skip_verify: e.target.checked })} disabled={!form.enabled} className="rounded border-[var(--border-light)]" />
               <span className="text-[12px] text-[var(--text-secondary)]">Skip TLS verification</span>
             </label>
+          </div>
+
+          {/* CA Certificate */}
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="label">CA Certificate (PEM)</label>
+              {caCertConfigured && form.ca_certificate === '' && (
+                <button
+                  type="button"
+                  onClick={() => { setCaCertConfigured(false); setForm({ ...form, ca_certificate: '' }); }}
+                  disabled={!form.enabled}
+                  className="text-[11px] text-red-400 hover:text-red-500"
+                >
+                  Remove certificate
+                </button>
+              )}
+            </div>
+            <textarea
+              value={form.ca_certificate}
+              onChange={e => { setForm({ ...form, ca_certificate: e.target.value }); if (e.target.value) setCaCertConfigured(false); }}
+              className="input mt-1 font-mono text-[11px] leading-relaxed min-h-[100px] resize-y"
+              placeholder={caCertConfigured ? 'Certificate is configured. Enter a new one to replace, or use the button above to remove.' : '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----'}
+              disabled={!form.enabled}
+              spellCheck={false}
+            />
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Required for LDAPS with self-signed or custom CA certificates.</p>
           </div>
 
           {/* Test connection */}

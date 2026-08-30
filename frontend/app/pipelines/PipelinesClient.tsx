@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable, type WorkflowInfo } from '@/lib/api';
+import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable, type WorkflowInfo, type TerraformState, type TerraformStateResource, type TerraformPlan } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import { VaultInput, useVaultPicker } from '@/components/VaultInput';
 import GitRepoPicker from '@/components/GitRepoPicker';
@@ -115,7 +115,12 @@ function PipelinesClientContent({
   const [selectedSource, setSelectedSource] = useState<PipelineSource | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [presets, setPresets] = useState<PipelinePreset[]>([]);
-  const [detailTab, setDetailTab] = useState<'runs' | 'presets'>('runs');
+  const [detailTab, setDetailTab] = useState<'runs' | 'presets' | 'state' | 'vulns'>('runs');
+  const [tfState, setTfState] = useState<TerraformState | null>(null);
+  const [tfPlan, setTfPlan] = useState<TerraformPlan | null>(null);
+  const [loadingState, setLoadingState] = useState(false);
+  const [loadingPlan, setLoadingPlan] = useState(false);
+  const [stateError, setStateError] = useState('');
   const [triggering, setTriggering] = useState(false);
   const [showTriggerModal, setShowTriggerModal] = useState(false);
   const [triggerParams, setTriggerParams] = useState<Record<string, string>>({});
@@ -135,10 +140,19 @@ function PipelinesClientContent({
   // Provider tab: trigger, jobs, logs, presets
   const [showProviderTrigger, setShowProviderTrigger] = useState(false);
 
+  // Interactive wizard state
+  const [showAnsibleWizard, setShowAnsibleWizard] = useState(false);
+  const [showTerraformWizard, setShowTerraformWizard] = useState(false);
+  const [trivyDiscovering, setTrivyDiscovering] = useState(false);
+  const [trivyScanning, setTrivyScanning] = useState(false);
+  const [trivyDiscoverResult, setTrivyDiscoverResult] = useState<{ created: number; existing: number; sources: PipelineSource[] } | null>(null);
+
   // Escape key closes modals
-  const anyModalOpen = showCreateModal || showTriggerModal || showProviderTrigger;
+  const anyModalOpen = showCreateModal || showTriggerModal || showProviderTrigger || showAnsibleWizard || showTerraformWizard;
   useEscapeKey(() => {
-    if (showProviderTrigger) setShowProviderTrigger(false);
+    if (showTerraformWizard) setShowTerraformWizard(false);
+    else if (showAnsibleWizard) setShowAnsibleWizard(false);
+    else if (showProviderTrigger) setShowProviderTrigger(false);
     else if (showTriggerModal) { setShowTriggerModal(false); setEngineCIVariables([]); }
     else if (showCreateModal) setShowCreateModal(false);
   }, anyModalOpen);
@@ -153,6 +167,7 @@ function PipelinesClientContent({
   const [providerPresets, setProviderPresets] = useState<{ name: string; description: string; ref: string; variables: Record<string, string> }[]>([]);
   const [expandedPipelineId, setExpandedPipelineId] = useState<number | null>(null);
   const [pipelineJobs, setPipelineJobs] = useState<GitPipelineJob[]>([]);
+
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [jobsErrorHint, setJobsErrorHint] = useState<string | null>(null);
@@ -224,11 +239,58 @@ function PipelinesClientContent({
     } catch { setPresets([]); }
   }, []);
 
+  const loadState = useCallback(async (sourceId: string) => {
+    setLoadingState(true);
+    setStateError('');
+    setFeedback({ ok: true, text: 'Loading infrastructure state...' });
+    try {
+      const data = await pipelineSources.state(sourceId);
+      setTfState(data);
+      setFeedback({ ok: true, text: 'State loaded successfully' });
+    } catch (err) {
+      setTfState(null);
+      const errMsg = friendlyError(err).message;
+      setStateError(errMsg);
+      setFeedback({ ok: false, text: 'Failed to load state', hint: errMsg });
+    } finally {
+      setLoadingState(false);
+    }
+  }, []);
+
+  const loadPlan = useCallback(async (sourceId: string) => {
+    setLoadingPlan(true);
+    setFeedback({ ok: true, text: 'Running plan preview...' });
+    try {
+      const data = await pipelineSources.plan(sourceId);
+      setTfPlan(data);
+      setFeedback({ ok: true, text: 'Plan completed' });
+    } catch (err) {
+      setTfPlan(null);
+      const errMsg = friendlyError(err).message;
+      setStateError(errMsg);
+      setFeedback({ ok: false, text: 'Plan failed', hint: errMsg });
+    } finally {
+      setLoadingPlan(false);
+    }
+  }, []);
+
+  const handleAnsibleDryRun = useCallback(async (source: PipelineSource) => {
+    setDetailTab('state');
+    await loadPlan(source.id);
+  }, [loadPlan]);
+
   const selectSource = async (source: PipelineSource) => {
     setSelectedSource(source);
     setDetailTab('runs');
+    setTfState(null);
+    setTfPlan(null);
+    setStateError('');
     await loadRuns(source.id);
     await loadPresets(source.id);
+    // Auto-load state for terraform/ansible sources
+    if (source.source_type === 'terraform' || source.source_type === 'ansible') {
+      loadState(source.id);
+    }
   };
 
   const handleTrigger = async () => {
@@ -347,11 +409,15 @@ function PipelinesClientContent({
   const handleSyncRuns = async () => {
     if (!selectedSource) return;
     setSyncing(true);
+    setFeedback({ ok: true, text: 'Syncing runs from remote...' });
     try {
       const result = await pipelineRuns.sync(selectedSource.id);
       await loadRuns(selectedSource.id);
       setFeedback({ ok: true, text: `Synced ${result.synced} runs from remote` });
-    } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+    } catch (err) {
+      const errMsg = friendlyError(err).message;
+      setFeedback({ ok: false, text: 'Sync failed', hint: errMsg });
+    }
     finally { setSyncing(false); }
   };
 
@@ -457,11 +523,21 @@ function PipelinesClientContent({
     if (!selectedProviderConn || !pickerValue.repo_id) return;
     setProviderTriggering(true);
     try {
+      // Split providerTriggerVars into regular variables and spec.inputs
+      // based on the is_input flag from parsed CI config.
+      const inputKeys = new Set(ciVariables.filter(cv => cv.is_input).map(cv => cv.key));
+      const variables: Record<string, string> = {};
+      const inputs: Record<string, string> = {};
+      for (const [k, v] of Object.entries(providerTriggerVars)) {
+        if (inputKeys.has(k)) inputs[k] = v;
+        else variables[k] = v;
+      }
       const result = await gitBrowser.triggerPipeline(
         selectedProviderConn.id,
         pickerValue.repo_id,
         providerTriggerRef || 'main',
-        providerTriggerVars,
+        variables,
+        Object.keys(inputs).length > 0 ? inputs : undefined,
       );
       setShowProviderTrigger(false);
       setProviderTriggerVars({});
@@ -769,19 +845,28 @@ function PipelinesClientContent({
                           <p className="text-sm text-[var(--text-secondary)]">{sourceTypeLabels[selectedSource.source_type]} pipeline</p>
                         </div>
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => openEngineTriggerModal(selectedSource)}
-                            className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium"
-                          >
-                            Run Pipeline
-                          </button>
-                          <button
-                            onClick={handleSyncRuns}
-                            disabled={syncing}
-                            className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm disabled:opacity-50"
-                          >
-                            {syncing ? 'Syncing...' : 'Sync Runs'}
-                          </button>
+                          {/* ── Primary action button (varies by provider) ── */}
+                          {selectedSource.source_type === 'terraform' ? (
+                            <>
+                              <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="px-3 py-1.5 bg-purple-500/15 text-purple-500 rounded-md hover:bg-purple-500/25 text-sm font-medium border border-purple-500/20">View State</button>
+                              <button onClick={() => loadPlan(selectedSource.id)} disabled={loadingPlan} className="px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md hover:bg-amber-500/25 text-sm font-medium border border-amber-500/20 disabled:opacity-50">{loadingPlan ? 'Planning...' : 'Plan'}</button>
+                              <button onClick={() => setShowTerraformWizard(true)} className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">Apply</button>
+                            </>
+                          ) : selectedSource.source_type === 'ansible' ? (
+                            <>
+                              <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="px-3 py-1.5 bg-emerald-500/15 text-emerald-600 rounded-md hover:bg-emerald-500/25 text-sm font-medium border border-emerald-500/20">Hosts</button>
+                              <button onClick={() => handleAnsibleDryRun(selectedSource)} disabled={loadingPlan} className="px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md hover:bg-amber-500/25 text-sm font-medium border border-amber-500/20 disabled:opacity-50">{loadingPlan ? 'Checking...' : 'Dry Run'}</button>
+                              <button onClick={() => setShowAnsibleWizard(true)} className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">Run Playbook</button>
+                            </>
+                          ) : selectedSource.source_type === 'trivy' ? (
+                            <button onClick={() => openEngineTriggerModal(selectedSource)} className="px-3 py-1.5 bg-cyan-500/15 text-cyan-600 rounded-md hover:bg-cyan-500/25 text-sm font-medium border border-cyan-500/20 font-medium">Run Scan</button>
+                          ) : (
+                            <>
+                              <button onClick={() => openEngineTriggerModal(selectedSource)} className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">Run Pipeline</button>
+                              <button onClick={handleSyncRuns} disabled={syncing} className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm disabled:opacity-50">{syncing ? 'Syncing...' : 'Sync Runs'}</button>
+                            </>
+                          )}
+                          {/* ── Common actions ── */}
                           <button onClick={() => handleResolveSchema(selectedSource)} className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm">Refresh Schema</button>
                           <button onClick={() => handleDeleteSource(selectedSource)} className="px-3 py-1.5 bg-red-500/10 text-red-500 rounded-md hover:bg-red-500/20 text-sm">Delete</button>
                         </div>
@@ -794,9 +879,21 @@ function PipelinesClientContent({
                         <button onClick={() => setDetailTab('runs')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'runs' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
                           Runs ({runs.length})
                         </button>
-                        <button onClick={() => setDetailTab('presets')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'presets' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
-                          Presets ({presets.length})
-                        </button>
+                        {selectedSource?.source_type !== 'trivy' && (
+                          <button onClick={() => setDetailTab('presets')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'presets' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
+                            Presets ({presets.length})
+                          </button>
+                        )}
+                        {(selectedSource?.source_type === 'terraform' || selectedSource?.source_type === 'ansible') && (
+                          <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'state' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
+                            {selectedSource.source_type === 'ansible' ? 'Hosts' : 'State'} {tfState ? `(${tfState.resources?.length || 0})` : ''}
+                          </button>
+                        )}
+                        {selectedSource?.source_type === 'trivy' && (
+                          <button onClick={() => setDetailTab('vulns')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'vulns' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
+                            Vulnerabilities
+                          </button>
+                        )}
                       </div>
                       <div className="p-4">
                         {detailTab === 'runs' && (
@@ -804,13 +901,20 @@ function PipelinesClientContent({
                             {runs.length === 0 && (
                               <div className="text-center py-6">
                                 <p className="text-sm text-[var(--text-secondary)] mb-2">No runs yet</p>
-                                <button
-                                  onClick={handleSyncRuns}
-                                  disabled={syncing}
-                                  className="text-sm text-[var(--accent)] hover:underline disabled:opacity-50"
-                                >
-                                  {syncing ? 'Syncing...' : 'Sync runs from remote →'}
-                                </button>
+                                {selectedSource.source_type !== 'terraform' && selectedSource.source_type !== 'ansible' && (
+                                  <button
+                                    onClick={handleSyncRuns}
+                                    disabled={syncing}
+                                    className="text-sm text-[var(--accent)] hover:underline disabled:opacity-50"
+                                  >
+                                    {syncing ? 'Syncing...' : 'Sync runs from remote →'}
+                                  </button>
+                                )}
+                                {(selectedSource.source_type === 'terraform' || selectedSource.source_type === 'ansible') && (
+                                  <p className="text-xs text-[var(--text-tertiary)] mt-2">
+                                    {selectedSource.source_type === 'terraform' ? 'Terraform' : 'Ansible'} runs are created when you trigger actions (Plan, Apply, or Run Playbook)
+                                  </p>
+                                )}
                               </div>
                             )}
                             {runs.map(run => {
@@ -930,6 +1034,174 @@ function PipelinesClientContent({
                                 </button>
                               </div>
                             ))}
+                          </div>
+                        )}
+                        {detailTab === 'state' && selectedSource && (
+                          <div className="space-y-4">
+                            {stateError && (
+                              <div className="p-3 rounded-md bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+                                {stateError}
+                              </div>
+                            )}
+                            {loadingState && (
+                              <div className="flex items-center gap-2 py-6 justify-center">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+                                <span className="text-sm text-[var(--text-secondary)]">Loading infrastructure state...</span>
+                              </div>
+                            )}
+                            {!loadingState && tfState && (
+                              <>
+                                {/* State summary */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm font-medium text-[var(--text-primary)]">
+                                      {tfState.resources?.length || 0} resource{(tfState.resources?.length || 0) !== 1 ? 's' : ''} managed
+                                    </span>
+                                    {(() => {
+                                      const byType: Record<string, number> = {};
+                                      (tfState.resources || []).forEach(r => { byType[r.type] = (byType[r.type] || 0) + 1; });
+                                      return Object.entries(byType).map(([type, count]) => (
+                                        <span key={type} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--border-light)] text-[var(--text-secondary)]">
+                                          {type}: {count}
+                                        </span>
+                                      ));
+                                    })()}
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => loadState(selectedSource.id)}
+                                      disabled={loadingState}
+                                      className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--border-light)] rounded-md border border-[var(--border)] disabled:opacity-50"
+                                    >
+                                      {loadingState ? 'Loading...' : 'Refresh'}
+                                    </button>
+                                    <button
+                                      onClick={() => loadPlan(selectedSource.id)}
+                                      disabled={loadingPlan}
+                                      className="px-3 py-1.5 text-xs text-blue-500 hover:bg-blue-500/10 rounded-md border border-blue-500/20 disabled:opacity-50"
+                                    >
+                                      {loadingPlan ? 'Planning...' : 'Plan'}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Plan result */}
+                                {tfPlan && (
+                                  <div className="p-3 rounded-md bg-[var(--bg)] border border-[var(--border)]">
+                                    <div className="flex items-center gap-3 mb-2">
+                                      <span className={`text-sm font-medium ${tfPlan.has_changes ? 'text-amber-500' : 'text-green-500'}`}>
+                                        {tfPlan.has_changes ? 'Changes detected' : 'No changes'}
+                                      </span>
+                                      <div className="flex gap-2 text-[10px]">
+                                        {tfPlan.add_count > 0 && <span className="px-1.5 py-0.5 rounded bg-green-500/15 text-green-600">+{tfPlan.add_count} add</span>}
+                                        {tfPlan.change_count > 0 && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">~{tfPlan.change_count} change</span>}
+                                        {tfPlan.destroy_count > 0 && <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-500">-{tfPlan.destroy_count} destroy</span>}
+                                      </div>
+                                    </div>
+                                    {tfPlan.output_text && (
+                                      <pre className="text-[10px] font-mono text-[var(--text-secondary)] bg-[var(--surface)] rounded p-2 max-h-40 overflow-auto whitespace-pre-wrap">{tfPlan.output_text}</pre>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Resource table */}
+                                {tfState.resources && tfState.resources.length > 0 ? (
+                                  <div className="overflow-hidden rounded-md border border-[var(--border)]">
+                                    <table className="w-full text-sm">
+                                      <thead>
+                                        <tr className="bg-[var(--bg)] border-b border-[var(--border)]">
+                                          <th className="text-left px-3 py-2 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Type</th>
+                                          <th className="text-left px-3 py-2 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Name</th>
+                                          <th className="text-left px-3 py-2 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">ID</th>
+                                          <th className="text-left px-3 py-2 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">Status</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {tfState.resources.map((resource, idx) => (
+                                          <tr key={`${resource.type}-${resource.name}-${idx}`} className="border-b border-[var(--border-light)] hover:bg-[var(--bg)] transition-colors">
+                                            <td className="px-3 py-2">
+                                              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 border border-violet-500/20">
+                                                {resource.type}
+                                              </span>
+                                            </td>
+                                            <td className="px-3 py-2 text-[12px] font-mono text-[var(--text-primary)]">{resource.name}</td>
+                                            <td className="px-3 py-2 text-[11px] font-mono text-[var(--text-tertiary)] truncate max-w-[200px]" title={resource.id}>{resource.id}</td>
+                                            <td className="px-3 py-2">
+                                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                                resource.status === 'created' ? 'bg-green-500/15 text-green-600' :
+                                                resource.status === 'ready' ? 'bg-green-500/15 text-green-600' :
+                                                resource.status === 'tainted' ? 'bg-amber-500/15 text-amber-600' :
+                                                'bg-[var(--border-light)] text-[var(--text-secondary)]'
+                                              }`}>
+                                                {resource.status}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="text-center py-6">
+                                    <p className="text-sm text-[var(--text-secondary)]">No resources in state</p>
+                                    <p className="text-xs text-[var(--text-tertiary)] mt-1">Run terraform apply to create resources</p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            {!loadingState && !tfState && !stateError && (
+                              <div className="text-center py-6">
+                                <p className="text-sm text-[var(--text-secondary)]">No state available</p>
+                                <button onClick={() => loadState(selectedSource.id)} className="mt-2 text-sm text-[var(--accent)] hover:underline">Load state</button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Trivy Vulnerabilities tab */}
+                        {detailTab === 'vulns' && selectedSource?.source_type === 'trivy' && (
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={async () => {
+                                  setTrivyDiscovering(true);
+                                  try {
+                                    const result = await pipelineSources.trivyAutoDiscover();
+                                    setTrivyDiscoverResult(result);
+                                  } catch { /* ignore */ }
+                                  setTrivyDiscovering(false);
+                                }}
+                                disabled={trivyDiscovering}
+                                className="px-3 py-1.5 bg-cyan-500/15 text-cyan-600 rounded-md text-sm font-medium border border-cyan-500/20 disabled:opacity-50"
+                              >
+                                {trivyDiscovering ? 'Discovering...' : 'Auto-discover Repositories'}
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  setTrivyScanning(true);
+                                  try { await pipelineSources.trivyScanAll(); } catch { /* ignore */ }
+                                  setTrivyScanning(false);
+                                }}
+                                disabled={trivyScanning}
+                                className="px-3 py-1.5 bg-red-500/15 text-red-500 rounded-md text-sm font-medium border border-red-500/20 disabled:opacity-50"
+                              >
+                                {trivyScanning ? 'Scanning...' : 'Scan All'}
+                              </button>
+                            </div>
+
+                            {trivyDiscoverResult && (
+                              <div className="p-3 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-sm">
+                                <p className="font-medium text-cyan-600">Discovery complete</p>
+                                <p className="text-[var(--text-secondary)] text-xs mt-1">
+                                  Created: {trivyDiscoverResult.created} new sources, {trivyDiscoverResult.existing} existing
+                                </p>
+                              </div>
+                            )}
+
+                            <div className="text-center py-6">
+                              <p className="text-sm text-[var(--text-secondary)]">Vulnerability results will appear here after scanning.</p>
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">Use "Auto-discover" to find repositories, then "Scan All" to check for vulnerabilities.</p>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1267,6 +1539,24 @@ function PipelinesClientContent({
         />
       )}
 
+      {/* Ansible Playbook Wizard */}
+      {showAnsibleWizard && selectedSource && (
+        <AnsiblePlaybookWizard
+          source={selectedSource}
+          onClose={() => setShowAnsibleWizard(false)}
+          onRunComplete={() => { loadRuns(selectedSource.id); }}
+        />
+      )}
+
+      {/* Terraform Execution Wizard */}
+      {showTerraformWizard && selectedSource && (
+        <TerraformExecutionWizard
+          source={selectedSource}
+          onClose={() => setShowTerraformWizard(false)}
+          onApplyComplete={() => { loadRuns(selectedSource.id); loadState(selectedSource.id); }}
+        />
+      )}
+
       {/* Provider Tab Trigger Modal */}
       {showProviderTrigger && selectedProviderConn && pickerValue.repo_id && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -1502,6 +1792,578 @@ function PipelinesClientContent({
   );
 }
 
+
+// ── Ansible Playbook Wizard ─────────────────────────────────
+
+interface AnsibleInspectionData {
+  playbooks: { name: string; file: string; plays: { name: string; hosts: string; roles: string[]; task_count: number; tags?: string[] }[] }[];
+  roles: { name: string; description?: string; path: string; task_count: number }[];
+  inventories: string[];
+}
+
+function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
+  source: PipelineSource;
+  onClose: () => void;
+  onRunComplete: () => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [inspection, setInspection] = useState<AnsibleInspectionData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedPlaybook, setSelectedPlaybook] = useState('');
+  const [selectedInventory, setSelectedInventory] = useState('');
+  const [customInventory, setCustomInventory] = useState('');
+  const [variables, setVariables] = useState<Record<string, string>>({});
+  const [dryRunOutput, setDryRunOutput] = useState('');
+  const [runningDryRun, setRunningDryRun] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [execOutput, setExecOutput] = useState('');
+  const [error, setError] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  useEffect(() => {
+    pipelineSources.inspect(source.id).then(raw => {
+      const data = raw as unknown as AnsibleInspectionData;
+      setInspection(data);
+      if (data.playbooks?.length > 0) {
+        setSelectedPlaybook(data.playbooks[0].file);
+      }
+      if (data.inventories?.length > 0) {
+        setSelectedInventory(data.inventories[0]);
+      }
+    }).catch(err => setError(friendlyError(err).message)).finally(() => setLoading(false));
+  }, [source.id]);
+
+  const steps = ['Select Playbook', 'Inventory', 'Variables', 'Dry Run', 'Execute'];
+
+  const handleDryRun = async () => {
+    setRunningDryRun(true);
+    setError('');
+    try {
+      const result = await pipelineSources.plan(source.id, {
+        inventory: customInventory || selectedInventory,
+        dry_run: true,
+        ...variables,
+      });
+      setDryRunOutput(result.output_text || 'No output');
+    } catch (err) {
+      setError(friendlyError(err).message);
+    } finally {
+      setRunningDryRun(false);
+    }
+  };
+
+  const handleExecute = async () => {
+    setExecuting(true);
+    setError('');
+    try {
+      const run = await pipelineRuns.trigger(source.id, { parameters: {
+        inventory: customInventory || selectedInventory,
+        ...variables,
+      } });
+      setExecOutput(`Playbook triggered. Run ID: ${run.id}\nPolling for output...`);
+      // Poll for completion
+      pollRef.current = setInterval(async () => {
+        try {
+          const result = await pipelineRuns.get(source.id, run.id);
+          if (result.run.status === 'running' || result.run.status === 'pending') {
+            try {
+              const logData = await pipelineRuns.logs(source.id, run.id);
+              setExecOutput(`Playbook triggered. Run ID: ${run.id}\n${logData.logs || ''}`);
+            } catch { /* ignore log fetch errors during polling */ }
+          } else {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pollRef.current = null;
+            setExecOutput(prev => prev + '\n--- Run completed: ' + result.run.status + ' ---');
+            setExecuting(false);
+            onRunComplete();
+          }
+        } catch {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setExecuting(false);
+        }
+      }, 3000);
+    } catch (err) {
+      setError(friendlyError(err).message);
+      setExecuting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-[var(--surface)] rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="p-6 pb-3 border-b shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Run Playbook</h3>
+              <p className="text-sm text-[var(--text-secondary)]">{source.name}</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-[var(--border-light)] rounded-md text-[var(--text-secondary)]">✕</button>
+          </div>
+          {/* Step indicator */}
+          <div className="flex gap-1 mt-4">
+            {steps.map((s, i) => (
+              <div key={s} className={`flex-1 h-1.5 rounded-full ${i <= step ? 'bg-emerald-500' : 'bg-[var(--border-light)]'}`} />
+            ))}
+          </div>
+          <p className="text-xs text-[var(--text-tertiary)] mt-1">Step {step + 1}: {steps[step]}</p>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {error && <div className="mb-4 p-3 rounded-md bg-red-500/10 border border-red-500/20 text-sm text-red-400">{error}</div>}
+
+          {loading && <div className="text-center py-8 text-[var(--text-secondary)]">Loading playbook data...</div>}
+
+          {inspection && step === 0 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Select a playbook to run:</p>
+              <div className="space-y-2">
+                {inspection.playbooks.map(pb => (
+                  <button
+                    key={pb.file}
+                    onClick={() => setSelectedPlaybook(pb.file)}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPlaybook === pb.file ? 'border-emerald-500 bg-emerald-500/5' : 'border-[var(--border)] hover:border-[var(--border-light)]'}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-mono font-medium">{pb.name || pb.file}</span>
+                      <span className="text-xs text-[var(--text-tertiary)]">{pb.file}</span>
+                    </div>
+                    {pb.plays.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {pb.plays.map((play, idx) => (
+                          <span key={idx} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)]">
+                            {play.name || play.hosts} ({play.task_count} tasks)
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {inspection.roles.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-tertiary)] mb-2">Discovered roles ({inspection.roles.length}):</p>
+                  <div className="flex flex-wrap gap-1">
+                    {inspection.roles.slice(0, 20).map(r => (
+                      <span key={r.name} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600" title={r.description || ''}>{r.name}</span>
+                    ))}
+                    {inspection.roles.length > 20 && <span className="text-[10px] text-[var(--text-tertiary)]">+{inspection.roles.length - 20} more</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {inspection && step === 1 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Select inventory:</p>
+              <div className="space-y-2">
+                {inspection.inventories.map(inv => (
+                  <button
+                    key={inv}
+                    onClick={() => { setSelectedInventory(inv); setCustomInventory(''); }}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedInventory === inv && !customInventory ? 'border-emerald-500 bg-emerald-500/5' : 'border-[var(--border)] hover:border-[var(--border-light)]'}`}
+                  >
+                    <span className="text-sm font-mono">{inv}</span>
+                  </button>
+                ))}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--text-secondary)]">Or enter custom inventory / host list:</label>
+                <input
+                  type="text"
+                  value={customInventory}
+                  onChange={e => setCustomInventory(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 border rounded-md text-sm font-mono"
+                  placeholder="host1,host2 or /path/to/inventory"
+                />
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Configure variables (optional):</p>
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <input type="text" placeholder="variable name" className="flex-1 px-3 py-2 border rounded-md text-sm font-mono" id="ansible-var-key" />
+                  <input type="text" placeholder="value" className="flex-1 px-3 py-2 border rounded-md text-sm font-mono" id="ansible-var-val" />
+                  <button
+                    onClick={() => {
+                      const key = (document.getElementById('ansible-var-key') as HTMLInputElement)?.value;
+                      const val = (document.getElementById('ansible-var-val') as HTMLInputElement)?.value;
+                      if (key) { setVariables(prev => ({ ...prev, [key]: val })); (document.getElementById('ansible-var-key') as HTMLInputElement).value = ''; (document.getElementById('ansible-var-val') as HTMLInputElement).value = ''; }
+                    }}
+                    className="px-3 py-2 bg-[var(--border-light)] rounded-md text-sm hover:bg-[var(--border)]"
+                  >Add</button>
+                </div>
+                {Object.entries(variables).length > 0 && (
+                  <div className="space-y-1 mt-2">
+                    {Object.entries(variables).map(([k, v]) => (
+                      <div key={k} className="flex items-center gap-2 p-2 bg-[var(--bg)] rounded-md border">
+                        <span className="text-sm font-mono font-medium">{k}</span>
+                        <span className="text-sm text-[var(--text-secondary)]">= {v}</span>
+                        <button onClick={() => setVariables(prev => { const n = { ...prev }; delete n[k]; return n; })} className="ml-auto text-xs text-red-500 hover:bg-red-500/10 px-1.5 py-0.5 rounded">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="p-3 bg-[var(--bg)] rounded-lg border">
+                <p className="text-xs text-[var(--text-tertiary)]">Summary:</p>
+                <p className="text-sm font-mono mt-1">Playbook: {selectedPlaybook}</p>
+                <p className="text-sm font-mono">Inventory: {customInventory || selectedInventory}</p>
+                <p className="text-sm font-mono">Extra vars: {Object.keys(variables).length}</p>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-[var(--text-secondary)]">Dry Run Preview (--check mode)</p>
+                <button onClick={handleDryRun} disabled={runningDryRun} className="px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md text-sm font-medium border border-amber-500/20 disabled:opacity-50">
+                  {runningDryRun ? 'Running...' : 'Run --check'}
+                </button>
+              </div>
+              {dryRunOutput && (
+                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{dryRunOutput}</pre>
+              )}
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-[var(--text-secondary)]">Execute Playbook</p>
+                <button onClick={handleExecute} disabled={executing} className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                  {executing ? 'Running...' : 'Execute'}
+                </button>
+              </div>
+              {execOutput && (
+                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{execOutput}</pre>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer navigation */}
+        <div className="flex justify-between p-6 pt-3 border-t shrink-0">
+          <button onClick={step === 0 ? onClose : () => setStep(s => s - 1)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">
+            {step === 0 ? 'Cancel' : 'Back'}
+          </button>
+          {step < 4 && (
+            <button
+              onClick={() => setStep(s => s + 1)}
+              disabled={loading || (step === 0 && !selectedPlaybook) || (step === 1 && !selectedInventory && !customInventory)}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 text-sm font-medium disabled:opacity-50"
+            >
+              Next
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ── Terraform Execution Wizard ──────────────────────────────
+
+interface TerraformInspectionData {
+  modules: { name: string; source: string; version?: string }[];
+  resources: { type: string; name: string; description?: string }[];
+  data_sources: { type: string; name: string; description?: string }[];
+  outputs: { name: string; description?: string; sensitive?: boolean }[];
+  backend?: string;
+  workspaces?: string[];
+}
+
+function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
+  source: PipelineSource;
+  onClose: () => void;
+  onApplyComplete: () => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [inspection, setInspection] = useState<TerraformInspectionData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [variables, setVariables] = useState<Record<string, string>>({});
+  const [workspace, setWorkspace] = useState('default');
+  const [planOutput, setPlanOutput] = useState('');
+  const [runningPlan, setRunningPlan] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applyOutput, setApplyOutput] = useState('');
+  const [error, setError] = useState('');
+  const tfPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => { if (tfPollRef.current) clearInterval(tfPollRef.current); };
+  }, []);
+
+  useEffect(() => {
+    pipelineSources.inspect(source.id).then(raw => {
+      const tfData = raw as unknown as TerraformInspectionData;
+      setInspection(tfData);
+      if (tfData.workspaces && tfData.workspaces.length > 0) {
+        setWorkspace(tfData.workspaces[0]);
+      }
+    }).catch(err => setError(friendlyError(err).message)).finally(() => setLoading(false));
+  }, [source.id]);
+
+  const steps = ['Overview', 'Variables', 'Workspace', 'Plan', 'Apply'];
+
+  const handlePlan = async () => {
+    setRunningPlan(true);
+    setError('');
+    try {
+      const result = await pipelineSources.plan(source.id, { workspace, ...variables });
+      setPlanOutput(result.output_text || JSON.stringify(result, null, 2));
+    } catch (err) {
+      setError(friendlyError(err).message);
+    } finally {
+      setRunningPlan(false);
+    }
+  };
+
+  const handleApply = async () => {
+    setApplying(true);
+    setError('');
+    try {
+      const run = await pipelineRuns.trigger(source.id, { parameters: { workspace, auto_approve: true, ...variables } });
+      setApplyOutput(`Apply triggered. Run ID: ${run.id}\nPolling for output...`);
+      tfPollRef.current = setInterval(async () => {
+        try {
+          const result = await pipelineRuns.get(source.id, run.id);
+          if (result.run.status === 'running' || result.run.status === 'pending') {
+            try {
+              const logData = await pipelineRuns.logs(source.id, run.id);
+              setApplyOutput(`Apply triggered. Run ID: ${run.id}\n${logData.logs || ''}`);
+            } catch { /* ignore */ }
+          } else {
+            if (tfPollRef.current) clearInterval(tfPollRef.current);
+            tfPollRef.current = null;
+            setApplyOutput(prev => prev + '\n--- Apply completed: ' + result.run.status + ' ---');
+            setApplying(false);
+            onApplyComplete();
+          }
+        } catch {
+          if (tfPollRef.current) clearInterval(tfPollRef.current);
+          tfPollRef.current = null;
+          setApplying(false);
+        }
+      }, 3000);
+    } catch (err) {
+      setError(friendlyError(err).message);
+      setApplying(false);
+    }
+  };
+
+  const resourceTypeIcon = (type: string) => {
+    if (type.includes('instance') || type.includes('server')) return '🖥';
+    if (type.includes('network') || type.includes('vpc') || type.includes('subnet')) return '🌐';
+    if (type.includes('storage') || type.includes('bucket') || type.includes('disk')) return '💾';
+    if (type.includes('database') || type.includes('db')) return '🗄';
+    return '📦';
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-[var(--surface)] rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="p-6 pb-3 border-b shrink-0">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">Terraform Apply</h3>
+              <p className="text-sm text-[var(--text-secondary)]">{source.name}</p>
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-[var(--border-light)] rounded-md text-[var(--text-secondary)]">✕</button>
+          </div>
+          <div className="flex gap-1 mt-4">
+            {steps.map((s, i) => (
+              <div key={s} className={`flex-1 h-1.5 rounded-full ${i <= step ? 'bg-purple-500' : 'bg-[var(--border-light)]'}`} />
+            ))}
+          </div>
+          <p className="text-xs text-[var(--text-tertiary)] mt-1">Step {step + 1}: {steps[step]}</p>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {error && <div className="mb-4 p-3 rounded-md bg-red-500/10 border border-red-500/20 text-sm text-red-400">{error}</div>}
+          {loading && <div className="text-center py-8 text-[var(--text-secondary)]">Loading terraform data...</div>}
+
+          {inspection && step === 0 && (
+            <div className="space-y-4">
+              {inspection.modules.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Modules ({inspection.modules.length})</p>
+                  <div className="space-y-1">
+                    {inspection.modules.map((m, i) => (
+                      <div key={i} className="p-2 bg-[var(--bg)] rounded-md border text-sm">
+                        <span className="font-mono font-medium">{m.name}</span>
+                        <span className="text-[var(--text-tertiary)] ml-2">{m.source}{m.version ? `@${m.version}` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {inspection.resources.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Resources ({inspection.resources.length})</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {inspection.resources.slice(0, 30).map((r, i) => (
+                      <div key={i} className="p-2 bg-[var(--bg)] rounded-md border text-xs flex items-center gap-1.5">
+                        <span>{resourceTypeIcon(r.type)}</span>
+                        <span className="font-mono truncate">{r.type}.{r.name}</span>
+                      </div>
+                    ))}
+                    {inspection.resources.length > 30 && <p className="text-xs text-[var(--text-tertiary)] col-span-2">+{inspection.resources.length - 30} more resources</p>}
+                  </div>
+                </div>
+              )}
+              {inspection.data_sources.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Data Sources ({inspection.data_sources.length})</p>
+                  <div className="flex flex-wrap gap-1">
+                    {inspection.data_sources.slice(0, 15).map((d, i) => (
+                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-500 font-mono">data.{d.type}.{d.name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {inspection.outputs.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Outputs ({inspection.outputs.length})</p>
+                  <div className="flex flex-wrap gap-1">
+                    {inspection.outputs.map((o, i) => (
+                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)] font-mono" title={o.description}>{o.name}{o.sensitive ? ' 🔒' : ''}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {inspection.backend && (
+                <div className="p-2 bg-[var(--bg)] rounded-md border text-xs">
+                  <span className="text-[var(--text-tertiary)]">Backend: </span>
+                  <span className="font-mono">{inspection.backend}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Terraform Variables:</p>
+              <div className="flex gap-2">
+                <input type="text" placeholder="variable name" className="flex-1 px-3 py-2 border rounded-md text-sm font-mono" id="tf-var-key" />
+                <input type="text" placeholder="value" className="flex-1 px-3 py-2 border rounded-md text-sm font-mono" id="tf-var-val" />
+                <button
+                  onClick={() => {
+                    const key = (document.getElementById('tf-var-key') as HTMLInputElement)?.value;
+                    const val = (document.getElementById('tf-var-val') as HTMLInputElement)?.value;
+                    if (key) { setVariables(prev => ({ ...prev, [key]: val })); (document.getElementById('tf-var-key') as HTMLInputElement).value = ''; (document.getElementById('tf-var-val') as HTMLInputElement).value = ''; }
+                  }}
+                  className="px-3 py-2 bg-[var(--border-light)] rounded-md text-sm hover:bg-[var(--border)]"
+                >Add</button>
+              </div>
+              {Object.entries(variables).length > 0 && (
+                <div className="space-y-1">
+                  {Object.entries(variables).map(([k, v]) => (
+                    <div key={k} className="flex items-center gap-2 p-2 bg-[var(--bg)] rounded-md border">
+                      <span className="text-sm font-mono font-medium">{k}</span>
+                      <span className="text-sm text-[var(--text-secondary)]">= {v}</span>
+                      <button onClick={() => setVariables(prev => { const n = { ...prev }; delete n[k]; return n; })} className="ml-auto text-xs text-red-500 hover:bg-red-500/10 px-1.5 py-0.5 rounded">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {inspection && step === 2 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Select workspace:</p>
+              <div className="space-y-2">
+                {(inspection.workspaces || ['default']).map(ws => (
+                  <button
+                    key={ws}
+                    onClick={() => setWorkspace(ws)}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${workspace === ws ? 'border-purple-500 bg-purple-500/5' : 'border-[var(--border)] hover:border-[var(--border-light)]'}`}
+                  >
+                    <span className="text-sm font-mono">{ws}</span>
+                    {ws === 'default' && <span className="text-xs text-[var(--text-tertiary)] ml-2">(default)</span>}
+                  </button>
+                ))}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--text-secondary)]">Or create new workspace:</label>
+                <div className="flex gap-2 mt-1">
+                  <input type="text" placeholder="workspace name" className="flex-1 px-3 py-2 border rounded-md text-sm font-mono" id="tf-new-ws" />
+                  <button
+                    onClick={() => {
+                      const val = (document.getElementById('tf-new-ws') as HTMLInputElement)?.value;
+                      if (val) { setWorkspace(val); (document.getElementById('tf-new-ws') as HTMLInputElement).value = ''; }
+                    }}
+                    className="px-3 py-2 bg-purple-500/15 text-purple-500 rounded-md text-sm font-medium border border-purple-500/20"
+                  >Create</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-[var(--text-secondary)]">Terraform Plan</p>
+                <button onClick={handlePlan} disabled={runningPlan} className="px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md text-sm font-medium border border-amber-500/20 disabled:opacity-50">
+                  {runningPlan ? 'Planning...' : 'Run Plan'}
+                </button>
+              </div>
+              {planOutput && (
+                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{planOutput}</pre>
+              )}
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-[var(--text-secondary)]">Apply Changes</p>
+                <button onClick={handleApply} disabled={applying} className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
+                  {applying ? 'Applying...' : 'Apply'}
+                </button>
+              </div>
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-md text-xs text-amber-600">
+                This will apply infrastructure changes. Make sure you have reviewed the plan output.
+              </div>
+              {applyOutput && (
+                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{applyOutput}</pre>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-between p-6 pt-3 border-t shrink-0">
+          <button onClick={step === 0 ? onClose : () => setStep(s => s - 1)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">
+            {step === 0 ? 'Cancel' : 'Back'}
+          </button>
+          {step < 4 && (
+            <button onClick={() => setStep(s => s + 1)} disabled={loading} className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium disabled:opacity-50">
+              Next
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Create Source Modal ────────────────────────────────────
 
@@ -2026,9 +2888,14 @@ function TriggerModal({
                 <div key={cv.key}>
                   <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                     {cv.key}
-                    <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">
-                      {cv.type === 'file' ? 'file' : 'env_var'}
-                    </span>
+                    {cv.is_input && (
+                      <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-500 font-medium">input</span>
+                    )}
+                    {!cv.is_input && (
+                      <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">
+                        {cv.type === 'file' ? 'file' : 'env_var'}
+                      </span>
+                    )}
                   </label>
                   {cv.description && !genericDescriptions.includes(cv.description) && (
                     <p className="text-xs text-[var(--text-secondary)] mb-1">{cv.description}</p>
@@ -2042,6 +2909,16 @@ function TriggerModal({
                       <option value="">-- Select --</option>
                       {cv.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                     </select>
+                  ) : cv.value === 'true' || cv.value === 'false' ? (
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={(params[cv.key] ?? cv.value) === 'true'}
+                        onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.checked ? 'true' : 'false' }))}
+                        className="rounded"
+                      />
+                      <span className="text-sm text-[var(--text-secondary)]">{(params[cv.key] ?? cv.value) === 'true' ? 'Yes' : 'No'}</span>
+                    </label>
                   ) : (
                     <input
                       type="text"

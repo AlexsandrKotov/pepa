@@ -31,7 +31,7 @@ export default function PipelineBlueprintsPage() {
     namespace: 'default',
     values_yaml: '', cpu: '100m', memory: '128Mi', replicas: 1,
     ports: '8080', category: 'general',
-    group_id: '' as string | null,
+    group_ids: [] as string[],
     compose_yaml: '',
   });
   const [gitInputMode, setGitInputMode] = useState<'picker' | 'manual'>('picker');
@@ -52,7 +52,7 @@ export default function PipelineBlueprintsPage() {
       name: '', description: '', source_type: 'container',
       helm_repo_id: '', image: '', chart_url: '', chart_name: '', chart_version: '', chart_path: '',
       namespace: 'default', values_yaml: '', cpu: '100m', memory: '128Mi', replicas: 1, ports: '8080', category: 'general',
-      group_id: '', compose_yaml: '',
+      group_ids: [], compose_yaml: '',
     });
     setRepoCharts([]);
     setChartVersions([]);
@@ -67,7 +67,7 @@ export default function PipelineBlueprintsPage() {
       namespace: bp.namespace, values_yaml: bp.values_yaml,
       cpu: bp.cpu, memory: bp.memory, replicas: bp.replicas,
       ports: bp.ports.join(', '), category: bp.category,
-      group_id: bp.group_id || '',
+      group_ids: bp.group_ids || [],
       compose_yaml: bp.compose_yaml || '',
     });
     setRepoCharts([]);
@@ -122,8 +122,7 @@ export default function PipelineBlueprintsPage() {
       values_yaml: form.values_yaml,
       cpu: form.cpu, memory: form.memory, replicas: form.replicas,
       ports, category: form.category,
-      group_id: form.group_id || null,
-      group_position: 0,
+      group_ids: form.group_ids,
       compose_yaml: form.compose_yaml,
     };
 
@@ -808,15 +807,39 @@ export default function PipelineBlueprintsPage() {
                 </div>
               )}
 
-              {/* Group assignment */}
+              {/* Group assignment (multi-select) */}
               <div>
-                <label className="label">Blueprint Group</label>
-                <select value={form.group_id || ''} onChange={e => setForm({ ...form, group_id: e.target.value || null })} className="input">
-                  <option value="">No group</option>
-                  {groups.map(g => (
-                    <option key={g.id} value={g.id}>{g.name}</option>
-                  ))}
-                </select>
+                <label className="label">Blueprint Groups</label>
+                {groups.length === 0 ? (
+                  <p className="text-[11px] text-[var(--text-tertiary)]">
+                    No groups yet. <Link href="/blueprint-groups" className="text-[var(--accent)] hover:underline">Create a group</Link>
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {groups.map(g => {
+                      const selected = form.group_ids.includes(g.id);
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => {
+                            const next = selected
+                              ? form.group_ids.filter(id => id !== g.id)
+                              : [...form.group_ids, g.id];
+                            setForm({ ...form, group_ids: next });
+                          }}
+                          className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                            selected
+                              ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                              : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
+                          }`}
+                        >
+                          {selected ? '✓ ' : ''}{g.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {form.source_type !== 'docker_compose' && (

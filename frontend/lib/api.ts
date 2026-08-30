@@ -446,6 +446,7 @@ export async function getLDAPAdminConfig(): Promise<{
   name_attr: string;
   start_tls: boolean;
   insecure_skip_verify: boolean;
+  ca_certificate: string;
   group_mapping: Record<string, string>;
 }> {
   return fetchAPI('/api/v1/settings/ldap/config');
@@ -458,6 +459,7 @@ export async function testLDAPConnection(config: {
   base_dn: string;
   start_tls: boolean;
   insecure_skip_verify: boolean;
+  ca_certificate: string;
 }): Promise<{ status: string; message: string }> {
   return fetchAPI('/api/v1/settings/ldap/test', {
     method: 'POST',
@@ -1745,6 +1747,7 @@ export interface CIVariable {
   type: string; // "env_var" | "file"
   options?: string[]; // enum options for choice-type variables
   required?: boolean;
+  is_input?: boolean; // true for spec.inputs (component pipeline inputs)
 }
 
 export interface WorkflowInfo {
@@ -1768,8 +1771,8 @@ export const gitBrowser = {
   listBranches: (connectionId: string, repoId: string) =>
     connections.browse(connectionId, 'get_branches', { repo_id: repoId })
       .then(r => ({ branches: ((r.data as any)?.branches || []) as { name: string; sha: string; protected: boolean }[], total: ((r.data as any)?.total || 0) as number })),
-  triggerPipeline: (connectionId: string, repoId: string, ref: string, variables?: Record<string, string>) =>
-    connections.execute(connectionId, 'trigger_pipeline', { repo_id: repoId, ref, variables })
+  triggerPipeline: (connectionId: string, repoId: string, ref: string, variables?: Record<string, string>, inputs?: Record<string, string>) =>
+    connections.execute(connectionId, 'trigger_pipeline', { repo_id: repoId, ref, variables, inputs })
       .then(r => (r.data as any) as GitPipelineTriggerResult),
   getPipelineJobs: (connectionId: string, repoId: string, pipelineId: number) =>
     connections.execute(connectionId, 'get_pipeline_jobs', { repo_id: repoId, pipeline_id: pipelineId })
@@ -3177,6 +3180,28 @@ export interface PipelineJobStep {
   completed_at?: string;
 }
 
+export interface TerraformStateResource {
+  type: string;
+  name: string;
+  id: string;
+  provider?: string;
+  status: string;
+}
+
+export interface TerraformState {
+  resources: TerraformStateResource[];
+  raw_json?: string;
+}
+
+export interface TerraformPlan {
+  has_changes: boolean;
+  add_count: number;
+  change_count: number;
+  destroy_count: number;
+  output_text?: string;
+  output_json?: string;
+}
+
 export const pipelineSources = {
   list: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -3192,6 +3217,16 @@ export const pipelineSources = {
     fetchAPI<{ message: string }>(`/api/v1/pipeline-sources/${id}`, { method: 'DELETE' }),
   resolveSchema: (id: string) =>
     fetchAPI<Record<string, unknown>>(`/api/v1/pipeline-sources/${id}/resolve-schema`, { method: 'POST' }),
+  state: (id: string) =>
+    fetchAPI<TerraformState>(`/api/v1/pipeline-sources/${id}/state`),
+  plan: (id: string, params?: Record<string, unknown>) =>
+    fetchAPI<TerraformPlan>(`/api/v1/pipeline-sources/${id}/plan`, { method: 'POST', body: params ? JSON.stringify(params) : '{}' }),
+  inspect: (id: string) =>
+    fetchAPI<Record<string, unknown>>(`/api/v1/pipeline-sources/${id}/inspect`),
+  trivyAutoDiscover: () =>
+    fetchAPI<{ created: number; existing: number; sources: PipelineSource[] }>('/api/v1/pipeline-sources/trivy/auto-discover', { method: 'POST' }),
+  trivyScanAll: () =>
+    fetchAPI<{ scanned: number; results: Record<string, unknown>[] }>('/api/v1/pipeline-sources/trivy/scan-all', { method: 'POST' }),
 };
 
 export const pipelineRuns = {
@@ -3426,8 +3461,7 @@ export interface ServiceBlueprint {
   replicas: number;
   ports: number[];
   category: string;
-  group_id: string | null;
-  group_position: number;
+  group_ids: string[];
   compose_yaml: string;
   created_at: string;
 }
@@ -3477,6 +3511,10 @@ export const blueprintGroups = {
     fetchAPI<{ ok: boolean }>(`/api/v1/blueprint-groups/${id}`, { method: 'DELETE' }),
   reorder: (id: string, blueprintIds: string[]) =>
     fetchAPI<{ ok: boolean }>(`/api/v1/blueprint-groups/${id}/reorder`, { method: 'PUT', body: JSON.stringify({ blueprint_ids: blueprintIds }) }),
+  addBlueprints: (id: string, blueprintIds: string[]) =>
+    fetchAPI<{ ok: boolean; added: number }>(`/api/v1/blueprint-groups/${id}/blueprints`, { method: 'POST', body: JSON.stringify({ blueprint_ids: blueprintIds }) }),
+  removeBlueprint: (id: string, bpId: string) =>
+    fetchAPI<{ ok: boolean }>(`/api/v1/blueprint-groups/${id}/blueprints/${bpId}`, { method: 'DELETE' }),
   deployDocker: (id: string, dockerHostId: string, envVars?: Record<string, string>) =>
     fetchAPI<{ results: BlueprintDeployResult[]; total: number }>(`/api/v1/blueprint-groups/${id}/deploy-docker`, { method: 'POST', body: JSON.stringify({ docker_host_id: dockerHostId, env_vars: envVars || {} }) }),
   deployKubernetes: (id: string, clusterId: string, namespace?: string) =>

@@ -521,6 +521,131 @@ func (a *TerraformAdapter) Cancel(ctx context.Context, raw json.RawMessage, exte
 	return fmt.Errorf("no active run found for %s", externalRunID)
 }
 
+// Inspect parses .tf files to discover modules, resources, data sources, and outputs.
+func (a *TerraformAdapter) Inspect(ctx context.Context, raw json.RawMessage) (json.RawMessage, error) {
+	cfg, err := parseTerraformConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	baseDir, cleanup, err := resolveTerraformDir(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	workDir := filepath.Join(baseDir, filepath.Clean(cfg.WorkingDir))
+	if cfg.isLocal() && filepath.IsAbs(cfg.WorkingDir) {
+		workDir = filepath.Clean(cfg.WorkingDir)
+	}
+
+	inspection := &TerraformInspection{}
+
+	// Regex patterns for HCL blocks
+	moduleRe := regexp.MustCompile(`(?s)module\s+"([^"]+)"\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}`)
+	resourceRe := regexp.MustCompile(`(?s)resource\s+"([^"]+)"\s+"([^"]+)"\s*\{`)
+	dataRe := regexp.MustCompile(`(?s)data\s+"([^"]+)"\s+"([^"]+)"\s*\{`)
+	outputRe := regexp.MustCompile(`(?s)output\s+"([^"]+)"\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}`)
+	backendRe := regexp.MustCompile(`(?s)backend\s+"([^"]+)"`)
+	sourceRe := regexp.MustCompile(`(?s)source\s*=\s*"([^"]*)"`)
+	versionRe := regexp.MustCompile(`(?s)version\s*=\s*"([^"]*)"`)
+	descRe := regexp.MustCompile(`(?s)description\s*=\s*"([^"]*)"`)
+	sensitiveRe := regexp.MustCompile(`(?s)sensitive\s*=\s*(true|false)`)
+
+	// Find all .tf files in the working directory (including subdirectories for modules)
+	tfFiles, _ := filepath.Glob(filepath.Join(workDir, "*.tf"))
+	// Also check subdirectories one level deep (for local modules)
+	subTfFiles, _ := filepath.Glob(filepath.Join(workDir, "*", "*.tf"))
+	tfFiles = append(tfFiles, subTfFiles...)
+
+	for _, tfFile := range tfFiles {
+		data, readErr := os.ReadFile(tfFile) //nolint:gosec // G304: validated path
+		if readErr != nil {
+			continue
+		}
+
+		// Modules
+		for _, m := range moduleRe.FindAllSubmatch(data, -1) {
+			if len(m) < 3 {
+				continue
+			}
+			mod := TerraformModule{
+				Name: string(m[1]),
+			}
+			block := m[2]
+			if srcM := sourceRe.FindSubmatch(block); len(srcM) > 1 {
+				mod.Source = string(srcM[1])
+			}
+			if verM := versionRe.FindSubmatch(block); len(verM) > 1 {
+				mod.Version = string(verM[1])
+			}
+			inspection.Modules = append(inspection.Modules, mod)
+		}
+
+		// Resources
+		for _, m := range resourceRe.FindAllSubmatch(data, -1) {
+			if len(m) < 3 {
+				continue
+			}
+			inspection.Resources = append(inspection.Resources, TerraformResourceDef{
+				Type: string(m[1]),
+				Name: string(m[2]),
+			})
+		}
+
+		// Data sources
+		for _, m := range dataRe.FindAllSubmatch(data, -1) {
+			if len(m) < 3 {
+				continue
+			}
+			inspection.DataSources = append(inspection.DataSources, TerraformResourceDef{
+				Type: string(m[1]),
+				Name: string(m[2]),
+			})
+		}
+
+		// Outputs
+		for _, m := range outputRe.FindAllSubmatch(data, -1) {
+			if len(m) < 3 {
+				continue
+			}
+			out := TerraformOutputDef{
+				Name: string(m[1]),
+			}
+			block := m[2]
+			if descM := descRe.FindSubmatch(block); len(descM) > 1 {
+				out.Description = string(descM[1])
+			}
+			if sensM := sensitiveRe.FindSubmatch(block); len(sensM) > 1 {
+				out.Sensitive = string(sensM[1]) == "true"
+			}
+			inspection.Outputs = append(inspection.Outputs, out)
+		}
+
+		// Backend (from terraform block)
+		if backendM := backendRe.FindSubmatch(data); len(backendM) > 1 {
+			inspection.Backend = string(backendM[1])
+		}
+	}
+
+	// Try to list workspaces
+	wsCmd := exec.CommandContext(ctx, "terraform", "workspace", "list")
+	wsCmd.Dir = workDir
+	if wsOut, wsErr := wsCmd.Output(); wsErr == nil {
+		for _, line := range strings.Split(string(wsOut), "\n") {
+			ws := strings.TrimSpace(line)
+			ws = strings.TrimPrefix(ws, "* ") // current workspace has a * prefix
+			if ws != "" {
+				inspection.Workspaces = append(inspection.Workspaces, ws)
+			}
+		}
+	}
+
+	return json.Marshal(inspection)
+}
+
 // resolveTerraformDir returns the base directory for terraform operations.
 // For repo-based configs it clones to a temp dir and returns a cleanup func.
 // For local configs it validates and returns the local path directly.

@@ -517,6 +517,7 @@ func applyLDAPSettings(deps Dependencies, value json.RawMessage) {
 		NameAttr           string            `json:"name_attr"`
 		StartTLS           bool              `json:"start_tls"`
 		InsecureSkipVerify bool              `json:"insecure_skip_verify"`
+		CACertificate      string            `json:"ca_certificate"`
 		GroupMapping       map[string]string `json:"group_mapping"`
 	}
 	if err := json.Unmarshal(value, &ldapSettings); err != nil {
@@ -537,19 +538,24 @@ func applyLDAPSettings(deps Dependencies, value json.RawMessage) {
 	deps.Config.Auth.LDAP.NameAttr = ldapSettings.NameAttr
 	deps.Config.Auth.LDAP.StartTLS = ldapSettings.StartTLS
 	deps.Config.Auth.LDAP.InsecureSkipVerify = ldapSettings.InsecureSkipVerify
+	// If the ca_certificate contains mask characters, keep the existing certificate
+	if ldapSettings.CACertificate != "" && !strings.Contains(ldapSettings.CACertificate, "\u2022") {
+		deps.Config.Auth.LDAP.CACertificate = ldapSettings.CACertificate
+	}
 	if ldapSettings.GroupMapping != nil {
 		deps.Config.Auth.LDAP.GroupMapping = ldapSettings.GroupMapping
 	}
 	slog.Info("LDAP settings updated at runtime", "enabled", ldapSettings.Enabled, "url", ldapSettings.URL)
 }
 
-// stripLDAPSecret removes bind_password from the JSON so it is not persisted in the DB.
+// stripLDAPSecret removes bind_password and ca_certificate from the JSON so they are not persisted in the DB.
 func stripLDAPSecret(value json.RawMessage) json.RawMessage {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(value, &m); err != nil {
 		return value
 	}
 	delete(m, "bind_password")
+	delete(m, "ca_certificate")
 	out, err := json.Marshal(m)
 	if err != nil {
 		return value
@@ -558,7 +564,7 @@ func stripLDAPSecret(value json.RawMessage) json.RawMessage {
 }
 
 // getLDAPAdminConfig returns the current LDAP configuration for the admin settings page.
-// The bind_password is masked for security.
+// The bind_password and ca_certificate are masked for security.
 func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ldap := deps.Config.Auth.LDAP
@@ -569,6 +575,10 @@ func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
 			} else {
 				maskedPassword = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
 			}
+		}
+		maskedCACert := ""
+		if ldap.CACertificate != "" {
+			maskedCACert = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"enabled":             ldap.Enabled,
@@ -582,6 +592,7 @@ func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
 			"name_attr":           ldap.NameAttr,
 			"start_tls":           ldap.StartTLS,
 			"insecure_skip_verify": ldap.InsecureSkipVerify,
+			"ca_certificate":      maskedCACert,
 			"group_mapping":       ldap.GroupMapping,
 		})
 	}
@@ -597,6 +608,7 @@ func testLDAPConnection(deps Dependencies) gin.HandlerFunc {
 			BaseDN             string `json:"base_dn"`
 			StartTLS           bool   `json:"start_tls"`
 			InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+			CACertificate      string `json:"ca_certificate"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -619,6 +631,9 @@ func testLDAPConnection(deps Dependencies) gin.HandlerFunc {
 		}
 		cfg.StartTLS = req.StartTLS
 		cfg.InsecureSkipVerify = req.InsecureSkipVerify
+		if req.CACertificate != "" && !strings.Contains(req.CACertificate, "\u2022") {
+			cfg.CACertificate = req.CACertificate
+		}
 
 		if cfg.URL == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "LDAP server URL is required"})
