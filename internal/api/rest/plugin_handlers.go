@@ -498,7 +498,7 @@ func registerStepExecutionRoutes(r *gin.RouterGroup, deps Dependencies) {
 // pluginToConnType maps plugin names to the connection type that provides their credentials.
 var pluginToConnType = map[string]string{
 	"gitlab":    "gitlab",
-	"github":    "gitlab", // GitHub uses the same connection type family (git-based forge)
+	"github":    "git",
 	"jira":      "jira",
 	"bitbucket": "git",
 	"gitea":     "git",
@@ -518,19 +518,31 @@ func mergeStoredPluginConfig(deps Dependencies, name string, reqConfig map[strin
 	// 1. Pull from matching connection (single source of truth)
 	if connType, ok := pluginToConnType[name]; ok && deps.Repos.Connection != nil {
 		if conns, err := deps.Repos.Connection.FindByTypeDecrypted(requestCtx, connType); err == nil && len(conns) > 0 {
-			// Use the most recently updated connected connection
-			conn := conns[0]
-			for k, v := range conn.Config {
-				switch val := v.(type) {
-				case string:
-					merged[k] = val
-				case float64:
-					merged[k] = fmt.Sprintf("%v", val)
-				case bool:
-					merged[k] = fmt.Sprintf("%v", val)
-				default:
-					if b, err := json.Marshal(val); err == nil {
-						merged[k] = string(b)
+			// For git-type connections, match by provider in config
+			var conn *repository.Connection
+			if connType == "git" {
+				for i := range conns {
+					if provider, _ := conns[i].Config["provider"].(string); provider == name {
+						conn = &conns[i]
+						break
+					}
+				}
+			} else if len(conns) > 0 {
+				conn = &conns[0]
+			}
+			if conn != nil {
+				for k, v := range conn.Config {
+					switch val := v.(type) {
+					case string:
+						merged[k] = val
+					case float64:
+						merged[k] = fmt.Sprintf("%v", val)
+					case bool:
+						merged[k] = fmt.Sprintf("%v", val)
+					default:
+						if b, err := json.Marshal(val); err == nil {
+							merged[k] = string(b)
+						}
 					}
 				}
 			}

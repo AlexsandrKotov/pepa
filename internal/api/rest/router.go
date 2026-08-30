@@ -278,7 +278,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 
 			// RAG knowledge base endpoints
 			if deps.Repos != nil && deps.Repos.RAG != nil && deps.AIManager != nil {
-				tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+				tenantID := uuid.MustParse(database.DefaultTenantID)
 				ragHandlers := NewRAGHandlers(deps.Repos.RAG, deps.AIManager, tenantID)
 				ragHandlers.SetIngestionEngine(deps.IngestionEngine)
 				ragHandlers.SetPipeline(deps.RAGPipeline)

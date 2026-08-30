@@ -8,7 +8,7 @@ import BrandIcon from '@/components/BrandIcon';
 // Note: fluxcd/argocd use clusters (not connections), so they're handled separately
 const PLUGIN_CONN_MAP: Record<string, string> = {
   gitlab: 'gitlab',
-  github: 'gitlab',
+  github: 'git',
   jira: 'jira',
   bitbucket: 'git',
   gitea: 'git',
@@ -282,7 +282,13 @@ export default function PluginsClient({ initialPlugins }: { initialPlugins?: Plu
             // Find the matching connection for this plugin
             const connType = PLUGIN_CONN_MAP[plugin.name];
             const linkedConn = connType
-              ? connectionList.find(c => c.type === connType && c.status === 'connected')
+              ? connectionList.find(c => {
+                  if (connType === 'git') {
+                    // For git connections, match by provider in config
+                    return c.type === 'git' && (c.config as Record<string, string>)?.provider === plugin.name;
+                  }
+                  return c.type === connType;
+                })
               : undefined;
             return (
               <PluginCard
