@@ -424,7 +424,7 @@ func getOIDCAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(oidc.ClientSecret) > 4 {
 				maskedSecret = oidc.ClientSecret[:4] + "••••••••"
 			} else {
-				maskedSecret = "••••••••"
+				maskedSecret = "••••••••" //nolint:gosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -488,7 +488,7 @@ func getAzureADAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(azure.ClientSecret) > 4 {
 				maskedSecret = azure.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 			} else {
-				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -567,7 +567,7 @@ func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(ldap.BindPassword) > 4 {
 				maskedPassword = ldap.BindPassword[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 			} else {
-				maskedPassword = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+				maskedPassword = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{

@@ -288,7 +288,7 @@ func (t *DeployTracker) checkGitLabCI(ctx context.Context, repoURL, commitSHA, t
 		slog.Info("GitLab CI check failed", "error", err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil
@@ -333,7 +333,7 @@ func (t *DeployTracker) checkGitHubCI(ctx context.Context, repoURL, commitSHA, t
 		slog.Info("GitHub CI check failed", "error", err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil
@@ -377,7 +377,7 @@ func (t *DeployTracker) checkGiteaCI(ctx context.Context, repoURL, commitSHA, to
 		slog.Info("Gitea CI check failed", "error", err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil

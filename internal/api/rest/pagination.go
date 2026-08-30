@@ -3,10 +3,6 @@ package rest
 import (
 	"encoding/base64"
 	"encoding/json"
-	"net/http"
-	"strconv"
-
-	"github.com/gin-gonic/gin"
 )
 
 // PageParams represents pagination parameters for list endpoints.
@@ -21,20 +17,6 @@ type PaginatedResponse struct {
 	Total      int         `json:"total,omitempty"`
 	NextCursor string      `json:"next_cursor,omitempty"`
 	HasMore    bool        `json:"has_more"`
-}
-
-// parsePageParams extracts pagination parameters from the request.
-func parsePageParams(c *gin.Context) PageParams {
-	p := PageParams{Limit: 50} // Default limit
-	
-	if l := c.Query("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 200 {
-			p.Limit = n
-		}
-	}
-	
-	p.Cursor = c.Query("cursor")
-	return p
 }
 
 // Cursor represents a pagination cursor with an ID.
@@ -69,14 +51,4 @@ func DecodeCursor(cursor string) (string, error) {
 	}
 	
 	return c.ID, nil
-}
-
-// respondPaginated sends a paginated response.
-func respondPaginated(c *gin.Context, items interface{}, total int, nextCursor string, hasMore bool) {
-	c.JSON(http.StatusOK, PaginatedResponse{
-		Items:      items,
-		Total:      total,
-		NextCursor: nextCursor,
-		HasMore:    hasMore,
-	})
 }

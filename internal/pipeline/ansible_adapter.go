@@ -412,10 +412,10 @@ func parseAnsibleOutput(output, playbook string) *AnsibleResult {
 		}
 		host := m[1]
 		var hr HostResult
-		fmt.Sscanf(m[2], "%d", &hr.OK)
-		fmt.Sscanf(m[3], "%d", &hr.Changed)
-		fmt.Sscanf(m[5], "%d", &hr.Failed)
-		fmt.Sscanf(m[6], "%d", &hr.Skipped)
+		_, _ = fmt.Sscanf(m[2], "%d", &hr.OK)
+		_, _ = fmt.Sscanf(m[3], "%d", &hr.Changed)
+		_, _ = fmt.Sscanf(m[5], "%d", &hr.Failed)
+		_, _ = fmt.Sscanf(m[6], "%d", &hr.Skipped)
 		result.Hosts[host] = hr
 	}
 

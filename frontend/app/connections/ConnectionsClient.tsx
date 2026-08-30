@@ -89,7 +89,7 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   useEffect(() => {
     pluginsAPI.list()
       .then(data => {
-        const names = new Set((data.plugins || []).map((p: PluginInfo) => p.name));
+        const names = new Set((data.plugins || []).filter((p: PluginInfo) => p.enabled && p.status !== 'uninstalled').map((p: PluginInfo) => p.name));
         setInstalledPluginNames(names);
       })
       .catch(() => {});

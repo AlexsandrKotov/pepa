@@ -164,6 +164,7 @@ function PipelinesClientContent({
   const [providerWorkflows, setProviderWorkflows] = useState<WorkflowInfo[]>([]);
   const [engineCIVariables, setEngineCIVariables] = useState<CIVariable[]>([]);
   const [loadingEngineCIVars, setLoadingEngineCIVariables] = useState(false);
+  const [engineWorkflows, setEngineWorkflows] = useState<WorkflowInfo[]>([]);
 
   // Engine runs: sync + expandable jobs/steps
   const [syncing, setSyncing] = useState(false);
@@ -279,18 +280,36 @@ function PipelinesClientContent({
       }
     }
     setEngineCIVariables([]);
+    setEngineWorkflows([]);
     setTriggerParams(defaults);
     setShowTriggerModal(true);
 
     // Dynamically load CI variables via plugin if source has a connection
-    if (source.connection_id && source.source_type === 'gitlab_ci') {
-      const projectId = source.config?.project_id as string;
-      const ref = source.config?.ref as string || 'main';
+    const isGitSource = source.source_type === 'gitlab_ci' || source.source_type === 'github_actions';
+    if (source.connection_id && isGitSource) {
+      // Determine repo/project ID and ref based on source type
+      let projectId = '';
+      let ref = 'main';
+      if (source.source_type === 'gitlab_ci') {
+        projectId = source.config?.project_id as string;
+        ref = source.config?.ref as string || 'main';
+      } else if (source.source_type === 'github_actions') {
+        // For GitHub Actions, use repo_id from config or repo_url
+        projectId = source.config?.repo_id as string || '';
+        if (!projectId && source.config?.repo_url) {
+          // Extract owner/repo from URL like https://github.com/owner/repo
+          const match = String(source.config.repo_url).match(/github\.com\/([^/]+\/[^/]+)/);
+          if (match) projectId = match[1];
+        }
+        ref = source.config?.ref as string || source.config?.branch as string || 'main';
+      }
+
       if (projectId) {
         setLoadingEngineCIVariables(true);
         try {
           const data = await gitBrowser.parseCIConfig(source.connection_id, projectId, ref);
           setEngineCIVariables(data.variables || []);
+          setEngineWorkflows(data.workflows || []);
           // Pre-fill defaults from CI variables
           for (const v of (data.variables || [])) {
             if (v.value && !defaults[v.key]) {
@@ -1240,10 +1259,11 @@ function PipelinesClientContent({
           setParams={setTriggerParams}
           triggering={triggering}
           onTrigger={handleTrigger}
-          onClose={() => { setShowTriggerModal(false); setEngineCIVariables([]); }}
+          onClose={() => { setShowTriggerModal(false); setEngineCIVariables([]); setEngineWorkflows([]); }}
           onSavedPreset={() => { loadPresets(selectedSource.id); }}
           ciVariables={engineCIVariables}
           loadingCIVars={loadingEngineCIVars}
+          workflows={engineWorkflows}
         />
       )}
 
@@ -1860,7 +1880,7 @@ interface SchemaProperty {
 
 function TriggerModal({
   source, params, setParams, triggering, onTrigger, onClose, onSavedPreset,
-  ciVariables, loadingCIVars,
+  ciVariables, loadingCIVars, workflows,
 }: {
   source: PipelineSource;
   params: Record<string, string>;
@@ -1871,6 +1891,7 @@ function TriggerModal({
   onSavedPreset: () => void;
   ciVariables?: CIVariable[];
   loadingCIVars?: boolean;
+  workflows?: WorkflowInfo[];
 }) {
   useEscapeKey(onClose);
   const [showSavePreset, setShowSavePreset] = useState(false);
@@ -1961,6 +1982,43 @@ function TriggerModal({
             </div>
           )}
 
+          {/* Workflow info from parsed CI config */}
+          {!loadingCIVars && workflows && workflows.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-[var(--text-secondary)]">Workflows</p>
+              {workflows.map((wf, idx) => (
+                <div key={idx} className="p-2.5 bg-[var(--bg)] rounded-md border border-[var(--border)]">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-sm font-mono font-medium text-[var(--text-primary)]">{wf.name || wf.file}</span>
+                    {!wf.has_dispatch && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 font-medium" title="Add workflow_dispatch trigger to enable manual runs">no dispatch</span>
+                    )}
+                    {wf.has_dispatch && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 font-medium">dispatchable</span>
+                    )}
+                  </div>
+                  {wf.file !== (wf.name || wf.file) && (
+                    <p className="text-[10px] text-[var(--text-tertiary)] mb-1 font-mono">{wf.file}</p>
+                  )}
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    <span className="text-[10px] text-[var(--text-tertiary)]">Triggers:</span>
+                    {wf.triggers.map(t => (
+                      <span key={t} className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${t === 'workflow_dispatch' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-sky-500/15 text-sky-600'}`}>{t}</span>
+                    ))}
+                  </div>
+                  {wf.jobs.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      <span className="text-[10px] text-[var(--text-tertiary)]">Jobs:</span>
+                      {wf.jobs.map(j => (
+                        <span key={j} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)] font-mono">{j}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Dynamic CI variables (from plugin) */}
           {hasCIVars && !loadingCIVars && (
             <>
@@ -2040,15 +2098,22 @@ function TriggerModal({
           </div>
         )}
 
-        <div className="flex justify-between items-center p-6 pt-3 border-t shrink-0">
-          <button onClick={() => setShowSavePreset(!showSavePreset)} className="px-3 py-2 text-sm text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-md">
-            {showSavePreset ? 'Hide Preset Form' : 'Save as Preset'}
-          </button>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">Cancel</button>
-            <button onClick={onTrigger} disabled={triggering} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium disabled:opacity-50">
-              {triggering ? 'Triggering...' : 'Trigger Pipeline'}
+        <div className="flex flex-col gap-2 p-6 pt-3 border-t shrink-0">
+          {!loadingCIVars && workflows && workflows.length > 0 && !workflows.some(w => w.has_dispatch) && (
+            <p className="text-xs text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md px-3 py-2">
+              None of the workflows have a <code className="font-mono font-medium">workflow_dispatch</code> trigger. Add it to your workflow YAML to enable manual triggering via the GitHub API.
+            </p>
+          )}
+          <div className="flex justify-between items-center">
+            <button onClick={() => setShowSavePreset(!showSavePreset)} className="px-3 py-2 text-sm text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-md">
+              {showSavePreset ? 'Hide Preset Form' : 'Save as Preset'}
             </button>
+            <div className="flex gap-2">
+              <button onClick={onClose} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">Cancel</button>
+              <button onClick={onTrigger} disabled={triggering} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium disabled:opacity-50">
+                {triggering ? 'Triggering...' : 'Trigger Pipeline'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

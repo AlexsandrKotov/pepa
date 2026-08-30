@@ -16,7 +16,6 @@ const allMainHrefs = mainNav.map(i => i.href);
 
 // Plugin-dependent nav items — shown only when the corresponding plugin is enabled
 const pluginNavItems: Record<string, { section: string; item: { href: string; label: string; permission: string | null; adminOnly?: boolean } }> = {
-  jira: { section: 'Delivery Automation', item: { href: '/jira', label: 'Jira', permission: 'jira' } },
 };
 
 // Plugin-dependent collapsible sections — entire sections shown only when plugin is enabled
@@ -43,6 +42,13 @@ const pluginSections: Record<string, { title: string; icon: string; items: { hre
     icon: 'M3 6c0-1.657 4.03-3 9-3s9 1.343 9 3v2c0 1.657-4.03 3-9 3S3 9.657 3 8V6zm0 4c0 1.657 4.03 3 9 3s9-1.343 9-3v2c0 1.657-4.03 3-9 3s-9-1.343-9-3v-2zm0 4c0 1.657 4.03 3 9 3s9-1.343 9-3v2c0 1.657-4.03 3-9 3s-9-1.343-9-3v-2z',
     items: [
       { href: '/s3-manage', label: 'S3 Manage', permission: 'connections' },
+    ],
+  },
+  jira: {
+    title: 'Jira Integration',
+    icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+    items: [
+      { href: '/jira', label: 'Jira', permission: 'jira' },
     ],
   },
 };

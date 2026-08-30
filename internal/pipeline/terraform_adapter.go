@@ -344,7 +344,7 @@ func (a *TerraformAdapter) Plan(ctx context.Context, raw json.RawMessage, params
 		planArgs = append(planArgs, "-var", fmt.Sprintf("%s=%v", k, v))
 	}
 
-	planCmd := exec.CommandContext(ctx, "terraform", planArgs...)
+	planCmd := exec.CommandContext(ctx, "terraform", planArgs...) //nolint:gosec // G204: terraform CLI is an expected subprocess
 	planCmd.Dir = workDir
 	planOutput, planErr := planCmd.CombinedOutput()
 
@@ -373,25 +373,25 @@ func (a *TerraformAdapter) Plan(ctx context.Context, raw json.RawMessage, params
 	deleteRe := regexp.MustCompile(`Delete:\s*(\d+)`)
 
 	if m := addRe.FindSubmatch(planOutput); len(m) > 1 {
-		fmt.Sscanf(string(m[1]), "%d", &result.AddCount)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &result.AddCount)
 	} else if m := createRe.FindSubmatch(planOutput); len(m) > 1 {
-		fmt.Sscanf(string(m[1]), "%d", &result.AddCount)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &result.AddCount)
 	}
 	if m := changeRe.FindSubmatch(planOutput); len(m) > 1 {
-		fmt.Sscanf(string(m[1]), "%d", &result.ChangeCount)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &result.ChangeCount)
 	} else if m := updateRe.FindSubmatch(planOutput); len(m) > 1 {
-		fmt.Sscanf(string(m[1]), "%d", &result.ChangeCount)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &result.ChangeCount)
 	}
 	if m := destroyRe.FindSubmatch(planOutput); len(m) > 1 {
-		fmt.Sscanf(string(m[1]), "%d", &result.DestroyCount)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &result.DestroyCount)
 	} else if m := deleteRe.FindSubmatch(planOutput); len(m) > 1 {
-		fmt.Sscanf(string(m[1]), "%d", &result.DestroyCount)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &result.DestroyCount)
 	}
 
 	result.HasChanges = result.AddCount > 0 || result.ChangeCount > 0 || result.DestroyCount > 0
 
 	// Try to get JSON representation via show
-	showCmd := exec.CommandContext(ctx, "terraform", "show", "-json", planFile)
+	showCmd := exec.CommandContext(ctx, "terraform", "show", "-json", planFile) //nolint:gosec // G204: terraform CLI is an expected subprocess
 	showCmd.Dir = workDir
 	if jsonOutput, err := showCmd.Output(); err == nil {
 		result.OutputJSON = string(jsonOutput)

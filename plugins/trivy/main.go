@@ -177,11 +177,9 @@ func (p *TrivyPlugin) scanImage(ctx context.Context, params map[string]interface
 		return nil, fmt.Errorf("image is required")
 	}
 
-	severity := p.severity
+	severity := "HIGH,CRITICAL"
 	if s, ok := params["severity"].(string); ok && s != "" {
 		severity = s
-	} else {
-		severity = "HIGH,CRITICAL"
 	}
 
 	result, err := p.executeTrivy(ctx, image, "image", severity, false)
@@ -268,7 +266,7 @@ func (p *TrivyPlugin) exportSARIF(ctx context.Context, params map[string]interfa
 	}
 	args = append(args, target)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...)
+	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // G204: trivy CLI is an expected subprocess
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
@@ -294,7 +292,7 @@ func (p *TrivyPlugin) executeTrivy(ctx context.Context, target, scanType, severi
 	}
 	args = append(args, target)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...)
+	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // G204: trivy CLI is an expected subprocess
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr

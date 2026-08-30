@@ -145,7 +145,7 @@ func (p *OIDCProvider) Discover(ctx context.Context) (*OIDCDiscovery, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch discovery: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("discovery endpoint returned status %d", resp.StatusCode)
@@ -208,7 +208,7 @@ func (p *OIDCProvider) ExchangeCode(ctx context.Context, code string) (*OIDCToke
 	if err != nil {
 		return nil, fmt.Errorf("exchange code: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -240,7 +240,7 @@ func (p *OIDCProvider) GetUserInfo(ctx context.Context, accessToken string) (*OI
 	if err != nil {
 		return nil, fmt.Errorf("fetch userinfo: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("userinfo endpoint returned status %d", resp.StatusCode)

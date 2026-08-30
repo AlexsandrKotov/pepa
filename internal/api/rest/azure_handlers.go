@@ -17,7 +17,7 @@ import (
 // in-memory store as generic OIDC; in production, use Redis).
 var (
 	azureStates   = make(map[string]azureStateData)
-	azureStatesMu = oidcStatesMu // share the same mutex
+	azureStatesMu = &oidcStatesMu // share the same mutex
 )
 
 type azureStateData = oidcStateData

@@ -36,7 +36,7 @@ func (p *LDAPProvider) TestConnection(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Bind with service account
 	if err := conn.Bind(p.config.BindDN, p.config.BindPassword); err != nil {
@@ -58,7 +58,7 @@ func (p *LDAPProvider) Authenticate(ctx context.Context, email, password string)
 	if err != nil {
 		return nil, fmt.Errorf("connect to LDAP: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Step 1: Bind with service account
 	if p.config.BindDN != "" {
@@ -168,7 +168,7 @@ func (p *LDAPProvider) connect() (*ldap.Conn, error) {
 
 	if p.config.StartTLS {
 		if err := conn.StartTLS(tlsConfig); err != nil {
-			conn.Close()
+			_ = conn.Close()
 			return nil, fmt.Errorf("StartTLS: %w", err)
 		}
 	}

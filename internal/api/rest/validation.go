@@ -107,7 +107,7 @@ func validateStruct(s interface{}) ValidationErrors {
 			} else if strings.HasPrefix(rule, "min=") {
 				minStr := strings.TrimPrefix(rule, "min=")
 				var min int
-				fmt.Sscanf(minStr, "%d", &min)
+				_, _ = fmt.Sscanf(minStr, "%d", &min)
 
 				if field.Kind() == reflect.String {
 					if utf8.RuneCountInString(field.String()) < min {
@@ -127,7 +127,7 @@ func validateStruct(s interface{}) ValidationErrors {
 			} else if strings.HasPrefix(rule, "max=") {
 				maxStr := strings.TrimPrefix(rule, "max=")
 				var max int
-				fmt.Sscanf(maxStr, "%d", &max)
+				_, _ = fmt.Sscanf(maxStr, "%d", &max)
 
 				if field.Kind() == reflect.String {
 					if utf8.RuneCountInString(field.String()) > max {
@@ -170,14 +170,4 @@ func isZero(v reflect.Value) bool {
 		return v.IsNil() || v.Len() == 0
 	}
 	return false
-}
-
-// sanitizeString removes leading/trailing whitespace and limits length.
-func sanitizeString(s string, maxLen int) string {
-	s = strings.TrimSpace(s)
-	if maxLen > 0 && utf8.RuneCountInString(s) > maxLen {
-		runes := []rune(s)
-		s = string(runes[:maxLen])
-	}
-	return s
 }

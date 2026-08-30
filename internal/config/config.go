@@ -162,7 +162,7 @@ func DefaultConfig() *Config {
 			UseSSL:        false,
 			BucketPlugins: "pepa-plugins",
 		},
-		Auth: AuthConfig{
+		Auth: AuthConfig{ //nolint:gosec // G101: struct contains dev default JWT secret; Validate() warns if not overridden
 			JWTSecret:       "dev-jwt-secret-change-in-production", //nolint:gosec // G101: dev default; Validate() warns if not overridden
 			SessionDuration: 24 * time.Hour,     // 24 hours
 			TokenExpiry:     24 * time.Hour,     // 24 hours
