@@ -388,10 +388,18 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// rateLimiter is a per-IP token-bucket rate limiter.
+// rateLimiter is a sharded per-IP token-bucket rate limiter.
+// Sharding reduces mutex contention under high concurrency by splitting
+// the IP table into independent segments, each with its own lock.
+const rateLimiterShards = 16
+
+type rateLimitShard struct {
+	mu    sync.Mutex
+	table map[string]*rateLimitEntry
+}
+
 type rateLimiter struct {
-	mu     sync.Mutex
-	table  map[string]*rateLimitEntry
+	shards [rateLimiterShards]*rateLimitShard
 	limit  int
 	window time.Duration
 	stopCh chan struct{}
@@ -405,12 +413,14 @@ type rateLimitEntry struct {
 // newRateLimiter creates a rate limiter that allows `limit` requests per `window` per IP.
 func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 	rl := &rateLimiter{
-		table:  make(map[string]*rateLimitEntry),
 		limit:  limit,
 		window: window,
 		stopCh: make(chan struct{}),
 	}
-	// Periodic cleanup of stale entries.
+	for i := range rl.shards {
+		rl.shards[i] = &rateLimitShard{table: make(map[string]*rateLimitEntry)}
+	}
+	// Periodic cleanup of stale entries across all shards.
 	go func() {
 		ticker := time.NewTicker(5 * window)
 		defer ticker.Stop()
@@ -419,14 +429,16 @@ func newRateLimiter(limit int, window time.Duration) *rateLimiter {
 			case <-rl.stopCh:
 				return
 			case <-ticker.C:
-				rl.mu.Lock()
 				cutoff := time.Now().Add(-2 * window)
-				for ip, e := range rl.table {
-					if e.lastReset.Before(cutoff) {
-						delete(rl.table, ip)
+				for _, s := range rl.shards {
+					s.mu.Lock()
+					for ip, e := range s.table {
+						if e.lastReset.Before(cutoff) {
+							delete(s.table, ip)
+						}
 					}
+					s.mu.Unlock()
 				}
-				rl.mu.Unlock()
 			}
 		}
 	}()
@@ -438,22 +450,37 @@ func (rl *rateLimiter) Stop() {
 	close(rl.stopCh)
 }
 
+// shard returns the shard for a given IP address.
+func (rl *rateLimiter) shard(ip string) *rateLimitShard {
+	// Fast hash: use last byte of IP string for distribution.
+	// Good enough for rate-limiter sharding (not cryptographic).
+	h := 0
+	for i := 0; i < len(ip); i++ {
+		h = h*31 + int(ip[i])
+	}
+	if h < 0 {
+		h = -h
+	}
+	return rl.shards[h%rateLimiterShards]
+}
+
 // Middleware returns a Gin middleware that enforces the rate limit.
 func (rl *rateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 		now := time.Now()
+		s := rl.shard(ip)
 
-		rl.mu.Lock()
-		entry, ok := rl.table[ip]
+		s.mu.Lock()
+		entry, ok := s.table[ip]
 		if !ok || now.Sub(entry.lastReset) > rl.window {
-			rl.table[ip] = &rateLimitEntry{tokens: rl.limit - 1, lastReset: now}
-			rl.mu.Unlock()
+			s.table[ip] = &rateLimitEntry{tokens: rl.limit - 1, lastReset: now}
+			s.mu.Unlock()
 			c.Next()
 			return
 		}
 		if entry.tokens <= 0 {
-			rl.mu.Unlock()
+			s.mu.Unlock()
 			c.Header("Retry-After", fmt.Sprintf("%d", int(rl.window.Seconds())))
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error": "rate limit exceeded, try again later",
@@ -461,7 +488,7 @@ func (rl *rateLimiter) Middleware() gin.HandlerFunc {
 			return
 		}
 		entry.tokens--
-		rl.mu.Unlock()
+		s.mu.Unlock()
 		c.Next()
 	}
 }

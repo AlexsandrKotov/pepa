@@ -16,7 +16,9 @@ const (
 	// DefaultChannel is the default Redis pub/sub channel.
 	DefaultChannel = "pepa:events"
 	// workerPoolSize is the number of event dispatch workers.
-	workerPoolSize = 100
+	// 8 workers is sufficient for single/multi-tenant deployments;
+	// each worker dispatches events synchronously to registered handlers.
+	workerPoolSize = 8
 	// DeadLetterChannel is the Redis key for events that could not be dispatched.
 	DeadLetterChannel = "pepa:events:dead"
 	// dispatchTimeout is how long to wait before dropping an event to the dead-letter queue.

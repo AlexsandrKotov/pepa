@@ -817,6 +817,9 @@ jobs:
             echo "# Copy plugin binaries"
             echo "cp -r pepa-plugins-${RELEASE_TAG#v}-linux-<arch>/bin/* \\"
             echo "  pepa-production-${RELEASE_TAG#v}/plugins/bin/"
+            echo "# Copy plugin manifests (required for Marketplace)"
+            echo "cp -r pepa-plugins-${RELEASE_TAG#v}-linux-<arch>/builtin/* \\"
+            echo "  pepa-production-${RELEASE_TAG#v}/plugins/builtin/"
             echo '```'
             echo ""
             echo "### 3. Deploy"
