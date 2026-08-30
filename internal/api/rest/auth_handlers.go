@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1067,8 +1068,32 @@ func HashBootstrapToken(token string) string {
 }
 
 // bootstrapStatusHandler returns whether the system needs bootstrap (first-run).
+// Results are cached for 30 seconds to avoid hitting the database on every
+// page load — bootstrap status changes at most once (first-run activation).
+var (
+	bootstrapStatusMu    sync.Mutex
+	bootstrapStatusCache *struct {
+		needed      bool
+		inProgress  bool
+		expiresAt   time.Time
+	}
+)
+
 func bootstrapStatusHandler(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Check cache first
+		bootstrapStatusMu.Lock()
+		if bootstrapStatusCache != nil && time.Now().Before(bootstrapStatusCache.expiresAt) {
+			cached := bootstrapStatusCache
+			bootstrapStatusMu.Unlock()
+			c.JSON(http.StatusOK, gin.H{
+				"needed":      cached.needed,
+				"in_progress": cached.inProgress,
+			})
+			return
+		}
+		bootstrapStatusMu.Unlock()
+
 		ctx := c.Request.Context()
 
 		// Check if there are any non-default users (real users besides the seeded admin).
@@ -1130,6 +1155,15 @@ func bootstrapStatusHandler(deps Dependencies) gin.HandlerFunc {
 			"needed":      needed,
 			"in_progress": inProgress,
 		})
+
+		// Update cache
+		bootstrapStatusMu.Lock()
+		bootstrapStatusCache = &struct {
+			needed      bool
+			inProgress  bool
+			expiresAt   time.Time
+		}{needed: needed, inProgress: inProgress, expiresAt: time.Now().Add(30 * time.Second)}
+		bootstrapStatusMu.Unlock()
 	}
 }
 
@@ -1238,6 +1272,11 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		logAudit(deps, c, "bootstrap_activate", "system", "", nil, nil)
+
+		// Invalidate bootstrap status cache — bootstrap is now complete
+		bootstrapStatusMu.Lock()
+		bootstrapStatusCache = nil
+		bootstrapStatusMu.Unlock()
 
 		setAuthCookie(c, deps, jwt, tokenExpiry)
 

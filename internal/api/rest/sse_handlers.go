@@ -3,6 +3,7 @@ package rest
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"sync"
 	"time"
 
@@ -26,14 +27,20 @@ type sseHub struct {
 	clients map[*sseClient]bool
 }
 
+const maxSSEClients = 200
+
 var hub = &sseHub{
 	clients: make(map[*sseClient]bool),
 }
 
-func (h *sseHub) add(c *sseClient) {
+func (h *sseHub) add(c *sseClient) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if len(h.clients) >= maxSSEClients {
+		return false
+	}
 	h.clients[c] = true
+	return true
 }
 
 func (h *sseHub) remove(c *sseClient) {
@@ -99,7 +106,10 @@ func registerSSERoutes(r *gin.RouterGroup, eventBus *events.Bus) {
 			events:   make(chan string, 64),
 			done:     make(chan struct{}),
 		}
-		hub.add(client)
+		if !hub.add(client) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
+			return
+		}
 		defer hub.remove(client)
 
 		// Send initial connected event
@@ -107,17 +117,26 @@ func registerSSERoutes(r *gin.RouterGroup, eventBus *events.Bus) {
 		c.Writer.Flush()
 
 		// Keep-alive ticker
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
 
 		c.Stream(func(w io.Writer) bool {
 			select {
 			case data := <-client.events:
-				_, _ = c.Writer.WriteString(data)
+				c.Writer.Flush()
+				_, err := c.Writer.WriteString(data)
+				if err != nil {
+					return false
+				}
 				c.Writer.Flush()
 				return true
 			case <-ticker.C:
-				_, _ = c.Writer.WriteString(": keepalive\n\n")
+				// Set a write deadline to detect dead connections
+				c.Writer.Flush()
+				_, err := c.Writer.WriteString(": keepalive\n\n")
+				if err != nil {
+					return false
+				}
 				c.Writer.Flush()
 				return true
 			case <-c.Request.Context().Done():

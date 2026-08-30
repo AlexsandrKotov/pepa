@@ -167,9 +167,9 @@ func main() {
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", comp.Config.Server.Host, comp.Config.Server.Port),
 		Handler:      router,
-		ReadTimeout:  60 * time.Second,
+		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 15 * time.Minute, // extended for LLM calls and SSE streaming
-		IdleTimeout:  120 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 
 	// Graceful shutdown

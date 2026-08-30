@@ -131,8 +131,8 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 				continue
 			}
 
-			// Check if binary exists (built by `make plugins` into bin/<name>/<name>)
-			binPath := filepath.Join(pluginDir, "bin", def.Name, def.Name)
+			// Check if binary exists (built by `make plugins` into bin/builtin/<name>/<name>)
+			binPath := filepath.Join(pluginDir, "bin", "builtin", def.Name, def.Name)
 			binaryAvailable := false
 			if info, err := os.Stat(binPath); err == nil && !info.IsDir() {
 				binaryAvailable = true
@@ -342,9 +342,9 @@ func loadPluginBinary(deps Dependencies, id string) error {
 		pluginDir = deps.Config.Plugin.Dir
 	}
 
-	binPath := filepath.Join(pluginDir, "bin", id, id)
+	binPath := filepath.Join(pluginDir, "bin", "builtin", id, id)
 	if _, err := os.Stat(binPath); err != nil {
-		return fmt.Errorf("plugin binary not found: build it with `make plugins` and place it in plugins/bin/%s", id)
+		return fmt.Errorf("plugin binary not found: build it with `make plugins` and place it in plugins/bin/builtin/%s", id)
 	}
 
 	// Validate resolved path is within plugin directory

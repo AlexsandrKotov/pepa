@@ -77,7 +77,7 @@ type rbacCacheEntry struct {
 	expires time.Time
 }
 
-const rbacCacheTTL = 5 * time.Second
+const rbacCacheTTL = 30 * time.Second
 
 func newRBACCache() *rbacCache {
 	return &rbacCache{entries: make(map[string]rbacCacheEntry)}

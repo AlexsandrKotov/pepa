@@ -152,26 +152,34 @@ func Bootstrap() (*Components, error) {
 	pluginMgr := engine.NewManager(cfg.Plugin, db)
 	providerRegistry := provider.NewRegistry()
 
-	if err := pluginMgr.DiscoverAndLoad(); err != nil {
-		log.Printf("Warning: plugin discovery failed: %v", err)
-	}
-
-	// Sync loaded plugins into the provider registry
-	for name, info := range pluginMgr.ListLoadedPlugins() {
-		grpcClient, err := pluginMgr.GetGRPCClient(name)
-		if err != nil {
-			log.Printf("Warning: could not get gRPC client for plugin %s: %v", name, err)
-			continue
+	// Load plugins asynchronously to avoid blocking API startup.
+	// Each plugin spawns a subprocess with gRPC — loading 15+ plugins
+	// can take 2+ minutes on slow disks. The provider registry is
+	// thread-safe, so plugins become available as they finish loading.
+	go func() {
+		if err := pluginMgr.DiscoverAndLoad(); err != nil {
+			log.Printf("Warning: plugin discovery failed: %v", err)
 		}
-		providerRegistry.Register(&provider.PluginEntry{
-			Name:     name,
-			Type:     info.PluginType,
-			Info:     info,
-			Executor: grpcClient,
-			Enabled:  true,
-		})
-	}
-	log.Printf("Provider registry initialized with %d plugin(s)", len(providerRegistry.List()))
+
+		// Sync loaded plugins into the provider registry
+		for name, info := range pluginMgr.ListLoadedPlugins() {
+			grpcClient, err := pluginMgr.GetGRPCClient(name)
+			if err != nil {
+				log.Printf("Warning: could not get gRPC client for plugin %s: %v", name, err)
+				continue
+			}
+			providerRegistry.Register(&provider.PluginEntry{
+				Name:     name,
+				Type:     info.PluginType,
+				Info:     info,
+				Executor: grpcClient,
+				Enabled:  true,
+			})
+		}
+		log.Printf("Provider registry: %d plugin(s) loaded", len(providerRegistry.List()))
+	}()
+
+	log.Printf("Provider registry initialized, plugins loading in background")
 
 	// Initialize event bus and job queue
 	eventBus := events.NewBus(redis.Client)

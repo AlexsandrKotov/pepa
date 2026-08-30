@@ -30,7 +30,7 @@ export default function LoginPage() {
   useEffect(() => {
     let cancelled = false;
     let retries = 0;
-    const maxRetries = 10; // up to ~30s total with getBootstrapStatus's internal retries
+    const maxRetries = 3; // up to ~6s total with getBootstrapStatus's internal retries
 
     const check = async () => {
       try {
@@ -48,7 +48,7 @@ export default function LoginPage() {
           setPhase('connecting');
         } else {
           // Retry after a short delay
-          setTimeout(() => check(), 2000);
+          setTimeout(() => check(), 1000);
         }
       }
     };

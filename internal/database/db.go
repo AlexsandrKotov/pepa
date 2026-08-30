@@ -26,8 +26,8 @@ func New(connString string) (*DB, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	config.MaxConns = 20
-	config.MinConns = 2
+	config.MaxConns = 50
+	config.MinConns = 5
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
 	config.HealthCheckPeriod = 10 * time.Second

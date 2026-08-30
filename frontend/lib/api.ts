@@ -385,11 +385,11 @@ export async function resetMyPassword(currentPassword: string, newPassword: stri
 
 export async function getBootstrapStatus(): Promise<{ needed: boolean; in_progress: boolean }> {
   // Retry to handle API startup delays after deploy.
-  // Total window: ~15 seconds (5 attempts × 3s delay).
-  const maxAttempts = 5;
+  // Total window: ~6 seconds (2 attempts × 3s delay).
+  const maxAttempts = 2;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
     try {
       const res = await fetch(`${getBase()}/api/v1/auth/bootstrap/status`, {
         signal: controller.signal,
@@ -408,7 +408,7 @@ export async function getBootstrapStatus(): Promise<{ needed: boolean; in_progre
       clearTimeout(timeoutId);
     }
     // Short delay before retrying
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, 500));
   }
   // Should not reach here, but just in case:
   throw new Error('Cannot determine bootstrap status.');
