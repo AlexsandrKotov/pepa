@@ -815,11 +815,12 @@ func (r *PipelineRunRepository) UpsertByExternalRunID(ctx context.Context, run *
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		ON CONFLICT (source_id, external_run_id) WHERE external_run_id != ''
 		DO UPDATE SET status=$8, external_status=$9, external_url=$6,
-		              duration_ms=$12, updated_at=$20
+		              duration_ms=$12, created_at=LEAST(pipeline_runs.created_at, $19),
+		              updated_at=$20
 	`, runID, run.TenantID, run.SourceID, run.PresetID, run.ExternalRunID,
 		run.ExternalURL, params, run.Status, run.ExternalStatus, run.StartedAt,
 		run.CompletedAt, run.DurationMs, run.Logs, run.LogsURL, run.JobDetails,
-		run.TriggeredBy, run.TriggerType, run.ErrorMessage, now, now)
+		run.TriggeredBy, run.TriggerType, run.ErrorMessage, run.CreatedAt, now)
 	if err != nil {
 		return fmt.Errorf("upsert pipeline run by external id: %w", err)
 	}

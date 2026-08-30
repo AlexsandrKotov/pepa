@@ -5,7 +5,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
 import GitRepoPicker from '@/components/GitRepoPicker';
-import { helmRepositories, blueprints as blueprintsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion } from '@/lib/api';
+import { helmRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup } from '@/lib/api';
 
 const categoryIcons: Record<string, string> = {
   backend: '⚙️', frontend: '🌐', database: '🗄️', messaging: '📨',
@@ -14,6 +14,7 @@ const categoryIcons: Record<string, string> = {
 
 export default function PipelineBlueprintsPage() {
   const [blueprints, setBlueprints] = useState<ServiceBlueprint[]>([]);
+  const [groups, setGroups] = useState<BlueprintGroup[]>([]);
   const [helmRepos, setHelmRepos] = useState<HelmRepository[]>([]);
   const [repoCharts, setRepoCharts] = useState<HelmChart[]>([]);
   const [chartVersions, setChartVersions] = useState<HelmChartVersion[]>([]);
@@ -30,6 +31,8 @@ export default function PipelineBlueprintsPage() {
     namespace: 'default',
     values_yaml: '', cpu: '100m', memory: '128Mi', replicas: 1,
     ports: '8080', category: 'general',
+    group_id: '' as string | null,
+    compose_yaml: '',
   });
   const [gitInputMode, setGitInputMode] = useState<'picker' | 'manual'>('picker');
 
@@ -40,6 +43,7 @@ export default function PipelineBlueprintsPage() {
   useEffect(() => {
     blueprintsAPI.list().then(res => setBlueprints(res.blueprints || [])).catch(() => {});
     helmRepositories.list().then(res => setHelmRepos(res.helm_repositories || [])).catch(() => {});
+    blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
   }, []);
 
   const openCreate = () => {
@@ -48,6 +52,7 @@ export default function PipelineBlueprintsPage() {
       name: '', description: '', source_type: 'container',
       helm_repo_id: '', image: '', chart_url: '', chart_name: '', chart_version: '', chart_path: '',
       namespace: 'default', values_yaml: '', cpu: '100m', memory: '128Mi', replicas: 1, ports: '8080', category: 'general',
+      group_id: '', compose_yaml: '',
     });
     setRepoCharts([]);
     setChartVersions([]);
@@ -62,6 +67,8 @@ export default function PipelineBlueprintsPage() {
       namespace: bp.namespace, values_yaml: bp.values_yaml,
       cpu: bp.cpu, memory: bp.memory, replicas: bp.replicas,
       ports: bp.ports.join(', '), category: bp.category,
+      group_id: bp.group_id || '',
+      compose_yaml: bp.compose_yaml || '',
     });
     setRepoCharts([]);
     setChartVersions([]);
@@ -88,9 +95,10 @@ export default function PipelineBlueprintsPage() {
 
   const handleSave = async () => {
     if (!form.name.trim()) return;
-    // Validate: container needs image, helm needs chart_url or helm_repo_id
+    // Validate: container needs image, helm needs chart_url or helm_repo_id, docker_compose needs compose_yaml
     if (form.source_type === 'container' && !form.image.trim()) return;
-    if (form.source_type !== 'container' && !form.chart_url.trim() && !form.helm_repo_id) return;
+    if (form.source_type !== 'container' && form.source_type !== 'docker_compose' && !form.chart_url.trim() && !form.helm_repo_id) return;
+    if (form.source_type === 'docker_compose' && !form.compose_yaml.trim()) return;
     const ports = form.ports.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
 
     // If helm_repo_id is set, resolve the chart_url from the repo
@@ -114,6 +122,9 @@ export default function PipelineBlueprintsPage() {
       values_yaml: form.values_yaml,
       cpu: form.cpu, memory: form.memory, replicas: form.replicas,
       ports, category: form.category,
+      group_id: form.group_id || null,
+      group_position: 0,
+      compose_yaml: form.compose_yaml,
     };
 
     try {
@@ -176,6 +187,9 @@ export default function PipelineBlueprintsPage() {
           <p className="page-subtitle-modern">Pre-configured service templates for deployment pipelines</p>
         </div>
         <div className="flex gap-2">
+          <Link href="/blueprint-groups" className="btn btn-secondary text-[12px]">
+            Groups
+          </Link>
           <Link href="/pipeline-builder" className="btn btn-secondary text-[12px]">
             Open Pipeline Builder →
           </Link>
@@ -247,15 +261,22 @@ export default function PipelineBlueprintsPage() {
                     bp.source_type === 'container' ? 'bg-blue-500/10 text-blue-500' :
                     bp.source_type === 'helm_git' ? 'bg-purple-500/10 text-purple-500' :
                     bp.source_type === 'helm_http' ? 'bg-orange-500/10 text-orange-500' :
+                    bp.source_type === 'docker_compose' ? 'bg-cyan-500/10 text-cyan-500' :
                     'bg-emerald-500/10 text-emerald-500'
                   }`}>
                     {bp.source_type === 'container' ? '🐳 Container' :
                      bp.source_type === 'helm_git' ? '🔀 Helm Git' :
                      bp.source_type === 'helm_http' ? '🌐 Helm HTTP' :
+                     bp.source_type === 'docker_compose' ? '🐙 Compose' :
                      '📦 Helm OCI'}
                   </span>
                 </div>
-                {bp.source_type === 'container' ? (
+                {bp.source_type === 'docker_compose' ? (
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <span className="text-[var(--text-tertiary)] w-16">Compose:</span>
+                    <span className="text-cyan-500 font-medium">{bp.compose_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
+                  </div>
+                ) : bp.source_type === 'container' ? (
                   <div className="flex items-center gap-2 text-[11px]">
                     <span className="text-[var(--text-tertiary)] w-16">Image:</span>
                     <span className="font-mono text-[var(--text-secondary)] truncate">{bp.image || '—'}</span>
@@ -351,12 +372,13 @@ export default function PipelineBlueprintsPage() {
               {/* Source Type */}
               <div>
                 <label className="label">Source Type</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-5 gap-2">
                   {[
                     { value: 'container', label: '🐳 Container', desc: 'Docker image' },
                     { value: 'helm_git', label: '🔀 Helm Git', desc: 'Chart from Git' },
                     { value: 'helm_http', label: '🌐 Helm HTTP', desc: 'Chart .tgz URL' },
                     { value: 'helm_oci', label: '📦 Helm OCI', desc: 'OCI registry' },
+                    { value: 'docker_compose', label: '🐙 Compose', desc: 'Docker Compose' },
                   ].map(opt => (
                     <button
                       key={opt.value}
@@ -752,6 +774,53 @@ export default function PipelineBlueprintsPage() {
                 </div>
               )}
 
+              {/* === Docker Compose: compose YAML === */}
+              {form.source_type === 'docker_compose' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="label mb-0">docker-compose.yml *</label>
+                    <label className="text-[11px] text-[var(--accent)] hover:underline cursor-pointer inline-flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      Upload .yaml
+                      <input
+                        type="file"
+                        accept=".yaml,.yml"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const text = await file.text();
+                          setForm({ ...form, compose_yaml: text });
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <textarea
+                    value={form.compose_yaml}
+                    onChange={e => setForm({ ...form, compose_yaml: e.target.value })}
+                    className="input font-mono text-[12px] w-full"
+                    rows={10}
+                    spellCheck={false}
+                    placeholder={`version: '3.8'\nservices:\n  web:\n    image: nginx:latest\n    ports:\n      - "80:80"\n    environment:\n      - ENV=production`}
+                  />
+                </div>
+              )}
+
+              {/* Group assignment */}
+              <div>
+                <label className="label">Blueprint Group</label>
+                <select value={form.group_id || ''} onChange={e => setForm({ ...form, group_id: e.target.value || null })} className="input">
+                  <option value="">No group</option>
+                  {groups.map(g => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {form.source_type !== 'docker_compose' && (
+              <>
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="label">Namespace</label>
@@ -777,7 +846,10 @@ export default function PipelineBlueprintsPage() {
                   <input value={form.ports} onChange={e => setForm({ ...form, ports: e.target.value })} className="input" placeholder="8080, 8443" />
                 </div>
               </div>
+              </>
+              )}
 
+              {form.source_type !== 'docker_compose' && (
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="label mb-0">values.yaml</label>
@@ -808,13 +880,14 @@ export default function PipelineBlueprintsPage() {
                   placeholder={`# Paste your Helm values.yaml here\nreplicaCount: 1\n\nimage:\n  repository: nginx\n  tag: "1.25"\n\nservice:\n  type: ClusterIP\n  port: 80`}
                 />
               </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border)] shrink-0">
               <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
               <button
                 onClick={handleSave}
-                disabled={!form.name.trim() || (form.source_type === 'container' ? !form.image.trim() : (!form.chart_url.trim() && !form.helm_repo_id))}
+                disabled={!form.name.trim() || (form.source_type === 'container' ? !form.image.trim() : form.source_type === 'docker_compose' ? !form.compose_yaml.trim() : (!form.chart_url.trim() && !form.helm_repo_id))}
                 className="btn btn-primary"
               >
                 {editing ? 'Save Changes' : 'Create Blueprint'}

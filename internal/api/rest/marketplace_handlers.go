@@ -400,6 +400,15 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Block installation when the plugin binary is not built/available.
+		// A plugin without a binary cannot run, so registering it would be misleading.
+		if !found.BinaryAvailable {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "plugin binary is not available — build it with `make plugins` before installing",
+			})
+			return
+		}
+
 		// Check if already installed
 		existing, err := deps.Repos.Plugin.GetByName(c.Request.Context(), id)
 		if err == nil && existing != nil && existing.Enabled && existing.Status != "uninstalled" {

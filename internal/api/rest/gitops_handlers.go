@@ -66,6 +66,9 @@ func registerGitOpsRoutes(r *gin.RouterGroup, deps Dependencies) {
 		// Topology / dependency graph
 		wf.GET("/repos/:id/topology", gitopsTopology(deps))
 
+		// Live cluster status for resources
+		wf.GET("/repos/:id/live-status", gitopsLiveStatus(deps))
+
 		// Drift detection: compare Git desired state vs live cluster state
 		wf.GET("/repos/:id/drift", gitopsDetectDrift(deps))
 		wf.GET("/repos/:id/overlays", gitopsListOverlays(deps))
@@ -206,9 +209,8 @@ func manualDeploy(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Simulated lifecycle: pending -> syncing -> deployed.
-		// Real cluster sync (ArgoCD/Flux) plugs in here later.
-		simulateDeployLifecycle(deps, deployment.ID)
+		// Trigger real GitOps sync based on cluster's engine type
+		triggerGitOpsSync(deps, deployment)
 
 		logAudit(deps, c, "create", "deployment", deployment.ID.String(), nil, gin.H{
 			"image_tag": req.ImageTag, "stage": stage, "team": req.Team,
@@ -221,36 +223,169 @@ func manualDeploy(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
-// simulateDeployLifecycle walks a deployment through pending -> syncing -> deployed.
-func simulateDeployLifecycle(deps Dependencies, deploymentID uuid.UUID) {
+// Plugin name constants
+const (
+	ArgoCDPluginName = "argocd"
+	FluxCDPluginName = "fluxcd"
+)
+
+// triggerGitOpsSync triggers real GitOps sync (ArgoCD sync or FluxCD reconcile)
+// based on the target cluster's GitOps engine type.
+func triggerGitOpsSync(deps Dependencies, deployment *repository.Deployment) {
+	if deps.PluginMgr == nil || deps.Repos.Cluster == nil {
+		slog.Warn("triggerGitOpsSync: plugin manager or cluster repo not available")
+		return
+	}
+	if deployment.TargetClusterID == nil {
+		slog.Info("triggerGitOpsSync: no target cluster specified, skipping sync")
+		return
+	}
+
+	// Capture deployment ID to avoid race condition
+	deploymentID := deployment.ID
+	tenantID := deployment.TenantID
+
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		transition := func(status string, wait time.Duration) bool {
-			time.Sleep(wait)
-			d, err := deps.Repos.Deployment.Get(ctx, deploymentID)
-			if err != nil {
-				return false
-			}
-			// Do not override terminal/manual states (cancelled, rolled_back, promoted...)
-			if d.Status != "pending" && d.Status != "syncing" {
-				return false
-			}
-			d.Status = status
-			d.UpdatedAt = time.Now()
-			if err := deps.Repos.Deployment.Update(ctx, d); err != nil {
-				slog.Info("lifecycle transition to failed for ", "arg1", status, "id", deploymentID, "error", err)
-				return false
-			}
-			return true
-		}
-
-		if !transition("syncing", 1500*time.Millisecond) {
+		// Fetch fresh copy to avoid race condition
+		d, err := deps.Repos.Deployment.Get(ctx, deploymentID)
+		if err != nil {
+			slog.Warn("triggerGitOpsSync: failed to fetch deployment", "error", err)
 			return
 		}
-		transition("deployed", 2*time.Second)
+
+		// Update status to syncing
+		d.Status = "syncing"
+		d.UpdatedAt = time.Now()
+		if err := deps.Repos.Deployment.Update(ctx, d); err != nil {
+			slog.Warn("triggerGitOpsSync: failed to update status to syncing", "error", err)
+			return
+		}
+
+		// Get cluster to determine engine type
+		cluster, err := deps.Repos.Cluster.Get(ctx, *d.TargetClusterID, tenantID)
+		if err != nil {
+			slog.Warn("triggerGitOpsSync: failed to get cluster", "error", err)
+			d.Status = "failed"
+			d.UpdatedAt = time.Now()
+			_ = deps.Repos.Deployment.Update(ctx, d)
+			return
+		}
+
+		// Determine GitOps engine from cluster labels or auto-detect
+		engineType := ""
+		if cluster.Labels != nil {
+			engineType = cluster.Labels["gitops_engine"]
+		}
+
+		// Call appropriate plugin based on engine type
+		var syncErr error
+		switch engineType {
+		case "argocd":
+			syncErr = triggerArgoSync(ctx, deps, d, cluster)
+		case "fluxcd":
+			syncErr = triggerFluxReconcile(ctx, deps, d, cluster)
+		default:
+			// Auto-detect: check plugin availability first to avoid unnecessary calls
+			slog.Info("triggerGitOpsSync: engine type unknown, attempting auto-detect", "cluster", cluster.Name)
+			if deps.PluginMgr.GetPlugin(ArgoCDPluginName) != nil {
+				syncErr = triggerArgoSync(ctx, deps, d, cluster)
+			}
+			if syncErr != nil && deps.PluginMgr.GetPlugin(FluxCDPluginName) != nil {
+				syncErr = triggerFluxReconcile(ctx, deps, d, cluster)
+			}
+		}
+
+		// Update deployment status based on sync result
+		if syncErr != nil {
+			slog.Warn("triggerGitOpsSync: sync failed", "error", syncErr)
+			d.Status = "failed"
+		} else {
+			d.Status = "deployed"
+		}
+		d.UpdatedAt = time.Now()
+		if err := deps.Repos.Deployment.Update(ctx, d); err != nil {
+			slog.Warn("triggerGitOpsSync: failed to update final status", "error", err)
+		}
 	}()
+}
+
+// triggerArgoSync calls the ArgoCD plugin to sync an application.
+// Note: ArgoCD credentials should ideally be stored in Vault, not in cluster labels.
+// This is a temporary implementation until Vault integration is complete.
+func triggerArgoSync(ctx context.Context, deps Dependencies, deployment *repository.Deployment, cluster *repository.Cluster) error {
+	if deps.PluginMgr == nil {
+		return fmt.Errorf("plugin manager not available")
+	}
+
+	// ArgoCD plugin expects: app_name, namespace, project (optional)
+	params := map[string]interface{}{
+		"app_name":  deployment.GitlabProjectName,
+		"namespace": deployment.TargetNamespace,
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("marshal params: %w", err)
+	}
+
+	// Try to find ArgoCD plugin config from cluster labels
+	// TODO: Migrate to Vault-based credential storage
+	pluginConfig := map[string]string{}
+	if cluster.Labels != nil {
+		if serverURL, ok := cluster.Labels["argocd_server_url"]; ok {
+			pluginConfig["server_url"] = serverURL
+		}
+		// WARNING: Auth token in labels is a security risk
+		// This should be migrated to Vault integration
+		if authToken, ok := cluster.Labels["argocd_auth_token"]; ok {
+			pluginConfig["auth_token"] = authToken
+			slog.Warn("triggerArgoSync: auth token found in cluster labels, consider migrating to Vault")
+		}
+	}
+
+	_, err = deps.PluginMgr.Execute(ctx, ArgoCDPluginName, "sync", paramsJSON, pluginConfig)
+	return err
+}
+
+// triggerFluxReconcile calls the FluxCD plugin to reconcile a HelmRelease or Kustomization.
+// Tries HelmRelease first as it's more commonly used, falls back to Kustomization if not found.
+func triggerFluxReconcile(ctx context.Context, deps Dependencies, deployment *repository.Deployment, cluster *repository.Cluster) error {
+	if deps.PluginMgr == nil {
+		return fmt.Errorf("plugin manager not available")
+	}
+	if deps.Repos.Cluster == nil {
+		return fmt.Errorf("cluster repository not available")
+	}
+
+	// FluxCD plugin expects: name, namespace, kind (HelmRelease or Kustomization)
+	params := map[string]interface{}{
+		"name":      deployment.GitlabProjectName,
+		"namespace": deployment.TargetNamespace,
+	}
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("marshal params: %w", err)
+	}
+
+	// Get kubeconfig from cluster
+	kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(ctx, cluster.ID, cluster.TenantID)
+	if err != nil {
+		return fmt.Errorf("failed to get kubeconfig: %w", err)
+	}
+
+	pluginConfig := map[string]string{
+		"kubeconfig": kubeconfig,
+	}
+
+	// Try reconcile_helmrelease first (more common)
+	_, err = deps.PluginMgr.Execute(ctx, FluxCDPluginName, "reconcile_helmrelease", paramsJSON, pluginConfig)
+	if err != nil {
+		// Fall back to reconcile_kustomization
+		_, err = deps.PluginMgr.Execute(ctx, FluxCDPluginName, "reconcile_kustomization", paramsJSON, pluginConfig)
+	}
+	return err
 }
 
 // verifyWorkflowDeployment runs verification checks on a deployment.
@@ -1218,15 +1353,21 @@ func gitopsCreateResource(deps Dependencies) gin.HandlerFunc {
 		resolveConnectionToken(ctx, deps, repo, auth.GetUserID(c), auth.GetTenantID(c))
 
 		var req struct {
-			Kind      string                 `json:"kind" binding:"required"` // HelmRelease, Kustomization
+			Kind      string                 `json:"kind" binding:"required"` // HelmRelease, Kustomization, Application
 			Name      string                 `json:"name" binding:"required"`
 			Namespace string                 `json:"namespace" binding:"required"`
 			Cluster   string                 `json:"cluster"`
 			Chart     string                 `json:"chart"`
 			Version   string                 `json:"version"`
-			SourceRef string                 `json:"source_ref"` // HelmRepository name
+			SourceRef string                 `json:"source_ref"` // FluxCD: HelmRepository name; ArgoCD: repo URL
 			Values    map[string]interface{} `json:"values"`
 			CommitMsg string                 `json:"commit_message"`
+			// ArgoCD-specific fields
+			RepoURL        string `json:"repo_url"`         // ArgoCD: source.repoURL
+			Path           string `json:"path"`             // ArgoCD: source.path
+			TargetRevision string `json:"target_revision"`  // ArgoCD: source.targetRevision
+			DestServer     string `json:"dest_server"`      // ArgoCD: destination.server
+			DestNamespace  string `json:"dest_namespace"`   // ArgoCD: destination.namespace
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1240,6 +1381,12 @@ func gitopsCreateResource(deps Dependencies) gin.HandlerFunc {
 			yamlContent = generateHelmReleaseYAML(req.Name, req.Namespace, req.Chart, req.Version, req.SourceRef, req.Values)
 		case "Kustomization":
 			yamlContent = generateKustomizationYAML(req.Name, req.Namespace, req.SourceRef)
+		case "Application":
+			yamlContent = generateArgoApplicationYAML(req.Name, req.Namespace, req.RepoURL, req.Path, req.TargetRevision, req.DestServer, req.DestNamespace, req.Values)
+			if yamlContent == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to generate ArgoCD Application: missing required fields (repo_url, path)"})
+				return
+			}
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported kind: " + req.Kind})
 			return
@@ -1333,6 +1480,71 @@ spec:
   path: "./"
   prune: true
 `, name, namespace, sourceRef)
+}
+
+// generateArgoApplicationYAML creates an ArgoCD Application YAML.
+// Returns empty string if required fields are missing.
+func generateArgoApplicationYAML(name, namespace, repoURL, path, targetRevision, destServer, destNamespace string, values map[string]interface{}) string {
+	// Validate required fields
+	if repoURL == "" {
+		slog.Warn("generateArgoApplicationYAML: repoURL is required")
+		return ""
+	}
+	if path == "" {
+		slog.Warn("generateArgoApplicationYAML: path is required")
+		return ""
+	}
+
+	// Apply defaults
+	if targetRevision == "" {
+		targetRevision = "HEAD"
+	}
+	if destServer == "" {
+		destServer = "https://kubernetes.default.svc"
+	}
+	if destNamespace == "" {
+		destNamespace = namespace
+	}
+
+	result := fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/managed-by: pepa
+spec:
+  project: default
+  source:
+    repoURL: %s
+    targetRevision: %s
+    path: %s
+  destination:
+    server: %s
+    namespace: %s
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+`, name, namespace, repoURL, targetRevision, path, destServer, destNamespace)
+
+	// Add Helm values if provided
+	if len(values) > 0 {
+		result += "    helm:\n      values: |\n"
+		valuesYAML, err := yaml.Marshal(values)
+		if err != nil {
+			slog.Warn("generateArgoApplicationYAML: failed to marshal helm values", "error", err)
+			// Continue without values rather than failing completely
+		} else {
+			for _, line := range strings.Split(string(valuesYAML), "\n") {
+				if line != "" {
+					result += "        " + line + "\n"
+				}
+			}
+		}
+	}
+
+	return result
 }
 
 // =============================================================================
@@ -1556,6 +1768,109 @@ func gitopsDeleteMapping(deps Dependencies) gin.HandlerFunc {
 // Query params:
 //   - cluster_id (optional): specific cluster to compare against
 //   - If omitted, compares against all clusters with kubeconfig
+// gitopsLiveStatus returns live cluster health/sync status for each resource in a repo.
+// It queries the cluster(s) and returns a map of resource key -> {health, sync_status, revision}.
+func gitopsLiveStatus(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.GitopsRepo == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "gitops repository not available"})
+			return
+		}
+		if deps.Repos.Cluster == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cluster repository not available"})
+			return
+		}
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo ID"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		repo, err := deps.Repos.GitopsRepo.Get(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		resolveConnectionToken(ctx, deps, repo, auth.GetUserID(c), auth.GetTenantID(c))
+
+		// Get clusters for this tenant
+		allClusters, err := deps.Repos.Cluster.List(ctx, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		// Filter to clusters with kubeconfig
+		var targetClusters []repository.Cluster
+		for _, cl := range allClusters {
+			if cl.HasKubeconfig {
+				targetClusters = append(targetClusters, cl)
+			}
+		}
+
+		if len(targetClusters) == 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"status_map": gin.H{},
+				"message":    "no clusters with kubeconfig available",
+			})
+			return
+		}
+
+		// Build a map: resource key -> live status from all clusters
+		statusMap := make(map[string]interface{})
+
+		for _, cl := range targetClusters {
+			liveResources, err := queryLiveResourcesForEngine(ctx, deps, &cl, repo.EngineType)
+			if err != nil {
+				slog.Warn("live-status: failed to query cluster", "name", cl.Name, "error", err)
+				continue
+			}
+
+			for _, r := range liveResources {
+				key := fmt.Sprintf("%s/%s/%s", r.Kind, r.Namespace, r.Name)
+				health := "unknown"
+				syncStatus := "unknown"
+				revision := ""
+				if h, ok := r.Labels["health"]; ok {
+					health = h
+				}
+				if s, ok := r.Labels["sync_status"]; ok {
+					syncStatus = s
+				}
+				if rev, ok := r.Labels["revision"]; ok {
+					revision = rev
+				}
+				// For FluxCD resources, derive health from conditions
+				if r.Kind == "HelmRelease" || r.Kind == "Kustomization" {
+					if r.Suspended {
+						health = "suspended"
+					} else if r.Version != "" {
+						health = "healthy"
+					}
+					syncStatus = "synced"
+				}
+
+				statusMap[key] = gin.H{
+					"health":      health,
+					"sync_status": syncStatus,
+					"revision":    revision,
+					"cluster":     cl.Name,
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status_map": statusMap,
+			"total":      len(statusMap),
+		})
+	}
+}
+
 func gitopsDetectDrift(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.GitopsRepo == nil {
@@ -1664,7 +1979,7 @@ func gitopsDetectDrift(deps Dependencies) gin.HandlerFunc {
 		// For single-cluster case, use simple DetectDrift
 		if len(targetClusters) == 1 {
 			cl := targetClusters[0]
-			liveResources, err := queryLiveFluxResources(ctx, deps, &cl)
+			liveResources, err := queryLiveResourcesForEngine(ctx, deps, &cl, repo.EngineType)
 			if err != nil {
 				respondInternalError(c, err)
 				return
@@ -1683,7 +1998,7 @@ func gitopsDetectDrift(deps Dependencies) gin.HandlerFunc {
 		// Multi-cluster: use DetectDriftMultiCluster
 		liveByCluster := make(map[string][]gitops.LiveResource)
 		for _, cl := range targetClusters {
-			liveResources, err := queryLiveFluxResources(ctx, deps, &cl)
+			liveResources, err := queryLiveResourcesForEngine(ctx, deps, &cl, repo.EngineType)
 			if err != nil {
 				slog.Warn("failed to query cluster for drift", "name", cl.Name, "error", err)
 				continue
@@ -1717,6 +2032,139 @@ func queryLiveFluxResources(ctx context.Context, deps Dependencies, cl *reposito
 	return resources, nil
 }
 
+// queryLiveResourcesForEngine dispatches to the correct live-resource query
+// function based on the GitOps engine type.
+func queryLiveResourcesForEngine(ctx context.Context, deps Dependencies, cl *repository.Cluster, engineType string) ([]gitops.Resource, error) {
+	switch engineType {
+	case "argocd":
+		return queryLiveArgoResources(ctx, deps, cl)
+	case "fluxcd":
+		return queryLiveFluxResources(ctx, deps, cl)
+	default:
+		// auto or unknown: try FluxCD first, then ArgoCD
+		fluxRes, fluxErr := queryLiveFluxResources(ctx, deps, cl)
+		if fluxErr == nil && len(fluxRes) > 0 {
+			return fluxRes, nil
+		}
+		argoRes, argoErr := queryLiveArgoResources(ctx, deps, cl)
+		if argoErr == nil && len(argoRes) > 0 {
+			return argoRes, nil
+		}
+		// Return FluxCD result (possibly empty) if both failed or both empty
+		if fluxErr != nil {
+			return nil, fluxErr
+		}
+		return fluxRes, nil
+	}
+}
+
+// queryLiveArgoResources fetches ArgoCD Application resources from a live cluster
+// via the Kubernetes API CRDs.
+func queryLiveArgoResources(ctx context.Context, deps Dependencies, cl *repository.Cluster) ([]gitops.Resource, error) {
+	kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(ctx, cl.ID, cl.TenantID)
+	if err != nil || kubeconfig == "" {
+		return nil, fmt.Errorf("kubeconfig not available for cluster %s", cl.Name)
+	}
+
+	restCfg, err := buildRestConfig(kubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("build rest config: %w", err)
+	}
+
+	data, err := k8sRequest(restCfg, "/apis/argoproj.io/v1alpha1/applications")
+	if err != nil {
+		return nil, fmt.Errorf("list argocd applications: %w", err)
+	}
+
+	var list struct {
+		Items []struct {
+			Metadata struct {
+				Name      string `json:"name"`
+				Namespace string `json:"namespace"`
+			} `json:"metadata"`
+			Spec struct {
+				Source *struct {
+					RepoURL        string `json:"repoURL"`
+					Path           string `json:"path"`
+					TargetRevision string `json:"targetRevision"`
+				} `json:"source"`
+				Destination struct {
+					Server    string `json:"server"`
+					Namespace string `json:"namespace"`
+				} `json:"destination"`
+			} `json:"spec"`
+			Status struct {
+				Sync struct {
+					Status   string `json:"status"`
+					Revision string `json:"revision"`
+				} `json:"sync"`
+				Health struct {
+					Status string `json:"status"`
+				} `json:"health"`
+			} `json:"status"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil, fmt.Errorf("parse argocd applications: %w", err)
+	}
+
+	var resources []gitops.Resource
+	for _, item := range list.Items {
+		// Map ArgoCD health to our label-based health model
+		health := "unknown"
+		switch strings.ToLower(item.Status.Health.Status) {
+		case "healthy":
+			health = "healthy"
+		case "degraded":
+			health = "degraded"
+		case "progressing", "missing":
+			health = "progressing"
+		case "suspended":
+			health = "unknown"
+		}
+
+		syncStatus := "unknown"
+		switch strings.ToLower(item.Status.Sync.Status) {
+		case "synced":
+			syncStatus = "synced"
+		case "outsynced", "out_of_sync":
+			syncStatus = "out_of_sync"
+		}
+
+		r := gitops.Resource{
+			Kind:       "Application",
+			APIVersion: "argoproj.io/v1alpha1",
+			Name:       item.Metadata.Name,
+			Namespace:  item.Metadata.Namespace,
+		}
+		if item.Spec.Source != nil {
+			r.Repo = item.Spec.Source.RepoURL
+			r.Chart = item.Spec.Source.Path
+			r.Version = item.Spec.Source.TargetRevision
+			r.Source = &gitops.ArgoSource{
+				RepoURL:        item.Spec.Source.RepoURL,
+				Path:           item.Spec.Source.Path,
+				TargetRevision: item.Spec.Source.TargetRevision,
+			}
+		}
+		r.Dest = &gitops.ArgoDest{
+			Server:    item.Spec.Destination.Server,
+			Namespace: item.Spec.Destination.Namespace,
+		}
+
+		// Store health and sync status in labels for drift comparison
+		r.Labels = map[string]string{
+			"health":     health,
+			"sync_status": syncStatus,
+			"revision":   item.Status.Sync.Revision,
+		}
+
+		resources = append(resources, r)
+	}
+
+	return resources, nil
+}
+
 // toLiveResources converts gitops.Resource (from cluster query) to LiveResource for drift comparison.
 func toLiveResources(resources []gitops.Resource) []gitops.LiveResource {
 	result := make([]gitops.LiveResource, 0, len(resources))
@@ -1725,12 +2173,17 @@ func toLiveResources(resources []gitops.Resource) []gitops.LiveResource {
 		if h, ok := r.Labels["health"]; ok {
 			health = h
 		}
+		revision := ""
+		if rev, ok := r.Labels["revision"]; ok {
+			revision = rev
+		}
 		result = append(result, gitops.LiveResource{
 			Kind:      r.Kind,
 			Name:      r.Name,
 			Namespace: r.Namespace,
 			Suspended: r.Suspended,
 			Version:   r.Version,
+			Revision:  revision,
 			Health:    health,
 		})
 	}

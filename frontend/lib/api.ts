@@ -2047,6 +2047,9 @@ export const gitops = {
     const qs = params.toString() ? `?${params.toString()}` : '';
     return fetchAPI<GitopsDriftResult>(`/api/v1/gitops/repos/${id}/drift${qs}`);
   },
+  // Live cluster status for resources
+  liveStatus: (id: string) =>
+    fetchAPI<{ status_map: Record<string, { health: string; sync_status: string; revision: string; cluster: string }>; total: number }>(`/api/v1/gitops/repos/${id}/live-status`),
   // List overlay paths in a repo
   listOverlays: (id: string) =>
     fetchAPI<{ overlays: string[] }>(`/api/v1/gitops/repos/${id}/overlays`),
@@ -2551,6 +2554,45 @@ export const aiExtended = {
   },
   suggestions: () => fetchAPI<{ suggestions: Array<Record<string, unknown>>; total: number }>('/api/v1/ai/suggestions'),
   apply: (data: { type: string; content: string }) => fetchAPI<{ message: string }>('/api/v1/ai/apply', { method: 'POST', body: JSON.stringify(data) }),
+};
+
+// ── RAG Knowledge Base ────────────────────────────────────────
+
+export const rag = {
+  search: (data: { query: string; top_k?: number; mode?: string; filters?: Record<string, string> }) =>
+    fetchAPI<{ results: Array<Record<string, unknown>>; total: number; query: string }>('/api/v1/rag/search', { method: 'POST', body: JSON.stringify(data) }),
+  chat: (data: { message: string; top_k?: number; enable_tools?: boolean }) =>
+    fetchAPI<{ response: string; sources: Array<Record<string, unknown>>; tokens_used: Record<string, number> }>('/api/v1/rag/chat', { method: 'POST', body: JSON.stringify(data) }),
+  chatStream: async (data: { message: string; top_k?: number; enable_tools?: boolean }, onChunk: (chunk: Record<string, unknown>) => void, signal?: AbortSignal): Promise<void> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (_bootstrapJwt) headers['Authorization'] = `Bearer ${_bootstrapJwt}`;
+    const res = await fetch(`${getBase()}/api/v1/rag/chat/stream`, { method: 'POST', headers, body: JSON.stringify(data), credentials: 'include', signal });
+    if (!res.ok) throw new Error(await res.text().catch(() => '') || `HTTP ${res.status}`);
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Streaming not supported');
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try { onChunk(JSON.parse(line.slice(6))); } catch { /* skip */ }
+      }
+    }
+  },
+  documents: (source?: string) => {
+    const qs = source ? `?source=${source}` : '';
+    return fetchAPI<{ documents: Array<Record<string, unknown>>; total: number }>(`/api/v1/rag/documents${qs}`);
+  },
+  deleteDocument: (id: string) => fetchAPI<{ message: string }>(`/api/v1/rag/documents/${id}`, { method: 'DELETE' }),
+  stats: () => fetchAPI<{ stats: Record<string, number>; total_documents: number; total_chunks: number; rag_enabled: boolean }>('/api/v1/rag/stats'),
+  reindex: () => fetchAPI<{ message: string }>('/api/v1/rag/reindex', { method: 'POST' }),
+  ingest: (data: { source: string; source_type?: string; content: string; metadata?: Record<string, string> }) =>
+    fetchAPI<{ message: string }>('/api/v1/rag/ingest', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ── Documentation (Phase 4.2) ─────────────────────────────────
@@ -3365,7 +3407,7 @@ export interface ServiceBlueprint {
   id: string;
   name: string;
   description: string;
-  source_type: 'container' | 'helm_git' | 'helm_http' | 'helm_oci';
+  source_type: 'container' | 'helm_git' | 'helm_http' | 'helm_oci' | 'docker_compose';
   helm_repo_id: string | null;
   image: string;
   chart_url: string;
@@ -3379,6 +3421,9 @@ export interface ServiceBlueprint {
   replicas: number;
   ports: number[];
   category: string;
+  group_id: string | null;
+  group_position: number;
+  compose_yaml: string;
   created_at: string;
 }
 
@@ -3393,6 +3438,44 @@ export const blueprints = {
     fetchAPI<ServiceBlueprint>(`/api/v1/blueprints/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     fetchAPI<{ ok: boolean }>(`/api/v1/blueprints/${id}`, { method: 'DELETE' }),
+  deployDocker: (id: string, dockerHostId: string, envVars?: Record<string, string>) =>
+    fetchAPI<DockerService>(`/api/v1/blueprints/${id}/deploy-docker`, { method: 'POST', body: JSON.stringify({ docker_host_id: dockerHostId, env_vars: envVars || {} }) }),
+};
+
+// ── Blueprint Groups ──────────────────────────────────────────
+
+export interface BlueprintGroup {
+  id: string;
+  name: string;
+  description: string;
+  position: number;
+  blueprints: ServiceBlueprint[];
+  created_at: string;
+}
+
+export interface BlueprintDeployResult {
+  blueprint_id: string;
+  blueprint_name: string;
+  status: string;
+  deployment_id?: string;
+  error?: string;
+}
+
+export const blueprintGroups = {
+  list: () =>
+    fetchAPI<{ groups: BlueprintGroup[] }>('/api/v1/blueprint-groups'),
+  create: (data: { name: string; description?: string; position?: number }) =>
+    fetchAPI<BlueprintGroup>('/api/v1/blueprint-groups', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { name: string; description?: string; position?: number }) =>
+    fetchAPI<BlueprintGroup>(`/api/v1/blueprint-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    fetchAPI<{ ok: boolean }>(`/api/v1/blueprint-groups/${id}`, { method: 'DELETE' }),
+  reorder: (id: string, blueprintIds: string[]) =>
+    fetchAPI<{ ok: boolean }>(`/api/v1/blueprint-groups/${id}/reorder`, { method: 'PUT', body: JSON.stringify({ blueprint_ids: blueprintIds }) }),
+  deployDocker: (id: string, dockerHostId: string, envVars?: Record<string, string>) =>
+    fetchAPI<{ results: BlueprintDeployResult[]; total: number }>(`/api/v1/blueprint-groups/${id}/deploy-docker`, { method: 'POST', body: JSON.stringify({ docker_host_id: dockerHostId, env_vars: envVars || {} }) }),
+  deployKubernetes: (id: string, clusterId: string, namespace?: string) =>
+    fetchAPI<{ results: BlueprintDeployResult[]; total: number }>(`/api/v1/blueprint-groups/${id}/deploy-kubernetes`, { method: 'POST', body: JSON.stringify({ cluster_id: clusterId, namespace: namespace || 'default' }) }),
 };
 
 // ── Virtualization (Proxmox) ────────────────────────────────

@@ -756,6 +756,7 @@ export default function TopBar() {
                 { href: '/security', label: 'Security', icon: '🛡️' },
                 { href: '/analytics', label: 'Analytics', icon: '📊' },
                 { href: '/ai', label: 'AI Assistant', icon: '🤖' },
+                { href: '/knowledge-base', label: 'Knowledge Base', icon: '📚' },
                 { href: '/audit', label: 'Audit Log', icon: '📝', adminOnly: true, permission: 'audit' },
                 { href: '/roles', label: 'Roles', icon: '👥', adminOnly: true, permission: 'roles' },
                 { href: '/settings', label: 'Settings', icon: '⚙️', adminOnly: true, permission: 'settings' },

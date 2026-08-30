@@ -86,6 +86,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
           { href: '/pipelines', label: 'Runs', permission: 'pipelines' },
           { href: '/pipeline-builder', label: 'Builder', permission: 'pipelines' },
           { href: '/pipeline-blueprints', label: 'Blueprints', permission: 'pipelines' },
+          { href: '/blueprint-groups', label: 'Blueprint Groups', permission: 'pipelines' },
         ],
       },
       {
@@ -164,6 +165,7 @@ const allNavHrefs = [
   ...allMainHrefs,
   '/credentials',
   '/ai',
+  '/knowledge-base',
   '/get-started',
   ...collapsibleSections.flatMap(s =>
     s.subGroups ? s.subGroups.flatMap(sg => sg.items.map(i => i.href)) : s.items.map(i => i.href)
@@ -565,6 +567,25 @@ export default function Sidebar() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
             </svg>
             {!collapsed && <span className="truncate">AI Platform</span>}
+          </Link>
+        )}
+
+        {/* Knowledge Base — RAG-powered AI context */}
+        {canSee('ai') && (
+          <Link
+            href="/knowledge-base"
+            prefetch={true}
+            className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 mb-1 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
+              isPathActive(pathname, '/knowledge-base')
+                ? 'bg-white/10 text-white shadow-sm'
+                : 'text-white/40 hover:text-white/80 hover:bg-white/[0.04]'
+            }`}
+            title={collapsed ? 'Knowledge Base' : undefined}
+          >
+            <svg className={`w-[17px] h-[17px] shrink-0 ${isPathActive(pathname, '/knowledge-base') ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+            </svg>
+            {!collapsed && <span className="truncate">Knowledge Base</span>}
           </Link>
         )}
 

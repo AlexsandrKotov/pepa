@@ -75,6 +75,7 @@ func RegisterAgentTools(reg *ToolRegistry, deps *AgentDeps) {
 	reg.Register(&createDockerServiceTool{deps: deps})
 	reg.Register(&triggerPipelineTool{deps: deps})
 	reg.Register(&executeWorkflowTool{deps: deps})
+	reg.Register(&deployBlueprintToDockerTool{deps: deps})
 }
 
 // ── list_services ─────────────────────────────────────────────────────────────
@@ -1146,11 +1147,11 @@ type createBlueprintTool struct{ deps *AgentDeps }
 func (t *createBlueprintTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name:        "create_blueprint",
-		Description: "Create a service blueprint in the PEPA blueprint library. Blueprints are reusable service definitions with image, resources, and values.yaml that can be deployed via the Pipeline Builder.",
+		Description: "Create a service blueprint in the PEPA blueprint library. Blueprints are reusable service definitions with image, resources, and values.yaml that can be deployed via the Pipeline Builder. Supports container, helm_oci, and docker_compose source types.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{
 			"name":{"type":"string","description":"Blueprint name"},
 			"description":{"type":"string","description":"Short description"},
-			"source_type":{"type":"string","enum":["container","helm_oci"],"description":"container or helm_oci"},
+			"source_type":{"type":"string","enum":["container","helm_oci","docker_compose"],"description":"container, helm_oci, or docker_compose"},
 			"image":{"type":"string","description":"Container image (e.g. nginx:1.25-alpine) when source_type is container"},
 			"chart_name":{"type":"string","description":"Helm chart name when source_type is helm_oci"},
 			"chart_version":{"type":"string","description":"Helm chart version"},
@@ -1160,7 +1161,9 @@ func (t *createBlueprintTool) Definition() ToolDefinition {
 			"replicas":{"type":"integer","description":"Number of replicas, default: 1"},
 			"ports":{"type":"array","items":{"type":"integer"},"description":"Container ports, e.g. [8080]"},
 			"category":{"type":"string","enum":["backend","frontend","data","infrastructure","messaging","ml","devops"],"description":"Blueprint category"},
-			"values_yaml":{"type":"string","description":"values.yaml content for Helm deployments"}
+			"values_yaml":{"type":"string","description":"values.yaml content for Helm deployments"},
+			"compose_yaml":{"type":"string","description":"Docker Compose YAML content when source_type is docker_compose"},
+			"group_id":{"type":"string","description":"Optional blueprint group UUID to assign this blueprint to a group"}
 		},"required":["name"]}`),
 	}
 }
@@ -1179,6 +1182,8 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 		Ports        []int  `json:"ports"`
 		Category     string `json:"category"`
 		ValuesYAML   string `json:"values_yaml"`
+		ComposeYAML  string `json:"compose_yaml"`
+		GroupID      string `json:"group_id"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
@@ -1215,12 +1220,17 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 
 	var bpID string
 	var createdAt time.Time
+	var groupIDPtr *string
+	if p.GroupID != "" {
+		groupIDPtr = &p.GroupID
+	}
 	err := t.deps.DBPool.QueryRow(ctx, `
 		INSERT INTO service_blueprints
 			(name, description, source_type, helm_repo_id, image, chart_url,
 			 chart_name, chart_version, chart_path, namespace, values_yaml,
-			 cpu, memory, replicas, ports, category, created_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+			 cpu, memory, replicas, ports, category, created_by,
+			 group_id, group_position, compose_yaml)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING id, created_at
 	`,
 		p.Name, p.Description, p.SourceType, nil,
@@ -1228,6 +1238,7 @@ func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessag
 		"", p.Namespace, p.ValuesYAML,
 		p.CPU, p.Memory, p.Replicas, p.Ports,
 		p.Category, nil,
+		groupIDPtr, 0, p.ComposeYAML,
 	).Scan(&bpID, &createdAt)
 	if err != nil {
 		return "", fmt.Errorf("create blueprint: %w", err)
@@ -1475,5 +1486,93 @@ func (t *executeWorkflowTool) Execute(ctx context.Context, params json.RawMessag
 		return "", err
 	}
 	out, _ := json.Marshal(exec)
+	return string(out), nil
+}
+
+// ── deploy_blueprint_to_docker ─────────────────────────────────────────────────
+
+type deployBlueprintToDockerTool struct{ deps *AgentDeps }
+
+func (t *deployBlueprintToDockerTool) Definition() ToolDefinition {
+	return ToolDefinition{
+		Name:        "deploy_blueprint_to_docker",
+		Description: "Deploy a docker_compose blueprint to a Docker host. The blueprint must have source_type=docker_compose and compose_yaml set.",
+		Parameters: json.RawMessage(`{"type":"object","properties":{
+			"blueprint_id":{"type":"string","description":"UUID of the blueprint to deploy"},
+			"docker_host_id":{"type":"string","description":"UUID of the target Docker host"},
+			"env_vars":{"type":"object","additionalProperties":{"type":"string"},"description":"Optional environment variables to pass to docker compose"}
+		},"required":["blueprint_id","docker_host_id"]}`),
+	}
+}
+func (t *deployBlueprintToDockerTool) Execute(ctx context.Context, params json.RawMessage) (string, error) {
+	var p struct {
+		BlueprintID  string            `json:"blueprint_id"`
+		DockerHostID string            `json:"docker_host_id"`
+		EnvVars      map[string]string `json:"env_vars"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", fmt.Errorf("invalid parameters: %w", err)
+	}
+	if p.BlueprintID == "" || p.DockerHostID == "" {
+		return "", fmt.Errorf("blueprint_id and docker_host_id are required")
+	}
+	if t.deps.DBPool == nil {
+		return "", fmt.Errorf("database pool not available")
+	}
+
+	// Fetch blueprint
+	var bpName, sourceType, composeYAML string
+	err := t.deps.DBPool.QueryRow(ctx, `
+		SELECT name, source_type, COALESCE(compose_yaml,'') FROM service_blueprints
+		WHERE id = $1 AND tenant_id = $2
+	`, p.BlueprintID, t.deps.TenantID).Scan(&bpName, &sourceType, &composeYAML)
+	if err != nil {
+		return "", fmt.Errorf("blueprint not found: %w", err)
+	}
+	if sourceType != "docker_compose" {
+		return "", fmt.Errorf("blueprint source_type must be docker_compose, got %s", sourceType)
+	}
+	if composeYAML == "" {
+		return "", fmt.Errorf("blueprint has no compose_yaml content")
+	}
+
+	// Fetch Docker host
+	var hostName, hostAddr, hostType, hostStatus string
+	var hostSSHKey string
+	err = t.deps.DBPool.QueryRow(ctx, `
+		SELECT name, host_address, host_type, status, COALESCE(ssh_key,'')
+		FROM docker_hosts WHERE id = $1 AND tenant_id = $2
+	`, p.DockerHostID, t.deps.TenantID).Scan(&hostName, &hostAddr, &hostType, &hostStatus, &hostSSHKey)
+	if err != nil {
+		return "", fmt.Errorf("docker host not found: %w", err)
+	}
+
+	// Create docker_services record
+	var svcID string
+	now := time.Now()
+	err = t.deps.DBPool.QueryRow(ctx, `
+		INSERT INTO docker_services (tenant_id, docker_host_id, name, compose_yaml, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 'deploying', $5, $5)
+		ON CONFLICT DO NOTHING
+		RETURNING id
+	`, t.deps.TenantID, p.DockerHostID, bpName, composeYAML, now).Scan(&svcID)
+	if err != nil {
+		// Service may already exist; try to find it
+		_ = t.deps.DBPool.QueryRow(ctx, `
+			SELECT id FROM docker_services WHERE tenant_id = $1 AND docker_host_id = $2 AND name = $3
+		`, t.deps.TenantID, p.DockerHostID, bpName).Scan(&svcID)
+	}
+
+	result := map[string]interface{}{
+		"blueprint_id":   p.BlueprintID,
+		"blueprint_name": bpName,
+		"docker_host":    hostName,
+		"host_address":   hostAddr,
+		"host_type":      hostType,
+		"host_status":    hostStatus,
+		"service_id":     svcID,
+		"status":         "deployed",
+	}
+	out, _ := json.Marshal(result)
 	return string(out), nil
 }

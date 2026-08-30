@@ -58,6 +58,7 @@ type Repositories struct {
 	UserCredential  *repository.UserCredentialRepository
 	CredentialShare *repository.CredentialShareRepository
 	Organization    *repository.OrganizationRepository
+	RAG             *repository.RAGRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -242,6 +243,8 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerTeamRoutes(v1, deps)
 		registerUserCredentialRoutes(v1, deps)
 		registerServiceBlueprintRoutes(v1, deps)
+		registerBlueprintGroupRoutes(v1, deps)
+		registerBlueprintDeployRoutes(v1, deps)
 		registerOrganizationRoutes(v1, deps)
 		registerProxmoxRoutes(v1, deps)
 		registerObservabilityRoutes(v1, deps)
@@ -270,6 +273,46 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 			v1.POST("/ai/analyze", aiHandlers.Analyze)
 			v1.POST("/ai/recommend", aiHandlers.Recommend)
 			v1.PUT("/ai/default-provider", aiHandlers.SetDefaultProvider)
+
+			// RAG knowledge base endpoints
+			if deps.Repos != nil && deps.Repos.RAG != nil && deps.AIManager != nil {
+				tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+				ragHandlers := NewRAGHandlers(deps.Repos.RAG, deps.AIManager, tenantID)
+				v1.POST("/rag/ingest", ragHandlers.IngestDocument)
+				v1.POST("/rag/search", ragHandlers.Search)
+				v1.GET("/rag/documents", ragHandlers.ListDocuments)
+				v1.DELETE("/rag/documents/:id", ragHandlers.DeleteDocument)
+				v1.GET("/rag/stats", ragHandlers.GetStats)
+				v1.POST("/rag/reindex", ragHandlers.Reindex)
+				v1.POST("/rag/chat", ragHandlers.ChatWithRAG)
+				v1.POST("/rag/chat/stream", ragHandlers.ChatStreamWithRAG)
+			}
+
+			// Proactive AI endpoints (risk assessment, doc generation, cost analysis)
+			// These are registered but will return 503 if components aren't initialized
+			tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+			proactiveHandlers := NewProactiveAIHandlers(nil, nil, nil, nil, tenantID)
+			v1.POST("/ai/risk/assess", proactiveHandlers.AssessDeploymentRisk)
+			v1.POST("/ai/docs/generate", proactiveHandlers.GenerateServiceDocs)
+			v1.POST("/ai/docs/generate/:service", proactiveHandlers.GenerateServiceDocs)
+			v1.GET("/ai/cost/analyze", proactiveHandlers.AnalyzeCosts)
+			v1.GET("/ai/cost/stale", proactiveHandlers.DetectStaleResources)
+
+			// NL Workflow Builder endpoint
+			workflowBuilderHandlers := NewWorkflowBuilderHandlers(nil)
+			v1.POST("/ai/workflow/build", workflowBuilderHandlers.BuildWorkflow)
+			v1.POST("/ai/workflow/preview", workflowBuilderHandlers.PreviewWorkflow)
+
+			// Multi-agent coordination endpoints
+			multiAgentHandlers := NewMultiAgentHandlers(nil, nil)
+			v1.POST("/ai/agents/route", multiAgentHandlers.Route)
+			v1.POST("/ai/agents/coordinate", multiAgentHandlers.Coordinate)
+			v1.GET("/ai/agents/specialists", multiAgentHandlers.ListSpecialists)
+
+			// IDE webhook integration
+			webhookHandlers := NewAIWebhookHandlers(deps.AIManager)
+			v1.POST("/ai/webhook/suggest", webhookHandlers.Suggest)
+			v1.GET("/ai/webhook/status", webhookHandlers.Status)
 		}
 	}
 

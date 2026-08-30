@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { connections as connectionsAPI, organization, type ConnectionType } from '@/lib/api';
 import { friendlyError, type FriendlyError } from '@/lib/errors';
 import { useRouter } from 'next/navigation';
@@ -52,6 +52,18 @@ export default function SetupPage() {
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
+
+  const handleCancel = useCallback(() => {
+    router.push('/');
+  }, [router]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleCancel]);
 
   const currentStep = STEPS[step];
 
@@ -342,6 +354,12 @@ export default function SetupPage() {
 
           {/* Actions */}
           <div className="flex gap-3 mt-8">
+            <button
+              onClick={handleCancel}
+              className="px-6 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--bg)] transition-colors"
+            >
+              Cancel
+            </button>
             {step > 0 && currentStep.id !== 'welcome' && (
               <button
                 onClick={handleBack}

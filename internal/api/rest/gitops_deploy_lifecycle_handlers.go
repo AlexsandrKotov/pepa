@@ -110,7 +110,7 @@ func completePromotion(deps Dependencies, c *gin.Context, d *repository.Deployme
 		respondInternalError(c, err)
 		return
 	}
-	simulateDeployLifecycle(deps, promoted.ID)
+	triggerGitOpsSync(deps, promoted)
 
 	logAudit(deps, c, "promote", "deployment", d.ID.String(), nil, gin.H{
 		"from_stage": d.Stage, "to_stage": next.Key, "new_deployment": promoted.ID.String(),

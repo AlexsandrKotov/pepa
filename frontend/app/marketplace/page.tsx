@@ -255,10 +255,11 @@ export default function MarketplacePage() {
                   ) : (
                     <button
                       onClick={() => handleInstall(plugin.id)}
-                      disabled={installing === plugin.id}
+                      disabled={installing === plugin.id || !plugin.binary_available}
                       className="btn btn-primary btn-sm disabled:opacity-50"
+                      title={!plugin.binary_available ? 'Plugin binary is not built yet. Run `make plugins` to build it.' : ''}
                     >
-                      {installing === plugin.id ? 'Installing...' : 'Install'}
+                      {installing === plugin.id ? 'Installing...' : !plugin.binary_available ? 'No Binary' : 'Install'}
                     </button>
                   )}
                 </div>

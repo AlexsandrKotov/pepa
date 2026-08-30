@@ -54,6 +54,7 @@ Environment:
 	cmd.AddCommand(newHealthCmd())
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newRoleCmd())
+	cmd.AddCommand(newAICmd())
 
 	return cmd
 }

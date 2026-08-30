@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import { clusters, deployments, blueprints as blueprintsAPI, type Cluster, type ServiceBlueprint } from '@/lib/api';
+import { clusters, deployments, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, dockerHosts, type Cluster, type ServiceBlueprint, type BlueprintGroup, type DockerHost } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
 
 interface PipelineItem {
@@ -10,6 +10,7 @@ interface PipelineItem {
   blueprint: ServiceBlueprint;
   namespace: string;
   enabled: boolean;
+  groupName?: string; // from which group this was added
 }
 
 const categoryIcons: Record<string, string> = {
@@ -32,19 +33,45 @@ export default function PipelineBuilderPage() {
   const [showValuesFor, setShowValuesFor] = useState<string | null>(null);
   const deployLogRef = useRef<HTMLDivElement>(null);
 
+  // Groups & Docker support
+  const [groups, setGroups] = useState<BlueprintGroup[]>([]);
+  const [dockerHostList, setDockerHostList] = useState<DockerHost[]>([]);
+  const [targetType, setTargetType] = useState<'kubernetes' | 'docker'>('kubernetes');
+  const [selectedDockerHostId, setSelectedDockerHostId] = useState('');
+  const [groupsExpanded, setGroupsExpanded] = useState(true);
+
   useEffect(() => {
     blueprintsAPI.list().then(res => setBlueprints(res.blueprints || [])).catch(() => {});
     clusters.list().then(d => setClusterList(d.clusters || [])).catch(() => {});
+    blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
+    dockerHosts.list().then(res => setDockerHostList(res.docker_hosts || [])).catch(() => {});
   }, []);
 
-  const addToPipeline = (bp: ServiceBlueprint) => {
+  const addToPipeline = (bp: ServiceBlueprint, groupName?: string) => {
     if (pipeline.some(p => p.blueprint.id === bp.id)) return;
     setPipeline([...pipeline, {
       id: `pi-${Date.now()}`,
       blueprint: bp,
       namespace: globalNamespace,
       enabled: true,
+      groupName,
     }]);
+  };
+
+  const addGroupToPipeline = (group: BlueprintGroup) => {
+    const newItems: PipelineItem[] = [];
+    for (const bp of group.blueprints) {
+      if (!pipeline.some(p => p.blueprint.id === bp.id) && !newItems.some(ni => ni.blueprint.id === bp.id)) {
+        newItems.push({
+          id: `pi-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          blueprint: bp,
+          namespace: globalNamespace,
+          enabled: true,
+          groupName: group.name,
+        });
+      }
+    }
+    if (newItems.length > 0) setPipeline([...pipeline, ...newItems]);
   };
 
   const removeFromPipeline = (id: string) => {
@@ -85,13 +112,19 @@ export default function PipelineBuilderPage() {
   };
 
   const handleDeploy = async () => {
-    if (!selectedClusterId) {
-      setDeployStatus({ type: 'error', text: 'Select a target cluster first' });
-      return;
-    }
     const enabledItems = pipeline.filter(p => p.enabled);
     if (enabledItems.length === 0) {
       setDeployStatus({ type: 'error', text: 'Add at least one service to the pipeline' });
+      return;
+    }
+
+    // Validate target
+    if (targetType === 'kubernetes' && !selectedClusterId) {
+      setDeployStatus({ type: 'error', text: 'Select a target cluster first' });
+      return;
+    }
+    if (targetType === 'docker' && !selectedDockerHostId) {
+      setDeployStatus({ type: 'error', text: 'Select a Docker host first' });
       return;
     }
 
@@ -107,13 +140,50 @@ export default function PipelineBuilderPage() {
     };
 
     try {
+      // Docker target: deploy docker_compose blueprints to Docker host
+      if (targetType === 'docker') {
+        const dockerItems = enabledItems.filter(i => i.blueprint.source_type === 'docker_compose');
+        const nonDockerItems = enabledItems.filter(i => i.blueprint.source_type !== 'docker_compose');
+        if (nonDockerItems.length > 0) {
+          addLog(`⚠ Skipping ${nonDockerItems.length} non-Compose blueprint(es) (not compatible with Docker target)`);
+        }
+        if (dockerItems.length === 0) {
+          addLog('⚠ No docker_compose blueprints in pipeline to deploy');
+          setDeployStatus({ type: 'error', text: 'No docker_compose blueprints to deploy' });
+          setDeploying(false);
+          return;
+        }
+        for (let i = 0; i < dockerItems.length; i++) {
+          const item = dockerItems[i];
+          const bp = item.blueprint;
+          addLog(`Deploying ${i + 1}/${dockerItems.length}: ${bp.name} → Docker host`);
+          try {
+            await blueprintsAPI.deployDocker(bp.id, selectedDockerHostId);
+            addLog(`✓ ${bp.name} deployed to Docker host`);
+          } catch (err) {
+            addLog(`✗ ${bp.name} failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
+        }
+        setDeployStatus({ type: 'success', text: `Docker deployment complete: ${dockerItems.length} service(s).` });
+        setDeploying(false);
+        return;
+      }
+
+      // Kubernetes target
       for (let i = 0; i < enabledItems.length; i++) {
         const item = enabledItems[i];
         const bp = item.blueprint;
-        addLog(`Deploying ${i + 1}/${enabledItems.length}: ${bp.name} \u2192 ${item.namespace}`);
+
+        // Skip docker_compose blueprints when deploying to K8s
+        if (bp.source_type === 'docker_compose') {
+          addLog(`⚠ Skipping ${bp.name} (docker_compose — use Docker target)`);
+          continue;
+        }
+
+        addLog(`Deploying ${i + 1}/${enabledItems.length}: ${bp.name} → ${item.namespace}`);
 
         if (bp.source_type !== 'container' && !bp.chart_name) {
-          addLog(`\u26A0 WARNING: ${bp.name} has no chart_name set. Edit the blueprint to add it.`);
+          addLog(`⚠ WARNING: ${bp.name} has no chart_name set. Edit the blueprint to add it.`);
         }
 
         const result = await deployments.create({
@@ -143,7 +213,7 @@ export default function PipelineBuilderPage() {
         });
 
         if (result?.id) submittedIds.push(result.id);
-        addLog(`\u2713 ${bp.name} submitted (ID: ${(result?.id || 'unknown').slice(0, 8)})`);
+        addLog(`✓ ${bp.name} submitted (ID: ${(result?.id || 'unknown').slice(0, 8)})`);
       }
 
       // Poll deployment status for submitted deployments
@@ -205,6 +275,7 @@ export default function PipelineBuilderPage() {
 
   const enabledCount = pipeline.filter(p => p.enabled).length;
   const selectedCluster = clusterList.find(c => c.id === selectedClusterId);
+  const selectedDockerHost = dockerHostList.find(h => h.id === selectedDockerHostId);
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -216,9 +287,12 @@ export default function PipelineBuilderPage() {
             <h1 className="page-title-modern">Pipeline Builder</h1>
             <ConceptHelp term="pipeline" />
           </div>
-          <p className="page-subtitle-modern">Compose multi-service deployment pipelines and deploy to any cluster</p>
+          <p className="page-subtitle-modern">Compose multi-service deployment pipelines and deploy to clusters or Docker hosts</p>
         </div>
         <div className="flex gap-2">
+          <Link href="/blueprint-groups" className="btn btn-secondary text-[12px]">
+            Manage Groups
+          </Link>
           <Link href="/pipeline-blueprints" className="btn btn-secondary text-[12px]">
             Manage Blueprints
           </Link>
@@ -226,9 +300,42 @@ export default function PipelineBuilderPage() {
       </div>
 
       <div className="grid grid-cols-12 gap-6 page-animate-up page-delay-1">
-        {/* Left: Available Blueprints */}
+        {/* Left: Available Blueprints + Groups */}
         <div className="col-span-3">
           <div className="card sticky top-6">
+            {/* Blueprint Groups Section */}
+            {groups.length > 0 && (
+              <div className="border-b border-[var(--border)]">
+                <button
+                  onClick={() => setGroupsExpanded(!groupsExpanded)}
+                  className="card-header w-full !flex-row !items-center !justify-between"
+                >
+                  <h2 className="text-[13px] font-medium text-[var(--text-primary)]">📂 Blueprint Groups</h2>
+                  <span className="text-[11px] text-[var(--text-tertiary)]">{groupsExpanded ? '▾' : '▸'} {groups.length}</span>
+                </button>
+                {groupsExpanded && (
+                  <div className="px-3 pb-3 space-y-1">
+                    {groups.map(group => (
+                      <button
+                        key={group.id}
+                        onClick={() => addGroupToPipeline(group)}
+                        className="w-full text-left p-2 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all text-[12px] cursor-pointer group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-[var(--text-primary)] truncate">{group.name}</span>
+                          <span className="text-[10px] text-[var(--text-tertiary)] ml-1 flex-shrink-0">{group.blueprints.length} bp</span>
+                        </div>
+                        {group.description && (
+                          <p className="text-[10px] text-[var(--text-tertiary)] truncate mt-0.5">{group.description}</p>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Individual Blueprints */}
             <div className="card-header">
               <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Available Blueprints</h2>
               <span className="text-[11px] text-[var(--text-tertiary)]">{blueprints.length}</span>
@@ -267,7 +374,8 @@ export default function PipelineBuilderPage() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-[var(--text-primary)] truncate">{bp.name}</div>
                           <div className="text-[10px] text-[var(--text-tertiary)] font-mono truncate">
-                            {bp.source_type === 'container' ? bp.image : bp.chart_url}
+                            {bp.source_type === 'docker_compose' ? `Compose (${bp.compose_yaml?.split('\n').length || 0} lines)` :
+                             bp.source_type === 'container' ? bp.image : bp.chart_url}
                           </div>
                         </div>
                         {inPipeline && <span className="text-green-600 text-[10px]">✓ added</span>}
@@ -288,25 +396,64 @@ export default function PipelineBuilderPage() {
               <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Target Configuration</h2>
             </div>
             <div className="card-body">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Target Cluster</label>
-                  <select value={selectedClusterId} onChange={e => setSelectedClusterId(e.target.value)} className="input">
-                    <option value="">Select cluster...</option>
-                    {clusterList.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.environment}) — {c.kubernetes_version}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Default Namespace</label>
-                  <input value={globalNamespace} onChange={e => {
-                    setGlobalNamespace(e.target.value);
-                    setPipeline(pipeline.map(p => ({ ...p, namespace: e.target.value })));
-                  }} className="input" placeholder="default" />
-                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Applied to all services. Override per-service below.</p>
+              {/* Target Type Selector */}
+              <div className="mb-3">
+                <label className="label">Target Type</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setTargetType('kubernetes')}
+                    className={`flex-1 text-[12px] px-3 py-2 rounded-lg border transition-all ${
+                      targetType === 'kubernetes'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    ☸️ Kubernetes Cluster
+                  </button>
+                  <button
+                    onClick={() => setTargetType('docker')}
+                    className={`flex-1 text-[12px] px-3 py-2 rounded-lg border transition-all ${
+                      targetType === 'docker'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    🐙 Docker Host
+                  </button>
                 </div>
               </div>
+              {targetType === 'kubernetes' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Target Cluster</label>
+                    <select value={selectedClusterId} onChange={e => setSelectedClusterId(e.target.value)} className="input">
+                      <option value="">Select cluster...</option>
+                      {clusterList.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.environment}) — {c.kubernetes_version}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Default Namespace</label>
+                    <input value={globalNamespace} onChange={e => {
+                      setGlobalNamespace(e.target.value);
+                      setPipeline(pipeline.map(p => ({ ...p, namespace: e.target.value })));
+                    }} className="input" placeholder="default" />
+                    <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Applied to all services. Override per-service below.</p>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="label">Docker Host</label>
+                  <select value={selectedDockerHostId} onChange={e => setSelectedDockerHostId(e.target.value)} className="input">
+                    <option value="">Select Docker host...</option>
+                    {dockerHostList.map(h => (
+                      <option key={h.id} value={h.id}>{h.name} ({h.host_type}) — {h.status}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Only docker_compose blueprints will be deployed to the Docker host.</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -369,13 +516,15 @@ export default function PipelineBuilderPage() {
                             <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">{item.blueprint.name}</span>
                             {!item.enabled && <span className="text-[10px] px-1.5 py-0.5 bg-[var(--border-light)] text-[var(--text-tertiary)] rounded flex-shrink-0">disabled</span>}
                             <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
-                              <input
-                                value={item.namespace}
-                                onChange={e => updateItemNamespace(item.id, e.target.value)}
-                                className="input text-[11px] w-24 py-1"
-                                placeholder="namespace"
-                                title="Override namespace for this service"
-                              />
+                              {targetType === 'kubernetes' && item.blueprint.source_type !== 'docker_compose' && (
+                                <input
+                                  value={item.namespace}
+                                  onChange={e => updateItemNamespace(item.id, e.target.value)}
+                                  className="input text-[11px] w-24 py-1"
+                                  placeholder="namespace"
+                                  title="Override namespace for this service"
+                                />
+                              )}
                               <button
                                 onClick={() => toggleEnabled(item.id)}
                                 className={`text-[11px] px-2 py-1 rounded transition-colors ${
@@ -402,24 +551,35 @@ export default function PipelineBuilderPage() {
                               item.blueprint.source_type === 'container' ? 'bg-blue-500/10 text-blue-500' :
                               item.blueprint.source_type === 'helm_git' ? 'bg-violet-500/10 text-violet-500' :
                               item.blueprint.source_type === 'helm_http' ? 'bg-orange-500/10 text-orange-600' :
+                              item.blueprint.source_type === 'docker_compose' ? 'bg-cyan-500/10 text-cyan-500' :
                               'bg-teal-500/10 text-teal-500'
                             }`}>
                               {item.blueprint.source_type === 'container' ? '🐳 Container' :
                                item.blueprint.source_type === 'helm_git' ? '🔀 Git' :
                                item.blueprint.source_type === 'helm_http' ? '🌐 HTTP' :
+                               item.blueprint.source_type === 'docker_compose' ? '🐙 Compose' :
                                '📦 OCI'}
                             </span>
+                            {item.groupName && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] bg-indigo-500/10 text-indigo-500 flex-shrink-0" title="From group">
+                                📂 {item.groupName}
+                              </span>
+                            )}
                             <span className="text-[10px] font-mono text-[var(--text-tertiary)] truncate max-w-[200px]">
-                              {item.blueprint.source_type === 'container'
-                                ? item.blueprint.image
-                                : item.blueprint.chart_name
-                                  ? `${item.blueprint.chart_url}/${item.blueprint.chart_name}`
-                                  : item.blueprint.chart_url}
+                              {item.blueprint.source_type === 'docker_compose'
+                                ? `Compose (${item.blueprint.compose_yaml?.split('\n').length || 0} lines)`
+                                : item.blueprint.source_type === 'container'
+                                  ? item.blueprint.image
+                                  : item.blueprint.chart_name
+                                    ? `${item.blueprint.chart_url}/${item.blueprint.chart_name}`
+                                    : item.blueprint.chart_url}
                             </span>
-                            {item.blueprint.source_type !== 'container' && !item.blueprint.chart_name && (
+                            {item.blueprint.source_type !== 'container' && item.blueprint.source_type !== 'docker_compose' && !item.blueprint.chart_name && (
                               <span className="text-[9px] text-red-500 flex-shrink-0" title="Chart name not set - edit blueprint">⚠ no chart name</span>
                             )}
-                            <span className="text-[10px] text-[var(--text-tertiary)] flex-shrink-0 bg-[var(--border-light)] px-1.5 py-0.5 rounded">{item.blueprint.cpu} / {item.blueprint.memory} ×{item.blueprint.replicas}</span>
+                            {item.blueprint.source_type !== 'docker_compose' && (
+                              <span className="text-[10px] text-[var(--text-tertiary)] flex-shrink-0 bg-[var(--border-light)] px-1.5 py-0.5 rounded">{item.blueprint.cpu} / {item.blueprint.memory} ×{item.blueprint.replicas}</span>
+                            )}
                             {item.blueprint.values_yaml && (
                               <button
                                 onClick={() => setShowValuesFor(showValuesFor === item.id ? null : item.id)}
@@ -477,16 +637,29 @@ export default function PipelineBuilderPage() {
               <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Deploy Summary</h2>
             </div>
             <div className="card-body space-y-4">
-              {/* Cluster info */}
+              {/* Target info */}
               <div>
-                <p className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider mb-1">Cluster</p>
-                {selectedCluster ? (
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${selectedCluster.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
-                    <span className="text-[12px] font-medium text-[var(--text-primary)]">{selectedCluster.name}</span>
-                  </div>
+                <p className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider mb-1">
+                  {targetType === 'kubernetes' ? 'Cluster' : 'Docker Host'}
+                </p>
+                {targetType === 'kubernetes' ? (
+                  selectedCluster ? (
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${selectedCluster.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
+                      <span className="text-[12px] font-medium text-[var(--text-primary)]">{selectedCluster.name}</span>
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-[var(--text-tertiary)]">Not selected</p>
+                  )
                 ) : (
-                  <p className="text-[12px] text-[var(--text-tertiary)]">Not selected</p>
+                  selectedDockerHost ? (
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${selectedDockerHost.status === 'connected' ? 'bg-green-500' : 'bg-gray-300'}`} />
+                      <span className="text-[12px] font-medium text-[var(--text-primary)]">{selectedDockerHost.name}</span>
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-[var(--text-tertiary)]">Not selected</p>
+                  )
                 )}
               </div>
 
@@ -527,7 +700,7 @@ export default function PipelineBuilderPage() {
               {/* Deploy button */}
               <button
                 onClick={handleDeploy}
-                disabled={deploying || !selectedClusterId || enabledCount === 0}
+                disabled={deploying || (targetType === 'kubernetes' && !selectedClusterId) || (targetType === 'docker' && !selectedDockerHostId) || enabledCount === 0}
                 className="btn btn-primary w-full justify-center"
               >
                 {deploying ? (
@@ -539,12 +712,12 @@ export default function PipelineBuilderPage() {
                     Deploying...
                   </span>
                 ) : (
-                  `Deploy ${enabledCount} service(s) → ${selectedCluster?.name || 'cluster'}`
+                  `Deploy ${enabledCount} service(s) → ${targetType === 'kubernetes' ? (selectedCluster?.name || 'cluster') : (selectedDockerHost?.name || 'docker host')}`
                 )}
               </button>
-              {(!selectedClusterId || enabledCount === 0) && (
+              {((targetType === 'kubernetes' && !selectedClusterId) || (targetType === 'docker' && !selectedDockerHostId) || enabledCount === 0) && (
                 <p className="text-[10px] text-[var(--text-tertiary)] text-center">
-                  {!selectedClusterId ? 'Select a cluster to deploy' : 'Add services to the pipeline'}
+                  {enabledCount === 0 ? 'Add services to the pipeline' : targetType === 'kubernetes' ? 'Select a cluster to deploy' : 'Select a Docker host'}
                 </p>
               )}
             </div>

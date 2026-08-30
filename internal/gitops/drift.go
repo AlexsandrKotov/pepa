@@ -105,8 +105,8 @@ func DetectDrift(repo *Repo, gitResources []Resource, liveResources []LiveResour
 
 	gitMap := make(map[string]Resource, len(gitResources))
 	for _, gr := range gitResources {
-		// Only compare FluxCD-managed resources
-		if !isFluxManaged(gr.Kind) {
+		// Compare resources managed by the repo's engine (FluxCD or ArgoCD)
+		if !isEngineManaged(gr.Kind, repo.EngineType) {
 			continue
 		}
 		key := resourceKey(gr.Kind, gr.Name, gr.Namespace)
@@ -237,7 +237,7 @@ func DetectDriftMultiCluster(repo *Repo, gitResources []Resource, liveByCluster 
 
 		gitMap := make(map[string]Resource, len(clusterGitResources))
 		for _, gr := range clusterGitResources {
-			if !isFluxManaged(gr.Kind) {
+			if !isEngineManaged(gr.Kind, repo.EngineType) {
 				continue
 			}
 			key := resourceKey(gr.Kind, gr.Name, gr.Namespace)
@@ -345,6 +345,29 @@ func isFluxManaged(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// isArgoManaged returns true if the resource kind is managed by ArgoCD.
+func isArgoManaged(kind string) bool {
+	switch kind {
+	case "Application", "ApplicationSet":
+		return true
+	}
+	return false
+}
+
+// isEngineManaged returns true if the resource kind is managed by the given engine.
+// engineType: "fluxcd", "argocd", or "auto"/"" (matches both).
+func isEngineManaged(kind, engineType string) bool {
+	switch engineType {
+	case "fluxcd":
+		return isFluxManaged(kind)
+	case "argocd":
+		return isArgoManaged(kind)
+	default:
+		// auto or unknown: accept both
+		return isFluxManaged(kind) || isArgoManaged(kind)
+	}
 }
 
 // filterResourcesByCluster returns resources that match the given cluster name.

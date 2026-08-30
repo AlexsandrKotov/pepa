@@ -22,24 +22,27 @@ func registerServiceBlueprintRoutes(r *gin.RouterGroup, deps Dependencies) {
 }
 
 type serviceBlueprintRow struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	SourceType   string   `json:"source_type"`
-	HelmRepoID   *string  `json:"helm_repo_id"`
-	Image        string   `json:"image"`
-	ChartURL     string   `json:"chart_url"`
-	ChartName    string   `json:"chart_name"`
-	ChartVersion string   `json:"chart_version"`
-	ChartPath    string   `json:"chart_path"`
-	Namespace    string   `json:"namespace"`
-	ValuesYAML   string   `json:"values_yaml"`
-	CPU          string   `json:"cpu"`
-	Memory       string   `json:"memory"`
-	Replicas     int      `json:"replicas"`
-	Ports        []int    `json:"ports"`
-	Category     string   `json:"category"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	SourceType    string    `json:"source_type"`
+	HelmRepoID    *string   `json:"helm_repo_id"`
+	Image         string    `json:"image"`
+	ChartURL      string    `json:"chart_url"`
+	ChartName     string    `json:"chart_name"`
+	ChartVersion  string    `json:"chart_version"`
+	ChartPath     string    `json:"chart_path"`
+	Namespace     string    `json:"namespace"`
+	ValuesYAML    string    `json:"values_yaml"`
+	CPU           string    `json:"cpu"`
+	Memory        string    `json:"memory"`
+	Replicas      int       `json:"replicas"`
+	Ports         []int     `json:"ports"`
+	Category      string    `json:"category"`
+	GroupID       *string   `json:"group_id"`
+	GroupPosition int       `json:"group_position"`
+	ComposeYAML   string    `json:"compose_yaml"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func listServiceBlueprints(deps Dependencies) gin.HandlerFunc {
@@ -52,6 +55,8 @@ func listServiceBlueprints(deps Dependencies) gin.HandlerFunc {
 			       COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
 			       COALESCE(memory,'128Mi'), COALESCE(replicas,1),
 			       COALESCE(ports,'{}'), COALESCE(category,'general'),
+			       group_id, COALESCE(group_position,0),
+			       COALESCE(compose_yaml,''),
 			       created_at
 			FROM service_blueprints
 			ORDER BY created_at DESC
@@ -72,6 +77,7 @@ func listServiceBlueprints(deps Dependencies) gin.HandlerFunc {
 				&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 				&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 				&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
+				&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
 				&bp.CreatedAt,
 			); err != nil {
 				respondInternalError(c, err)
@@ -97,22 +103,25 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 		userID := auth.GetUserID(c)
 
 		var req struct {
-			Name         string  `json:"name" binding:"required"`
-			Description  string  `json:"description"`
-			SourceType   string  `json:"source_type" binding:"required"`
-			HelmRepoID   *string `json:"helm_repo_id"`
-			Image        string  `json:"image"`
-			ChartURL     string  `json:"chart_url"`
-			ChartName    string  `json:"chart_name"`
-			ChartVersion string  `json:"chart_version"`
-			ChartPath    string  `json:"chart_path"`
-			Namespace    string  `json:"namespace"`
-			ValuesYAML   string  `json:"values_yaml"`
-			CPU          string  `json:"cpu"`
-			Memory       string  `json:"memory"`
-			Replicas     int     `json:"replicas"`
-			Ports        []int   `json:"ports"`
-			Category     string  `json:"category"`
+			Name          string  `json:"name" binding:"required"`
+			Description   string  `json:"description"`
+			SourceType    string  `json:"source_type" binding:"required"`
+			HelmRepoID    *string `json:"helm_repo_id"`
+			Image         string  `json:"image"`
+			ChartURL      string  `json:"chart_url"`
+			ChartName     string  `json:"chart_name"`
+			ChartVersion  string  `json:"chart_version"`
+			ChartPath     string  `json:"chart_path"`
+			Namespace     string  `json:"namespace"`
+			ValuesYAML    string  `json:"values_yaml"`
+			CPU           string  `json:"cpu"`
+			Memory        string  `json:"memory"`
+			Replicas      int     `json:"replicas"`
+			Ports         []int   `json:"ports"`
+			Category      string  `json:"category"`
+			GroupID       *string `json:"group_id"`
+			GroupPosition int     `json:"group_position"`
+			ComposeYAML   string  `json:"compose_yaml"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -144,8 +153,9 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			INSERT INTO service_blueprints
 				(name, description, source_type, helm_repo_id, image, chart_url,
 				 chart_name, chart_version, chart_path, namespace, values_yaml,
-				 cpu, memory, replicas, ports, category, created_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+				 cpu, memory, replicas, ports, category, group_id, group_position,
+				 compose_yaml, created_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 			RETURNING id, name, COALESCE(description,''), source_type,
 			          helm_repo_id, COALESCE(image,''), COALESCE(chart_url,''),
 			          COALESCE(chart_name,''), COALESCE(chart_version,''),
@@ -153,19 +163,23 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			          COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
 			          COALESCE(memory,'128Mi'), COALESCE(replicas,1),
 			          COALESCE(ports,'{}'), COALESCE(category,'general'),
+			          group_id, COALESCE(group_position,0),
+			          COALESCE(compose_yaml,''),
 			          created_at
 		`,
 			req.Name, req.Description, req.SourceType, req.HelmRepoID,
 			req.Image, req.ChartURL, req.ChartName, req.ChartVersion,
 			req.ChartPath, req.Namespace, req.ValuesYAML,
 			req.CPU, req.Memory, req.Replicas, req.Ports,
-			req.Category, userID,
+			req.Category, req.GroupID, req.GroupPosition,
+			req.ComposeYAML, userID,
 		).Scan(
 			&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
 			&helmRepoID, &bp.Image, &bp.ChartURL,
 			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
+			&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
 			&bp.CreatedAt,
 		)
 		if err != nil {
@@ -202,6 +216,8 @@ func getServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			       COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
 			       COALESCE(memory,'128Mi'), COALESCE(replicas,1),
 			       COALESCE(ports,'{}'), COALESCE(category,'general'),
+			       group_id, COALESCE(group_position,0),
+			       COALESCE(compose_yaml,''),
 			       created_at
 			FROM service_blueprints WHERE id = $1
 		`, id).Scan(
@@ -210,6 +226,7 @@ func getServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
+			&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
 			&bp.CreatedAt,
 		)
 		if err != nil {
@@ -235,22 +252,25 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name         string  `json:"name" binding:"required"`
-			Description  string  `json:"description"`
-			SourceType   string  `json:"source_type" binding:"required"`
-			HelmRepoID   *string `json:"helm_repo_id"`
-			Image        string  `json:"image"`
-			ChartURL     string  `json:"chart_url"`
-			ChartName    string  `json:"chart_name"`
-			ChartVersion string  `json:"chart_version"`
-			ChartPath    string  `json:"chart_path"`
-			Namespace    string  `json:"namespace"`
-			ValuesYAML   string  `json:"values_yaml"`
-			CPU          string  `json:"cpu"`
-			Memory       string  `json:"memory"`
-			Replicas     int     `json:"replicas"`
-			Ports        []int   `json:"ports"`
-			Category     string  `json:"category"`
+			Name          string  `json:"name" binding:"required"`
+			Description   string  `json:"description"`
+			SourceType    string  `json:"source_type" binding:"required"`
+			HelmRepoID    *string `json:"helm_repo_id"`
+			Image         string  `json:"image"`
+			ChartURL      string  `json:"chart_url"`
+			ChartName     string  `json:"chart_name"`
+			ChartVersion  string  `json:"chart_version"`
+			ChartPath     string  `json:"chart_path"`
+			Namespace     string  `json:"namespace"`
+			ValuesYAML    string  `json:"values_yaml"`
+			CPU           string  `json:"cpu"`
+			Memory        string  `json:"memory"`
+			Replicas      int     `json:"replicas"`
+			Ports         []int   `json:"ports"`
+			Category      string  `json:"category"`
+			GroupID       *string `json:"group_id"`
+			GroupPosition int     `json:"group_position"`
+			ComposeYAML   string  `json:"compose_yaml"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -284,7 +304,8 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 				image=$6, chart_url=$7, chart_name=$8, chart_version=$9,
 				chart_path=$10, namespace=$11, values_yaml=$12,
 				cpu=$13, memory=$14, replicas=$15, ports=$16,
-				category=$17, updated_at=NOW()
+				category=$17, group_id=$18, group_position=$19,
+				compose_yaml=$20, updated_at=NOW()
 			WHERE id=$1
 			RETURNING id, name, COALESCE(description,''), source_type,
 			          helm_repo_id, COALESCE(image,''), COALESCE(chart_url,''),
@@ -293,19 +314,23 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			          COALESCE(values_yaml,''), COALESCE(cpu,'100m'),
 			          COALESCE(memory,'128Mi'), COALESCE(replicas,1),
 			          COALESCE(ports,'{}'), COALESCE(category,'general'),
+			          group_id, COALESCE(group_position,0),
+			          COALESCE(compose_yaml,''),
 			          created_at
 		`,
 			id, req.Name, req.Description, req.SourceType, req.HelmRepoID,
 			req.Image, req.ChartURL, req.ChartName, req.ChartVersion,
 			req.ChartPath, req.Namespace, req.ValuesYAML,
 			req.CPU, req.Memory, req.Replicas, req.Ports,
-			req.Category,
+			req.Category, req.GroupID, req.GroupPosition,
+			req.ComposeYAML,
 		).Scan(
 			&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
 			&helmRepoID, &bp.Image, &bp.ChartURL,
 			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
+			&bp.GroupID, &bp.GroupPosition, &bp.ComposeYAML,
 			&bp.CreatedAt,
 		)
 		if err != nil {

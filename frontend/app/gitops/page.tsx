@@ -67,6 +67,46 @@ function kindIcon(kind: string) {
   }
 }
 
+function healthBadge(health: string) {
+  const styles: Record<string, string> = {
+    healthy: 'bg-emerald-500/15 text-emerald-600',
+    degraded: 'bg-red-500/15 text-red-500',
+    progressing: 'bg-blue-500/15 text-blue-500',
+    suspended: 'bg-yellow-500/15 text-yellow-600',
+    unknown: 'bg-[var(--border-light)] text-[var(--text-tertiary)]',
+  };
+  const labels: Record<string, string> = {
+    healthy: 'Healthy',
+    degraded: 'Degraded',
+    progressing: 'Progressing',
+    suspended: 'Suspended',
+    unknown: 'Unknown',
+  };
+  return (
+    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${styles[health] || styles.unknown}`}>
+      {labels[health] || health}
+    </span>
+  );
+}
+
+function syncBadge(syncStatus: string) {
+  const styles: Record<string, string> = {
+    synced: 'bg-emerald-500/15 text-emerald-600',
+    out_of_sync: 'bg-orange-500/15 text-orange-500',
+    unknown: 'bg-[var(--border-light)] text-[var(--text-tertiary)]',
+  };
+  const labels: Record<string, string> = {
+    synced: 'Synced',
+    out_of_sync: 'Out of Sync',
+    unknown: 'Unknown',
+  };
+  return (
+    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${styles[syncStatus] || styles.unknown}`}>
+      {labels[syncStatus] || syncStatus}
+    </span>
+  );
+}
+
 export default function GitOpsPage() {
   const router = useRouter();
   const [repos, setRepos] = useState<GitopsRepo[]>([]);
@@ -89,6 +129,7 @@ export default function GitOpsPage() {
   const [loadingResources, setLoadingResources] = useState(false);
   const [selectedResource, setSelectedResource] = useState<GitopsResource | null>(null);
   const [resourceFilter, setResourceFilter] = useState('');
+  const [liveStatusMap, setLiveStatusMap] = useState<Record<string, { health: string; sync_status: string; revision: string; cluster: string }>>({});
 
   // YAML Editor state
   const [editMode, setEditMode] = useState(false);
@@ -212,8 +253,13 @@ export default function GitOpsPage() {
     try {
       const res = await gitops.listResources(repo.id);
       setResources(res.resources || []);
+      // Fetch live cluster status in parallel
+      gitops.liveStatus(repo.id).then(live => {
+        setLiveStatusMap(live.status_map || {});
+      }).catch(() => setLiveStatusMap({}));
     } catch {
       setResources([]);
+      setLiveStatusMap({});
     }
     setLoadingResources(false);
   };
@@ -465,7 +511,10 @@ export default function GitOpsPage() {
                         <span>{kind}</span>
                         <span className="text-[var(--text-tertiary)] font-normal">({items.length})</span>
                       </div>
-                      {items.map((r, idx) => (
+                      {items.map((r, idx) => {
+                        const statusKey = `${r.kind}/${r.namespace || 'default'}/${r.name}`;
+                        const liveStatus = liveStatusMap[statusKey];
+                        return (
                         <button
                           key={`${r.name}-${idx}`}
                           onClick={() => { setSelectedResource(r); setEditMode(false); setCommitResult(null); setPreviewDiff(''); setShowDiffPreview(false); }}
@@ -478,15 +527,20 @@ export default function GitOpsPage() {
                                 <span className="text-[10px] text-[var(--text-tertiary)] ml-2">ns: {r.namespace}</span>
                               )}
                             </div>
-                            {r.chart && (
-                              <span className="text-[10px] font-mono text-[var(--text-tertiary)]">
-                                {r.chart}{r.version ? `@${r.version}` : ''}
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {liveStatus && healthBadge(liveStatus.health)}
+                              {liveStatus && syncBadge(liveStatus.sync_status)}
+                              {r.chart && (
+                                <span className="text-[10px] font-mono text-[var(--text-tertiary)]">
+                                  {r.chart}{r.version ? `@${r.version}` : ''}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="text-[10px] text-[var(--text-tertiary)] font-mono mt-0.5">{r.file_path}</div>
                         </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
@@ -618,6 +672,32 @@ export default function GitOpsPage() {
                     {selectedResource.chart && <DetailRow label="Chart" value={`${selectedResource.chart}${selectedResource.version ? ` @ ${selectedResource.version}` : ''}`} />}
                     {selectedResource.repo && <DetailRow label="Source Ref" value={selectedResource.repo} />}
                   </div>
+
+                  {/* Live Cluster Status */}
+                  {(() => {
+                    const statusKey = `${selectedResource.kind}/${selectedResource.namespace || 'default'}/${selectedResource.name}`;
+                    const liveStatus = liveStatusMap[statusKey];
+                    if (!liveStatus) return null;
+                    return (
+                      <div>
+                        <h4 className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Live Cluster Status</h4>
+                        <div className="bg-[var(--bg)] rounded-lg p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-[var(--text-tertiary)] w-20">Health:</span>
+                            {healthBadge(liveStatus.health)}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-[var(--text-tertiary)] w-20">Sync:</span>
+                            {syncBadge(liveStatus.sync_status)}
+                          </div>
+                          {liveStatus.revision && (
+                            <DetailRow label="Revision" value={liveStatus.revision.substring(0, 8)} mono />
+                          )}
+                          <DetailRow label="Cluster" value={liveStatus.cluster} />
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ArgoCD Source */}
                   {selectedResource.source && (

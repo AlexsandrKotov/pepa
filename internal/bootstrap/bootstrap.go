@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/ai"
@@ -65,12 +66,23 @@ type Components struct {
 	UserCredentialRepo  *repository.UserCredentialRepository
 	CredentialShareRepo *repository.CredentialShareRepository
 	OrganizationRepo    *repository.OrganizationRepository
+	RAGRepo             *repository.RAGRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
 
 	// AI
-	AIManager *ai.Manager
+	AIManager        *ai.Manager
+	RAGPipeline      *ai.RAGPipeline
+	IngestionEngine  *ai.IngestionEngine
+	RAGWatcher       *ai.RAGWatcher
+	RiskScorer       *ai.RiskScorer
+	DocGenerator     *ai.DocGenerator
+	CostAdvisor      *ai.CostAdvisor
+	StaleDetector    *ai.StaleDetector
+	WorkflowBuilder  *ai.WorkflowBuilder
+	Specialists      *ai.SpecialistRegistry
+	Coordinator      *ai.AgentCoordinator
 }
 
 // Bootstrap loads configuration, connects to infrastructure, discovers plugins,
@@ -196,6 +208,7 @@ func Bootstrap() (*Components, error) {
 		UserCredentialRepo:  repository.NewUserCredentialRepository(db.Pool),
 		CredentialShareRepo: repository.NewCredentialShareRepository(db.Pool),
 		OrganizationRepo:    repository.NewOrganizationRepository(db.Pool),
+		RAGRepo:             repository.NewRAGRepository(db),
 	}
 
 	// Initialize pipeline provider registry
@@ -346,6 +359,52 @@ func Bootstrap() (*Components, error) {
 	})
 	slog.Info("AI manager initialized", "tools", len(aiManager.ToolRegistry().List()))
 
+	// Initialize RAG components (requires an AI provider for embeddings)
+	if provider, err := aiManager.DefaultProvider(); err == nil {
+		tenantID := uuid.MustParse(database.DefaultTenantID)
+
+		// Ingestion engine
+		ingestionEngine := ai.NewIngestionEngine(db.Pool, c.RAGRepo, provider)
+		c.IngestionEngine = ingestionEngine
+
+		// RAG query pipeline
+		ragPipeline := ai.NewRAGPipeline(provider, provider, aiManager.ToolRegistry(), c.RAGRepo, tenantID)
+		c.RAGPipeline = ragPipeline
+
+		// Event-driven watcher
+		ragWatcher := ai.NewRAGWatcher(eventBus, ingestionEngine, tenantID)
+		ragWatcher.Start()
+		ragWatcher.PeriodicReindex(15 * time.Minute)
+		c.RAGWatcher = ragWatcher
+
+		// Proactive AI components
+		c.RiskScorer = ai.NewRiskScorer(db.Pool, provider, tenantID)
+		c.DocGenerator = ai.NewDocGenerator(db.Pool, provider, tenantID)
+		c.CostAdvisor = ai.NewCostAdvisor(db.Pool, provider, tenantID)
+		c.StaleDetector = ai.NewStaleDetector(db.Pool, provider, tenantID)
+		c.WorkflowBuilder = ai.NewWorkflowBuilder(db.Pool, provider, tenantID)
+
+		// Multi-agent architecture
+		mode := ai.AgentModeNative
+		c.Specialists = ai.InitSpecialists(provider, aiManager.ToolRegistry(), mode)
+		c.Coordinator = ai.NewAgentCoordinator(c.Specialists, provider)
+
+		slog.Info("RAG pipeline and proactive AI components initialized")
+
+		// Seed knowledge base with built-in documentation (runs in background).
+		// This ingests PEPA's own docs so the AI assistant can answer questions
+		// about the platform from the start.
+		go func() {
+			seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer seedCancel()
+			if err := ai.SeedDocuments(seedCtx, ingestionEngine, tenantID); err != nil {
+				slog.Warn("RAG: documentation seeding failed", "error", err)
+			}
+		}()
+	} else {
+		slog.Warn("RAG pipeline not initialized: no AI provider configured")
+	}
+
 	return c, nil
 }
 
@@ -465,6 +524,9 @@ func (c *Components) StartEventBus() {
 
 // Shutdown gracefully stops all components.
 func (c *Components) Shutdown(ctx context.Context) {
+	if c.RAGWatcher != nil {
+		c.RAGWatcher.Stop()
+	}
 	c.EventBus.Stop()
 	c.PluginMgr.Shutdown(ctx)
 	_ = c.Redis.Close()
