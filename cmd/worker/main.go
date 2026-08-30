@@ -38,11 +38,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Reconcile discovered plugins with the DB: only explicitly installed
-	// plugins are active, so workflow/pipeline steps can't hit uninstalled ones.
-	comp.AutoRegisterPlugins()
-
 	// Start event bus
+	// (AutoRegisterPlugins runs asynchronously inside Bootstrap after plugin discovery)
 	comp.StartEventBus()
 
 	// Initialize workflow engine

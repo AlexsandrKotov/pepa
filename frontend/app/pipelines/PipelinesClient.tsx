@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable } from '@/lib/api';
+import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable, type WorkflowInfo } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import { VaultInput, useVaultPicker } from '@/components/VaultInput';
 import GitRepoPicker from '@/components/GitRepoPicker';
@@ -161,6 +161,7 @@ function PipelinesClientContent({
   const [loadingLog, setLoadingLog] = useState(false);
   const [ciVariables, setCIVariables] = useState<CIVariable[]>([]);
   const [loadingCIVars, setLoadingCIVariables] = useState(false);
+  const [providerWorkflows, setProviderWorkflows] = useState<WorkflowInfo[]>([]);
   const [engineCIVariables, setEngineCIVariables] = useState<CIVariable[]>([]);
   const [loadingEngineCIVars, setLoadingEngineCIVariables] = useState(false);
 
@@ -508,11 +509,13 @@ function PipelinesClientContent({
     setProviderTriggerRef(ref || pickerValue.branch || 'main');
     setProviderTriggerVars({});
     setCIVariables([]);
+    setProviderWorkflows([]);
     setShowProviderTrigger(true);
     setLoadingCIVariables(true);
     try {
       const data = await gitBrowser.parseCIConfig(selectedProviderConn.id, pickerValue.repo_id, ref || pickerValue.branch || 'main');
       setCIVariables(data.variables || []);
+      setProviderWorkflows(data.workflows || []);
       // If preset values provided, use them; otherwise pre-fill from CI config defaults
       if (presetVars) {
         setProviderTriggerVars({ ...presetVars });
@@ -525,6 +528,7 @@ function PipelinesClientContent({
       }
     } catch {
       setCIVariables([]);
+      setProviderWorkflows([]);
     } finally {
       setLoadingCIVariables(false);
     }
@@ -1266,6 +1270,45 @@ function PipelinesClientContent({
                 />
               </div>
 
+              {/* Workflow info from parsed CI config */}
+              {!loadingCIVars && providerWorkflows.length > 0 && (
+                <div className="pt-2 border-t">
+                  <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Workflows</p>
+                  <div className="space-y-2">
+                    {providerWorkflows.map((wf, idx) => (
+                      <div key={idx} className="p-2.5 bg-[var(--bg)] rounded-md border border-[var(--border)]">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-sm font-mono font-medium text-[var(--text-primary)]">{wf.name || wf.file}</span>
+                          {!wf.has_dispatch && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600 font-medium" title="Add workflow_dispatch trigger to enable manual runs">no dispatch</span>
+                          )}
+                          {wf.has_dispatch && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 font-medium">dispatchable</span>
+                          )}
+                        </div>
+                        {wf.file !== (wf.name || wf.file) && (
+                          <p className="text-[10px] text-[var(--text-tertiary)] mb-1 font-mono">{wf.file}</p>
+                        )}
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          <span className="text-[10px] text-[var(--text-tertiary)]">Triggers:</span>
+                          {wf.triggers.map(t => (
+                            <span key={t} className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${t === 'workflow_dispatch' ? 'bg-emerald-500/15 text-emerald-600' : 'bg-sky-500/15 text-sky-600'}`}>{t}</span>
+                          ))}
+                        </div>
+                        {wf.jobs.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            <span className="text-[10px] text-[var(--text-tertiary)]">Jobs:</span>
+                            {wf.jobs.map(j => (
+                              <span key={j} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)] font-mono">{j}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="pt-2 border-t">
                 <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Variables</p>
                 {loadingCIVars ? (
@@ -1418,11 +1461,18 @@ function PipelinesClientContent({
               )}
             </div>
 
-            <div className="flex justify-end gap-2 p-6 pt-3 border-t shrink-0">
-              <button onClick={() => setShowProviderTrigger(false)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">Cancel</button>
-              <button onClick={handleProviderTrigger} disabled={providerTriggering} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium disabled:opacity-50">
-                {providerTriggering ? 'Triggering...' : 'Trigger Pipeline'}
-              </button>
+            <div className="flex flex-col gap-2 p-6 pt-3 border-t shrink-0">
+              {!loadingCIVars && providerWorkflows.length > 0 && !providerWorkflows.some(w => w.has_dispatch) && (
+                <p className="text-xs text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md px-3 py-2">
+                  None of the workflows have a <code className="font-mono font-medium">workflow_dispatch</code> trigger. Add it to your workflow YAML to enable manual triggering via the GitHub API.
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowProviderTrigger(false)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">Cancel</button>
+                <button onClick={handleProviderTrigger} disabled={providerTriggering} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium disabled:opacity-50">
+                  {providerTriggering ? 'Triggering...' : 'Trigger Pipeline'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

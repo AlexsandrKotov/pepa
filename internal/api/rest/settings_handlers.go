@@ -20,6 +20,9 @@ func registerSettingsRoutes(r *gin.RouterGroup, deps Dependencies) {
 	{
 		settings.GET("", listSettings(deps))
 		settings.GET("/oidc/config", getOIDCAdminConfig(deps))
+		settings.GET("/azure/config", getAzureADAdminConfig(deps))
+		settings.GET("/ldap/config", getLDAPAdminConfig(deps))
+		settings.POST("/ldap/test", testLDAPConnection(deps))
 		settings.GET("/:key", getSetting(deps))
 		settings.PUT("/:key", updateSetting(deps))
 		settings.DELETE("/:key", deleteSetting(deps))
@@ -87,14 +90,23 @@ func updateSetting(deps Dependencies) gin.HandlerFunc {
 			applyAISettings(deps, c.Request.Context(), req.Value, tenantID)
 		case "oidc":
 			applyOIDCSettings(deps, req.Value)
+		case "azure_ad":
+			applyAzureADSettings(deps, req.Value)
+		case "ldap":
+			applyLDAPSettings(deps, req.Value)
 		}
 
-		// For OIDC, strip client_secret from the value persisted in the DB
-		// so it is never stored in plaintext. The runtime config already holds
-		// the real secret; the admin endpoint re-masks it on read.
+		// Strip secrets from values persisted in the DB so they are never
+		// stored in plaintext. The runtime config holds the real secrets;
+		// admin endpoints re-mask them on read.
 		storeValue := req.Value
-		if key == "oidc" {
+		switch key {
+		case "oidc":
 			storeValue = stripOIDCSecret(req.Value)
+		case "azure_ad":
+			storeValue = stripAzureSecret(req.Value)
+		case "ldap":
+			storeValue = stripLDAPSecret(req.Value)
 		}
 
 		// Persist to DB
@@ -422,6 +434,209 @@ func getOIDCAdminConfig(deps Dependencies) gin.HandlerFunc {
 			"client_secret": maskedSecret,
 			"redirect_url":  oidc.RedirectURL,
 			"scopes":        oidc.Scopes,
+		})
+	}
+}
+
+// ── Azure AD settings ────────────────────────────────────────────────────────
+
+// applyAzureADSettings reads the Azure AD settings JSON and updates the runtime config.
+func applyAzureADSettings(deps Dependencies, value json.RawMessage) {
+	var azureSettings struct {
+		Enabled      bool   `json:"enabled"`
+		TenantID     string `json:"tenant_id"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		RedirectURL  string `json:"redirect_url"`
+	}
+	if err := json.Unmarshal(value, &azureSettings); err != nil {
+		slog.Error("failed to unmarshal Azure AD settings", "error", err)
+		return
+	}
+	deps.Config.Auth.AzureAD.Enabled = azureSettings.Enabled
+	deps.Config.Auth.AzureAD.TenantID = azureSettings.TenantID
+	deps.Config.Auth.AzureAD.ClientID = azureSettings.ClientID
+	// If the client_secret contains mask characters, keep the existing secret
+	if azureSettings.ClientSecret != "" && !strings.Contains(azureSettings.ClientSecret, "\u2022") {
+		deps.Config.Auth.AzureAD.ClientSecret = azureSettings.ClientSecret
+	}
+	deps.Config.Auth.AzureAD.RedirectURL = azureSettings.RedirectURL
+	slog.Info("Azure AD settings updated at runtime", "enabled", azureSettings.Enabled, "tenant_id", azureSettings.TenantID)
+}
+
+// stripAzureSecret removes client_secret from the JSON so it is not persisted in the DB.
+func stripAzureSecret(value json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(value, &m); err != nil {
+		return value
+	}
+	delete(m, "client_secret")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return value
+	}
+	return out
+}
+
+// getAzureADAdminConfig returns the current Azure AD configuration for the admin settings page.
+// The client_secret is masked for security.
+func getAzureADAdminConfig(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		azure := deps.Config.Auth.AzureAD
+		maskedSecret := ""
+		if azure.ClientSecret != "" {
+			if len(azure.ClientSecret) > 4 {
+				maskedSecret = azure.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+			} else {
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":       azure.Enabled,
+			"tenant_id":     azure.TenantID,
+			"client_id":     azure.ClientID,
+			"client_secret": maskedSecret,
+			"redirect_url":  azure.RedirectURL,
+		})
+	}
+}
+
+// ── LDAP settings ────────────────────────────────────────────────────────────
+
+// applyLDAPSettings reads the LDAP settings JSON and updates the runtime config.
+func applyLDAPSettings(deps Dependencies, value json.RawMessage) {
+	var ldapSettings struct {
+		Enabled            bool              `json:"enabled"`
+		URL                string            `json:"url"`
+		BindDN             string            `json:"bind_dn"`
+		BindPassword       string            `json:"bind_password"`
+		BaseDN             string            `json:"base_dn"`
+		UserFilter         string            `json:"user_filter"`
+		GroupFilter        string            `json:"group_filter"`
+		EmailAttr          string            `json:"email_attr"`
+		NameAttr           string            `json:"name_attr"`
+		StartTLS           bool              `json:"start_tls"`
+		InsecureSkipVerify bool              `json:"insecure_skip_verify"`
+		GroupMapping       map[string]string `json:"group_mapping"`
+	}
+	if err := json.Unmarshal(value, &ldapSettings); err != nil {
+		slog.Error("failed to unmarshal LDAP settings", "error", err)
+		return
+	}
+	deps.Config.Auth.LDAP.Enabled = ldapSettings.Enabled
+	deps.Config.Auth.LDAP.URL = ldapSettings.URL
+	deps.Config.Auth.LDAP.BindDN = ldapSettings.BindDN
+	// If the bind_password contains mask characters, keep the existing password
+	if ldapSettings.BindPassword != "" && !strings.Contains(ldapSettings.BindPassword, "\u2022") {
+		deps.Config.Auth.LDAP.BindPassword = ldapSettings.BindPassword
+	}
+	deps.Config.Auth.LDAP.BaseDN = ldapSettings.BaseDN
+	deps.Config.Auth.LDAP.UserFilter = ldapSettings.UserFilter
+	deps.Config.Auth.LDAP.GroupFilter = ldapSettings.GroupFilter
+	deps.Config.Auth.LDAP.EmailAttr = ldapSettings.EmailAttr
+	deps.Config.Auth.LDAP.NameAttr = ldapSettings.NameAttr
+	deps.Config.Auth.LDAP.StartTLS = ldapSettings.StartTLS
+	deps.Config.Auth.LDAP.InsecureSkipVerify = ldapSettings.InsecureSkipVerify
+	if ldapSettings.GroupMapping != nil {
+		deps.Config.Auth.LDAP.GroupMapping = ldapSettings.GroupMapping
+	}
+	slog.Info("LDAP settings updated at runtime", "enabled", ldapSettings.Enabled, "url", ldapSettings.URL)
+}
+
+// stripLDAPSecret removes bind_password from the JSON so it is not persisted in the DB.
+func stripLDAPSecret(value json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(value, &m); err != nil {
+		return value
+	}
+	delete(m, "bind_password")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return value
+	}
+	return out
+}
+
+// getLDAPAdminConfig returns the current LDAP configuration for the admin settings page.
+// The bind_password is masked for security.
+func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ldap := deps.Config.Auth.LDAP
+		maskedPassword := ""
+		if ldap.BindPassword != "" {
+			if len(ldap.BindPassword) > 4 {
+				maskedPassword = ldap.BindPassword[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+			} else {
+				maskedPassword = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":             ldap.Enabled,
+			"url":                 ldap.URL,
+			"bind_dn":             ldap.BindDN,
+			"bind_password":       maskedPassword,
+			"base_dn":             ldap.BaseDN,
+			"user_filter":         ldap.UserFilter,
+			"group_filter":        ldap.GroupFilter,
+			"email_attr":          ldap.EmailAttr,
+			"name_attr":           ldap.NameAttr,
+			"start_tls":           ldap.StartTLS,
+			"insecure_skip_verify": ldap.InsecureSkipVerify,
+			"group_mapping":       ldap.GroupMapping,
+		})
+	}
+}
+
+// testLDAPConnection tests an LDAP connection with the provided or current configuration.
+func testLDAPConnection(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			URL                string `json:"url"`
+			BindDN             string `json:"bind_dn"`
+			BindPassword       string `json:"bind_password"`
+			BaseDN             string `json:"base_dn"`
+			StartTLS           bool   `json:"start_tls"`
+			InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Use provided values or fall back to runtime config
+		cfg := deps.Config.Auth.LDAP
+		if req.URL != "" {
+			cfg.URL = req.URL
+		}
+		if req.BindDN != "" {
+			cfg.BindDN = req.BindDN
+		}
+		if req.BindPassword != "" && !strings.Contains(req.BindPassword, "\u2022") {
+			cfg.BindPassword = req.BindPassword
+		}
+		if req.BaseDN != "" {
+			cfg.BaseDN = req.BaseDN
+		}
+		cfg.StartTLS = req.StartTLS
+		cfg.InsecureSkipVerify = req.InsecureSkipVerify
+
+		if cfg.URL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "LDAP server URL is required"})
+			return
+		}
+
+		ldapProvider := auth.NewLDAPProvider(cfg)
+		if err := ldapProvider.TestConnection(c.Request.Context()); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "error",
+				"message": fmt.Sprintf("LDAP connection failed: %v", err),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "connected",
+			"message": "Successfully connected to LDAP server",
 		})
 	}
 }

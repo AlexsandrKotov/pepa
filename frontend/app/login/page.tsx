@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { login, bootstrapActivate, getBootstrapStatus, resetMyPassword, getMe, setStoredUser, getOIDCConfig, getOIDCLoginURL } from '@/lib/api';
+import { login, bootstrapActivate, getBootstrapStatus, resetMyPassword, getMe, setStoredUser, getOIDCConfig, getOIDCLoginURL, getAzureConfig, getAzureLoginURL, getLDAPConfig, ldapLogin } from '@/lib/api';
 
 type Phase = 'loading' | 'login' | 'bootstrap' | 'change-password' | 'connecting';
 
@@ -20,6 +20,12 @@ export default function LoginPage() {
 
   // OIDC state
   const [oidcEnabled, setOIDCEnabled] = useState(false);
+
+  // Azure AD state
+  const [azureEnabled, setAzureEnabled] = useState(false);
+
+  // LDAP state
+  const [ldapEnabled, setLDAPEnabled] = useState(false);
 
   // Refs to read actual DOM values — guards against browser autofill
   // not triggering React's onChange (controlled input desync).
@@ -66,6 +72,16 @@ export default function LoginPage() {
     }).catch(() => {
       setOIDCEnabled(false);
     });
+    getAzureConfig().then((config) => {
+      setAzureEnabled(config.enabled);
+    }).catch(() => {
+      setAzureEnabled(false);
+    });
+    getLDAPConfig().then((config) => {
+      setLDAPEnabled(config.enabled);
+    }).catch(() => {
+      setLDAPEnabled(false);
+    });
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -77,6 +93,20 @@ export default function LoginPage() {
       // React's onChange, leaving state out of sync with the DOM.
       const actualEmail = emailRef.current?.value || email;
       const actualPassword = passwordRef.current?.value || password;
+
+      // If LDAP is enabled, try LDAP first, then fall back to local auth
+      if (ldapEnabled) {
+        try {
+          await ldapLogin(actualEmail, actualPassword);
+          // LDAP login succeeded
+          window.dispatchEvent(new Event('pepa:auth-changed'));
+          window.location.href = '/';
+          return;
+        } catch {
+          // LDAP failed — fall through to local auth
+        }
+      }
+
       const data = await login(actualEmail, actualPassword);
       if (data.must_change_password) {
         // Store the current password for the change-password step
@@ -448,8 +478,8 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {/* OIDC/SSO button */}
-            {oidcEnabled && (
+            {/* External auth buttons */}
+            {(oidcEnabled || azureEnabled) && (
               <div className="mt-6">
                 <div className="relative">
                   <div className="absolute inset-0 flex items-center">
@@ -460,25 +490,56 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      setError('');
-                      const { redirect_url } = await getOIDCLoginURL();
-                      window.location.href = redirect_url;
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : 'SSO login failed');
-                    }
-                  }}
-                  className="mt-4 w-full bg-white/5 border border-white/10 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 transition-all flex items-center justify-center gap-2"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                  </svg>
-                  Sign in with SSO
-                </button>
+                <div className="mt-4 space-y-3">
+                  {oidcEnabled && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setError('');
+                          const { redirect_url } = await getOIDCLoginURL();
+                          window.location.href = redirect_url;
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'SSO login failed');
+                        }
+                      }}
+                      className="w-full bg-white/5 border border-white/10 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 transition-all flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                      </svg>
+                      Sign in with SSO
+                    </button>
+                  )}
+
+                  {azureEnabled && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          setError('');
+                          const { redirect_url } = await getAzureLoginURL();
+                          window.location.href = redirect_url;
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Azure AD login failed');
+                        }
+                      }}
+                      className="w-full bg-white/5 border border-white/10 text-white py-2.5 px-4 rounded-lg text-sm font-medium hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-white/20 focus:ring-offset-2 transition-all flex items-center justify-center gap-2"
+                    >
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M11.5 2.5h-9l9 19.5-3-9.5h8l-5-10zm1 0h9l-9 19.5 3-9.5h-8l5-10z" opacity="0.8"/>
+                      </svg>
+                      Sign in with Azure AD
+                    </button>
+                  )}
+                </div>
               </div>
+            )}
+
+            {ldapEnabled && (
+              <p className="mt-3 text-[11px] text-white/30 text-center">
+                LDAP authentication is active — use your directory credentials to sign in.
+              </p>
             )}
             </>
           )}

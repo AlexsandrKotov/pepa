@@ -70,6 +70,8 @@ type AuthConfig struct {
 	TokenExpiry     time.Duration `mapstructure:"token_expiry"`
 	RefreshExpiry   time.Duration `mapstructure:"refresh_expiry"`
 	OIDC            OIDCConfig    `mapstructure:"oidc"`
+	AzureAD         AzureADConfig `mapstructure:"azure_ad"`
+	LDAP            LDAPConfig    `mapstructure:"ldap"`
 }
 
 type OIDCConfig struct {
@@ -79,6 +81,32 @@ type OIDCConfig struct {
 	ClientSecret string   `mapstructure:"client_secret"`
 	RedirectURL  string   `mapstructure:"redirect_url"`
 	Scopes       []string `mapstructure:"scopes"`
+}
+
+// AzureADConfig holds Azure AD (Microsoft Entra ID) OIDC settings.
+// Azure AD uses the standard OIDC flow with Microsoft-specific endpoints.
+type AzureADConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`
+	TenantID     string `mapstructure:"tenant_id"`
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURL  string `mapstructure:"redirect_url"`
+}
+
+// LDAPConfig holds LDAP/Active Directory authentication settings.
+type LDAPConfig struct {
+	Enabled            bool              `mapstructure:"enabled"`
+	URL                string            `mapstructure:"url"`
+	BindDN             string            `mapstructure:"bind_dn"`
+	BindPassword       string            `mapstructure:"bind_password"`
+	BaseDN             string            `mapstructure:"base_dn"`
+	UserFilter         string            `mapstructure:"user_filter"`
+	GroupFilter        string            `mapstructure:"group_filter"`
+	EmailAttr          string            `mapstructure:"email_attr"`
+	NameAttr           string            `mapstructure:"name_attr"`
+	StartTLS           bool              `mapstructure:"start_tls"`
+	InsecureSkipVerify bool              `mapstructure:"insecure_skip_verify"`
+	GroupMapping       map[string]string `mapstructure:"group_mapping"`
 }
 
 type PluginConfig struct {

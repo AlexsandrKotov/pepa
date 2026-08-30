@@ -156,35 +156,6 @@ func Bootstrap() (*Components, error) {
 	pluginMgr := engine.NewManager(cfg.Plugin, db)
 	providerRegistry := provider.NewRegistry()
 
-	// Load plugins asynchronously to avoid blocking API startup.
-	// Each plugin spawns a subprocess with gRPC — loading 15+ plugins
-	// can take 2+ minutes on slow disks. The provider registry is
-	// thread-safe, so plugins become available as they finish loading.
-	go func() {
-		if err := pluginMgr.DiscoverAndLoad(); err != nil {
-			slog.Warn("plugin discovery failed", "error", err)
-		}
-
-		// Sync loaded plugins into the provider registry
-		for name, info := range pluginMgr.ListLoadedPlugins() {
-			grpcClient, err := pluginMgr.GetGRPCClient(name)
-			if err != nil {
-				slog.Warn("could not get gRPC client for plugin", "plugin", name, "error", err)
-				continue
-			}
-			providerRegistry.Register(&provider.PluginEntry{
-				Name:     name,
-				Type:     info.PluginType,
-				Info:     info,
-				Executor: grpcClient,
-				Enabled:  true,
-			})
-		}
-		slog.Info("provider registry loaded", "count", len(providerRegistry.List()))
-	}()
-
-	slog.Info("provider registry initialized, plugins loading in background")
-
 	// Initialize event bus and job queue
 	eventBus := events.NewBus(redis.Client)
 	jobQueue := queue.New(redis.Client)
@@ -237,6 +208,39 @@ func Bootstrap() (*Components, error) {
 	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
 	c.PipelineRegistry = pipelineRegistry
 	slog.Info("pipeline registry initialized", "adapters", pipelineRegistry.List())
+
+	// Load plugins asynchronously to avoid blocking API startup.
+	// Each plugin spawns a subprocess with gRPC — loading 15+ plugins
+	// can take 2+ minutes on slow disks. The provider registry is
+	// thread-safe, so plugins become available as they finish loading.
+	// AutoRegisterPlugins runs here (after discovery) to avoid a race
+	// condition where it could execute before async discovery completes.
+	go func() {
+		if err := pluginMgr.DiscoverAndLoad(); err != nil {
+			slog.Warn("plugin discovery failed", "error", err)
+		}
+
+		// Sync loaded plugins into the provider registry
+		for name, info := range pluginMgr.ListLoadedPlugins() {
+			grpcClient, err := pluginMgr.GetGRPCClient(name)
+			if err != nil {
+				slog.Warn("could not get gRPC client for plugin", "plugin", name, "error", err)
+				continue
+			}
+			providerRegistry.Register(&provider.PluginEntry{
+				Name:     name,
+				Type:     info.PluginType,
+				Info:     info,
+				Executor: grpcClient,
+				Enabled:  true,
+			})
+		}
+		slog.Info("provider registry loaded", "count", len(providerRegistry.List()))
+
+		// Reconcile discovered plugins with the database now that all
+		// binaries are loaded and the provider registry is populated.
+		c.AutoRegisterPlugins()
+	}()
 
 	// Initialize AI manager
 	aiManager := ai.NewManager()
@@ -346,21 +350,37 @@ func Bootstrap() (*Components, error) {
 }
 
 // AutoRegisterPlugins reconciles plugins discovered on disk with the database.
-// Discovery alone does NOT activate a plugin: binaries that were never installed
-// (or were uninstalled) are unloaded so they cannot serve any actions — an
-// explicit install from the Marketplace is required. Plugins that are already
-// registered keep the admin's enabled/disabled choice across restarts.
+// Plugins with binaries on disk but no DB row are auto-registered (enabled,
+// status=running) so the Marketplace correctly reflects their active state.
+// Only explicitly "uninstalled" plugins are unloaded. Plugins that already
+// have a DB row preserve the admin's enabled/disabled choice across restarts.
 func (c *Components) AutoRegisterPlugins() {
 	for name, info := range c.PluginMgr.ListLoadedPlugins() {
 		existing, _ := c.PluginRepo.GetByName(context.Background(), name)
 
-		if existing == nil || existing.Status == "uninstalled" {
-			// Discovered on disk but never installed (or explicitly uninstalled).
-			// Unload the subprocess and drop it from the provider registry so it
-			// stays inactive until an admin installs it from the Marketplace.
+		if existing != nil && existing.Status == "uninstalled" {
+			// Explicitly uninstalled by admin — keep unloaded.
 			_ = c.PluginMgr.UnloadPlugin(name)
 			c.ProviderRegistry.Unregister(name)
-			slog.Info("plugin discovered but not installed, kept inactive", "plugin", name, "version", info.Version)
+			slog.Info("plugin uninstalled, kept inactive", "plugin", name)
+			continue
+		}
+
+		if existing == nil {
+			// Plugin binary found on disk but no DB row — auto-register it
+			// so the Marketplace shows it as installed (not orphaned).
+			plugin := &repository.Plugin{
+				Name:    name,
+				Version: info.Version,
+				Type:    info.PluginType,
+				Status:  "running",
+				Enabled: true,
+			}
+			if err := c.PluginRepo.Register(context.Background(), plugin); err != nil {
+				slog.Warn("failed to auto-register plugin", "plugin", name, "error", err)
+			} else {
+				slog.Info("plugin auto-registered", "plugin", name, "version", info.Version)
+			}
 			continue
 		}
 

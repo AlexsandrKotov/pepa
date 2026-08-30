@@ -43,9 +43,8 @@ func main() {
 	}
 	slog.Info("database migrations completed")
 
-	// Auto-register plugins in DB
-	comp.AutoRegisterPlugins()
 	// Migrate plain text credentials to encrypted storage
+	// (AutoRegisterPlugins runs asynchronously inside Bootstrap after plugin discovery)
 	comp.MigrateEncryptCredentials()
 
 	// Seed default public Helm repositories

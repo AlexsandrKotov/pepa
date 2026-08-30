@@ -34,6 +34,15 @@ func registerAuthRoutes(r *gin.Engine, deps Dependencies) {
 		public.GET("/oidc/config", oidcConfigHandler(deps))
 		public.GET("/oidc/login", oidcLoginHandler(deps))
 		public.GET("/oidc/callback", oidcCallbackHandler(deps))
+
+		// Azure AD routes (public, no JWT required)
+		public.GET("/azure/config", azureConfigHandler(deps))
+		public.GET("/azure/login", azureLoginHandler(deps))
+		public.GET("/azure/callback", azureCallbackHandler(deps))
+
+		// LDAP routes (public, no JWT required)
+		public.POST("/ldap/login", ldapLoginHandler(deps))
+		public.GET("/ldap/config", ldapConfigHandler(deps))
 	}
 
 	// Protected routes (JWT required)

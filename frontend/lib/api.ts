@@ -370,6 +370,101 @@ export async function getOIDCAdminConfig(): Promise<{
   return fetchAPI('/api/v1/settings/oidc/config');
 }
 
+// ── Azure AD API ─────────────────────────────────────────────
+
+export async function getAzureConfig(): Promise<{ enabled: boolean }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/azure/config`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    return { enabled: false };
+  }
+  return res.json();
+}
+
+export async function getAzureLoginURL(): Promise<{ redirect_url: string }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/azure/login`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to get Azure AD login URL');
+  }
+  return res.json();
+}
+
+export async function getAzureAdminConfig(): Promise<{
+  enabled: boolean;
+  tenant_id: string;
+  client_id: string;
+  client_secret: string;
+  redirect_url: string;
+}> {
+  return fetchAPI('/api/v1/settings/azure/config');
+}
+
+// ── LDAP API ─────────────────────────────────────────────────
+
+export async function getLDAPConfig(): Promise<{ enabled: boolean }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/ldap/config`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    return { enabled: false };
+  }
+  return res.json();
+}
+
+export async function ldapLogin(email: string, password: string): Promise<{
+  token: string;
+  expires_in: number;
+  user: { id: string; email: string; name: string; roles: string[] };
+}> {
+  const res = await fetch(`${getBase()}/api/v1/auth/ldap/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'LDAP login failed');
+  }
+  return res.json();
+}
+
+export async function getLDAPAdminConfig(): Promise<{
+  enabled: boolean;
+  url: string;
+  bind_dn: string;
+  bind_password: string;
+  base_dn: string;
+  user_filter: string;
+  group_filter: string;
+  email_attr: string;
+  name_attr: string;
+  start_tls: boolean;
+  insecure_skip_verify: boolean;
+  group_mapping: Record<string, string>;
+}> {
+  return fetchAPI('/api/v1/settings/ldap/config');
+}
+
+export async function testLDAPConnection(config: {
+  url: string;
+  bind_dn: string;
+  bind_password: string;
+  base_dn: string;
+  start_tls: boolean;
+  insecure_skip_verify: boolean;
+}): Promise<{ status: string; message: string }> {
+  return fetchAPI('/api/v1/settings/ldap/test', {
+    method: 'POST',
+    body: JSON.stringify(config),
+  });
+}
+
 export async function getMe(): Promise<{ user: { id: string; email: string; name: string; is_active: boolean }; roles: string[]; permissions: string[] }> {
   // Use raw fetch instead of fetchAPI to avoid the global 401→redirect behavior.
   // getMe() is called on page load to check session validity — a 401 here
@@ -1652,6 +1747,14 @@ export interface CIVariable {
   required?: boolean;
 }
 
+export interface WorkflowInfo {
+  file: string;
+  name: string;
+  triggers: string[];
+  jobs: string[];
+  has_dispatch: boolean;
+}
+
 export const gitBrowser = {
   listGroups: (connectionId: string, parentId?: string) =>
     connections.browse(connectionId, 'list_groups', parentId ? { parent_id: parentId } : undefined)
@@ -1679,6 +1782,7 @@ export const gitBrowser = {
       .then(r => ({
         variables: ((r.data as any)?.variables || []) as CIVariable[],
         has_ci_file: ((r.data as any)?.has_ci_file || false) as boolean,
+        workflows: ((r.data as any)?.workflows || []) as WorkflowInfo[],
       })),
 };
 

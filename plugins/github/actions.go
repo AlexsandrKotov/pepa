@@ -25,6 +25,17 @@ type githubCIVar struct {
 	Required    bool     `json:"required"`
 }
 
+// escapeRepoPath splits an "owner/repo" string and re-joins it safely for use in URL paths.
+// url.PathEscape encodes "/" as "%2F" which breaks GitHub API paths, so we escape each
+// segment individually.
+func escapeRepoPath(repoID string) string {
+	parts := strings.SplitN(repoID, "/", 2)
+	if len(parts) == 2 {
+		return url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
+	}
+	return url.PathEscape(repoID)
+}
+
 // githubAPIRequest performs an authenticated GitHub API request.
 func githubAPIRequest(ctx context.Context, baseURL, token, path string) ([]byte, error) {
 	u := strings.TrimRight(baseURL, "/") + path
@@ -213,7 +224,7 @@ func (p *GitHubPlugin) getBranches(ctx context.Context, baseURL, token string, p
 		return nil, fmt.Errorf("repo_id is required (owner/repo format)")
 	}
 
-	path := fmt.Sprintf("/repos/%s/branches?per_page=100", url.PathEscape(req.RepoID))
+	path := fmt.Sprintf("/repos/%s/branches?per_page=100", escapeRepoPath(req.RepoID))
 	data, err := githubAPIRequest(ctx, baseURL, token, path)
 	if err != nil {
 		return nil, fmt.Errorf("list branches: %w", err)
@@ -258,7 +269,7 @@ func (p *GitHubPlugin) listPipelines(ctx context.Context, baseURL, token string,
 		return nil, fmt.Errorf("repo_id is required (owner/repo format)")
 	}
 
-	path := fmt.Sprintf("/repos/%s/actions/runs?per_page=20", url.PathEscape(req.RepoID))
+	path := fmt.Sprintf("/repos/%s/actions/runs?per_page=20", escapeRepoPath(req.RepoID))
 	data, err := githubAPIRequest(ctx, baseURL, token, path)
 	if err != nil {
 		return nil, fmt.Errorf("list pipeline runs: %w", err)
@@ -324,7 +335,7 @@ func (p *GitHubPlugin) triggerPipeline(ctx context.Context, baseURL, token strin
 	}
 
 	// First, get the workflow ID (use the first active workflow)
-	workflowsPath := fmt.Sprintf("/repos/%s/actions/workflows", req.RepoID)
+	workflowsPath := fmt.Sprintf("/repos/%s/actions/workflows", escapeRepoPath(req.RepoID))
 	data, err := githubAPIRequest(ctx, baseURL, token, workflowsPath)
 	if err != nil {
 		return nil, fmt.Errorf("list workflows: %w", err)
@@ -345,7 +356,7 @@ func (p *GitHubPlugin) triggerPipeline(ctx context.Context, baseURL, token strin
 
 	// Trigger the first workflow
 	workflowID := wfResult.Workflows[0].ID
-	dispatchPath := fmt.Sprintf("/repos/%s/actions/workflows/%d/dispatches", url.PathEscape(req.RepoID), workflowID)
+	dispatchPath := fmt.Sprintf("/repos/%s/actions/workflows/%d/dispatches", escapeRepoPath(req.RepoID), workflowID)
 
 	u := strings.TrimRight(baseURL, "/") + dispatchPath
 	dispatchBody, err := json.Marshal(map[string]string{"ref": req.Ref})
@@ -380,6 +391,8 @@ func (p *GitHubPlugin) triggerPipeline(ctx context.Context, baseURL, token strin
 }
 
 // parseCIConfig fetches GitHub Actions workflow files and extracts workflow_dispatch inputs.
+// Also returns workflow metadata (name, triggers, jobs) for display even when workflow_dispatch
+// is not configured.
 // See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#onworkflow_dispatchinputs
 func (p *GitHubPlugin) parseCIConfig(ctx context.Context, baseURL, token string, params []byte) ([]byte, error) {
 	var req struct {
@@ -402,8 +415,18 @@ func (p *GitHubPlugin) parseCIConfig(ctx context.Context, baseURL, token string,
 	varMap := make(map[string]*ciVar)
 	hasCIFile := false
 
+	// Workflow metadata for display
+	type workflowInfo struct {
+		File        string   `json:"file"`
+		Name        string   `json:"name"`
+		Triggers    []string `json:"triggers"`
+		Jobs        []string `json:"jobs"`
+		HasDispatch bool     `json:"has_dispatch"`
+	}
+	var workflows []workflowInfo
+
 	// List workflow files from .github/workflows/
-	listPath := fmt.Sprintf("/repos/%s/contents/.github/workflows?ref=%s", url.PathEscape(req.RepoID), url.PathEscape(ref))
+	listPath := fmt.Sprintf("/repos/%s/contents/.github/workflows?ref=%s", escapeRepoPath(req.RepoID), url.PathEscape(ref))
 	data, err := githubAPIRequest(ctx, baseURL, token, listPath)
 	if err == nil {
 		var files []struct {
@@ -422,7 +445,7 @@ func (p *GitHubPlugin) parseCIConfig(ctx context.Context, baseURL, token string,
 				hasCIFile = true
 
 				// Fetch the workflow file content
-				contentPath := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", url.PathEscape(req.RepoID), url.PathEscape(f.Path), url.PathEscape(ref))
+				contentPath := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", escapeRepoPath(req.RepoID), f.Path, url.PathEscape(ref))
 				contentData, contentErr := githubAPIRequest(ctx, baseURL, token, contentPath)
 				if contentErr != nil {
 					continue
@@ -447,6 +470,48 @@ func (p *GitHubPlugin) parseCIConfig(ctx context.Context, baseURL, token string,
 					continue
 				}
 
+				// Extract workflow metadata
+				wf := workflowInfo{File: f.Name}
+
+				// Workflow name
+				if name, ok := workflow["name"].(string); ok {
+					wf.Name = name
+				}
+
+				// Extract triggers from "on" section
+				if onSection, ok := workflow["on"]; ok {
+					switch v := onSection.(type) {
+					case string:
+						wf.Triggers = []string{v}
+					case []interface{}:
+						for _, t := range v {
+							if s, ok := t.(string); ok {
+								wf.Triggers = append(wf.Triggers, s)
+							}
+						}
+					case map[string]interface{}:
+						for k := range v {
+							wf.Triggers = append(wf.Triggers, k)
+						}
+					}
+					// Check if workflow_dispatch is present
+					for _, t := range wf.Triggers {
+						if t == "workflow_dispatch" {
+							wf.HasDispatch = true
+							break
+						}
+					}
+				}
+
+				// Extract job names
+				if jobs, ok := workflow["jobs"].(map[string]interface{}); ok {
+					for jobName := range jobs {
+						wf.Jobs = append(wf.Jobs, jobName)
+					}
+				}
+
+				workflows = append(workflows, wf)
+
 				// Extract on: workflow_dispatch: inputs
 				extractGitHubDispatchInputs(workflow, varMap)
 			}
@@ -459,9 +524,14 @@ func (p *GitHubPlugin) parseCIConfig(ctx context.Context, baseURL, token string,
 		variables = append(variables, *v)
 	}
 
+	if workflows == nil {
+		workflows = []workflowInfo{}
+	}
+
 	return actionOutput(map[string]any{
 		"variables":   variables,
 		"has_ci_file": hasCIFile,
+		"workflows":   workflows,
 	})
 }
 
