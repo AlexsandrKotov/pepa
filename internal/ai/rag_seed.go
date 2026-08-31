@@ -15,22 +15,37 @@ import (
 // SeedDocuments reads embedded documentation and ingests it into the RAG
 // knowledge base. It is called once at startup (after RAG init) and is
 // idempotent — documents with the same source identity are upserted.
+// Orphaned documents from previous seed versions are cleaned up automatically.
 func SeedDocuments(ctx context.Context, engine *IngestionEngine, tenantID uuid.UUID) error {
 	ingested := 0
+	var seededIDs []string
 
-	// 1. Seed focused RAG docs (rag-seed/*.md)
-	if err := seedFromFS(ctx, engine, docs.SeedDocs, "rag-seed", "documentation", tenantID, &ingested); err != nil {
-		slog.Warn("RAG: failed to seed focused docs", "error", err)
+	// Seed focused RAG docs (rag-seed/*.md) — the only embedded docs for RAG.
+	// Full design docs and user guides are intentionally excluded to keep
+	// the knowledge base focused and avoid diluting search relevance.
+	seededIDs, err := collectSeedIDs(docs.SeedDocs, "rag-seed")
+	if err != nil {
+		slog.Warn("RAG: failed to collect seed IDs", "error", err)
 	}
 
-	// 2. Seed full PEPA documentation (*.md in docs root)
-	if err := seedFromFS(ctx, engine, docs.AllDocs, "", "documentation", tenantID, &ingested); err != nil {
-		slog.Warn("RAG: failed to seed full docs", "error", err)
+	if err := seedFromFS(ctx, engine, docs.SeedDocs, "rag-seed", "documentation", tenantID, &ingested); err != nil {
+		slog.Warn("RAG: failed to seed focused docs", "error", err)
 	}
 
 	if ingested > 0 {
 		slog.Info("RAG: documentation seeded into knowledge base", "documents", ingested)
 	}
+
+	// Clean up orphaned seed documents (from previous versions).
+	if len(seededIDs) > 0 {
+		removed, err := engine.ragRepo.DeleteOrphanedSeedDocs(ctx, tenantID, "pepa-docs", seededIDs)
+		if err != nil {
+			slog.Warn("RAG: failed to clean orphaned seed docs", "error", err)
+		} else if removed > 0 {
+			slog.Info("RAG: removed orphaned seed documents", "count", removed)
+		}
+	}
+
 	return nil
 }
 
@@ -101,6 +116,23 @@ func extractTitle(content string) string {
 	return ""
 }
 
+// collectSeedIDs returns the source IDs that the current embedded seed set
+// would produce (without actually ingesting anything).
+func collectSeedIDs(fsys fs.FS, subdir string) ([]string, error) {
+	entries, err := fs.ReadDir(fsys, subdir)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		ids = append(ids, "doc-"+strings.TrimSuffix(entry.Name(), ".md"))
+	}
+	return ids, nil
+}
+
 // SeedDocumentList returns metadata about all seed documents without ingesting.
 // Useful for the frontend to show what's in the knowledge base.
 func SeedDocumentList() []map[string]string {
@@ -139,7 +171,6 @@ func SeedDocumentList() []map[string]string {
 	}
 
 	addFromFS(docs.SeedDocs, "rag-seed")
-	addFromFS(docs.AllDocs, "")
 
 	return result
 }

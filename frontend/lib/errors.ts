@@ -51,6 +51,18 @@ const HINTS: ErrorHint[] = [
     match: ['context deadline exceeded', 'timeout', 'timed out'],
     hint: 'The operation timed out. The target system may be slow or unreachable — try again or check its health.',
   },
+  {
+    match: ['executable file not found', 'not found in $path', 'iac init failed', 'terraform init failed'],
+    hint: 'OpenTofu/Terraform is not installed on the PEPA server. Rebuild the Docker image or set IAC_BINARY env var.',
+  },
+  {
+    match: ['clone terraform repo', 'clone ansible', 'could not read username'],
+    hint: 'Failed to clone the repository. Check the repo URL and make sure the token has read access.',
+  },
+  {
+    match: ['iac show failed', 'terraform show failed', 'no state', 'state lock'],
+    hint: 'IaC state is unavailable. Run init and apply first, or check the working directory.',
+  },
 ];
 
 export interface FriendlyError {

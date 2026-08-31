@@ -12,6 +12,7 @@ VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_TIME  := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS     := -ldflags "-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
 GOFILES     := $(shell find . -name '*.go' -not -path './vendor/*')
+OPENTOFU_VERSION ?= 1.9.0
 
 # ── Build ────────────────────────────────────────────────────
 
@@ -109,7 +110,7 @@ COMPOSE      := docker compose -f $(COMPOSE_FILE) --profile production
 
 docker-build:
 	@echo "→ Building Docker images..."
-	@docker build -f deployments/docker/Dockerfile.api -t ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest .
+	@docker build -f deployments/docker/Dockerfile.api --build-arg OPENTOFU_VERSION=$(OPENTOFU_VERSION) -t ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest .
 	@docker build -f deployments/docker/Dockerfile.worker -t ghcr.io/alexsandrkotov/pepa/pepa-worker:latest .
 	@docker build -f deployments/docker/Dockerfile.frontend -t ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest frontend/
 
@@ -200,19 +201,18 @@ build-plugin-example:
 # Plugin directories by category
 PLUGIN_DIRS_BUILTIN := $(shell find plugins/builtin -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
 PLUGIN_DIRS_COMMUNITY := $(shell find plugins/community -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
-PLUGIN_DIRS_PREMIUM := $(shell find plugins/premium -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
 
-# Legacy support - all plugins except builtin/community/premium
-PLUGIN_DIRS := $(shell find plugins -mindepth 1 -maxdepth 1 -type d ! -name bin ! -name examples ! -name sdk-go ! -name builtin ! -name community ! -name premium ! -name README.md)
+# Legacy support - all plugins except builtin/community
+PLUGIN_DIRS := $(shell find plugins -mindepth 1 -maxdepth 1 -type d ! -name bin ! -name examples ! -name sdk-go ! -name builtin ! -name community ! -name README.md)
 
 # Plugins default to Linux/amd64 for Docker containers.
 # Override: make plugins GOOS= GOARCH=
 PLUGIN_GOOS   ?= linux
 PLUGIN_GOARCH ?= amd64
 
-# Build all public plugins (builtin + community)
+# Build all plugins (builtin + community)
 plugins: plugins-builtin plugins-community
-	@echo "✓ All public plugins built"
+	@echo "✓ All plugins built"
 
 # Build built-in plugins (source in plugins/<name>/, metadata in plugins/builtin/<name>/)
 plugins-builtin:
@@ -241,28 +241,9 @@ plugins-community:
 	done
 	@echo "✓ Community plugins built in plugins/bin/community/<name>/"
 
-# Build premium plugins (commercial, private)
-plugins-premium:
-	@echo "→ Building premium plugins ($(PLUGIN_GOOS)/$(PLUGIN_GOARCH))..."
-	@if [ -z "$(PLUGIN_DIRS_PREMIUM)" ]; then \
-		echo "  ⚠ No premium plugins found"; \
-	else \
-		for dir in $(PLUGIN_DIRS_PREMIUM); do \
-			name=$$(basename $$dir); \
-			echo "  → $$name (premium)"; \
-			mkdir -p plugins/premium-bin/$$name; \
-			CGO_ENABLED=0 GOOS=$(PLUGIN_GOOS) GOARCH=$(PLUGIN_GOARCH) go build -o plugins/premium-bin/$$name/$$name ./$$dir; \
-		done; \
-		echo "✓ Premium plugins built in plugins/premium-bin/<name>/"; \
-	fi
-
-# Build all plugins (including premium)
-plugins-all: plugins plugins-premium
-	@echo "✓ All plugins built (builtin + community + premium)"
-
 clean-plugins:
 	@echo "→ Cleaning plugins..."
-	@rm -rf plugins/bin/* plugins/premium-bin/*
+	@rm -rf plugins/bin/*
 
 # ── Plugin Signing ─────────────────────────────────────────────
 

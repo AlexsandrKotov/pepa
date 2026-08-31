@@ -106,7 +106,8 @@ type EnhancedProvider interface {
 	Plan(ctx context.Context, config json.RawMessage, params map[string]any) (*PlanResult, error)
 
 	// State returns the current state of managed resources.
-	State(ctx context.Context, config json.RawMessage) (*StateResult, error)
+	// params may contain backend_* keys needed to initialize the backend before reading state.
+	State(ctx context.Context, config json.RawMessage, params map[string]any) (*StateResult, error)
 }
 
 // PlanResult represents a preview of infrastructure changes.

@@ -328,7 +328,7 @@ func (a *AnsibleAdapter) Plan(ctx context.Context, raw json.RawMessage, params m
 }
 
 // State returns managed hosts discovered from Ansible inventory files.
-func (a *AnsibleAdapter) State(ctx context.Context, raw json.RawMessage) (*StateResult, error) {
+func (a *AnsibleAdapter) State(ctx context.Context, raw json.RawMessage, _ map[string]any) (*StateResult, error) {
 	cfg, err := parseAnsibleConfig(raw)
 	if err != nil {
 		return nil, err

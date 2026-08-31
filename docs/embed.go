@@ -7,8 +7,3 @@ import "embed"
 //
 //go:embed rag-seed/*.md
 var SeedDocs embed.FS
-
-// AllDocs contains all PEPA documentation (architecture, guides, user guides).
-//
-//go:embed *.md
-var AllDocs embed.FS

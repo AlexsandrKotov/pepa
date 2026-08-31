@@ -970,8 +970,29 @@ func getPipelineState(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Collect params for backend initialization:
+		// 1. From request body (POST), or
+		// 2. From the last successful run's stored parameters
+		var params map[string]any
+		if c.Request.ContentLength > 0 {
+			if err := c.ShouldBindJSON(&params); err != nil {
+				params = make(map[string]any)
+			}
+		}
+		if len(params) == 0 && deps.Repos.PipelineRun != nil {
+			runs, _, listErr := deps.Repos.PipelineRun.List(c.Request.Context(), id, 1, 1)
+			if listErr == nil {
+				for _, run := range runs {
+					if run.Status == "success" && len(run.Parameters) > 0 {
+						_ = json.Unmarshal(run.Parameters, &params)
+					}
+					break
+				}
+			}
+		}
+
 		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
-		state, err := enhanced.State(c.Request.Context(), config)
+		state, err := enhanced.State(c.Request.Context(), config, params)
 		if err != nil {
 			respondInternalError(c, err)
 			return

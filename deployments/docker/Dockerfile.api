@@ -9,6 +9,18 @@ RUN apk add --no-cache curl && \
     mv /tmp/linux-${ARCH}/helm /usr/local/bin/helm && \
     rm -rf helm.tar.gz /tmp/linux-${ARCH}
 
+# Stage 1b: OpenTofu binary (open-source Terraform fork, MPL 2.0)
+FROM alpine:3.24 AS opentofu
+ARG OPENTOFU_VERSION=1.9.0
+ARG TARGETARCH
+RUN apk add --no-cache curl unzip && \
+    ARCH=$(if [ "$TARGETARCH" = "arm64" ]; then echo "arm64"; else echo "amd64"; fi) && \
+    curl -fsSLo tofu.zip "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.zip" && \
+    unzip tofu.zip -d /tmp && \
+    mv /tmp/tofu /usr/local/bin/tofu && \
+    chmod +x /usr/local/bin/tofu && \
+    rm -rf tofu.zip /tmp/*
+
 # Stage 2: Go builder
 FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache git
@@ -31,6 +43,7 @@ RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash o
     chown -R pepa:pepa /plugins /custom-plugins /var/run/pepa
 
 COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
+COPY --from=opentofu /usr/local/bin/tofu /usr/local/bin/tofu
 COPY --from=builder /out/api-server /api-server
 
 USER pepa:pepa

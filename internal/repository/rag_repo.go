@@ -167,15 +167,23 @@ func (r *RAGRepository) DeleteDocumentsBySource(ctx context.Context, tenantID uu
 
 // InsertChunk inserts a chunk with its embedding vector.
 func (r *RAGRepository) InsertChunk(ctx context.Context, chunk *RAGChunk) error {
-	embeddingStr := formatEmbedding(chunk.Embedding)
+	// pgvector rejects empty vectors ("vector must have at least 1 dimension"),
+	// so store NULL when no embedding is available.  This lets chunks survive
+	// even when the embedding provider is unavailable (keyword search still works).
+	var embeddingParam interface{}
+	if len(chunk.Embedding) == 0 {
+		embeddingParam = nil // NULL
+	} else {
+		embeddingParam = formatEmbedding(chunk.Embedding) + "::vector"
+	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO rag_chunks (document_id, tenant_id, content, chunk_index, embedding, metadata)
-		VALUES ($1, $2, $3, $4, $5::vector, $6)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (document_id, chunk_index)
-		DO UPDATE SET content = $3, embedding = $5::vector, metadata = $6
+		DO UPDATE SET content = $3, embedding = $5, metadata = $6
 	`,
 		chunk.DocumentID, chunk.TenantID, chunk.Content,
-		chunk.ChunkIndex, embeddingStr, mustJSON(chunk.Metadata),
+		chunk.ChunkIndex, embeddingParam, mustJSON(chunk.Metadata),
 	)
 	if err != nil {
 		return fmt.Errorf("insert rag chunk: %w", err)
@@ -314,6 +322,17 @@ func (r *RAGRepository) ExpireOldDocuments(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM rag_documents WHERE expires_at IS NOT NULL AND expires_at < NOW()`)
 	if err != nil {
 		return 0, fmt.Errorf("expire old rag documents: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteOrphanedSeedDocs removes seed documents whose source_id is NOT in the
+// keepIDs list.  This cleans up documents left over from previous seed versions.
+func (r *RAGRepository) DeleteOrphanedSeedDocs(ctx context.Context, tenantID uuid.UUID, source string, keepIDs []string) (int64, error) {
+	query := `DELETE FROM rag_documents WHERE tenant_id = $1 AND source = $2 AND source_id != ALL($3)`
+	tag, err := r.pool.Exec(ctx, query, tenantID, source, keepIDs)
+	if err != nil {
+		return 0, fmt.Errorf("delete orphaned seed docs: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

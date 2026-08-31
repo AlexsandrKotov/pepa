@@ -405,9 +405,24 @@ func (p *httpProvider) Stream(ctx context.Context, messages []Message, opts *Cha
 
 // Embed generates embeddings via the /embeddings endpoint.
 func (p *httpProvider) Embed(ctx context.Context, texts []string, opts *EmbedOptions) (*EmbedResponse, error) {
-	model := "text-embedding-3-small"
+	// Prefer an explicit embedding model, fall back to the provider's configured
+	// model (works for local providers like LM Studio / Ollama), then to a
+	// provider-specific default.  The old hard-coded "text-embedding-3-small"
+	// only works for OpenAI and breaks every other provider.
+	model := ""
 	if opts != nil && opts.Model != "" {
 		model = opts.Model
+	}
+	if model == "" {
+		model = p.model // use the chat model for embeddings when no dedicated one is set
+	}
+	if model == "" {
+		switch p.name {
+		case "openai":
+			model = "text-embedding-3-small"
+		default:
+			model = p.defaultModel()
+		}
 	}
 	body := map[string]any{"model": model, "input": texts}
 	data, _ := json.Marshal(body)

@@ -285,6 +285,7 @@ function PipelinesClientContent({
     setTfState(null);
     setTfPlan(null);
     setStateError('');
+    setFeedback(null); // Clear stale feedback when switching engines
     await loadRuns(source.id);
     await loadPresets(source.id);
     // Auto-load state for terraform/ansible sources
@@ -346,9 +347,17 @@ function PipelinesClientContent({
     setTriggerParams(defaults);
     setShowTriggerModal(true);
 
-    // Dynamically load CI variables via plugin if source has a connection
+    // Dynamically load CI variables via plugin if a git connection is available
     const isGitSource = source.source_type === 'gitlab_ci' || source.source_type === 'github_actions';
-    if (source.connection_id && isGitSource) {
+    if (isGitSource) {
+      // Resolve connection_id: prefer the source's own, fall back to any matching git connection
+      let connId = source.connection_id as string | undefined;
+      if (!connId && connections.length > 0) {
+        const matchType = source.source_type === 'github_actions' ? 'github' : 'gitlab';
+        const found = connections.find(c => c.type === matchType || c.type === 'git');
+        if (found) connId = found.id;
+      }
+
       // Determine repo/project ID and ref based on source type
       let projectId = '';
       let ref = 'main';
@@ -366,10 +375,10 @@ function PipelinesClientContent({
         ref = source.config?.ref as string || source.config?.branch as string || 'main';
       }
 
-      if (projectId) {
+      if (connId && projectId) {
         setLoadingEngineCIVariables(true);
         try {
-          const data = await gitBrowser.parseCIConfig(source.connection_id, projectId, ref);
+          const data = await gitBrowser.parseCIConfig(connId, projectId, ref);
           setEngineCIVariables(data.variables || []);
           setEngineWorkflows(data.workflows || []);
           // Pre-fill defaults from CI variables
@@ -843,6 +852,25 @@ function PipelinesClientContent({
                         <div>
                           <h2 className="text-lg font-semibold text-[var(--text-primary)]">{selectedSource.name}</h2>
                           <p className="text-sm text-[var(--text-secondary)]">{sourceTypeLabels[selectedSource.source_type]} pipeline</p>
+                          {/* Config summary - shows what's configured */}
+                          {(() => {
+                            const cfg = selectedSource.config as Record<string, unknown> | undefined;
+                            if (!cfg) return null;
+                            let summary = '';
+                            if (selectedSource.source_type === 'terraform') {
+                              summary = cfg.local_path ? `Local: ${cfg.local_path}` : cfg.repo_url ? `Repo: ${cfg.repo_url}` : '';
+                              if (cfg.working_dir && cfg.working_dir !== '.') summary += ` → ${cfg.working_dir}`;
+                            } else if (selectedSource.source_type === 'ansible') {
+                              summary = cfg.local_path ? `Local: ${cfg.local_path}` : cfg.repo_url ? `Repo: ${cfg.repo_url}` : '';
+                              if (cfg.playbook) summary += ` / ${cfg.playbook}`;
+                            } else if (selectedSource.source_type === 'gitlab_ci') {
+                              summary = cfg.project_id ? `Project: ${cfg.project_id}` : '';
+                            } else if (selectedSource.source_type === 'github_actions') {
+                              summary = cfg.owner && cfg.repo ? `${cfg.owner}/${cfg.repo}` : cfg.repo_url ? String(cfg.repo_url).replace(/^https?:\/\//, '') : '';
+                              if (cfg.workflow) summary += ` / ${cfg.workflow}`;
+                            }
+                            return summary ? <p className="text-xs text-[var(--text-tertiary)] font-mono mt-1 truncate max-w-md" title={summary}>{summary}</p> : null;
+                          })()}
                         </div>
                         <div className="flex gap-2">
                           {/* ── Primary action button (varies by provider) ── */}
@@ -899,21 +927,39 @@ function PipelinesClientContent({
                         {detailTab === 'runs' && (
                           <div className="space-y-2">
                             {runs.length === 0 && (
-                              <div className="text-center py-6">
-                                <p className="text-sm text-[var(--text-secondary)] mb-2">No runs yet</p>
-                                {selectedSource.source_type !== 'terraform' && selectedSource.source_type !== 'ansible' && (
-                                  <button
-                                    onClick={handleSyncRuns}
-                                    disabled={syncing}
-                                    className="text-sm text-[var(--accent)] hover:underline disabled:opacity-50"
-                                  >
-                                    {syncing ? 'Syncing...' : 'Sync runs from remote →'}
-                                  </button>
-                                )}
-                                {(selectedSource.source_type === 'terraform' || selectedSource.source_type === 'ansible') && (
-                                  <p className="text-xs text-[var(--text-tertiary)] mt-2">
-                                    {selectedSource.source_type === 'terraform' ? 'Terraform' : 'Ansible'} runs are created when you trigger actions (Plan, Apply, or Run Playbook)
-                                  </p>
+                              <div className="text-center py-6 space-y-3">
+                                {selectedSource.source_type === 'terraform' ? (
+                                  <>
+                                    <div className="text-2xl opacity-30">🏗</div>
+                                    <p className="text-sm text-[var(--text-secondary)]">No Terraform runs yet</p>
+                                    <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
+                                      Use the buttons above to interact with your Terraform configuration.
+                                      Click <strong>View State</strong> to see current infrastructure, or <strong>Plan</strong> to preview changes.
+                                    </p>
+                                    <div className="flex gap-2 justify-center pt-1">
+                                      <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="text-xs px-3 py-1.5 bg-purple-500/15 text-purple-500 rounded-md hover:bg-purple-500/25 border border-purple-500/20">View State</button>
+                                      <button onClick={() => loadPlan(selectedSource.id)} className="text-xs px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md hover:bg-amber-500/25 border border-amber-500/20">Run Plan</button>
+                                    </div>
+                                  </>
+                                ) : selectedSource.source_type === 'ansible' ? (
+                                  <>
+                                    <div className="text-2xl opacity-30">⚙</div>
+                                    <p className="text-sm text-[var(--text-secondary)]">No Ansible runs yet</p>
+                                    <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
+                                      Click <strong>Run Playbook</strong> to execute your Ansible playbook, or <strong>Dry Run</strong> to preview changes without applying them.
+                                    </p>
+                                  </>
+                                ) : (
+                                  <>
+                                    <p className="text-sm text-[var(--text-secondary)] mb-2">No runs yet</p>
+                                    <button
+                                      onClick={handleSyncRuns}
+                                      disabled={syncing}
+                                      className="text-sm text-[var(--accent)] hover:underline disabled:opacity-50"
+                                    >
+                                      {syncing ? 'Syncing...' : 'Sync runs from remote →'}
+                                    </button>
+                                  </>
                                 )}
                               </div>
                             )}
@@ -1039,8 +1085,23 @@ function PipelinesClientContent({
                         {detailTab === 'state' && selectedSource && (
                           <div className="space-y-4">
                             {stateError && (
-                              <div className="p-3 rounded-md bg-red-500/10 border border-red-500/20 text-sm text-red-400">
-                                {stateError}
+                              <div className="p-3 rounded-md bg-red-500/10 border border-red-500/20">
+                                <p className="text-sm text-red-400 font-medium">{stateError}</p>
+                                <div className="mt-2 text-xs text-[var(--text-tertiary)] space-y-1">
+                                  {stateError.includes('terraform') && stateError.includes('not found') && (
+                                    <p>Terraform binary is not installed on the server. Install it or use a repo-based configuration.</p>
+                                  )}
+                                  {stateError.includes('local_path') && stateError.includes('not exist') && (
+                                    <p>The local path does not exist inside the Docker container. Mount the directory or switch to repo-based configuration.</p>
+                                  )}
+                                  {stateError.includes('clone') && (
+                                    <p>Failed to clone the repository. Check the repo URL and token in the engine configuration.</p>
+                                  )}
+                                  {(stateError.includes('no state') || stateError.includes('no saved state')) && (
+                                    <p>No terraform state file found. Run <strong>terraform init</strong> and <strong>terraform apply</strong> first, or check the working directory.</p>
+                                  )}
+                                  <p>Tip: Verify the engine configuration shown above matches your actual setup.</p>
+                                </div>
                               </div>
                             )}
                             {loadingState && (
@@ -2883,54 +2944,75 @@ function TriggerModal({
 
           {/* Dynamic CI variables (from plugin) */}
           {hasCIVars && !loadingCIVars && (
-            <>
-              {filteredCIVars.map(cv => (
-                <div key={cv.key}>
-                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
-                    {cv.key}
-                    {cv.is_input && (
-                      <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-500 font-medium">input</span>
-                    )}
-                    {!cv.is_input && (
-                      <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">
-                        {cv.type === 'file' ? 'file' : 'env_var'}
-                      </span>
-                    )}
-                  </label>
-                  {cv.description && !genericDescriptions.includes(cv.description) && (
-                    <p className="text-xs text-[var(--text-secondary)] mb-1">{cv.description}</p>
-                  )}
-                  {cv.options && cv.options.length > 0 ? (
-                    <select
-                      value={params[cv.key] ?? cv.value ?? ''}
-                      onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.value }))}
-                      className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">-- Select --</option>
-                      {cv.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                    </select>
-                  ) : cv.value === 'true' || cv.value === 'false' ? (
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={(params[cv.key] ?? cv.value) === 'true'}
-                        onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.checked ? 'true' : 'false' }))}
-                        className="rounded"
-                      />
-                      <span className="text-sm text-[var(--text-secondary)]">{(params[cv.key] ?? cv.value) === 'true' ? 'Yes' : 'No'}</span>
-                    </label>
-                  ) : (
-                    <input
-                      type="text"
-                      value={params[cv.key] ?? cv.value ?? ''}
-                      onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.value }))}
-                      className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder={cv.value || ''}
-                    />
-                  )}
-                </div>
-              ))}
-            </>
+            <div className="pt-2 border-t">
+              <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Variables</p>
+              <div className="space-y-2 mb-3">
+                {filteredCIVars.map(cv => {
+                  const isFileType = cv.type === 'file';
+                  const hasOptions = cv.options && cv.options.length > 0;
+                  const typeLabel = isFileType ? 'File' : hasOptions ? 'Choice' : 'Variable';
+                  const typeBadgeColor = isFileType ? 'bg-amber-500/15 text-amber-600' : hasOptions ? 'bg-purple-500/15 text-purple-500' : 'bg-sky-500/15 text-sky-500';
+                  const hasLongDesc = cv.description && cv.description.length > 50;
+                  return (
+                    <div key={cv.key} className="p-2.5 bg-[var(--bg)] rounded-md border border-[var(--border)]">
+                      <div className={`flex items-center gap-2 ${hasLongDesc ? 'mb-1' : 'mb-1.5'}`}>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${typeBadgeColor}`}>{typeLabel}</span>
+                        <span className="text-sm font-mono font-medium text-[var(--text-primary)] shrink-0">{cv.key}</span>
+                        {cv.is_input && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-500 font-medium">input</span>
+                        )}
+                      </div>
+                      {cv.description && !genericDescriptions.includes(cv.description) && (
+                        <div className={`text-xs text-[var(--text-secondary)] ${hasLongDesc ? 'mb-1.5 whitespace-pre-line leading-relaxed' : 'mb-1.5'}`} title={cv.description}>
+                          {cv.description}
+                        </div>
+                      )}
+                      {isFileType ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={params[cv.key] ?? cv.value ?? ''}
+                            onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.value }))}
+                            className="flex-1 px-2.5 py-1.5 border rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="File content or path..."
+                          />
+                          <span className="text-xs text-[var(--text-tertiary)] shrink-0" title="This variable will be stored as a file in the CI runner">file</span>
+                        </div>
+                      ) : hasOptions ? (
+                        <select
+                          value={params[cv.key] ?? cv.value ?? ''}
+                          onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 border rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[var(--surface)]"
+                        >
+                          <option value="">-- Select --</option>
+                          {cv.options!.map(opt => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      ) : cv.value === 'true' || cv.value === 'false' ? (
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={(params[cv.key] ?? cv.value) === 'true'}
+                            onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.checked ? 'true' : 'false' }))}
+                            className="rounded"
+                          />
+                          <span className="text-sm text-[var(--text-secondary)]">{(params[cv.key] ?? cv.value) === 'true' ? 'Yes' : 'No'}</span>
+                        </label>
+                      ) : (
+                        <input
+                          type="text"
+                          value={params[cv.key] ?? cv.value ?? ''}
+                          onChange={e => setParams(prev => ({ ...prev, [cv.key]: e.target.value }))}
+                          className="w-full px-2.5 py-1.5 border rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder={cv.value || 'Enter value...'}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
 
           {/* Schema-based properties (fallback when no CI vars loaded) */}
@@ -2939,7 +3021,8 @@ function TriggerModal({
               {Object.keys(properties).length === 0 && (
                 <p className="text-sm text-[var(--text-secondary)]">No parameters defined. Click &quot;Refresh Schema&quot; to auto-detect parameters.</p>
               )}
-              {Object.entries(properties).map(([key, prop]) => (
+              {/* Regular (non-backend) properties */}
+              {Object.entries(properties).filter(([key]) => !key.startsWith('backend_')).map(([key, prop]) => (
                 <div key={key}>
                   <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
                     {key}{requiredFields.has(key) && <span className="text-red-500 ml-0.5">*</span>}
@@ -2948,6 +3031,22 @@ function TriggerModal({
                   {renderInput(key, prop)}
                 </div>
               ))}
+              {/* Backend config properties — grouped separately */}
+              {Object.entries(properties).filter(([key]) => key.startsWith('backend_')).length > 0 && (
+                <div className="space-y-3 pt-3 border-t border-dashed border-[var(--border)]">
+                  <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide">Backend Configuration</p>
+                  <p className="text-xs text-[var(--text-tertiary)]">These values configure the Terraform backend (remote state). They are injected at init time.</p>
+                  {Object.entries(properties).filter(([key]) => key.startsWith('backend_')).map(([key, prop]) => (
+                    <div key={key}>
+                      <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+                        {key}{requiredFields.has(key) && <span className="text-red-500 ml-0.5">*</span>}
+                      </label>
+                      {prop.description && <p className="text-xs text-[var(--text-secondary)] mb-1">{prop.description}</p>}
+                      {renderInput(key, prop)}
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
           <div className="pt-2 border-t">

@@ -25,15 +25,27 @@ func NewSemanticChunker() *SemanticChunker {
 	}
 }
 
-// Chunk splits a document into chunks based on its source type.
+// Chunk splits a document into chunks based on its content type.
+// It checks Type first (e.g. "documentation", "kubernetes", "logs") and
+// falls back to Source so that both naming conventions work.
 func (c *SemanticChunker) Chunk(doc *Document) ([]*Chunk, error) {
-	switch doc.Source {
+	// Try Type first — it carries the semantic content format.
+	switch doc.Type {
 	case "kubernetes":
 		return c.chunkK8sResource(doc)
 	case "documentation":
 		return c.chunkMarkdown(doc)
 	case "logs":
 		return c.chunkLogGroup(doc)
+	}
+	// Fall back to Source (e.g. "kubernetes", "logs").
+	switch doc.Source {
+	case "kubernetes":
+		return c.chunkK8sResource(doc)
+	case "logs":
+		return c.chunkLogGroup(doc)
+	case "documentation":
+		return c.chunkMarkdown(doc)
 	default:
 		return c.chunkGeneric(doc)
 	}

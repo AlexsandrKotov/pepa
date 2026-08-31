@@ -135,6 +135,7 @@ services:
       SERVER_ENV: ${SERVER_ENV:-production}
       CUSTOM_PLUGIN_DIR: /custom-plugins
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:8088}
+      IAC_BINARY: ${IAC_BINARY:-}
     ports:
       - "${API_PORT:-8088}:8080"
     healthcheck:

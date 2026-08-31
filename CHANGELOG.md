@@ -43,10 +43,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 - **Rate Limiting** — token-bucket per-IP rate limiter middleware
 
 #### Plugin System
-- **Three-tier Plugin Distribution:**
-  - **Built-in (9 plugins)** — GitHub, GitLab, ArgoCD, Telegram, Email, Webhook, Slack, Prometheus, S3
-  - **Community (1 plugin)** — Gitea (free, downloadable)
-  - **Premium (5 plugins)** — Bitbucket, FluxCD, Teams, Jira, Proxmox (commercial)
+- **15 Open-Source Plugins** — GitHub, GitLab, Bitbucket, Gitea, ArgoCD, FluxCD, Telegram, Slack, Teams, Email, Webhook, Proxmox, Prometheus, S3, Jira
 - **Plugin SDK** — Go SDK for custom plugin development
 - **Marketplace** — browse and install plugins from curated catalog
 - **Plugin Signing** — cryptographic signature verification for all plugins
@@ -153,26 +150,22 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 ### 📦 Plugin Ecosystem
 
-**Built-in Plugins (Included):**
+**All 15 plugins are free and open-source:**
 - GitHub — Git provider integration
 - GitLab — Git provider integration
+- Bitbucket — Git provider integration
+- Gitea — Self-hosted Git service
 - ArgoCD — GitOps CD engine
+- FluxCD — Alternative GitOps engine
 - Telegram — Notification channel
+- Slack — Notification channel
+- Microsoft Teams — Enterprise notifications
 - Email — Notification channel
 - Webhook — Generic webhook integration
-- Slack — Notification channel
+- Proxmox — Virtualization management
 - Prometheus — Monitoring integration
 - S3 — Object storage (MinIO/AWS)
-
-**Community Plugins (Free):**
-- Gitea — Self-hosted Git service
-
-**Premium Plugins (Commercial):**
-- Bitbucket — Enterprise Git provider
-- FluxCD — Alternative GitOps engine
-- Microsoft Teams — Enterprise notifications
-- Jira — Enterprise task tracker
-- Proxmox — Enterprise virtualization
+- Jira — Task tracker integration
 
 ### 🎯 Key Achievements
 
@@ -188,7 +181,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 - **Backend:** ~62,000 lines of Go code
 - **Frontend:** ~45,000 lines of TypeScript
-- **Plugins:** 15 plugins (9 built-in, 1 community, 5 premium)
+- **Plugins:** 15 free, open-source plugins
 - **Database:** 32 migrations
 - **API Endpoints:** 30+ REST endpoints
 - **Frontend Pages:** 52 pages
@@ -196,7 +189,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 ### 🔮 Future Roadmap
 
-- Additional premium plugins
+- Additional plugins and integrations
 - Enhanced AI capabilities
 - Advanced monitoring and observability
 - Extended integration ecosystem
@@ -208,8 +201,8 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 ## [Unreleased]
 
 ### Added
-- Three-tier plugin distribution system (builtin, community, premium)
-- Plugin build system with separate targets for each tier
+- Unified plugin distribution system (all plugins free and open-source)
+- Plugin build system with builtin and community targets
 - Enhanced documentation for plugin installation
 - Production-ready deployment package with build-production.sh
 

@@ -106,13 +106,17 @@ make build && make run-api
 
 ## Plugins
 
-PEPA includes a three-tier plugin system:
+PEPA includes 15 free, open-source plugins:
 
-**Built-in (Free):** GitHub, GitLab, ArgoCD, Telegram, Email, Webhook, Slack, Prometheus, S3
+**Git Providers:** GitHub, GitLab, Bitbucket, Gitea
 
-**Community (Free):** Gitea - download from [GitHub Releases](https://github.com/AlexsandrKotov/pepa/releases)
+**CD Engines:** ArgoCD, FluxCD
 
-**Premium (Commercial):** Bitbucket, FluxCD, Teams, Jira, Proxmox - contact for licensing
+**Notifications:** Telegram, Slack, Microsoft Teams, Email, Webhook
+
+**Infrastructure:** Proxmox, Prometheus, S3
+
+**Task Trackers:** Jira
 
 ---
 
