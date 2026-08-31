@@ -28,6 +28,7 @@ export default function DockerServicesPage() {
 
   // Form state
   const [form, setForm] = useState({
+    deploy_target: 'local' as 'host' | 'local',
     docker_host_id: '', name: '', compose_yaml: '', env_mode: 'yaml' as 'yaml' | 'kv',
     env_key: '', env_value: '', env_vars: {} as Record<string, string>,
   });
@@ -69,10 +70,17 @@ export default function DockerServicesPage() {
     });
   }, []);
 
-  const hostName = (id: string) => hosts.find(h => h.id === id)?.name || 'Unknown';
+  const hostName = (id: string | null) => {
+    if (!id) return 'Local Docker';
+    return hosts.find(h => h.id === id)?.name || 'Unknown';
+  };
 
   const openDeploy = () => {
-    setForm({ docker_host_id: hosts[0]?.id || '', name: '', compose_yaml: '', env_mode: 'yaml', env_key: '', env_value: '', env_vars: {} });
+    setForm({
+      deploy_target: hosts.length > 0 ? 'host' : 'local',
+      docker_host_id: hosts[0]?.id || '', name: '', compose_yaml: '',
+      env_mode: 'yaml', env_key: '', env_value: '', env_vars: {},
+    });
     setError('');
     setShowForm(true);
   };
@@ -84,17 +92,29 @@ export default function DockerServicesPage() {
 
   const handleDeploy = async () => {
     setError('');
-    if (!form.docker_host_id || !form.name.trim() || !form.compose_yaml.trim()) {
-      setError('Host, name, and compose YAML are required');
+    if (form.deploy_target === 'host' && !form.docker_host_id) {
+      setError('Please select a Docker host');
+      return;
+    }
+    if (!form.name.trim() || !form.compose_yaml.trim()) {
+      setError('Name and compose YAML are required');
       return;
     }
     try {
-      await dockerServices.create({
-        docker_host_id: form.docker_host_id,
-        name: form.name.trim(),
-        compose_yaml: form.compose_yaml,
-        env_vars: form.env_vars,
-      });
+      if (form.deploy_target === 'local') {
+        await dockerServices.deployLocal({
+          name: form.name.trim(),
+          compose_yaml: form.compose_yaml,
+          env_vars: form.env_vars,
+        });
+      } else {
+        await dockerServices.create({
+          docker_host_id: form.docker_host_id,
+          name: form.name.trim(),
+          compose_yaml: form.compose_yaml,
+          env_vars: form.env_vars,
+        });
+      }
       setShowForm(false);
       load();
     } catch (err) {
@@ -155,7 +175,7 @@ export default function DockerServicesPage() {
       <div className="page-animate flex items-center justify-between">
         <div>
           <h1 className="page-title-modern">Docker Services</h1>
-          <p className="page-subtitle-modern">Deploy and manage Docker Compose stacks on your Docker hosts</p>
+          <p className="page-subtitle-modern">Deploy and manage Docker Compose stacks on local or remote Docker hosts</p>
         </div>
         <div className="flex gap-2">
           <Link href="/docker-hosts" className="btn btn-secondary text-[12px]">Manage Hosts</Link>
@@ -166,7 +186,7 @@ export default function DockerServicesPage() {
           >
             {discovering ? 'Discovering...' : '🔍 Discover Containers'}
           </button>
-          <button onClick={openDeploy} className="btn btn-primary" disabled={hosts.length === 0}>
+          <button onClick={openDeploy} className="btn btn-primary">
             + Deploy Service
           </button>
         </div>
@@ -175,7 +195,7 @@ export default function DockerServicesPage() {
       {hosts.length === 0 && !loading && (
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
           <p className="text-[13px] text-blue-500">
-            No Docker hosts configured. <Link href="/docker-hosts" className="underline font-medium">Add a Docker host</Link> first to deploy services.
+            No remote Docker hosts configured. You can still deploy to the <strong>local Docker daemon</strong>, or <Link href="/docker-hosts" className="underline font-medium">add a Docker host</Link> for remote deployments.
           </p>
         </div>
       )}
@@ -192,7 +212,7 @@ export default function DockerServicesPage() {
           <p className="text-[12px] text-[var(--text-tertiary)] mb-5">
             Deploy a Docker Compose stack to get started
           </p>
-          {hosts.length > 0 && <button onClick={openDeploy} className="btn btn-primary">+ Deploy First Service</button>}
+          <button onClick={openDeploy} className="btn btn-primary">+ Deploy First Service</button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -200,10 +220,19 @@ export default function DockerServicesPage() {
             <div key={svc.id} className="card p-5 modern-card-hover" style={{ borderRadius: '12px' }}>
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <span className="text-xl">📦</span>
+                  <span className="text-xl">{svc.docker_host_id ? '📦' : '🐳'}</span>
                   <div>
                     <h3 className="text-[14px] font-semibold text-[var(--text-primary)]">{svc.name}</h3>
-                    <span className="text-[11px] text-[var(--text-tertiary)]">Host: {hostName(svc.docker_host_id)}</span>
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      {svc.docker_host_id ? (
+                        <>Host: {hostName(svc.docker_host_id)}</>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+                          Local Docker
+                        </span>
+                      )}
+                    </span>
                   </div>
                 </div>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColor(svc.status)}`}>
@@ -384,20 +413,62 @@ export default function DockerServicesPage() {
                 <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-[12px] text-red-500">{error}</div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Deploy Target</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, deploy_target: 'local' })}
+                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                      form.deploy_target === 'local'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    <span className="text-lg">🐳</span>
+                    <div>
+                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Docker</p>
+                      <p className="text-[10px] text-[var(--text-tertiary)]">unix:///var/run/docker.sock</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, deploy_target: 'host' })}
+                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                      form.deploy_target === 'host'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    <span className="text-lg">🖥️</span>
+                    <div>
+                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Registered Host</p>
+                      <p className="text-[10px] text-[var(--text-tertiary)]">Remote via TCP/SSH/TLS</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {form.deploy_target === 'host' && (
                 <div>
-                  <label className="label">Target Docker Host *</label>
+                  <label className="label">Docker Host *</label>
                   <select value={form.docker_host_id} onChange={e => setForm({ ...form, docker_host_id: e.target.value })} className="input">
                     <option value="">Select host...</option>
                     {hosts.map(h => (
                       <option key={h.id} value={h.id}>{h.name} ({h.status})</option>
                     ))}
                   </select>
+                  {hosts.length === 0 && (
+                    <p className="text-[11px] text-orange-500 mt-1">
+                      No hosts configured. <Link href="/docker-hosts" className="underline">Add a Docker host</Link>
+                    </p>
+                  )}
                 </div>
-                <div>
-                  <label className="label">Service Name *</label>
-                  <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input" placeholder="my-service" />
-                </div>
+              )}
+
+              <div>
+                <label className="label">Service Name *</label>
+                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input" placeholder="my-service" />
               </div>
 
               <div>
@@ -465,7 +536,9 @@ export default function DockerServicesPage() {
 
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border)] shrink-0">
               <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={handleDeploy} className="btn btn-primary">Deploy</button>
+              <button onClick={handleDeploy} className="btn btn-primary">
+                {form.deploy_target === 'local' ? '🐳 Deploy Locally' : 'Deploy to Host'}
+              </button>
             </div>
           </div>
         </div>

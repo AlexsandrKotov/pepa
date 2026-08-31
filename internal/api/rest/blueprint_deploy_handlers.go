@@ -17,6 +17,7 @@ import (
 // registerBlueprintDeployRoutes registers deploy routes for blueprints.
 func registerBlueprintDeployRoutes(r *gin.RouterGroup, deps Dependencies) {
 	r.POST("/blueprints/:id/deploy-docker", deployBlueprintToDocker(deps))
+	r.POST("/blueprints/:id/deploy-local", deployBlueprintToLocal(deps))
 	r.POST("/blueprint-groups/:id/deploy-docker", deployBlueprintGroupToDocker(deps))
 	r.POST("/blueprint-groups/:id/deploy-kubernetes", deployBlueprintGroupToKubernetes(deps))
 }
@@ -84,7 +85,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 
 		svc := &repository.DockerService{
 			TenantID:     tenantID,
-			DockerHostID: req.DockerHostID,
+			DockerHostID: &req.DockerHostID,
 			Name:         bp.Name,
 			ComposeYaml:  bp.ComposeYAML,
 			EnvVars:      envJSON,
@@ -128,6 +129,81 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 
 		logAudit(deps, c, "deploy_docker", "blueprint", bp.ID, nil, gin.H{"docker_host": req.DockerHostID.String()})
 		c.JSON(http.StatusCreated, svc)
+	}
+}
+
+// deployBlueprintToLocal deploys a docker_compose blueprint to the local Docker daemon
+// (unix:///var/run/docker.sock) without requiring a registered Docker host.
+func deployBlueprintToLocal(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		bpID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid blueprint ID"})
+			return
+		}
+
+		var req struct {
+			EnvVars map[string]string `json:"env_vars"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Fetch blueprint
+		var bp serviceBlueprintRow
+		var helmRepoID *string
+		err = deps.DB.Pool.QueryRow(c.Request.Context(), `
+			SELECT `+selectBlueprintCols()+`
+			FROM service_blueprints WHERE id = $1
+		`, bpID).Scan(
+			&bp.ID, &bp.Name, &bp.Description, &bp.SourceType,
+			&helmRepoID, &bp.Image, &bp.ChartURL,
+			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
+			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
+			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
+			&bp.ComposeYAML,
+			&bp.CreatedAt,
+		)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "blueprint not found"})
+			return
+		}
+
+		if bp.SourceType != "docker_compose" || bp.ComposeYAML == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "blueprint must be of type docker_compose with compose_yaml"})
+			return
+		}
+
+		envVars := req.EnvVars
+		if envVars == nil {
+			envVars = make(map[string]string)
+		}
+
+		// Deploy to local Docker daemon
+		cfg := dockerpkg.HostConfig{
+			HostType:    "local",
+			HostAddress: "unix:///var/run/docker.sock",
+		}
+		client := dockerpkg.NewClient(cfg)
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+		defer cancel()
+
+		if err := client.ComposeUp(ctx, bp.Name, bp.ComposeYAML, envVars); err != nil {
+			respondInternalError(c, fmt.Errorf("local deploy failed: %w", err))
+			return
+		}
+
+		containers, _ := client.ComposePs(ctx, bp.Name)
+
+		logAudit(deps, c, "deploy_local", "blueprint", bp.ID, nil, gin.H{"target": "local"})
+		c.JSON(http.StatusCreated, gin.H{
+			"status":     "running",
+			"name":       bp.Name,
+			"target":     "local",
+			"containers": containers,
+		})
 	}
 }
 
@@ -221,7 +297,7 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 			envJSON, _ := json.Marshal(envVars)
 			svc := &repository.DockerService{
 				TenantID:     tenantID,
-				DockerHostID: req.DockerHostID,
+				DockerHostID: &req.DockerHostID,
 				Name:         bp.Name,
 				ComposeYaml:  bp.ComposeYAML,
 				EnvVars:      envJSON,

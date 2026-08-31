@@ -36,7 +36,7 @@ export default function PipelineBuilderPage() {
   // Groups & Docker support
   const [groups, setGroups] = useState<BlueprintGroup[]>([]);
   const [dockerHostList, setDockerHostList] = useState<DockerHost[]>([]);
-  const [targetType, setTargetType] = useState<'kubernetes' | 'docker'>('kubernetes');
+  const [targetType, setTargetType] = useState<'kubernetes' | 'docker' | 'local'>('kubernetes');
   const [selectedDockerHostId, setSelectedDockerHostId] = useState('');
   const [groupsExpanded, setGroupsExpanded] = useState(true);
 
@@ -165,6 +165,35 @@ export default function PipelineBuilderPage() {
           }
         }
         setDeployStatus({ type: 'success', text: `Docker deployment complete: ${dockerItems.length} service(s).` });
+        setDeploying(false);
+        return;
+      }
+
+      // Local Docker target: deploy docker_compose blueprints to local Docker daemon
+      if (targetType === 'local') {
+        const dockerItems = enabledItems.filter(i => i.blueprint.source_type === 'docker_compose');
+        const nonDockerItems = enabledItems.filter(i => i.blueprint.source_type !== 'docker_compose');
+        if (nonDockerItems.length > 0) {
+          addLog(`⚠ Skipping ${nonDockerItems.length} non-Compose blueprint(es) (not compatible with Local Docker target)`);
+        }
+        if (dockerItems.length === 0) {
+          addLog('⚠ No docker_compose blueprints in pipeline to deploy');
+          setDeployStatus({ type: 'error', text: 'No docker_compose blueprints to deploy' });
+          setDeploying(false);
+          return;
+        }
+        for (let i = 0; i < dockerItems.length; i++) {
+          const item = dockerItems[i];
+          const bp = item.blueprint;
+          addLog(`Deploying ${i + 1}/${dockerItems.length}: ${bp.name} → Local Docker`);
+          try {
+            await blueprintsAPI.deployLocal(bp.id);
+            addLog(`✓ ${bp.name} deployed to local Docker`);
+          } catch (err) {
+            addLog(`✗ ${bp.name} failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          }
+        }
+        setDeployStatus({ type: 'success', text: `Local Docker deployment complete: ${dockerItems.length} service(s).` });
         setDeploying(false);
         return;
       }
@@ -408,7 +437,7 @@ export default function PipelineBuilderPage() {
                         : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
                     }`}
                   >
-                    ☸️ Kubernetes Cluster
+                    ☸️ Kubernetes
                   </button>
                   <button
                     onClick={() => setTargetType('docker')}
@@ -419,6 +448,16 @@ export default function PipelineBuilderPage() {
                     }`}
                   >
                     🐙 Docker Host
+                  </button>
+                  <button
+                    onClick={() => setTargetType('local')}
+                    className={`flex-1 text-[12px] px-3 py-2 rounded-lg border transition-all ${
+                      targetType === 'local'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    🐳 Local
                   </button>
                 </div>
               </div>
@@ -442,7 +481,7 @@ export default function PipelineBuilderPage() {
                     <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Applied to all services. Override per-service below.</p>
                   </div>
                 </div>
-              ) : (
+              ) : targetType === 'docker' ? (
                 <div>
                   <label className="label">Docker Host</label>
                   <select value={selectedDockerHostId} onChange={e => setSelectedDockerHostId(e.target.value)} className="input">
@@ -452,6 +491,13 @@ export default function PipelineBuilderPage() {
                     ))}
                   </select>
                   <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Only docker_compose blueprints will be deployed to the Docker host.</p>
+                </div>
+              ) : (
+                <div className="bg-[var(--border-light)] rounded-lg p-3">
+                  <p className="text-[12px] text-[var(--text-secondary)]">
+                    <span className="font-medium">Local Docker</span> — deploys docker_compose blueprints directly to the Docker daemon on this server <span className="font-mono text-[10px] text-[var(--text-tertiary)]">(unix:///var/run/docker.sock)</span>.
+                  </p>
+                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">No Docker host registration required. Only docker_compose blueprints are supported.</p>
                 </div>
               )}
             </div>
@@ -640,7 +686,7 @@ export default function PipelineBuilderPage() {
               {/* Target info */}
               <div>
                 <p className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider mb-1">
-                  {targetType === 'kubernetes' ? 'Cluster' : 'Docker Host'}
+                  {targetType === 'kubernetes' ? 'Cluster' : targetType === 'docker' ? 'Docker Host' : 'Local Docker'}
                 </p>
                 {targetType === 'kubernetes' ? (
                   selectedCluster ? (
@@ -651,7 +697,7 @@ export default function PipelineBuilderPage() {
                   ) : (
                     <p className="text-[12px] text-[var(--text-tertiary)]">Not selected</p>
                   )
-                ) : (
+                ) : targetType === 'docker' ? (
                   selectedDockerHost ? (
                     <div className="flex items-center gap-2">
                       <div className={`w-2 h-2 rounded-full ${selectedDockerHost.status === 'connected' ? 'bg-green-500' : 'bg-gray-300'}`} />
@@ -660,6 +706,11 @@ export default function PipelineBuilderPage() {
                   ) : (
                     <p className="text-[12px] text-[var(--text-tertiary)]">Not selected</p>
                   )
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500" />
+                    <span className="text-[12px] font-medium text-[var(--text-primary)]">Local Docker (unix socket)</span>
+                  </div>
                 )}
               </div>
 
@@ -712,7 +763,7 @@ export default function PipelineBuilderPage() {
                     Deploying...
                   </span>
                 ) : (
-                  `Deploy ${enabledCount} service(s) → ${targetType === 'kubernetes' ? (selectedCluster?.name || 'cluster') : (selectedDockerHost?.name || 'docker host')}`
+                  `Deploy ${enabledCount} service(s) → ${targetType === 'kubernetes' ? (selectedCluster?.name || 'cluster') : targetType === 'docker' ? (selectedDockerHost?.name || 'docker host') : 'Local Docker'}`
                 )}
               </button>
               {((targetType === 'kubernetes' && !selectedClusterId) || (targetType === 'docker' && !selectedDockerHostId) || enabledCount === 0) && (

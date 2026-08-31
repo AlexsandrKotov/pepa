@@ -720,11 +720,10 @@ func (t *getDockerServiceLogsTool) Execute(ctx context.Context, params json.RawM
 	if err != nil {
 		return "", err
 	}
-	host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, svc.DockerHostID, t.deps.TenantID)
+	client, err := newDockerClientForService(t.deps, svc)
 	if err != nil {
-		return "", fmt.Errorf("docker host not found: %w", err)
+		return "", err
 	}
-	client := newDockerClient(host)
 	logsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	logs, err := client.ComposeLogs(logsCtx, svc.Name, p.Service, p.Tail)
@@ -746,6 +745,22 @@ func newDockerClient(host *repository.DockerHost) *dockerpkg.Client {
 		SSHKey:      host.SSHKey,
 	}
 	return dockerpkg.NewClient(cfg)
+}
+
+// newDockerClientForService returns a Docker client for the given service.
+// If DockerHostID is nil, the local Docker socket is used.
+func newDockerClientForService(deps *AgentDeps, svc *repository.DockerService) (*dockerpkg.Client, error) {
+	if svc.DockerHostID == nil {
+		return dockerpkg.NewClient(dockerpkg.HostConfig{
+			HostType:    "local",
+			HostAddress: "unix:///var/run/docker.sock",
+		}), nil
+	}
+	host, err := deps.DockerHostRepo.GetHostDecrypted(context.Background(), *svc.DockerHostID, deps.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("docker host not found: %w", err)
+	}
+	return newDockerClient(host), nil
 }
 
 // ── update_service ────────────────────────────────────────────────────────────
@@ -920,11 +935,10 @@ func (t *restartDockerServiceTool) Execute(ctx context.Context, params json.RawM
 	if err != nil {
 		return "", err
 	}
-	host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, svc.DockerHostID, t.deps.TenantID)
+	client, err := newDockerClientForService(t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
-	client := newDockerClient(host)
 	dCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := client.ComposeRestart(dCtx, svc.Name, p.ServiceName); err != nil {
@@ -959,11 +973,10 @@ func (t *stopDockerServiceTool) Execute(ctx context.Context, params json.RawMess
 	if err != nil {
 		return "", err
 	}
-	host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, svc.DockerHostID, t.deps.TenantID)
+	client, err := newDockerClientForService(t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
-	client := newDockerClient(host)
 	dCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := client.ComposeStop(dCtx, svc.Name); err != nil {
@@ -998,11 +1011,10 @@ func (t *startDockerServiceTool) Execute(ctx context.Context, params json.RawMes
 	if err != nil {
 		return "", err
 	}
-	host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, svc.DockerHostID, t.deps.TenantID)
+	client, err := newDockerClientForService(t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
-	client := newDockerClient(host)
 	dCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := client.ComposeStart(dCtx, svc.Name); err != nil {
@@ -1037,11 +1049,10 @@ func (t *refreshDockerServiceTool) Execute(ctx context.Context, params json.RawM
 	if err != nil {
 		return "", err
 	}
-	host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, svc.DockerHostID, t.deps.TenantID)
+	client, err := newDockerClientForService(t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
-	client := newDockerClient(host)
 	rCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	containers, err := client.ComposePs(rCtx, svc.Name)
@@ -1086,11 +1097,10 @@ func (t *refreshAllDockerServicesTool) Execute(ctx context.Context, _ json.RawMe
 	refreshed := 0
 	for i := range services {
 		svc := &services[i]
-		host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, svc.DockerHostID, t.deps.TenantID)
+		client, err := newDockerClientForService(t.deps, svc)
 		if err != nil {
 			continue
 		}
-		client := newDockerClient(host)
 		rCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		containers, err := client.ComposePs(rCtx, svc.Name)
 		cancel()
@@ -1379,7 +1389,7 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 	envJSON, _ := json.Marshal(envVars)
 	svc := &repository.DockerService{
 		TenantID:     t.deps.TenantID,
-		DockerHostID: hostID,
+		DockerHostID: &hostID,
 		Name:         p.Name,
 		ComposeYaml:  p.ComposeYaml,
 		EnvVars:      envJSON,

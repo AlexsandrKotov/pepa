@@ -47,7 +47,7 @@ type DockerHost struct {
 type DockerService struct {
 	ID           uuid.UUID       `json:"id"`
 	TenantID     uuid.UUID       `json:"tenant_id"`
-	DockerHostID uuid.UUID       `json:"docker_host_id"`
+	DockerHostID *uuid.UUID      `json:"docker_host_id"` // nil = local Docker socket
 	Name         string          `json:"name"`
 	ComposeYaml  string          `json:"compose_yaml"`
 	EnvVars      json.RawMessage `json:"env_vars,omitempty"`

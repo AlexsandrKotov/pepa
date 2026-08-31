@@ -3078,7 +3078,7 @@ export interface DiscoveredDockerContainer {
 export interface DockerService {
   id: string;
   tenant_id: string;
-  docker_host_id: string;
+  docker_host_id: string | null; // null = local Docker socket
   name: string;
   compose_yaml: string;
   env_vars: Record<string, string>;
@@ -3107,6 +3107,8 @@ export const dockerServices = {
     fetchAPI<{ status: string }>(`/api/v1/docker-services/${id}`, { method: 'DELETE' }),
   logs: (id: string, service?: string, tail?: number) =>
     fetchAPI<{ logs: string }>(`/api/v1/docker-services/${id}/logs?service=${service || ''}&tail=${tail || 200}`),
+  deployLocal: (data: { name: string; compose_yaml: string; env_vars?: Record<string, string> }) =>
+    fetchAPI<DockerService>('/api/v1/docker-services/deploy-local', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ── Helm Repositories ───────────────────────────────────────
@@ -3583,6 +3585,8 @@ export const blueprints = {
     fetchAPI<{ ok: boolean }>(`/api/v1/blueprints/${id}`, { method: 'DELETE' }),
   deployDocker: (id: string, dockerHostId: string, envVars?: Record<string, string>) =>
     fetchAPI<DockerService>(`/api/v1/blueprints/${id}/deploy-docker`, { method: 'POST', body: JSON.stringify({ docker_host_id: dockerHostId, env_vars: envVars || {} }) }),
+  deployLocal: (id: string, envVars?: Record<string, string>) =>
+    fetchAPI<{ status: string; name: string; target: string; containers: unknown[] }>(`/api/v1/blueprints/${id}/deploy-local`, { method: 'POST', body: JSON.stringify({ env_vars: envVars || {} }) }),
 };
 
 // ── Blueprint Groups ──────────────────────────────────────────

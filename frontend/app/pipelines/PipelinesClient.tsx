@@ -1504,7 +1504,7 @@ function PipelinesClientContent({
 
                             <div className="text-center py-6">
                               <p className="text-sm text-[var(--text-secondary)]">Vulnerability results will appear here after scanning.</p>
-                              <p className="text-xs text-[var(--text-tertiary)] mt-1">Use "Auto-discover" to find repositories, then "Scan All" to check for vulnerabilities.</p>
+                              <p className="text-xs text-[var(--text-tertiary)] mt-1">Use {"\u201C"}Auto-discover{"\u201D"} to find repositories, then {"\u201C"}Scan All{"\u201D"} to check for vulnerabilities.</p>
                             </div>
                           </div>
                         )}

@@ -178,6 +178,9 @@ services:
     read_only: true
     security_opt:
       - no-new-privileges:true
+    # Access to Docker socket (owned by root:root)
+    group_add:
+      - "0"  # root group — needed to write to /var/run/docker.sock
     tmpfs:
       - /tmp:size=256m,exec
     deploy:

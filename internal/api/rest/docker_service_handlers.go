@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -18,6 +19,7 @@ func registerDockerServiceRoutes(r *gin.RouterGroup, deps Dependencies) {
 	{
 		dockerServices.GET("", listDockerServices(deps))
 		dockerServices.POST("", createDockerService(deps))
+		dockerServices.POST("/deploy-local", deployLocalDockerService(deps))
 		dockerServices.GET("/:id", getDockerService(deps))
 		dockerServices.POST("/:id/refresh", refreshDockerService(deps))
 		dockerServices.POST("/:id/restart", restartDockerService(deps))
@@ -26,6 +28,31 @@ func registerDockerServiceRoutes(r *gin.RouterGroup, deps Dependencies) {
 		dockerServices.DELETE("/:id", deleteDockerService(deps))
 		dockerServices.GET("/:id/logs", getDockerServiceLogs(deps))
 	}
+}
+
+// dockerClientForService returns a Docker CLI client for the given service.
+// If the service has no DockerHostID (nil), it uses the local Docker socket.
+func dockerClientForService(deps Dependencies, svc *repository.DockerService, tenantID uuid.UUID) (*dockerpkg.Client, error) {
+	if svc.DockerHostID == nil {
+		cfg := dockerpkg.HostConfig{
+			HostType:    "local",
+			HostAddress: "unix:///var/run/docker.sock",
+		}
+		return dockerpkg.NewClient(cfg), nil
+	}
+	host, err := deps.Repos.DockerHost.GetHostDecrypted(context.Background(), *svc.DockerHostID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("docker host not found: %w", err)
+	}
+	cfg := dockerpkg.HostConfig{
+		HostType:    host.HostType,
+		HostAddress: host.HostAddress,
+		TLSCACert:   host.TLSCACert,
+		TLSCert:     host.TLSCert,
+		TLSKey:      host.TLSKey,
+		SSHKey:      host.SSHKey,
+	}
+	return dockerpkg.NewClient(cfg), nil
 }
 
 func listDockerServices(deps Dependencies) gin.HandlerFunc {
@@ -77,7 +104,7 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 
 		svc := &repository.DockerService{
 			TenantID:     auth.GetTenantID(c),
-			DockerHostID: req.DockerHostID,
+			DockerHostID: &req.DockerHostID,
 			Name:         req.Name,
 			ComposeYaml:  req.ComposeYaml,
 			EnvVars:      envJSON,
@@ -125,6 +152,73 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// deployLocalDockerService deploys a compose stack to the local Docker daemon
+// (unix:///var/run/docker.sock) without requiring a registered Docker host.
+func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DockerHost == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "docker service repository not available"})
+			return
+		}
+		var req struct {
+			Name        string            `json:"name" binding:"required"`
+			ComposeYaml string            `json:"compose_yaml" binding:"required"`
+			EnvVars     map[string]string `json:"env_vars"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		envVars := req.EnvVars
+		if envVars == nil {
+			envVars = make(map[string]string)
+		}
+		envJSON, _ := json.Marshal(envVars)
+
+		svc := &repository.DockerService{
+			TenantID:     auth.GetTenantID(c),
+			DockerHostID: nil, // local Docker socket
+			Name:         req.Name,
+			ComposeYaml:  req.ComposeYaml,
+			EnvVars:      envJSON,
+			Status:       "deploying",
+			Containers:   json.RawMessage("[]"),
+		}
+
+		if err := deps.Repos.DockerHost.CreateService(c.Request.Context(), svc); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		client := dockerpkg.NewClient(dockerpkg.HostConfig{
+			HostType:    "local",
+			HostAddress: "unix:///var/run/docker.sock",
+		})
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+		defer cancel()
+
+		if err := client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars); err != nil {
+			svc.Status = "error"
+			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+			respondInternalError(c, err)
+			return
+		}
+
+		containers, err := client.ComposePs(ctx, svc.Name)
+		if err == nil {
+			cJSON, _ := json.Marshal(containers)
+			svc.Containers = cJSON
+		}
+		svc.Status = "running"
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+
+		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local"})
+		c.JSON(http.StatusCreated, svc)
+	}
+}
+
 func getDockerService(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.DockerHost == nil {
@@ -164,21 +258,11 @@ func refreshDockerService(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		host, err := deps.Repos.DockerHost.GetHostDecrypted(c.Request.Context(), svc.DockerHostID, tenantID)
+		client, err := dockerClientForService(deps, svc, tenantID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "docker host not found"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		cfg := dockerpkg.HostConfig{
-			HostType:    host.HostType,
-			HostAddress: host.HostAddress,
-			TLSCACert:   host.TLSCACert,
-			TLSCert:     host.TLSCert,
-			TLSKey:      host.TLSKey,
-			SSHKey:      host.SSHKey,
-		}
-		client := dockerpkg.NewClient(cfg)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
@@ -228,9 +312,9 @@ func restartDockerService(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		host, err := deps.Repos.DockerHost.GetHostDecrypted(c.Request.Context(), svc.DockerHostID, tenantID)
+		client, err := dockerClientForService(deps, svc, tenantID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "docker host not found"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
@@ -238,16 +322,6 @@ func restartDockerService(deps Dependencies) gin.HandlerFunc {
 			ServiceName string `json:"service_name"`
 		}
 		_ = c.ShouldBindJSON(&req)
-
-		cfg := dockerpkg.HostConfig{
-			HostType:    host.HostType,
-			HostAddress: host.HostAddress,
-			TLSCACert:   host.TLSCACert,
-			TLSCert:     host.TLSCert,
-			TLSKey:      host.TLSKey,
-			SSHKey:      host.SSHKey,
-		}
-		client := dockerpkg.NewClient(cfg)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
@@ -282,21 +356,11 @@ func stopDockerService(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		host, err := deps.Repos.DockerHost.GetHostDecrypted(c.Request.Context(), svc.DockerHostID, tenantID)
+		client, err := dockerClientForService(deps, svc, tenantID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "docker host not found"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		cfg := dockerpkg.HostConfig{
-			HostType:    host.HostType,
-			HostAddress: host.HostAddress,
-			TLSCACert:   host.TLSCACert,
-			TLSCert:     host.TLSCert,
-			TLSKey:      host.TLSKey,
-			SSHKey:      host.SSHKey,
-		}
-		client := dockerpkg.NewClient(cfg)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
@@ -331,21 +395,11 @@ func startDockerService(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		host, err := deps.Repos.DockerHost.GetHostDecrypted(c.Request.Context(), svc.DockerHostID, tenantID)
+		client, err := dockerClientForService(deps, svc, tenantID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "docker host not found"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		cfg := dockerpkg.HostConfig{
-			HostType:    host.HostType,
-			HostAddress: host.HostAddress,
-			TLSCACert:   host.TLSCACert,
-			TLSCert:     host.TLSCert,
-			TLSKey:      host.TLSKey,
-			SSHKey:      host.SSHKey,
-		}
-		client := dockerpkg.NewClient(cfg)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
@@ -380,22 +434,14 @@ func deleteDockerService(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Try to tear down compose stack (use decrypted host to get real TLS/SSH credentials)
-		host, err := deps.Repos.DockerHost.GetHostDecrypted(c.Request.Context(), svc.DockerHostID, tenantID)
+		// Try to tear down compose stack
+		client, err := dockerClientForService(deps, svc, tenantID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "docker host not found"})
+			// If host is gone, still allow DB cleanup
+			_ = deps.Repos.DockerHost.DeleteService(c.Request.Context(), id)
+			c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 			return
 		}
-
-		cfg := dockerpkg.HostConfig{
-			HostType:    host.HostType,
-			HostAddress: host.HostAddress,
-			TLSCACert:   host.TLSCACert,
-			TLSCert:     host.TLSCert,
-			TLSKey:      host.TLSKey,
-			SSHKey:      host.SSHKey,
-		}
-		client := dockerpkg.NewClient(cfg)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
@@ -429,24 +475,14 @@ func getDockerServiceLogs(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		host, err := deps.Repos.DockerHost.GetHostDecrypted(c.Request.Context(), svc.DockerHostID, tenantID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "docker host not found"})
-			return
-		}
-
 		serviceName := c.Query("service")
 		tail := 200
 
-		cfg := dockerpkg.HostConfig{
-			HostType:    host.HostType,
-			HostAddress: host.HostAddress,
-			TLSCACert:   host.TLSCACert,
-			TLSCert:     host.TLSCert,
-			TLSKey:      host.TLSKey,
-			SSHKey:      host.SSHKey,
+		client, err := dockerClientForService(deps, svc, tenantID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
-		client := dockerpkg.NewClient(cfg)
 
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()

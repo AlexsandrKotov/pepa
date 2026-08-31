@@ -1016,9 +1016,12 @@ func getDockerServices(ctx context.Context, deps Dependencies, tenantID uuid.UUI
 
 	var services []DiscoveredService
 	for _, ds := range dockerSvcs {
-		hostName := hostNames[ds.DockerHostID.String()]
-		if hostName == "" {
-			hostName = "docker-host"
+		hostName := "Local Docker"
+		if ds.DockerHostID != nil {
+			hostName = hostNames[ds.DockerHostID.String()]
+			if hostName == "" {
+				hostName = "docker-host"
+			}
 		}
 
 		var health, status string

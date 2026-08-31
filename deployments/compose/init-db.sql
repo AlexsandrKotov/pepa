@@ -1063,7 +1063,7 @@ CREATE INDEX IF NOT EXISTS idx_docker_hosts_tenant ON docker_hosts(tenant_id);
 CREATE TABLE IF NOT EXISTS docker_services (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL,
-    docker_host_id  UUID NOT NULL REFERENCES docker_hosts(id) ON DELETE CASCADE,
+    docker_host_id  UUID REFERENCES docker_hosts(id) ON DELETE CASCADE, -- nullable: NULL = local Docker socket
     name            VARCHAR(128) NOT NULL,
     compose_yaml    TEXT NOT NULL,
     env_vars        JSONB DEFAULT '{}',
