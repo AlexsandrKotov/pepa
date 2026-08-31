@@ -3081,6 +3081,7 @@ export interface DockerService {
   docker_host_id: string | null; // null = local Docker socket
   name: string;
   compose_yaml: string;
+  folder_path: string; // server-side project folder path
   env_vars: Record<string, string>;
   status: string;
   containers: DockerContainer[];
@@ -3093,7 +3094,7 @@ export const dockerServices = {
     fetchAPI<{ docker_services: DockerService[]; total: number }>('/api/v1/docker-services'),
   get: (id: string) =>
     fetchAPI<DockerService>(`/api/v1/docker-services/${id}`),
-  create: (data: { docker_host_id: string; name: string; compose_yaml: string; env_vars?: Record<string, string> }) =>
+  create: (data: { docker_host_id: string; name: string; compose_yaml?: string; folder_path?: string; env_vars?: Record<string, string> }) =>
     fetchAPI<DockerService>('/api/v1/docker-services', { method: 'POST', body: JSON.stringify(data) }),
   refresh: (id: string) =>
     fetchAPI<DockerService>(`/api/v1/docker-services/${id}/refresh`, { method: 'POST' }),
@@ -3107,7 +3108,7 @@ export const dockerServices = {
     fetchAPI<{ status: string }>(`/api/v1/docker-services/${id}`, { method: 'DELETE' }),
   logs: (id: string, service?: string, tail?: number) =>
     fetchAPI<{ logs: string }>(`/api/v1/docker-services/${id}/logs?service=${service || ''}&tail=${tail || 200}`),
-  deployLocal: (data: { name: string; compose_yaml: string; env_vars?: Record<string, string> }) =>
+  deployLocal: (data: { name: string; compose_yaml?: string; folder_path?: string; env_vars?: Record<string, string> }) =>
     fetchAPI<DockerService>('/api/v1/docker-services/deploy-local', { method: 'POST', body: JSON.stringify(data) }),
 };
 

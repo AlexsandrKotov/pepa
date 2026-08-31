@@ -80,11 +80,18 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 		var req struct {
 			DockerHostID uuid.UUID         `json:"docker_host_id" binding:"required"`
 			Name         string            `json:"name" binding:"required"`
-			ComposeYaml  string            `json:"compose_yaml" binding:"required"`
+			ComposeYaml  string            `json:"compose_yaml"`
+			FolderPath   string            `json:"folder_path"`
 			EnvVars      map[string]string `json:"env_vars"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Require either compose_yaml or folder_path
+		if req.ComposeYaml == "" && req.FolderPath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "either compose_yaml or folder_path is required"})
 			return
 		}
 
@@ -107,6 +114,7 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 			DockerHostID: &req.DockerHostID,
 			Name:         req.Name,
 			ComposeYaml:  req.ComposeYaml,
+			FolderPath:   req.FolderPath,
 			EnvVars:      envJSON,
 			Status:       "deploying",
 			Containers:   json.RawMessage("[]"),
@@ -128,13 +136,21 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 		}
 		client := dockerpkg.NewClient(cfg)
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
 		defer cancel()
 
-		if err := client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars); err != nil {
+		// Deploy from folder or from YAML
+		var deployErr error
+		if svc.FolderPath != "" {
+			deployErr = client.ComposeUpFromFolder(ctx, svc.Name, svc.FolderPath, envVars)
+		} else {
+			deployErr = client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars)
+		}
+
+		if deployErr != nil {
 			svc.Status = "error"
 			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
-			respondInternalError(c, err)
+			respondInternalError(c, deployErr)
 			return
 		}
 
@@ -147,13 +163,14 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 		svc.Status = "running"
 		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 
-		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name})
+		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "folder_path": svc.FolderPath})
 		c.JSON(http.StatusCreated, svc)
 	}
 }
 
 // deployLocalDockerService deploys a compose stack to the local Docker daemon
 // (unix:///var/run/docker.sock) without requiring a registered Docker host.
+// Accepts either compose_yaml or folder_path (project folder with docker-compose.yml).
 func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.DockerHost == nil {
@@ -162,11 +179,18 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 		}
 		var req struct {
 			Name        string            `json:"name" binding:"required"`
-			ComposeYaml string            `json:"compose_yaml" binding:"required"`
+			ComposeYaml string            `json:"compose_yaml"`
+			FolderPath  string            `json:"folder_path"`
 			EnvVars     map[string]string `json:"env_vars"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Require either compose_yaml or folder_path
+		if req.ComposeYaml == "" && req.FolderPath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "either compose_yaml or folder_path is required"})
 			return
 		}
 
@@ -181,6 +205,7 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 			DockerHostID: nil, // local Docker socket
 			Name:         req.Name,
 			ComposeYaml:  req.ComposeYaml,
+			FolderPath:   req.FolderPath,
 			EnvVars:      envJSON,
 			Status:       "deploying",
 			Containers:   json.RawMessage("[]"),
@@ -196,13 +221,21 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 			HostAddress: "unix:///var/run/docker.sock",
 		})
 
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
 		defer cancel()
 
-		if err := client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars); err != nil {
+		// Deploy from folder or from YAML
+		var deployErr error
+		if svc.FolderPath != "" {
+			deployErr = client.ComposeUpFromFolder(ctx, svc.Name, svc.FolderPath, envVars)
+		} else {
+			deployErr = client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars)
+		}
+
+		if deployErr != nil {
 			svc.Status = "error"
 			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
-			respondInternalError(c, err)
+			respondInternalError(c, deployErr)
 			return
 		}
 
@@ -214,7 +247,7 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 		svc.Status = "running"
 		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
 
-		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local"})
+		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local", "folder_path": svc.FolderPath})
 		c.JSON(http.StatusCreated, svc)
 	}
 }

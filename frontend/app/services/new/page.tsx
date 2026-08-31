@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { services, serviceTemplates, clusters, helmRepositories, integrations, blueprints as blueprintsAPI, type ServiceTemplate, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type ServiceBlueprint } from '@/lib/api';
+import { services, serviceTemplates, clusters, helmRepositories, integrations, blueprints as blueprintsAPI, dockerHosts, dockerServices, type ServiceTemplate, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type ServiceBlueprint, type DockerHost } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
 import GitRepoPicker from '@/components/GitRepoPicker';
 import BrandIcon from '@/components/BrandIcon';
@@ -103,6 +103,14 @@ function NewServiceForm() {
   const [replicas, setReplicas] = useState(1);
   const [error, setError] = useState<{ message: string; hint?: string } | null>(null);
 
+  // Docker Compose Import state
+  const [composeYaml, setComposeYaml] = useState('');
+  const [composeSource, setComposeSource] = useState<'yaml' | 'folder'>('yaml');
+  const [composeFolderPath, setComposeFolderPath] = useState('');
+  const [composeDeployTarget, setComposeDeployTarget] = useState<'local' | 'host'>('local');
+  const [composeHostId, setComposeHostId] = useState('');
+  const [dockerHostList, setDockerHostList] = useState<DockerHost[]>([]);
+
   useEffect(() => {
     loadTemplates();
     loadHelmRepos();
@@ -174,6 +182,18 @@ function NewServiceForm() {
     } catch {}
   };
 
+  const loadDockerHosts = async () => {
+    try {
+      const data = await dockerHosts.list().catch(() => ({ docker_hosts: [] }));
+      setDockerHostList(data.docker_hosts || []);
+      if ((data.docker_hosts || []).length > 0 && !composeHostId) {
+        setComposeHostId(data.docker_hosts[0].id);
+      }
+    } catch {}
+  };
+
+  const isComposeImport = selectedTemplate?.slug === 'docker-compose-import';
+
   const handleHelmRepoChartChange = async (value: string) => {
     setSelectedHelmRepoChart(value);
     if (!value) { setHelmUrl(''); setHelmChartVersions([]); return; }
@@ -218,6 +238,10 @@ function NewServiceForm() {
     // Auto-fill GitLab URL from template helm_chart.repo_url (if it looks like a git repo)
     if (tmpl.helm_chart?.repo_url && /git(lab|hub)/i.test(tmpl.helm_chart.repo_url)) {
       setGitlabUrl(tmpl.helm_chart.repo_url);
+    }
+    // Load Docker hosts for compose import template
+    if (tmpl.slug === 'docker-compose-import') {
+      loadDockerHosts();
     }
   };
 
@@ -320,7 +344,47 @@ function NewServiceForm() {
         envVars.filter(e => e.key).forEach(e => { envVarsObj[e.key] = e.value; });
       }
 
-      // Build metadata with raw values.yaml if provided
+      // ── Docker Compose Import flow ──
+      if (isComposeImport) {
+        if (!name.trim()) {
+          setError({ message: 'Service name is required' });
+          setCreating(false);
+          return;
+        }
+        if (composeSource === 'yaml' && !composeYaml.trim()) {
+          setError({ message: 'Docker Compose YAML is required' });
+          setCreating(false);
+          return;
+        }
+        if (composeSource === 'folder' && !composeFolderPath.trim()) {
+          setError({ message: 'Folder path is required' });
+          setCreating(false);
+          return;
+        }
+
+        const composeData = {
+          name: name.trim(),
+          ...(composeSource === 'folder'
+            ? { folder_path: composeFolderPath.trim() }
+            : { compose_yaml: composeYaml }),
+          env_vars: envVarsObj,
+        };
+
+        if (composeDeployTarget === 'local') {
+          await dockerServices.deployLocal(composeData);
+        } else {
+          if (!composeHostId) {
+            setError({ message: 'Please select a Docker host' });
+            setCreating(false);
+            return;
+          }
+          await dockerServices.create({ ...composeData, docker_host_id: composeHostId });
+        }
+        router.push('/docker-services');
+        return;
+      }
+
+      // ── Standard service creation flow ──
       const metadata: Record<string, unknown> = {};
       if (envMode === 'yaml' && valuesYaml.trim()) {
         metadata.values_yaml = valuesYaml;
@@ -648,26 +712,170 @@ function NewServiceForm() {
               <span className="text-[11px] text-[var(--text-tertiary)]">{selectedBlueprint ? `Blueprint: ${selectedBlueprint.name}` : `Template: ${selectedTemplate?.name}`}</span>
             </div>
             <div className="card-body space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Service Name *</label>
-                  <input type="text" value={name} onChange={e => setName(e.target.value)} className="input" placeholder="my-service" />
-                  <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                    Lowercase letters, digits and dashes. Used in URLs and Kubernetes resources.
-                    {name && <span className="ml-1 text-green-600">Slug: <code className="bg-[var(--border-light)] px-1 rounded">{generateSlug(name)}</code></span>}
-                  </p>
-                </div>
-                <div>
-                  <label className="label">Namespace</label>
-                  <input type="text" value={namespace} onChange={e => setNamespace(e.target.value)} className="input" placeholder="default" />
-                  <p className="text-[11px] text-[var(--text-tertiary)] mt-1">The Kubernetes namespace where this service will live.</p>
-                </div>
-              </div>
               <div>
-                <label className="label">Description</label>
-                <textarea value={description} onChange={e => setDescription(e.target.value)} className="input" rows={2} placeholder="Brief description of the service" />
+                <label className="label">Service Name *</label>
+                <input type="text" value={name} onChange={e => setName(e.target.value)} className="input" placeholder="my-service" />
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                  {isComposeImport
+                    ? 'Name for this Docker Compose stack.'
+                    : 'Lowercase letters, digits and dashes. Used in URLs and Kubernetes resources.'}
+                  {name && <span className="ml-1 text-green-600">Slug: <code className="bg-[var(--border-light)] px-1 rounded">{generateSlug(name)}</code></span>}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+
+              {isComposeImport ? (
+                <>
+                  <div>
+                    <label className="label">Description</label>
+                    <textarea value={description} onChange={e => setDescription(e.target.value)} className="input" rows={2} placeholder="Brief description of this compose stack" />
+                  </div>
+
+                  {/* Compose Source */}
+                  <div>
+                    <label className="label">Compose Source</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setComposeSource('yaml')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeSource === 'yaml'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">📝</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Paste / Upload YAML</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">docker-compose.yml content</p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setComposeSource('folder')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeSource === 'folder'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">📂</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Folder</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Path on the PEPA server</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {composeSource === 'folder' ? (
+                    <div>
+                      <label className="label">Folder Path on Server *</label>
+                      <input value={composeFolderPath} onChange={e => setComposeFolderPath(e.target.value)} className="input font-mono text-[12px]" placeholder="/data/compose-projects/my-app" />
+                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                        Folder containing <code className="bg-[var(--border-light)] px-1 rounded">docker-compose.yml</code>. Must be accessible from the PEPA api-server container.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="label mb-0">docker-compose.yml *</label>
+                        <label className="text-[11px] text-[var(--accent)] hover:underline cursor-pointer inline-flex items-center gap-1">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                          </svg>
+                          Upload file
+                          <input
+                            type="file"
+                            accept=".yaml,.yml"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const text = await file.text();
+                              setComposeYaml(text);
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <textarea
+                        value={composeYaml}
+                        onChange={e => setComposeYaml(e.target.value)}
+                        className="input font-mono text-[12px] w-full"
+                        rows={10}
+                        spellCheck={false}
+                        placeholder={`version: '3.8'\nservices:\n  web:\n    image: nginx:latest\n    ports:\n      - "80:80"`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Deploy Target */}
+                  <div>
+                    <label className="label">Deploy Target</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setComposeDeployTarget('local')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeDeployTarget === 'local'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">🐳</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Docker</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">unix:///var/run/docker.sock</p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setComposeDeployTarget('host')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeDeployTarget === 'host'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">🖥️</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Registered Host</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Remote via TCP/SSH/TLS</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {composeDeployTarget === 'host' && (
+                    <div>
+                      <label className="label">Docker Host *</label>
+                      <select value={composeHostId} onChange={e => setComposeHostId(e.target.value)} className="input">
+                        <option value="">Select host...</option>
+                        {dockerHostList.map(h => (
+                          <option key={h.id} value={h.id}>{h.name} ({h.status})</option>
+                        ))}
+                      </select>
+                      {dockerHostList.length === 0 && (
+                        <p className="text-[11px] text-orange-500 mt-1">
+                          No hosts configured. <Link href="/docker-hosts" className="underline">Add a Docker host</Link>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">Namespace</label>
+                      <input type="text" value={namespace} onChange={e => setNamespace(e.target.value)} className="input" placeholder="default" />
+                      <p className="text-[11px] text-[var(--text-tertiary)] mt-1">The Kubernetes namespace where this service will live.</p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Description</label>
+                    <textarea value={description} onChange={e => setDescription(e.target.value)} className="input" rows={2} placeholder="Brief description of the service" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Git Repository URL</label>
                   <div className="space-y-1.5">
@@ -800,9 +1008,12 @@ function NewServiceForm() {
                   )}
                 </div>
               </div>
+                </>
+              )}
             </div>
           </div>
 
+          {!isComposeImport && (
           <div className="card">
             <div className="card-header">
               <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Resources</h2>
@@ -828,6 +1039,7 @@ function NewServiceForm() {
               </p>
             </div>
           </div>
+          )}
 
           <div className="card">
             <div className="card-header">
@@ -960,13 +1172,23 @@ env:
 
           <div className="flex gap-3 justify-end">
             <button onClick={() => setStep('template')} className="btn btn-secondary">← Back</button>
-            <button
-              onClick={() => setStep('deploy')}
-              disabled={!name}
-              className="btn btn-primary"
-            >
-              Next: Deploy →
-            </button>
+            {isComposeImport ? (
+              <button
+                onClick={handleCreate}
+                disabled={!name || creating || (composeSource === 'yaml' && !composeYaml.trim()) || (composeSource === 'folder' && !composeFolderPath.trim())}
+                className="btn btn-primary"
+              >
+                {creating ? 'Deploying...' : composeDeployTarget === 'local' ? '🐳 Deploy Locally' : 'Deploy to Host'}
+              </button>
+            ) : (
+              <button
+                onClick={() => setStep('deploy')}
+                disabled={!name}
+                className="btn btn-primary"
+              >
+                Next: Deploy →
+              </button>
+            )}
           </div>
         </div>
       )}

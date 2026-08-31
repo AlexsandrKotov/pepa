@@ -49,7 +49,8 @@ type DockerService struct {
 	TenantID     uuid.UUID       `json:"tenant_id"`
 	DockerHostID *uuid.UUID      `json:"docker_host_id"` // nil = local Docker socket
 	Name         string          `json:"name"`
-	ComposeYaml  string          `json:"compose_yaml"`
+	ComposeYaml  string          `json:"compose_yaml,omitempty"`
+	FolderPath   string          `json:"folder_path,omitempty"` // server-side project folder path
 	EnvVars      json.RawMessage `json:"env_vars,omitempty"`
 	Status       string          `json:"status"`
 	Containers   json.RawMessage `json:"containers,omitempty"`
@@ -201,8 +202,8 @@ func (r *DockerHostRepository) DeleteHost(ctx context.Context, id uuid.UUID) err
 // ListServices returns all Docker services for a tenant.
 func (r *DockerHostRepository) ListServices(ctx context.Context, tenantID uuid.UUID) ([]DockerService, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, docker_host_id, name, compose_yaml,
-		       COALESCE(env_vars,'{}'::jsonb), status,
+		SELECT id, tenant_id, docker_host_id, name, COALESCE(compose_yaml,''),
+		       COALESCE(folder_path,''), COALESCE(env_vars,'{}'::jsonb), status,
 		       COALESCE(containers,'[]'::jsonb),
 		       created_at, updated_at
 		FROM docker_services WHERE tenant_id = $1
@@ -217,7 +218,7 @@ func (r *DockerHostRepository) ListServices(ctx context.Context, tenantID uuid.U
 	for rows.Next() {
 		var s DockerService
 		if err := rows.Scan(&s.ID, &s.TenantID, &s.DockerHostID, &s.Name,
-			&s.ComposeYaml, &s.EnvVars, &s.Status, &s.Containers,
+			&s.ComposeYaml, &s.FolderPath, &s.EnvVars, &s.Status, &s.Containers,
 			&s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan docker service: %w", err)
 		}
@@ -230,13 +231,13 @@ func (r *DockerHostRepository) ListServices(ctx context.Context, tenantID uuid.U
 func (r *DockerHostRepository) GetService(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) (*DockerService, error) {
 	var s DockerService
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, docker_host_id, name, compose_yaml,
-		       COALESCE(env_vars,'{}'::jsonb), status,
+		SELECT id, tenant_id, docker_host_id, name, COALESCE(compose_yaml,''),
+		       COALESCE(folder_path,''), COALESCE(env_vars,'{}'::jsonb), status,
 		       COALESCE(containers,'[]'::jsonb),
 		       created_at, updated_at
 		FROM docker_services WHERE id = $1 AND tenant_id = $2
 	`, id, tenantID).Scan(&s.ID, &s.TenantID, &s.DockerHostID, &s.Name,
-		&s.ComposeYaml, &s.EnvVars, &s.Status, &s.Containers,
+		&s.ComposeYaml, &s.FolderPath, &s.EnvVars, &s.Status, &s.Containers,
 		&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("get docker service: %w", err)
@@ -247,10 +248,10 @@ func (r *DockerHostRepository) GetService(ctx context.Context, id uuid.UUID, ten
 // CreateService inserts a new Docker service.
 func (r *DockerHostRepository) CreateService(ctx context.Context, s *DockerService) error {
 	return r.pool.QueryRow(ctx, `
-		INSERT INTO docker_services (tenant_id, docker_host_id, name, compose_yaml, env_vars, status, containers)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		INSERT INTO docker_services (tenant_id, docker_host_id, name, compose_yaml, folder_path, env_vars, status, containers)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id, created_at, updated_at
-	`, s.TenantID, s.DockerHostID, s.Name, s.ComposeYaml, s.EnvVars, s.Status, s.Containers,
+	`, s.TenantID, s.DockerHostID, s.Name, s.ComposeYaml, s.FolderPath, s.EnvVars, s.Status, s.Containers,
 	).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 }
 

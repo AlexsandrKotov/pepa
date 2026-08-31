@@ -1360,8 +1360,8 @@ type createDockerServiceTool struct{ deps *AgentDeps }
 func (t *createDockerServiceTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name:        "create_docker_service",
-		Description: "Deploy a Docker Compose stack to a Docker host.",
-		Parameters:  json.RawMessage(`{"type":"object","properties":{"docker_host_id":{"type":"string","description":"Docker host UUID"},"name":{"type":"string","description":"Project name"},"compose_yaml":{"type":"string","description":"Docker Compose YAML content"},"env_vars":{"type":"object","description":"Environment variables"}},"required":["docker_host_id","name","compose_yaml"]}`),
+		Description: "Deploy a Docker Compose stack to a Docker host or local Docker daemon. Provide either compose_yaml or folder_path.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"docker_host_id":{"type":"string","description":"Docker host UUID (omit or empty for local Docker daemon)"},"name":{"type":"string","description":"Project name"},"compose_yaml":{"type":"string","description":"Docker Compose YAML content"},"folder_path":{"type":"string","description":"Server-side project folder path containing docker-compose.yml"},"env_vars":{"type":"object","description":"Environment variables"}},"required":["name"]}`),
 	}
 }
 func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMessage) (string, error) {
@@ -1369,44 +1369,75 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 		DockerHostID string            `json:"docker_host_id"`
 		Name         string            `json:"name"`
 		ComposeYaml  string            `json:"compose_yaml"`
+		FolderPath   string            `json:"folder_path"`
 		EnvVars      map[string]string `json:"env_vars"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
-	hostID, err := uuid.Parse(p.DockerHostID)
-	if err != nil {
-		return "", fmt.Errorf("invalid docker host ID: %w", err)
+
+	// Require either compose_yaml or folder_path
+	if p.ComposeYaml == "" && p.FolderPath == "" {
+		return "", fmt.Errorf("either compose_yaml or folder_path is required")
 	}
-	host, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, hostID, t.deps.TenantID)
-	if err != nil {
-		return "", fmt.Errorf("docker host not found: %w", err)
-	}
+
 	envVars := p.EnvVars
 	if envVars == nil {
 		envVars = make(map[string]string)
 	}
 	envJSON, _ := json.Marshal(envVars)
+
 	svc := &repository.DockerService{
-		TenantID:     t.deps.TenantID,
-		DockerHostID: &hostID,
-		Name:         p.Name,
-		ComposeYaml:  p.ComposeYaml,
-		EnvVars:      envJSON,
-		Status:       "deploying",
-		Containers:   json.RawMessage("[]"),
+		TenantID:    t.deps.TenantID,
+		Name:        p.Name,
+		ComposeYaml: p.ComposeYaml,
+		FolderPath:  p.FolderPath,
+		EnvVars:     envJSON,
+		Status:      "deploying",
+		Containers:  json.RawMessage("[]"),
 	}
+
+	// Set DockerHostID (nil = local Docker socket)
+	if p.DockerHostID != "" {
+		hostID, err := uuid.Parse(p.DockerHostID)
+		if err != nil {
+			return "", fmt.Errorf("invalid docker host ID: %w", err)
+		}
+		// Verify host exists
+		if _, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, hostID, t.deps.TenantID); err != nil {
+			return "", fmt.Errorf("docker host not found: %w", err)
+		}
+		svc.DockerHostID = &hostID
+	}
+
 	if err := t.deps.DockerHostRepo.CreateService(ctx, svc); err != nil {
 		return "", err
 	}
-	client := newDockerClient(host)
-	dCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-	if err := client.ComposeUp(dCtx, svc.Name, svc.ComposeYaml, envVars); err != nil {
+
+	client, err := newDockerClientForService(t.deps, svc)
+	if err != nil {
 		svc.Status = "error"
 		_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
-		return "", fmt.Errorf("deploy failed: %w", err)
+		return "", fmt.Errorf("docker client error: %w", err)
 	}
+
+	dCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
+	defer cancel()
+
+	// Deploy from folder or from YAML
+	var deployErr error
+	if svc.FolderPath != "" {
+		deployErr = client.ComposeUpFromFolder(dCtx, svc.Name, svc.FolderPath, envVars)
+	} else {
+		deployErr = client.ComposeUp(dCtx, svc.Name, svc.ComposeYaml, envVars)
+	}
+
+	if deployErr != nil {
+		svc.Status = "error"
+		_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
+		return "", fmt.Errorf("deploy failed: %w", deployErr)
+	}
+
 	containers, err := client.ComposePs(dCtx, svc.Name)
 	if err == nil {
 		cJSON, _ := json.Marshal(containers)

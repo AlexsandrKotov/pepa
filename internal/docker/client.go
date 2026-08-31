@@ -195,6 +195,47 @@ func (c *Client) ComposeUp(ctx context.Context, projectName, composeYaml string,
 	return nil
 }
 
+// ComposeUpFromFolder deploys a compose stack from a project folder on the server.
+// The folder must contain a docker-compose.yml (or docker-compose.yaml).
+// Relative paths in the compose file (build context, volumes) are resolved relative to this folder.
+func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPath string, envVars map[string]string) error {
+	// Validate path is absolute to prevent accidental relative path usage
+	if !filepath.IsAbs(folderPath) {
+		return fmt.Errorf("folder_path must be an absolute path, got: %s", folderPath)
+	}
+
+	// Verify the folder exists and contains a compose file
+	info, err := os.Stat(folderPath)
+	if err != nil {
+		return fmt.Errorf("folder not accessible: %s: %w", folderPath, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("folder_path is not a directory: %s", folderPath)
+	}
+
+	composePath := filepath.Join(folderPath, "docker-compose.yml")
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		composePath = filepath.Join(folderPath, "docker-compose.yaml")
+		if _, err := os.Stat(composePath); os.IsNotExist(err) {
+			return fmt.Errorf("no docker-compose.yml or docker-compose.yaml found in %s", folderPath)
+		}
+	}
+
+	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "-d"}
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker compose with validated args
+	cmd.Dir = folderPath                               // set working directory for relative paths
+	cmd.Env = c.env()
+	for k, v := range envVars {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker compose up (folder): %s: %w", stderr.String(), err)
+	}
+	return nil
+}
+
 // ComposeDown removes a compose stack.
 func (c *Client) ComposeDown(ctx context.Context, projectName string) error {
 	_, err := c.run(ctx, "compose", "-p", projectName, "down", "--remove-orphans")
