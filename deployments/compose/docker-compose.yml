@@ -25,6 +25,8 @@ volumes:
   pepa-token-tmpfs:  # In-memory volume for bootstrap token (never persisted)
   nginx-logs:
     driver: local
+  loki-data:
+  grafana-data:
 
 # ── Shared environment variables (api-server + worker) ──────
 # Both Go services need the same DB/Redis/S3 connection settings.
@@ -298,3 +300,122 @@ services:
         limits:
           cpus: '${NGINX_CPUS_LIMIT:-0.5}'
           memory: ${NGINX_MEMORY_LIMIT:-128M}
+
+  # ── OpenTelemetry Collector (optional observability stack) ──
+  # Enable with: docker compose --profile observability up -d
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: pepa-otel-collector
+    profiles:
+      - observability
+    restart: unless-stopped
+    command: ["--config", "/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus exporter (scrape target)
+      - "8889:8889"   # Prometheus exporter metrics
+      - "13133:13133" # Health check extension
+      - "55679:55679" # zpages extension
+    depends_on:
+      - jaeger
+      - loki
+    networks:
+      - pepa-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:13133/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '${OTEL_CPUS_LIMIT:-0.5}'
+          memory: ${OTEL_MEMORY_LIMIT:-512M}
+
+  # ── Jaeger (distributed tracing backend) ──────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: pepa-jaeger
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=memory
+      - MEMORY_MAX_TRACES=${JAEGER_MAX_TRACES:-5000}
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317"        # OTLP gRPC (internal)
+    networks:
+      - pepa-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '${JAEGER_CPUS_LIMIT:-1.0}'
+          memory: ${JAEGER_MEMORY_LIMIT:-512M}
+
+  # ── Loki (log aggregation) ────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: pepa-loki
+    profiles:
+      - observability
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100" # Loki API
+    networks:
+      - pepa-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '${LOKI_CPUS_LIMIT:-1.0}'
+          memory: ${LOKI_MEMORY_LIMIT:-1G}
+
+  # ── Grafana (visualization, optional) ─────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pepa-grafana
+    profiles:
+      - observability
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3001:3000" # Grafana UI (3001 to avoid conflict with frontend)
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+      - jaeger
+    networks:
+      - pepa-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '${GRAFANA_CPUS_LIMIT:-0.5}'
+          memory: ${GRAFANA_MEMORY_LIMIT:-256M}

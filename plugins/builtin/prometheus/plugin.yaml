@@ -16,6 +16,12 @@ config_schema:
     token:
       type: string
       description: "Bearer token for authentication (optional)"
+    remote_write_url:
+      type: string
+      description: "Remote write endpoint (optional, defaults to url/api/v1/write)"
+    push_interval:
+      type: string
+      description: "Push interval for metrics (e.g., '30s', '1m')"
   required:
     - url
 
@@ -36,6 +42,10 @@ actions:
     description: "Get values for a specific label"
   - name: alertmanagers
     description: "List discovered Alertmanager instances"
+  - name: remote_write
+    description: "Send metrics to Prometheus remote write endpoint"
+  - name: push_metrics
+    description: "Push internal PEPA metrics to Prometheus"
 
 health_check:
   endpoint: /health

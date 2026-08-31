@@ -24,6 +24,7 @@ func registerObservabilityRoutes(r *gin.RouterGroup, deps Dependencies) {
 		obs.GET("/dashboards", observabilityDashboards(deps))
 		obs.GET("/alerts", observabilityAlerts(deps))
 		obs.POST("/alerts/:id/resolve", observabilityResolveAlert(deps))
+		obs.GET("/correlate", observabilityCorrelate(deps)) // Correlate trace/logs/metrics
 	}
 }
 
@@ -417,3 +418,115 @@ func observabilityResolveAlert(deps Dependencies) gin.HandlerFunc {
 
 // startTime tracks when the application started for uptime calculation.
 var startTime = time.Now()
+
+// observabilityCorrelate correlates traces, logs, and metrics by trace_id.
+// This endpoint enables full-stack observability by finding all related data
+// for a given trace ID across the system.
+func observabilityCorrelate(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		traceID := c.Query("trace_id")
+		if traceID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "trace_id query parameter is required"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+
+		result := map[string]interface{}{
+			"trace_id": traceID,
+		}
+
+		// 1. Find related pipeline runs (traces)
+		var traces []map[string]interface{}
+		if deps.DB != nil && deps.DB.Pool != nil {
+			rows, err := deps.DB.Pool.Query(ctx, `
+				SELECT 
+					pr.id::text as trace_id,
+					'pipeline' as service,
+					COALESCE(ps.name, 'unknown') as operation,
+					EXTRACT(EPOCH FROM (COALESCE(pr.finished_at, NOW()) - pr.created_at)) * 1000 as duration_ms,
+					COALESCE(pr.jobs_completed, 0) + COALESCE(pr.jobs_failed, 0) as spans,
+					pr.status,
+					pr.created_at as timestamp
+				FROM pipeline_runs pr
+				LEFT JOIN pipeline_sources ps ON pr.source_id = ps.id
+				WHERE pr.id::text = $1
+				ORDER BY pr.created_at DESC
+			`, traceID)
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var tID, service, operation, status string
+					var durationMs float64
+					var spans int
+					var timestamp time.Time
+					if err := rows.Scan(&tID, &service, &operation, &durationMs, &spans, &status, &timestamp); err == nil {
+						traces = append(traces, map[string]interface{}{
+							"trace_id":    tID,
+							"service":     service,
+							"operation":   operation,
+							"duration_ms": durationMs,
+							"spans":       spans,
+							"status":      status,
+							"timestamp":   timestamp.UTC().Format(time.RFC3339),
+						})
+					}
+				}
+			}
+		}
+		result["traces"] = traces
+
+		// 2. Find related audit logs (logs with trace_id in metadata)
+		var logs []map[string]interface{}
+		if deps.DB != nil && deps.DB.Pool != nil {
+			rows, err := deps.DB.Pool.Query(ctx, `
+				SELECT created_at, action, COALESCE(entity_type, ''), COALESCE(plugin_name, ''), COALESCE(ip_address::text, '')
+				FROM audit_log
+				WHERE new_values::text LIKE $1
+				ORDER BY created_at DESC
+				LIMIT 100
+			`, "%"+traceID+"%")
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var ts time.Time
+					var action, entityType, plugin, ip string
+					if err := rows.Scan(&ts, &action, &entityType, &plugin, &ip); err == nil {
+						logs = append(logs, map[string]interface{}{
+							"timestamp":   ts.UTC().Format(time.RFC3339),
+							"action":      action,
+							"entity_type": entityType,
+							"plugin":      plugin,
+							"ip":          ip,
+							"trace_id":    traceID,
+						})
+					}
+				}
+			}
+		}
+		result["logs"] = logs
+
+		// 3. Get metrics during the trace timeframe (last hour as fallback)
+		var metrics []map[string]interface{}
+		metricFamilies, err := prometheus.DefaultGatherer.Gather()
+		if err == nil {
+			for _, mf := range metricFamilies {
+				metrics = append(metrics, map[string]interface{}{
+					"name": mf.GetName(),
+					"type": mf.GetType().String(),
+					"help": mf.GetHelp(),
+				})
+			}
+		}
+		result["metrics"] = metrics
+
+		// 4. Add correlation metadata
+		result["correlated_at"] = time.Now().UTC().Format(time.RFC3339)
+		result["total_traces"] = len(traces)
+		result["total_logs"] = len(logs)
+		result["total_metrics"] = len(metrics)
+
+		c.JSON(http.StatusOK, result)
+	}
+}

@@ -21,6 +21,8 @@ func registerSettingsRoutes(r *gin.RouterGroup, deps Dependencies) {
 		settings.GET("", listSettings(deps))
 		settings.GET("/oidc/config", getOIDCAdminConfig(deps))
 		settings.GET("/azure/config", getAzureADAdminConfig(deps))
+		settings.GET("/google/config", getGoogleAdminConfig(deps))
+		settings.GET("/github/config", getGitHubAdminConfig(deps))
 		settings.GET("/ldap/config", getLDAPAdminConfig(deps))
 		settings.POST("/ldap/test", testLDAPConnection(deps))
 		settings.GET("/:key", getSetting(deps))
@@ -92,6 +94,10 @@ func updateSetting(deps Dependencies) gin.HandlerFunc {
 			applyOIDCSettings(deps, req.Value)
 		case "azure_ad":
 			applyAzureADSettings(deps, req.Value)
+		case "google":
+			applyGoogleSettings(deps, req.Value)
+		case "github":
+			applyGitHubSettings(deps, req.Value)
 		case "ldap":
 			applyLDAPSettings(deps, req.Value)
 		}
@@ -105,6 +111,10 @@ func updateSetting(deps Dependencies) gin.HandlerFunc {
 			storeValue = stripOIDCSecret(req.Value)
 		case "azure_ad":
 			storeValue = stripAzureSecret(req.Value)
+		case "google":
+			storeValue = stripGoogleSecret(req.Value)
+		case "github":
+			storeValue = stripGitHubSecret(req.Value)
 		case "ldap":
 			storeValue = stripLDAPSecret(req.Value)
 		}
@@ -497,6 +507,126 @@ func getAzureADAdminConfig(deps Dependencies) gin.HandlerFunc {
 			"client_id":     azure.ClientID,
 			"client_secret": maskedSecret,
 			"redirect_url":  azure.RedirectURL,
+		})
+	}
+}
+
+// ── Google OAuth settings ─────────────────────────────────────────────────────
+
+// applyGoogleSettings reads the Google OAuth settings JSON and updates the runtime config.
+func applyGoogleSettings(deps Dependencies, value json.RawMessage) {
+	var googleSettings struct {
+		Enabled      bool   `json:"enabled"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		RedirectURL  string `json:"redirect_url"`
+	}
+	if err := json.Unmarshal(value, &googleSettings); err != nil {
+		slog.Error("failed to unmarshal Google settings", "error", err)
+		return
+	}
+	deps.Config.Auth.Google.Enabled = googleSettings.Enabled
+	deps.Config.Auth.Google.ClientID = googleSettings.ClientID
+	// If the client_secret contains mask characters, keep the existing secret
+	if googleSettings.ClientSecret != "" && !strings.Contains(googleSettings.ClientSecret, "\u2022") {
+		deps.Config.Auth.Google.ClientSecret = googleSettings.ClientSecret
+	}
+	deps.Config.Auth.Google.RedirectURL = googleSettings.RedirectURL
+	slog.Info("Google OAuth settings updated at runtime", "enabled", googleSettings.Enabled)
+}
+
+// stripGoogleSecret removes client_secret from the JSON so it is not persisted in the DB.
+func stripGoogleSecret(value json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(value, &m); err != nil {
+		return value
+	}
+	delete(m, "client_secret")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return value
+	}
+	return out
+}
+
+// getGoogleAdminConfig returns the current Google OAuth configuration for the admin settings page.
+// The client_secret is masked for security.
+func getGoogleAdminConfig(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		google := deps.Config.Auth.Google
+		maskedSecret := ""
+		if google.ClientSecret != "" {
+			if len(google.ClientSecret) > 4 {
+				maskedSecret = google.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+			} else {
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":       google.Enabled,
+			"client_id":     google.ClientID,
+			"client_secret": maskedSecret,
+			"redirect_url":  google.RedirectURL,
+		})
+	}
+}
+
+// ── GitHub OAuth settings ─────────────────────────────────────────────────────
+
+// applyGitHubSettings reads the GitHub OAuth settings JSON and updates the runtime config.
+func applyGitHubSettings(deps Dependencies, value json.RawMessage) {
+	var githubSettings struct {
+		Enabled      bool   `json:"enabled"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		RedirectURL  string `json:"redirect_url"`
+	}
+	if err := json.Unmarshal(value, &githubSettings); err != nil {
+		slog.Error("failed to unmarshal GitHub settings", "error", err)
+		return
+	}
+	deps.Config.Auth.GitHub.Enabled = githubSettings.Enabled
+	deps.Config.Auth.GitHub.ClientID = githubSettings.ClientID
+	// If the client_secret contains mask characters, keep the existing secret
+	if githubSettings.ClientSecret != "" && !strings.Contains(githubSettings.ClientSecret, "\u2022") {
+		deps.Config.Auth.GitHub.ClientSecret = githubSettings.ClientSecret
+	}
+	deps.Config.Auth.GitHub.RedirectURL = githubSettings.RedirectURL
+	slog.Info("GitHub OAuth settings updated at runtime", "enabled", githubSettings.Enabled)
+}
+
+// stripGitHubSecret removes client_secret from the JSON so it is not persisted in the DB.
+func stripGitHubSecret(value json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(value, &m); err != nil {
+		return value
+	}
+	delete(m, "client_secret")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return value
+	}
+	return out
+}
+
+// getGitHubAdminConfig returns the current GitHub OAuth configuration for the admin settings page.
+// The client_secret is masked for security.
+func getGitHubAdminConfig(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		github := deps.Config.Auth.GitHub
+		maskedSecret := ""
+		if github.ClientSecret != "" {
+			if len(github.ClientSecret) > 4 {
+				maskedSecret = github.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
+			} else {
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"enabled":       github.Enabled,
+			"client_id":     github.ClientID,
+			"client_secret": maskedSecret,
+			"redirect_url":  github.RedirectURL,
 		})
 	}
 }

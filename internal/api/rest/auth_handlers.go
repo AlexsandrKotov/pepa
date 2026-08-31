@@ -40,6 +40,16 @@ func registerAuthRoutes(r *gin.Engine, deps Dependencies) {
 		public.GET("/azure/login", azureLoginHandler(deps))
 		public.GET("/azure/callback", azureCallbackHandler(deps))
 
+		// Google OAuth routes (public, no JWT required)
+		public.GET("/google/config", googleConfigHandler(deps))
+		public.GET("/google/login", googleLoginHandler(deps))
+		public.GET("/google/callback", googleCallbackHandler(deps))
+
+		// GitHub OAuth routes (public, no JWT required)
+		public.GET("/github/config", githubConfigHandler(deps))
+		public.GET("/github/login", githubLoginHandler(deps))
+		public.GET("/github/callback", githubCallbackHandler(deps))
+
 		// LDAP routes (public, no JWT required)
 		public.POST("/ldap/login", ldapLoginHandler(deps))
 		public.GET("/ldap/config", ldapConfigHandler(deps))

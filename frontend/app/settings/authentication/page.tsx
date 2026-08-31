@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getOIDCAdminConfig, getAzureAdminConfig, getLDAPAdminConfig, testLDAPConnection, platformSettings } from '@/lib/api';
+import { getOIDCAdminConfig, getAzureAdminConfig, getLDAPAdminConfig, testLDAPConnection, getGoogleAdminConfig, getGitHubAdminConfig, platformSettings } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 
-type Tab = 'sso' | 'azure' | 'ldap';
+type Tab = 'sso' | 'azure' | 'google' | 'github' | 'ldap';
 
 export default function AuthenticationSettingsPage() {
   const [tab, setTab] = useState<Tab>('sso');
@@ -23,6 +23,8 @@ export default function AuthenticationSettingsPage() {
             {([
               { id: 'sso' as Tab, label: 'SSO / OIDC' },
               { id: 'azure' as Tab, label: 'Azure AD' },
+              { id: 'google' as Tab, label: 'Google' },
+              { id: 'github' as Tab, label: 'GitHub' },
               { id: 'ldap' as Tab, label: 'LDAP' },
             ]).map(t => (
               <button
@@ -41,6 +43,8 @@ export default function AuthenticationSettingsPage() {
 
           {tab === 'sso' && <SSOSettingsPanel />}
           {tab === 'azure' && <AzureSettingsPanel />}
+          {tab === 'google' && <GoogleSettingsPanel />}
+          {tab === 'github' && <GitHubSettingsPanel />}
           {tab === 'ldap' && <LDAPSettingsPanel />}
         </div>
       </div>
@@ -256,6 +260,192 @@ function AzureSettingsPanel() {
         </div>
         <div className="card-footer flex justify-end">
           <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? 'Saving...' : 'Save Azure AD Settings'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Google OAuth Panel ─────────────────────────────────────────
+
+function GoogleSettingsPanel() {
+  const [form, setForm] = useState({
+    enabled: false,
+    client_id: '',
+    client_secret: '',
+    redirect_url: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await getGoogleAdminConfig();
+        setForm({
+          enabled: cfg.enabled,
+          client_id: cfg.client_id || '',
+          client_secret: cfg.client_secret || '',
+          redirect_url: cfg.redirect_url || '',
+        });
+      } catch { /* no config yet */ }
+      setLoaded(true);
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setToast(null);
+    setError('');
+    if (form.enabled) {
+      if (!form.client_id.trim()) { setError('Client ID is required'); setSaving(false); return; }
+      if (!form.redirect_url.trim()) { setError('Redirect URL is required'); setSaving(false); return; }
+    }
+    try {
+      await platformSettings.update('google', {
+        enabled: form.enabled,
+        client_id: form.client_id.trim(),
+        client_secret: form.client_secret,
+        redirect_url: form.redirect_url.trim(),
+      });
+      setToast({ message: 'Google OAuth configuration saved', type: 'success' });
+    } catch (err) {
+      setToast({ message: `Save failed: ${err}`, type: 'error' });
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="space-y-6">
+      <Toast toast={toast} />
+      {error && <ErrorBanner message={error} />}
+
+      <div className="card page-animate-up" style={{ borderRadius: '12px' }}>
+        <div className="card-header flex items-center justify-between">
+          <span className="text-[13px] font-medium text-[var(--text-primary)]">Google OAuth</span>
+          <ToggleSwitch enabled={form.enabled} onChange={() => setForm({ ...form, enabled: !form.enabled })} />
+        </div>
+        <div className="card-body space-y-5">
+          <InfoBanner text='Configure Google OAuth to enable &quot;Sign in with Google&quot;. Create credentials at console.cloud.google.com &gt; APIs &amp; Services &gt; Credentials.' />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="label">Client ID *</label>
+              <input value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })} className="input mt-1" placeholder="xxxxxxxxxxxx.apps.googleusercontent.com" disabled={!form.enabled} />
+            </div>
+            <div>
+              <label className="label">Client Secret *</label>
+              <input type="password" value={form.client_secret} onChange={e => setForm({ ...form, client_secret: e.target.value })} className="input mt-1" placeholder="••••••••" disabled={!form.enabled} />
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Leave unchanged to keep the current secret</p>
+            </div>
+          </div>
+          <div>
+            <label className="label">Redirect URL *</label>
+            <input value={form.redirect_url} onChange={e => setForm({ ...form, redirect_url: e.target.value })} className="input mt-1" placeholder="https://your-pepa-domain/api/v1/auth/google/callback" disabled={!form.enabled} />
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Add this URL to your Google OAuth client&apos;s authorized redirect URIs</p>
+          </div>
+        </div>
+        <div className="card-footer flex justify-end">
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? 'Saving...' : 'Save Google Settings'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── GitHub OAuth Panel ─────────────────────────────────────────
+
+function GitHubSettingsPanel() {
+  const [form, setForm] = useState({
+    enabled: false,
+    client_id: '',
+    client_secret: '',
+    redirect_url: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfg = await getGitHubAdminConfig();
+        setForm({
+          enabled: cfg.enabled,
+          client_id: cfg.client_id || '',
+          client_secret: cfg.client_secret || '',
+          redirect_url: cfg.redirect_url || '',
+        });
+      } catch { /* no config yet */ }
+      setLoaded(true);
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setToast(null);
+    setError('');
+    if (form.enabled) {
+      if (!form.client_id.trim()) { setError('Client ID is required'); setSaving(false); return; }
+      if (!form.redirect_url.trim()) { setError('Redirect URL is required'); setSaving(false); return; }
+    }
+    try {
+      await platformSettings.update('github', {
+        enabled: form.enabled,
+        client_id: form.client_id.trim(),
+        client_secret: form.client_secret,
+        redirect_url: form.redirect_url.trim(),
+      });
+      setToast({ message: 'GitHub OAuth configuration saved', type: 'success' });
+    } catch (err) {
+      setToast({ message: `Save failed: ${err}`, type: 'error' });
+    } finally {
+      setSaving(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="space-y-6">
+      <Toast toast={toast} />
+      {error && <ErrorBanner message={error} />}
+
+      <div className="card page-animate-up" style={{ borderRadius: '12px' }}>
+        <div className="card-header flex items-center justify-between">
+          <span className="text-[13px] font-medium text-[var(--text-primary)]">GitHub OAuth</span>
+          <ToggleSwitch enabled={form.enabled} onChange={() => setForm({ ...form, enabled: !form.enabled })} />
+        </div>
+        <div className="card-body space-y-5">
+          <InfoBanner text='Configure GitHub OAuth to enable &quot;Sign in with GitHub&quot;. Create an OAuth App at github.com/settings/developers.' />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="label">Client ID *</label>
+              <input value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })} className="input mt-1" placeholder="Iv1.xxxxxxxxxxxxxxxx" disabled={!form.enabled} />
+            </div>
+            <div>
+              <label className="label">Client Secret *</label>
+              <input type="password" value={form.client_secret} onChange={e => setForm({ ...form, client_secret: e.target.value })} className="input mt-1" placeholder="••••••••" disabled={!form.enabled} />
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Leave unchanged to keep the current secret</p>
+            </div>
+          </div>
+          <div>
+            <label className="label">Redirect URL *</label>
+            <input value={form.redirect_url} onChange={e => setForm({ ...form, redirect_url: e.target.value })} className="input mt-1" placeholder="https://your-pepa-domain/api/v1/auth/github/callback" disabled={!form.enabled} />
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Set this as the &quot;Authorization callback URL&quot; in your GitHub OAuth App settings</p>
+          </div>
+        </div>
+        <div className="card-footer flex justify-end">
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? 'Saving...' : 'Save GitHub Settings'}</button>
         </div>
       </div>
     </div>

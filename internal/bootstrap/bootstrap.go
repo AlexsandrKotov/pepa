@@ -20,6 +20,7 @@ import (
 	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/gitops"
 	"github.com/pepa/pepa/internal/logging"
+	"github.com/pepa/pepa/internal/observability"
 	"github.com/pepa/pepa/internal/pipeline"
 	"github.com/pepa/pepa/internal/plugin/engine"
 	"github.com/pepa/pepa/internal/provider"
@@ -83,6 +84,9 @@ type Components struct {
 	WorkflowBuilder  *ai.WorkflowBuilder
 	Specialists      *ai.SpecialistRegistry
 	Coordinator      *ai.AgentCoordinator
+
+	// Observability
+	TracingShutdown func(context.Context) error
 }
 
 // Bootstrap loads configuration, connects to infrastructure, discovers plugins,
@@ -92,8 +96,18 @@ func Bootstrap() (*Components, error) {
 	cfg := config.DefaultConfig()
 	cfg.LoadFromEnv()
 
-	// Initialize structured logging
-	logging.Init(cfg.Server.Env, cfg.Server.LogLevel)
+	// Initialize structured logging with syslog support
+	logging.InitWithConfig(logging.Config{
+		Environment: cfg.Server.Env,
+		Level:       cfg.Server.LogLevel,
+		Syslog: logging.SyslogConfig{
+			Enabled:  cfg.Observability.Syslog.Enabled,
+			Network:  cfg.Observability.Syslog.Network,
+			Address:  cfg.Observability.Syslog.Address,
+			Tag:      cfg.Observability.Syslog.Tag,
+			Facility: cfg.Observability.Syslog.Facility,
+		},
+	})
 
 	// Warn about insecure defaults
 	for _, w := range cfg.Validate() {
@@ -109,6 +123,25 @@ func Bootstrap() (*Components, error) {
 		slog.Warn("encryption key validation warning", "error", err)
 	} else {
 		slog.Debug("encryption key validation passed")
+	}
+
+	// Initialize OpenTelemetry tracing (if enabled)
+	ctx := context.Background()
+	var tracingShutdown func(context.Context) error
+	if cfg.Observability.Enabled && cfg.Observability.OTLPEndpoint != "" {
+		shutdown, err := observability.InitTracing(ctx, observability.TracingConfig{
+			Enabled:      cfg.Observability.Enabled,
+			OTLPEndpoint: cfg.Observability.OTLPEndpoint,
+			ServiceName:  cfg.Observability.ServiceName,
+			SamplingRate: cfg.Observability.SamplingRate,
+			Insecure:     cfg.Observability.Insecure,
+		})
+		if err != nil {
+			slog.Warn("failed to initialize OpenTelemetry tracing", "error", err)
+		} else {
+			tracingShutdown = shutdown
+			slog.Info("OpenTelemetry tracing initialized")
+		}
 	}
 
 	// Initialize PostgreSQL
@@ -182,6 +215,7 @@ func Bootstrap() (*Components, error) {
 		ProviderRegistry:    providerRegistry,
 		EventBus:            eventBus,
 		JobQueue:            jobQueue,
+		TracingShutdown:     tracingShutdown,
 		EntityRepo:          repository.NewEntityRepository(db),
 		WorkflowRepo:        repository.NewWorkflowRepository(db),
 		PluginRepo:          repository.NewPluginRepository(db),
@@ -524,6 +558,13 @@ func (c *Components) StartEventBus() {
 
 // Shutdown gracefully stops all components.
 func (c *Components) Shutdown(ctx context.Context) {
+	// Shutdown OpenTelemetry tracing first (flush any pending spans)
+	if c.TracingShutdown != nil {
+		if err := c.TracingShutdown(ctx); err != nil {
+			slog.Warn("failed to shutdown tracing", "error", err)
+		}
+	}
+
 	if c.RAGWatcher != nil {
 		c.RAGWatcher.Stop()
 	}

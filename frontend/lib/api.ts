@@ -404,6 +404,72 @@ export async function getAzureAdminConfig(): Promise<{
   return fetchAPI('/api/v1/settings/azure/config');
 }
 
+// ── Google OAuth API ──────────────────────────────────────────
+
+export async function getGoogleConfig(): Promise<{ enabled: boolean }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/google/config`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    return { enabled: false };
+  }
+  return res.json();
+}
+
+export async function getGoogleLoginURL(): Promise<{ redirect_url: string }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/google/login`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to get Google login URL');
+  }
+  return res.json();
+}
+
+export async function getGoogleAdminConfig(): Promise<{
+  enabled: boolean;
+  client_id: string;
+  client_secret: string;
+  redirect_url: string;
+}> {
+  return fetchAPI('/api/v1/settings/google/config');
+}
+
+// ── GitHub OAuth API ──────────────────────────────────────────
+
+export async function getGitHubConfig(): Promise<{ enabled: boolean }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/github/config`, {
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    return { enabled: false };
+  }
+  return res.json();
+}
+
+export async function getGitHubLoginURL(): Promise<{ redirect_url: string }> {
+  const res = await fetch(`${getBase()}/api/v1/auth/github/login`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to get GitHub login URL');
+  }
+  return res.json();
+}
+
+export async function getGitHubAdminConfig(): Promise<{
+  enabled: boolean;
+  client_id: string;
+  client_secret: string;
+  redirect_url: string;
+}> {
+  return fetchAPI('/api/v1/settings/github/config');
+}
+
 // ── LDAP API ─────────────────────────────────────────────────
 
 export async function getLDAPConfig(): Promise<{ enabled: boolean }> {

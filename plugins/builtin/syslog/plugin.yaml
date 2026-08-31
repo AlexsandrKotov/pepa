@@ -1,0 +1,65 @@
+name: syslog
+version: "0.1.0"
+display_name: "Syslog Exporter"
+description: "Forward PEPA logs, events, and audit trail to syslog server for centralized logging."
+category: logging
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    server:
+      type: string
+      description: "Syslog server address (host:port, e.g., syslog:514)"
+    protocol:
+      type: string
+      enum: ["udp", "tcp"]
+      default: "udp"
+      description: "Transport protocol"
+    facility:
+      type: string
+      enum: ["local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7", "user", "daemon"]
+      default: "local0"
+      description: "Syslog facility"
+    tag:
+      type: string
+      default: "pepa"
+      description: "Syslog message tag"
+    format:
+      type: string
+      enum: ["json", "text", "rfc5424"]
+      default: "json"
+      description: "Message format"
+    severity_mapping:
+      type: object
+      description: "Map PEPA log levels to syslog severity"
+      properties:
+        debug:
+          type: string
+          default: "debug"
+        info:
+          type: string
+          default: "info"
+        warn:
+          type: string
+          default: "warning"
+        error:
+          type: string
+          default: "error"
+  required:
+    - server
+
+actions:
+  - name: send_log
+    description: "Send a log message to syslog"
+  - name: send_audit
+    description: "Send an audit event to syslog"
+  - name: send_event
+    description: "Send a system event to syslog"
+  - name: test_connection
+    description: "Test syslog server connectivity"
+
+health_check:
+  interval: 30s

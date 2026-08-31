@@ -254,4 +254,19 @@ func cleanupOldStates() {
 			delete(oidcStates, state)
 		}
 	}
+	for state, data := range azureStates {
+		if data.CreatedAt.Before(cutoff) {
+			delete(azureStates, state)
+		}
+	}
+	for state, data := range googleStates {
+		if data.CreatedAt.Before(cutoff) {
+			delete(googleStates, state)
+		}
+	}
+	for state, data := range githubStates {
+		if data.CreatedAt.Before(cutoff) {
+			delete(githubStates, state)
+		}
+	}
 }

@@ -4,21 +4,23 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // Config — root application configuration
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	S3       S3Config       `mapstructure:"s3"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Plugin   PluginConfig   `mapstructure:"plugin"`
-	AI       AIConfig       `mapstructure:"ai"`
-	CORS     CORSConfig     `mapstructure:"cors"`
-	Worker   WorkerConfig   `mapstructure:"worker"`
+	Server        ServerConfig        `mapstructure:"server"`
+	Database      DatabaseConfig      `mapstructure:"database"`
+	Redis         RedisConfig         `mapstructure:"redis"`
+	S3            S3Config            `mapstructure:"s3"`
+	Auth          AuthConfig          `mapstructure:"auth"`
+	Plugin        PluginConfig        `mapstructure:"plugin"`
+	AI            AIConfig            `mapstructure:"ai"`
+	CORS          CORSConfig          `mapstructure:"cors"`
+	Worker        WorkerConfig        `mapstructure:"worker"`
+	Observability ObservabilityConfig `mapstructure:"observability"`
 }
 
 type ServerConfig struct {
@@ -72,6 +74,8 @@ type AuthConfig struct {
 	OIDC            OIDCConfig    `mapstructure:"oidc"`
 	AzureAD         AzureADConfig `mapstructure:"azure_ad"`
 	LDAP            LDAPConfig    `mapstructure:"ldap"`
+	Google          GoogleConfig  `mapstructure:"google"`
+	GitHub          GitHubConfig  `mapstructure:"github"`
 }
 
 type OIDCConfig struct {
@@ -110,6 +114,22 @@ type LDAPConfig struct {
 	GroupMapping       map[string]string `mapstructure:"group_mapping"`
 }
 
+// GoogleConfig holds Google OAuth2 authentication settings.
+type GoogleConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURL  string `mapstructure:"redirect_url"`
+}
+
+// GitHubConfig holds GitHub OAuth2 authentication settings.
+type GitHubConfig struct {
+	Enabled      bool   `mapstructure:"enabled"`
+	ClientID     string `mapstructure:"client_id"`
+	ClientSecret string `mapstructure:"client_secret"`
+	RedirectURL  string `mapstructure:"redirect_url"`
+}
+
 type PluginConfig struct {
 	Dir              string `mapstructure:"dir"`
 	CustomDir        string `mapstructure:"custom_dir"`
@@ -131,6 +151,26 @@ type CORSConfig struct {
 
 type WorkerConfig struct {
 	Concurrency int `mapstructure:"concurrency"`
+}
+
+// ObservabilityConfig holds OpenTelemetry and observability settings.
+// Controls distributed tracing, metrics export, and log forwarding.
+type ObservabilityConfig struct {
+	Enabled      bool    `mapstructure:"enabled"`
+	OTLPEndpoint string  `mapstructure:"otlp_endpoint"`
+	ServiceName  string  `mapstructure:"service_name"`
+	SamplingRate float64 `mapstructure:"sampling_rate"`
+	Insecure     bool    `mapstructure:"insecure"`
+	Syslog       SyslogConfig `mapstructure:"syslog"`
+}
+
+// SyslogConfig holds syslog forwarding settings.
+type SyslogConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Network  string `mapstructure:"network"` // "udp", "tcp"
+	Address  string `mapstructure:"address"` // "syslog-server:514"
+	Tag      string `mapstructure:"tag"`     // "pepa"
+	Facility string `mapstructure:"facility"` // "local0"-"local7"
 }
 
 // DefaultConfig returns a configuration with sensible defaults for development.
@@ -188,6 +228,20 @@ func DefaultConfig() *Config {
 		},
 		Worker: WorkerConfig{
 			Concurrency: 3,
+		},
+		Observability: ObservabilityConfig{
+			Enabled:      false,
+			OTLPEndpoint: "",
+			ServiceName:  "pepa-api",
+			SamplingRate: 1.0,
+			Insecure:     true,
+			Syslog: SyslogConfig{
+				Enabled:  false,
+				Network:  "udp",
+				Address:  "",
+				Tag:      "pepa",
+				Facility: "local0",
+			},
 		},
 	}
 }
@@ -286,6 +340,34 @@ func (c *Config) LoadFromEnv() {
 		}
 	}
 
+	// Google OAuth
+	if v := getenv("GOOGLE_OAUTH_ENABLED"); v == "true" {
+		c.Auth.Google.Enabled = true
+	}
+	if v := getenv("GOOGLE_CLIENT_ID"); v != "" {
+		c.Auth.Google.ClientID = v
+	}
+	if v := getenv("GOOGLE_CLIENT_SECRET"); v != "" {
+		c.Auth.Google.ClientSecret = v
+	}
+	if v := getenv("GOOGLE_REDIRECT_URL"); v != "" {
+		c.Auth.Google.RedirectURL = v
+	}
+
+	// GitHub OAuth
+	if v := getenv("GITHUB_OAUTH_ENABLED"); v == "true" {
+		c.Auth.GitHub.Enabled = true
+	}
+	if v := getenv("GITHUB_CLIENT_ID"); v != "" {
+		c.Auth.GitHub.ClientID = v
+	}
+	if v := getenv("GITHUB_CLIENT_SECRET"); v != "" {
+		c.Auth.GitHub.ClientSecret = v
+	}
+	if v := getenv("GITHUB_REDIRECT_URL"); v != "" {
+		c.Auth.GitHub.RedirectURL = v
+	}
+
 	// Plugin
 	if v := getenv("PLUGIN_DIR"); v != "" {
 		c.Plugin.Dir = v
@@ -317,6 +399,42 @@ func (c *Config) LoadFromEnv() {
 	// CORS
 	if v := getenv("CORS_ORIGINS"); v != "" {
 		c.CORS.Origins = strings.Split(v, ",")
+	}
+
+	// Observability (OpenTelemetry)
+	if v := getenv("OTEL_ENABLED"); v == "true" {
+		c.Observability.Enabled = true
+	}
+	if v := getenv("OTEL_ENDPOINT"); v != "" {
+		c.Observability.OTLPEndpoint = v
+	}
+	if v := getenv("OTEL_SERVICE_NAME"); v != "" {
+		c.Observability.ServiceName = v
+	}
+	if v := getenv("OTEL_SAMPLING_RATE"); v != "" {
+		if rate, err := strconv.ParseFloat(v, 64); err == nil && rate >= 0 && rate <= 1 {
+			c.Observability.SamplingRate = rate
+		}
+	}
+	if v := getenv("OTEL_INSECURE"); v == "true" {
+		c.Observability.Insecure = true
+	}
+
+	// Syslog
+	if v := getenv("SYSLOG_ENABLED"); v == "true" {
+		c.Observability.Syslog.Enabled = true
+	}
+	if v := getenv("SYSLOG_NETWORK"); v != "" {
+		c.Observability.Syslog.Network = v
+	}
+	if v := getenv("SYSLOG_ADDRESS"); v != "" {
+		c.Observability.Syslog.Address = v
+	}
+	if v := getenv("SYSLOG_TAG"); v != "" {
+		c.Observability.Syslog.Tag = v
+	}
+	if v := getenv("SYSLOG_FACILITY"); v != "" {
+		c.Observability.Syslog.Facility = v
 	}
 }
 

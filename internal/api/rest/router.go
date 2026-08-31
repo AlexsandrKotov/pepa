@@ -121,6 +121,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(requestIDMiddleware())
+	r.Use(correlationMiddleware()) // Add trace ID to all requests
 	r.Use(requestLogger())
 	r.Use(metrics.GinMiddleware())
 	r.Use(corsMiddleware(deps.Config.CORS))
