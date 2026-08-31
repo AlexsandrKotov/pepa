@@ -433,6 +433,42 @@ func (a *GitLabAdapter) Cancel(ctx context.Context, raw json.RawMessage, externa
 	return nil
 }
 
+// GetWorkflowGraph fetches and parses .gitlab-ci.yml to return a visual job graph.
+func (a *GitLabAdapter) GetWorkflowGraph(ctx context.Context, raw json.RawMessage) (*WorkflowGraph, error) {
+	cfg, err := parseGitLabConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newGitLabClient(cfg.BaseURL, cfg.Token)
+	if err != nil {
+		return nil, err
+	}
+
+	pid, _ := strconv.Atoi(cfg.ProjectID)
+	file, _, err := client.RepositoryFiles.GetFile(pid, ".gitlab-ci.yml", &gitlab.GetFileOptions{
+		Ref: gitlab.Ptr(cfg.Ref),
+	}, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("fetch .gitlab-ci.yml: %w", err)
+	}
+	if file.Content == "" {
+		return nil, fmt.Errorf(".gitlab-ci.yml is empty")
+	}
+
+	decoded, decErr := base64.StdEncoding.DecodeString(file.Content)
+	if decErr != nil {
+		return nil, fmt.Errorf("decode file content: %w", decErr)
+	}
+
+	graph, err := ParseGitLabWorkflowGraph(string(decoded))
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow graph: %w", err)
+	}
+
+	return graph, nil
+}
+
 // ListRemoteRuns fetches recent pipelines from GitLab.
 func (a *GitLabAdapter) ListRemoteRuns(ctx context.Context, raw json.RawMessage, perPage int) ([]RunStatus, error) {
 	cfg, err := parseGitLabConfig(raw)

@@ -898,3 +898,41 @@ func (r *PipelineRunRepository) DeleteJobsByRunID(ctx context.Context, runID uui
 	}
 	return nil
 }
+
+// StatsBySource returns aggregated run statistics grouped by source_id for a tenant.
+func (r *PipelineRunRepository) StatsBySource(ctx context.Context, tenantID uuid.UUID) ([]models.EngineStats, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT source_id,
+		       COUNT(*) AS total_runs,
+		       COUNT(*) FILTER (WHERE status = 'success') AS success_count,
+		       COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
+		       COUNT(*) FILTER (WHERE status = 'running') AS running_count,
+		       MAX(created_at) AS last_run_at,
+		       (ARRAY_AGG(status ORDER BY created_at DESC))[1] AS last_run_status
+		FROM pipeline_runs
+		WHERE tenant_id = $1
+		GROUP BY source_id
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("stats by source: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []models.EngineStats
+	for rows.Next() {
+		var s models.EngineStats
+		var lastRunStatus sql.NullString
+		var lastRunAt sql.NullTime
+		if err := rows.Scan(&s.SourceID, &s.TotalRuns, &s.SuccessCount, &s.FailedCount, &s.RunningCount, &lastRunAt, &lastRunStatus); err != nil {
+			return nil, fmt.Errorf("scan engine stats: %w", err)
+		}
+		if lastRunAt.Valid {
+			s.LastRunAt = &lastRunAt.Time
+		}
+		if lastRunStatus.Valid {
+			s.LastRunStatus = lastRunStatus.String
+		}
+		stats = append(stats, s)
+	}
+	return stats, nil
+}

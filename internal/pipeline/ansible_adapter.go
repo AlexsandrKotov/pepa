@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -47,16 +48,33 @@ func (c *AnsibleConfig) isLocal() bool {
 
 // ansibleRun tracks an in-flight ansible-playbook execution.
 type ansibleRun struct {
-	cancel context.CancelFunc
-	logBuf *bytes.Buffer
-	status string // pending, running, success, failed, cancelled
-	result *AnsibleResult
+	cancel     context.CancelFunc
+	logBuf     *bytes.Buffer
+	status     string // pending, running, success, failed, cancelled
+	result     *AnsibleResult
+	finishedAt time.Time // zero while still running
 }
 
 var (
 	ansibleRunsMu sync.RWMutex
 	ansibleRuns   = make(map[string]*ansibleRun)
 )
+
+func init() {
+	// Background cleanup: remove completed ansible runs older than 5 minutes
+	go func() {
+		for {
+			time.Sleep(60 * time.Second)
+			ansibleRunsMu.Lock()
+			for id, r := range ansibleRuns {
+				if r.status != "running" && !r.finishedAt.IsZero() && time.Since(r.finishedAt) > 5*time.Minute {
+					delete(ansibleRuns, id)
+				}
+			}
+			ansibleRunsMu.Unlock()
+		}
+	}()
+}
 
 // AnsibleAdapter implements Provider and EnhancedProvider for Ansible pipelines.
 type AnsibleAdapter struct{}
@@ -208,11 +226,8 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 	ansibleRunsMu.Lock()
 	ansibleRuns[runID] = &ansibleRun{cancel: cancel, logBuf: logBuf, status: "running"}
 	ansibleRunsMu.Unlock()
-	defer func() {
-		ansibleRunsMu.Lock()
-		delete(ansibleRuns, runID)
-		ansibleRunsMu.Unlock()
-	}()
+	// NOTE: Do NOT delete from map here — keep logs accessible for polling.
+	// A background cleanup will remove stale entries after 5 minutes.
 
 	// Build ansible-playbook command
 	// Validate playbook path to prevent path traversal
@@ -227,7 +242,7 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		return nil, fmt.Errorf("invalid playbook path")
 	}
 
-	args := []string{cleanPlaybook, "--no-color"}
+	args := []string{cleanPlaybook}
 
 	if inv, ok := params["inventory"]; ok && inv != "" {
 		args = append(args, "-i", fmt.Sprintf("%v", inv))
@@ -255,6 +270,14 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 	cmd.Dir = workDir
 	cmd.Stdout = logBuf
 	cmd.Stderr = logBuf
+	cmd.Env = append(os.Environ(),
+		"ANSIBLE_NOCOLOR=false",
+		"ANSIBLE_FORCE_COLOR=true",
+		"ANSIBLE_HOME=/tmp/ansible",
+		"ANSIBLE_LOCAL_TEMP=/tmp/ansible",
+		"ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote",
+		"ANSIBLE_DEPRECATION_WARNINGS=false",
+	)
 	cmdErr := cmd.Run()
 
 	// Parse the output for per-host results
@@ -268,6 +291,7 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		ansibleRun.status = "success"
 	}
 	ansibleRun.result = parsed
+	ansibleRun.finishedAt = time.Now()
 	ansibleRunsMu.Unlock()
 
 	status := "success"
@@ -298,7 +322,7 @@ func (a *AnsibleAdapter) Plan(ctx context.Context, raw json.RawMessage, params m
 	}
 
 	// Build ansible-playbook --check command
-	args := []string{cfg.Playbook, "--check", "--no-color", "--diff"}
+	args := []string{cfg.Playbook, "--check", "--diff"}
 
 	if inv, ok := params["inventory"]; ok && inv != "" {
 		args = append(args, "-i", fmt.Sprintf("%v", inv))
@@ -319,6 +343,14 @@ func (a *AnsibleAdapter) Plan(ctx context.Context, raw json.RawMessage, params m
 
 	cmd := exec.CommandContext(ctx, "ansible-playbook", args...) //nolint:gosec // G204: ansible-playbook is an admin-configured binary
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(),
+		"ANSIBLE_NOCOLOR=false",
+		"ANSIBLE_FORCE_COLOR=true",
+		"ANSIBLE_HOME=/tmp/ansible",
+		"ANSIBLE_LOCAL_TEMP=/tmp/ansible",
+		"ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote",
+		"ANSIBLE_DEPRECATION_WARNINGS=false",
+	)
 	output, _ := cmd.CombinedOutput()
 
 	return &PlanResult{
@@ -840,15 +872,11 @@ func parseAnsibleOutput(output, playbook string) *AnsibleResult {
 // For local configs it validates and returns the local path directly.
 func resolveAnsibleDir(ctx context.Context, cfg *AnsibleConfig) (workDir string, cleanup func(), err error) {
 	if cfg.isLocal() {
-		absPath, err := filepath.Abs(cfg.LocalPath)
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid local_path: %w", err)
+		resolved, resolveErr := resolveContainerPath(cfg.LocalPath)
+		if resolveErr != nil {
+			return "", nil, resolveErr
 		}
-		info, statErr := os.Stat(absPath)
-		if statErr != nil || !info.IsDir() {
-			return "", nil, fmt.Errorf("local_path does not exist or is not a directory: %s", absPath)
-		}
-		return absPath, nil, nil
+		return resolved, nil, nil
 	}
 	tmpDir, err := os.MkdirTemp("", "pepa-ansible-*")
 	if err != nil {

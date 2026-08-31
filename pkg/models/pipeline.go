@@ -108,6 +108,17 @@ type PipelineRunJob struct {
 	CreatedAt     time.Time       `json:"created_at" db:"created_at"`
 }
 
+// EngineStats holds aggregated run statistics for a pipeline source.
+type EngineStats struct {
+	SourceID      uuid.UUID  `json:"source_id"`
+	TotalRuns     int64      `json:"total_runs"`
+	SuccessCount  int64      `json:"success_count"`
+	FailedCount   int64      `json:"failed_count"`
+	RunningCount  int64      `json:"running_count"`
+	LastRunAt     *time.Time `json:"last_run_at,omitempty"`
+	LastRunStatus string     `json:"last_run_status,omitempty"`
+}
+
 // ── Request types ────────────────────────────────────────────
 
 // RunPipelineRequest is the payload for triggering a pipeline run.

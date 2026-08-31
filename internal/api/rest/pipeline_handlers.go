@@ -19,6 +19,7 @@ func registerPipelineSourceRoutes(r *gin.RouterGroup, deps Dependencies) {
 	sources := r.Group("/pipeline-sources")
 	{
 		sources.GET("", listPipelineSources(deps))
+		sources.GET("/stats", getEngineStats(deps))
 		sources.POST("", createPipelineSource(deps))
 		sources.GET("/:id", getPipelineSource(deps))
 		sources.PUT("/:id", updatePipelineSource(deps))
@@ -30,6 +31,7 @@ func registerPipelineSourceRoutes(r *gin.RouterGroup, deps Dependencies) {
 		sources.GET("/:id/inspect", inspectPipelineSource(deps))
 		sources.POST("/trivy/auto-discover", trivyAutoDiscover(deps))
 		sources.POST("/trivy/scan-all", trivyScanAll(deps))
+		sources.GET("/:id/workflow-graph", getWorkflowGraph(deps))
 	}
 }
 
@@ -54,6 +56,26 @@ func listPipelineSources(deps Dependencies) gin.HandlerFunc {
 			"page":     page,
 			"per_page": perPage,
 		})
+	}
+}
+
+func getEngineStats(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID := auth.GetTenantID(c)
+
+		stats, err := deps.Repos.PipelineRun.StatsBySource(c.Request.Context(), tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		// Build a map keyed by source_id for easy frontend lookup
+		statsMap := make(map[string]models.EngineStats, len(stats))
+		for _, s := range stats {
+			statsMap[s.SourceID.String()] = s
+		}
+
+		c.JSON(http.StatusOK, gin.H{"stats": statsMap})
 	}
 }
 
@@ -468,7 +490,7 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 			SourceID:    sourceID,
 			PresetID:    req.PresetID,
 			Parameters:  paramsJSON,
-			Status:      models.PipelineRunPending,
+			Status:      models.PipelineRunRunning,
 			TriggeredBy: userID,
 			TriggerType: "manual",
 		}
@@ -508,22 +530,60 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		// Trigger via the adapter
-		result, err := provider.Trigger(c.Request.Context(), config, req.Parameters)
-		if err != nil {
-			run.Status = models.PipelineRunError
-			run.ErrorMessage = err.Error()
-			_ = deps.Repos.PipelineRun.Update(c.Request.Context(), run.ID, run)
-			respondInternalError(c, err)
-			return
-		}
-
-		run.ExternalRunID = result.ExternalRunID
-		run.ExternalURL = result.ExternalURL
-		run.Status = models.PipelineRunRunning
-		_ = deps.Repos.PipelineRun.Update(c.Request.Context(), run.ID, run)
-
 		logAudit(deps, c, "trigger", "pipeline_run", run.ID.String(), nil, run)
+
+		// Run Trigger asynchronously — return immediately, update DB when done
+		runID := run.ID
+		go func() {
+			// Use a background context since the HTTP request context is cancelled when we return
+			bgCtx := context.Background()
+			bgCtx, cancel := context.WithTimeout(bgCtx, 30*time.Minute)
+			defer cancel()
+
+			result, triggerErr := provider.Trigger(bgCtx, config, req.Parameters)
+
+			// Fetch the latest run state
+			currentRun, err := deps.Repos.PipelineRun.Get(bgCtx, runID)
+			if err != nil {
+				return
+			}
+
+			if triggerErr != nil {
+				currentRun.Status = models.PipelineRunError
+				currentRun.ErrorMessage = triggerErr.Error()
+			} else {
+				currentRun.ExternalRunID = result.ExternalRunID
+				currentRun.ExternalURL = result.ExternalURL
+				switch result.Status {
+				case "success":
+					currentRun.Status = models.PipelineRunSuccess
+				case "failed":
+					currentRun.Status = models.PipelineRunFailed
+				default:
+					currentRun.Status = models.PipelineRunSuccess
+				}
+			}
+
+			// Persist logs from the adapter into the DB
+			if currentRun.ExternalRunID != "" {
+				if logs, logErr := provider.Logs(bgCtx, config, currentRun.ExternalRunID, ""); logErr == nil && logs != "" {
+					currentRun.Logs = logs
+				}
+			}
+
+			now := time.Now()
+			currentRun.CompletedAt = &now
+			if currentRun.StartedAt == nil {
+				startedAt := currentRun.CreatedAt
+				currentRun.StartedAt = &startedAt
+			}
+			if currentRun.StartedAt != nil {
+				dur := int(currentRun.CompletedAt.Sub(*currentRun.StartedAt).Milliseconds())
+				currentRun.DurationMs = &dur
+			}
+
+			_ = deps.Repos.PipelineRun.Update(bgCtx, currentRun.ID, currentRun)
+		}()
 
 		c.JSON(http.StatusAccepted, run)
 	}
@@ -777,6 +837,11 @@ func getPipelineRunLogs(deps Dependencies) gin.HandlerFunc {
 		if err != nil {
 			respondInternalError(c, err)
 			return
+		}
+
+		// Fall back to DB-persisted logs if the adapter no longer has them in memory
+		if logs == "" && run.Logs != "" {
+			logs = run.Logs
 		}
 
 		c.JSON(http.StatusOK, gin.H{"logs": logs, "run_id": runID})
@@ -1096,6 +1161,49 @@ func inspectPipelineSource(deps Dependencies) gin.HandlerFunc {
 		}
 
 		c.Data(http.StatusOK, "application/json", result)
+	}
+}
+
+// getWorkflowGraph returns the parsed job dependency graph from a workflow YAML.
+func getWorkflowGraph(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pipeline source ID"})
+			return
+		}
+
+		source, err := deps.Repos.PipelineSource.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.PipelineRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "pipeline registry not available"})
+			return
+		}
+
+		provider, err := deps.PipelineRegistry.Get(source.SourceType)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		graphProvider, ok := provider.(pipeline.WorkflowGraphProvider)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("%s does not support workflow graph visualization", source.SourceType)})
+			return
+		}
+
+		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		graph, err := graphProvider.GetWorkflowGraph(c.Request.Context(), config)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, graph)
 	}
 }
 

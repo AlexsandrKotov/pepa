@@ -8,6 +8,9 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -157,6 +160,17 @@ type InspectableProvider interface {
 	// Inspect returns structured metadata about the pipeline source
 	// (e.g. Ansible playbooks/roles, Terraform modules/resources).
 	Inspect(ctx context.Context, config json.RawMessage) (json.RawMessage, error)
+}
+
+// ── WorkflowGraphProvider (optional capability) ────────────────
+
+// WorkflowGraphProvider is implemented by adapters that can parse their
+// workflow YAML to return a visual job dependency graph.
+type WorkflowGraphProvider interface {
+	Provider
+
+	// GetWorkflowGraph returns the parsed job graph from the workflow YAML.
+	GetWorkflowGraph(ctx context.Context, config json.RawMessage) (*WorkflowGraph, error)
 }
 
 // ── Ansible-specific result types ───────────────────────────────
@@ -317,4 +331,49 @@ func randomRunID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
 	return fmt.Sprintf("%x", b)
+}
+
+// hostHomePrefixes are common absolute-path prefixes found on host machines.
+// When PEPA runs inside Docker the host home directory is bind-mounted at
+// /host-home so these paths become accessible after translation.
+var hostHomePrefixes = []string{"/Users/", "/home/"}
+
+// resolveContainerPath resolves a local_path entered in the UI to a path
+// accessible inside the current process.  When PEPA runs natively the path
+// is returned as-is.  When running inside Docker the host home directory is
+// mounted read-only at /host-home, so a host path like
+// /Users/alice/projects/ansible is translated to /host-home/projects/ansible.
+func resolveContainerPath(p string) (string, error) {
+	absPath, err := filepath.Abs(p)
+	if err != nil {
+		return "", fmt.Errorf("invalid local_path: %w", err)
+	}
+
+	// 1. Direct access (native mode or path already inside container).
+	if info, statErr := os.Stat(absPath); statErr == nil && info.IsDir() {
+		return absPath, nil
+	}
+
+	// 2. Docker mode — translate host home path → /host-home/...
+	//    /Users/alice/projects/ansible → /host-home/projects/ansible
+	//    /home/alice/projects/ansible  → /host-home/projects/ansible
+	if filepath.IsAbs(p) {
+		for _, prefix := range hostHomePrefixes {
+			if strings.HasPrefix(p, prefix) {
+				// Strip prefix + username segment: /Users/<user>/rest → rest
+				rest := strings.TrimPrefix(p, prefix)
+				if idx := strings.Index(rest, "/"); idx >= 0 {
+					rest = rest[idx+1:]
+				} else {
+					continue // no sub-path after username
+				}
+				containerPath := filepath.Join("/host-home", rest)
+				if info, statErr := os.Stat(containerPath); statErr == nil && info.IsDir() {
+					return containerPath, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("local_path does not exist or is not a directory: %s", p)
 }

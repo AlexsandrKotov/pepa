@@ -41,9 +41,6 @@ func parseGitHubConfig(raw json.RawMessage) (*GitHubActionsConfig, error) {
 	if cfg.Token == "" {
 		return nil, fmt.Errorf("github_actions config: token is required")
 	}
-	if cfg.Workflow == "" {
-		cfg.Workflow = "ci.yml"
-	}
 	if cfg.Ref == "" {
 		cfg.Ref = "main"
 	}
@@ -102,12 +99,21 @@ func (a *GitHubActionsAdapter) ResolveSchema(ctx context.Context, raw json.RawMe
 	props := make(map[string]PropertyDef)
 
 	// Fetch the workflow YAML content to extract workflow_dispatch inputs
+	if cfg.Workflow == "" {
+		// No specific workflow — provide basic schema and let sync list all runs
+		props["ref"] = PropertyDef{Type: "string", Description: "Git ref to run against", Default: cfg.Ref}
+		return &ParameterSchema{
+			Type:       "object",
+			Properties: props,
+			Required:   []string{"ref"},
+		}, nil
+	}
 	contentURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", cfg.Owner, cfg.Repo, ".github/workflows/"+cfg.Workflow)
 	if strings.Contains(cfg.Workflow, "/") {
 		contentURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", cfg.Owner, cfg.Repo, cfg.Workflow)
 	}
-	contentBody, err := ghAPIGet(ctx, contentURL+"?ref="+cfg.Ref, cfg.Token)
-	if err == nil {
+	contentBody, contentErr := ghAPIGet(ctx, contentURL+"?ref="+cfg.Ref, cfg.Token)
+	if contentErr == nil {
 		var contentResp struct {
 			Content  string `json:"content"`
 			Encoding string `json:"encoding"`
@@ -164,6 +170,9 @@ func (a *GitHubActionsAdapter) Trigger(ctx context.Context, raw json.RawMessage,
 		"inputs": inputs,
 	}
 
+	if cfg.Workflow == "" {
+		return nil, fmt.Errorf("github_actions trigger: workflow file is required (e.g. ci.yml)")
+	}
 	dispatchURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/workflows/%s/dispatches", cfg.Owner, cfg.Repo, cfg.Workflow)
 	if err := ghAPIPost(ctx, dispatchURL, cfg.Token, payload); err != nil {
 		return nil, fmt.Errorf("dispatch workflow: %w", err)
@@ -339,6 +348,47 @@ func (a *GitHubActionsAdapter) Cancel(ctx context.Context, raw json.RawMessage, 
 		return fmt.Errorf("cancel run: %w", err)
 	}
 	return nil
+}
+
+// GetWorkflowGraph fetches and parses the workflow YAML to return a visual job graph.
+func (a *GitHubActionsAdapter) GetWorkflowGraph(ctx context.Context, raw json.RawMessage) (*WorkflowGraph, error) {
+	cfg, err := parseGitHubConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg.Workflow == "" {
+		return nil, fmt.Errorf("github_actions: workflow file is required to build graph")
+	}
+
+	// Fetch the workflow YAML content via Contents API
+	contentURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", cfg.Owner, cfg.Repo, ".github/workflows/"+cfg.Workflow)
+	if strings.Contains(cfg.Workflow, "/") {
+		contentURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", cfg.Owner, cfg.Repo, cfg.Workflow)
+	}
+	contentBody, err := ghAPIGet(ctx, contentURL+"?ref="+cfg.Ref, cfg.Token)
+	if err != nil {
+		return nil, fmt.Errorf("fetch workflow file: %w", err)
+	}
+
+	var contentResp struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(contentBody, &contentResp); err != nil {
+		return nil, fmt.Errorf("parse workflow response: %w", err)
+	}
+	if contentResp.Content == "" {
+		return nil, fmt.Errorf("workflow file is empty")
+	}
+
+	decoded := ghDecodeBase64(contentResp.Content)
+	graph, err := ParseGitHubWorkflowGraph(decoded)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow graph: %w", err)
+	}
+
+	return graph, nil
 }
 
 // ListRemoteRuns fetches recent workflow runs from GitHub Actions.

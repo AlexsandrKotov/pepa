@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // TerraformConfig is the expected shape of PipelineSource.Config for terraform sources.
@@ -46,15 +47,32 @@ func (c *TerraformConfig) isLocal() bool {
 
 // tfRun tracks an in-flight terraform execution.
 type tfRun struct {
-	cancel context.CancelFunc
-	logBuf *bytes.Buffer
-	status string // pending, running, success, failed, cancelled
+	cancel     context.CancelFunc
+	logBuf     *bytes.Buffer
+	status     string // pending, running, success, failed, cancelled
+	finishedAt time.Time
 }
 
 var (
 	tfRunsMu sync.RWMutex
 	tfRuns   = make(map[string]*tfRun)
 )
+
+func init() {
+	// Background cleanup: remove completed terraform runs older than 5 minutes
+	go func() {
+		for {
+			time.Sleep(60 * time.Second)
+			tfRunsMu.Lock()
+			for id, r := range tfRuns {
+				if r.status != "running" && !r.finishedAt.IsZero() && time.Since(r.finishedAt) > 5*time.Minute {
+					delete(tfRuns, id)
+				}
+			}
+			tfRunsMu.Unlock()
+		}
+	}()
+}
 
 // TerraformAdapter implements Provider and EnhancedProvider for Terraform pipelines.
 type TerraformAdapter struct{}
@@ -79,6 +97,24 @@ func iacBinary() string {
 		return p
 	}
 	return "tofu" // will fail with clear "executable not found" message
+}
+
+// selectWorkspace selects or creates a terraform workspace if requested via params.
+// It runs "terraform workspace select <name>" or "terraform workspace new <name>" if it doesn't exist.
+func selectWorkspace(ctx context.Context, bin, workDir, workspace string) error {
+	if workspace == "" || workspace == "default" {
+		return nil
+	}
+	// Try to select existing workspace
+	cmd := exec.CommandContext(ctx, bin, "workspace", "select", workspace)
+	cmd.Dir = workDir
+	if err := cmd.Run(); err == nil {
+		return nil
+	}
+	// If select failed, try to create it
+	cmd = exec.CommandContext(ctx, bin, "workspace", "new", workspace)
+	cmd.Dir = workDir
+	return cmd.Run()
 }
 
 // ResolveSchema clones the repo (or reads local path) and parses .tf files to extract variable blocks.
@@ -406,11 +442,8 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 	tfRunsMu.Lock()
 	tfRuns[runID] = &tfRun{cancel: cancel, logBuf: logBuf, status: "running"}
 	tfRunsMu.Unlock()
-	defer func() {
-		tfRunsMu.Lock()
-		delete(tfRuns, runID)
-		tfRunsMu.Unlock()
-	}()
+	// NOTE: Do NOT delete from map here — keep logs accessible for polling.
+	// A background cleanup will remove stale entries after 5 minutes.
 
 	// Inject backend config override if backend_* parameters are provided.
 	// This solves the Terraform limitation where backend blocks cannot use variables.
@@ -433,8 +466,16 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 	if err := initCmd.Run(); err != nil {
 		tfRunsMu.Lock()
 		tfRuns[runID].status = "failed"
+		tfRuns[runID].finishedAt = time.Now()
 		tfRunsMu.Unlock()
 		return nil, fmt.Errorf("iac init failed: %s: %w", logBuf.String(), err)
+	}
+
+	// Select workspace if requested
+	if ws, ok := params["workspace"].(string); ok {
+		if wsErr := selectWorkspace(runCtx, bin, workDir, ws); wsErr != nil {
+			fmt.Fprintf(logBuf, "Warning: workspace select failed: %s\n", wsErr)
+		}
 	}
 
 	// Build IaC command args
@@ -444,9 +485,9 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 		args = append(args, "-auto-approve")
 	}
 
-	// Add -var flags for extra params (skip backend_* keys — they go to the backend override)
+	// Add -var flags for extra params (skip backend_* keys and internal params)
 	for k, v := range params {
-		if k == "tf_action" || k == "auto_approve" || k == "ref" {
+		if k == "tf_action" || k == "auto_approve" || k == "ref" || k == "workspace" {
 			continue
 		}
 		if backendKeys != nil && backendKeys[k] {
@@ -462,6 +503,7 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 	if err := tfCmd.Run(); err != nil {
 		tfRunsMu.Lock()
 		tfRuns[runID].status = "failed"
+		tfRuns[runID].finishedAt = time.Now()
 		tfRunsMu.Unlock()
 		return &TriggerResult{
 			ExternalRunID: runID,
@@ -472,6 +514,7 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 
 	tfRunsMu.Lock()
 	tfRuns[runID].status = "success"
+	tfRuns[runID].finishedAt = time.Now()
 	tfRunsMu.Unlock()
 
 	return &TriggerResult{
@@ -525,12 +568,20 @@ func (a *TerraformAdapter) Plan(ctx context.Context, raw json.RawMessage, params
 		return nil, fmt.Errorf("iac init failed: %s: %w", string(output), err)
 	}
 
+	// Select workspace if requested
+	if ws, ok := params["workspace"].(string); ok {
+		if wsErr := selectWorkspace(ctx, bin, workDir, ws); wsErr != nil {
+			// Workspace selection failure will surface in plan output
+			_ = wsErr
+		}
+	}
+
 	// terraform plan with JSON output
 	// planFile is written to a validated workDir (already checked above), so the path is safe.
 	planFile := filepath.Join(workDir, "tfplan")
 	planArgs := []string{"plan", "-input=false", "-no-color", "-out=" + planFile}
 	for k, v := range params {
-		if k == "tf_action" || k == "auto_approve" || k == "ref" {
+		if k == "tf_action" || k == "auto_approve" || k == "ref" || k == "workspace" {
 			continue
 		}
 		if backendKeys != nil && backendKeys[k] {
@@ -863,18 +914,25 @@ func (a *TerraformAdapter) Inspect(ctx context.Context, raw json.RawMessage) (js
 
 // resolveTerraformDir returns the base directory for terraform operations.
 // For repo-based configs it clones to a temp dir and returns a cleanup func.
-// For local configs it validates and returns the local path directly.
+// For local configs it copies to a temp dir (since host mounts are read-only)
+// and returns a cleanup func.
 func resolveTerraformDir(ctx context.Context, cfg *TerraformConfig) (baseDir string, cleanup func(), err error) {
 	if cfg.isLocal() {
-		absPath, err := filepath.Abs(cfg.LocalPath)
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid local_path: %w", err)
+		resolved, resolveErr := resolveContainerPath(cfg.LocalPath)
+		if resolveErr != nil {
+			return "", nil, resolveErr
 		}
-		info, statErr := os.Stat(absPath)
-		if statErr != nil || !info.IsDir() {
-			return "", nil, fmt.Errorf("local_path does not exist or is not a directory: %s", absPath)
+		// Copy to temp dir because host mounts are read-only and Terraform
+		// needs write access for .terraform/, state files, and plan files.
+		tmpDir, mkdirErr := os.MkdirTemp("", "pepa-terraform-*")
+		if mkdirErr != nil {
+			return "", nil, fmt.Errorf("create temp dir: %w", mkdirErr)
 		}
-		return absPath, nil, nil
+		if copyErr := copyDir(resolved, tmpDir); copyErr != nil {
+			_ = os.RemoveAll(tmpDir)
+			return "", nil, fmt.Errorf("copy terraform project: %w", copyErr)
+		}
+		return tmpDir, func() { _ = os.RemoveAll(tmpDir) }, nil
 	}
 	tmpDir, err := os.MkdirTemp("", "pepa-terraform-*")
 	if err != nil {
@@ -885,4 +943,33 @@ func resolveTerraformDir(ctx context.Context, cfg *TerraformConfig) (baseDir str
 		return "", nil, fmt.Errorf("clone terraform repo: %w", err)
 	}
 	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }, nil
+}
+
+// copyDir recursivelyally copies a directory from src to dst.
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			if err := os.MkdirAll(dstPath, 0755); err != nil {
+				return err
+			}
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

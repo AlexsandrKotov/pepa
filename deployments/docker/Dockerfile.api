@@ -37,7 +37,8 @@ LABEL org.opencontainers.image.title="PEPA API Server" \
       org.opencontainers.image.vendor="PEPA" \
       org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
 
-RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git && \
+RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git python3 py3-pip && \
+    pip3 install --break-system-packages --no-cache ansible-core && \
     mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa && \
     addgroup -S pepa && adduser -S pepa -G pepa && \
     chown -R pepa:pepa /plugins /custom-plugins /var/run/pepa

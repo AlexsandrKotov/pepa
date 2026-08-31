@@ -3180,6 +3180,37 @@ export interface PipelineJobStep {
   completed_at?: string;
 }
 
+export interface EngineStats {
+  source_id: string;
+  total_runs: number;
+  success_count: number;
+  failed_count: number;
+  running_count: number;
+  last_run_at?: string;
+  last_run_status?: string;
+}
+
+export interface WorkflowGraphStage {
+  name: string;
+  order: number;
+}
+
+export interface WorkflowGraphJob {
+  name: string;
+  stage: string;
+  needs: string[];
+  runs_on?: string;
+  if?: string;
+}
+
+export interface WorkflowGraph {
+  name: string;
+  source: string;
+  stages: WorkflowGraphStage[];
+  jobs: WorkflowGraphJob[];
+  triggers: string[];
+}
+
 export interface TerraformStateResource {
   type: string;
   name: string;
@@ -3227,6 +3258,8 @@ export const pipelineSources = {
     fetchAPI<{ created: number; existing: number; sources: PipelineSource[] }>('/api/v1/pipeline-sources/trivy/auto-discover', { method: 'POST' }),
   trivyScanAll: () =>
     fetchAPI<{ scanned: number; results: Record<string, unknown>[] }>('/api/v1/pipeline-sources/trivy/scan-all', { method: 'POST' }),
+  stats: () =>
+    fetchAPI<{ stats: Record<string, EngineStats> }>('/api/v1/pipeline-sources/stats'),
 };
 
 export const pipelineRuns = {
@@ -3243,7 +3276,7 @@ export const pipelineRuns = {
   cancel: (sourceId: string, runId: string) =>
     fetchAPI<PipelineRun>(`/api/v1/pipeline-sources/${sourceId}/runs/${runId}/cancel`, { method: 'POST' }),
   sync: (sourceId: string, perPage = 30) =>
-    fetchAPI<{ synced: number; total_remote: number }>(`/api/v1/pipeline-sources/${sourceId}/sync-runs?per_page=${perPage}`, { method: 'POST' }),
+    fetchAPI<{ synced: number; skipped: number; total_remote: number }>(`/api/v1/pipeline-sources/${sourceId}/sync-runs?per_page=${perPage}`, { method: 'POST' }),
   jobs: (sourceId: string, runId: string) =>
     fetchAPI<{ jobs: PipelineRunJob[] }>(`/api/v1/pipeline-sources/${sourceId}/runs/${runId}/jobs`),
   logs: (sourceId: string, runId: string, jobId?: string) => {
@@ -3263,6 +3296,11 @@ export const pipelinePresets = {
     fetchAPI<PipelinePreset>(`/api/v1/pipeline-sources/${sourceId}/presets/${presetId}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (sourceId: string, presetId: string) =>
     fetchAPI<{ message: string }>(`/api/v1/pipeline-sources/${sourceId}/presets/${presetId}`, { method: 'DELETE' }),
+};
+
+export const pipelineWorkflows = {
+  graph: (sourceId: string) =>
+    fetchAPI<WorkflowGraph>(`/api/v1/pipeline-sources/${sourceId}/workflow-graph`),
 };
 
 // ── GitOps ──────────────────────────────────────────────────────────

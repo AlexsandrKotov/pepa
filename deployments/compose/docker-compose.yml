@@ -136,6 +136,8 @@ services:
       CUSTOM_PLUGIN_DIR: /custom-plugins
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:8088}
       IAC_BINARY: ${IAC_BINARY:-}
+      # Ansible needs a writable temp directory; root filesystem is read-only.
+      ANSIBLE_LOCAL_TEMP: /tmp/ansible
     ports:
       - "${API_PORT:-8088}:8080"
     healthcheck:
@@ -149,6 +151,11 @@ services:
       # Run `make plugins` to build them, then restart the container.
       - ../../plugins:/plugins:ro
       - custom-plugins:/custom-plugins
+      # Host filesystem — allows IaC engines to access local Ansible/Terraform
+      # projects by their host path (e.g. /Users/akotau/pepa/ansible).
+      # The backend auto-translates host paths → /host-home/... inside the container.
+      # Read-only for security. Override with HOST_HOME_DIR in .env if needed.
+      - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
       # WARNING: Mounting the Docker socket gives the api container control
       # over the Docker daemon (create/delete containers, read secrets, etc.).
       # Disabled by default (mounts /dev/null). Set MOUNT_DOCK_SOCKET to the
@@ -193,6 +200,8 @@ services:
       - ../../plugins:/plugins:ro
       # Writable storage for uploaded custom plugins.
       - custom-plugins:/custom-plugins
+      # Host filesystem — same mount for the worker engine.
+      - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
     depends_on:
       postgres:
         condition: service_healthy

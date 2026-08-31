@@ -3,15 +3,29 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { pipelineSources, pipelineRuns, pipelinePresets, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable, type WorkflowInfo, type TerraformState, type TerraformStateResource, type TerraformPlan } from '@/lib/api';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { pipelineSources, pipelineRuns, pipelinePresets, pipelineWorkflows, connections as connectionsAPI, gitBrowser, type PipelineSource, type PipelineRun, type PipelinePreset, type PipelineRunJob, type Connection, type GitPipeline, type GitPipelineJob, type CIVariable, type WorkflowInfo, type WorkflowGraph, type TerraformState, type TerraformStateResource, type TerraformPlan, type EngineStats } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import { VaultInput, useVaultPicker } from '@/components/VaultInput';
 import GitRepoPicker from '@/components/GitRepoPicker';
 import BrandIcon from '@/components/BrandIcon';
 import PermissionGuard from '@/components/PermissionGuard';
+import AnsiOutput from '@/components/AnsiOutput';
+import PipelineGraph from '@/components/pipeline/PipelineGraph';
+import ToastContainer from '@/components/ToastContainer';
+import { useToast } from '@/hooks/useToast';
 
 // ── Constants ──────────────────────────────────────────────
+
+const statusDotColors: Record<string, string> = {
+  success: 'bg-emerald-500',
+  failed: 'bg-red-500',
+  error: 'bg-red-500',
+  running: 'bg-blue-500',
+  pending: 'bg-amber-500',
+  cancelled: 'bg-[var(--border)]',
+  timeout: 'bg-orange-500',
+};
 
 const statusColors: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-600',
@@ -63,6 +77,21 @@ function getConnTypeInfo(conn: Connection) {
   return info;
 }
 
+function getTimeAgo(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
 // ── Main Component ─────────────────────────────────────────
 
 function StepStatusIcon({ status }: { status: string }) {
@@ -105,6 +134,7 @@ function PipelinesClientContent({
   initialConnections?: Connection[];
 }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'engines' | 'providers'>(
     searchParams.get('tab') === 'providers' ? 'providers' : 'engines'
   );
@@ -115,7 +145,10 @@ function PipelinesClientContent({
   const [selectedSource, setSelectedSource] = useState<PipelineSource | null>(null);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [presets, setPresets] = useState<PipelinePreset[]>([]);
-  const [detailTab, setDetailTab] = useState<'runs' | 'presets' | 'state' | 'vulns'>('runs');
+  const [detailTab, setDetailTab] = useState<'runs' | 'graph' | 'presets' | 'state' | 'vulns'>('runs');
+  const [workflowGraph, setWorkflowGraph] = useState<WorkflowGraph | null>(null);
+  const [loadingGraph, setLoadingGraph] = useState(false);
+  const [graphError, setGraphError] = useState('');
   const [tfState, setTfState] = useState<TerraformState | null>(null);
   const [tfPlan, setTfPlan] = useState<TerraformPlan | null>(null);
   const [loadingState, setLoadingState] = useState(false);
@@ -129,7 +162,8 @@ function PipelinesClientContent({
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ source: '', status: '', type: '' });
   const [testing, setTesting] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ ok: boolean; text: string; hint?: string } | null>(null);
+  const { toasts, addToast, removeToast } = useToast();
+  const [engineStats, setEngineStats] = useState<Record<string, EngineStats>>({});
 
   // Providers tab state: project selection and pipeline browsing
   const [selectedProviderConn, setSelectedProviderConn] = useState<Connection | null>(null);
@@ -187,6 +221,8 @@ function PipelinesClientContent({
   const [runJobs, setRunJobs] = useState<Record<string, PipelineRunJob[]>>({});
   const [loadingRunJobs, setLoadingRunJobs] = useState<string | null>(null);
   const [expandedJobKey, setExpandedJobKey] = useState<string | null>(null);
+  const [runLogs, setRunLogs] = useState<Record<string, string>>({});
+  const [loadingRunLogs, setLoadingRunLogs] = useState<string | null>(null);
 
   // Fetch connections client-side (server-side has no auth token)
   useEffect(() => {
@@ -194,14 +230,11 @@ function PipelinesClientContent({
     connectionsAPI.list()
       .then(data => {
         const allConns = data.connections || [];
-        console.log('[Pipelines] All connections from API:', allConns.map(c => ({ id: c.id, name: c.name, type: c.type })));
         // Filter to git/gitlab connections that can provide CI/CD pipelines
         const gitConns = allConns.filter(c => c.type === 'git' || c.type === 'gitlab');
-        console.log('[Pipelines] Filtered git/gitlab connections:', gitConns.map(c => ({ id: c.id, name: c.name, type: c.type })));
         setConnections(gitConns);
       })
-      .catch((err) => {
-        console.error('[Pipelines] Failed to fetch connections:', err);
+      .catch(() => {
         setConnections([]);
       })
       .finally(() => setConnectionsLoading(false));
@@ -218,12 +251,39 @@ function PipelinesClientContent({
     }
   }, []);
 
+  const loadStats = useCallback(async () => {
+    try {
+      const data = await pipelineSources.stats();
+      setEngineStats(data.stats || {});
+    } catch {
+      // Stats are non-critical; silently ignore
+    }
+  }, []);
+
   // Fetch sources on mount when no SSR data is provided
   useEffect(() => {
     if (initialSources === undefined) {
       loadSources();
     }
+    loadStats();
   }, []);
+
+  // Auto-select first engine when sources are loaded and nothing is selected
+  useEffect(() => {
+    if (sources.length > 0 && !selectedSource) {
+      const engineId = searchParams.get('engine');
+      const urlSource = engineId ? sources.find(s => s.id === engineId) : null;
+      const target = urlSource || sources[0];
+      // Sync URL if no engine param or it points to a missing source
+      if (!engineId || !urlSource) {
+        const params = new URLSearchParams(window.location.search);
+        params.set('engine', target.id);
+        router.replace(`/pipelines?${params.toString()}`, { scroll: false });
+      }
+      selectSource(target);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources, selectedSource]);
 
   const loadRuns = useCallback(async (sourceId: string) => {
     try {
@@ -242,16 +302,16 @@ function PipelinesClientContent({
   const loadState = useCallback(async (sourceId: string) => {
     setLoadingState(true);
     setStateError('');
-    setFeedback({ ok: true, text: 'Loading infrastructure state...' });
+    addToast('Loading infrastructure state...', 'info');
     try {
       const data = await pipelineSources.state(sourceId);
       setTfState(data);
-      setFeedback({ ok: true, text: 'State loaded successfully' });
+      addToast('State loaded successfully', 'success');
     } catch (err) {
       setTfState(null);
       const errMsg = friendlyError(err).message;
       setStateError(errMsg);
-      setFeedback({ ok: false, text: 'Failed to load state', hint: errMsg });
+      addToast('Failed to load state', 'error', errMsg);
     } finally {
       setLoadingState(false);
     }
@@ -259,16 +319,16 @@ function PipelinesClientContent({
 
   const loadPlan = useCallback(async (sourceId: string) => {
     setLoadingPlan(true);
-    setFeedback({ ok: true, text: 'Running plan preview...' });
+    addToast('Running plan preview...', 'info');
     try {
       const data = await pipelineSources.plan(sourceId);
       setTfPlan(data);
-      setFeedback({ ok: true, text: 'Plan completed' });
+      addToast('Plan completed', 'success');
     } catch (err) {
       setTfPlan(null);
       const errMsg = friendlyError(err).message;
       setStateError(errMsg);
-      setFeedback({ ok: false, text: 'Plan failed', hint: errMsg });
+      addToast('Plan failed', 'error', errMsg);
     } finally {
       setLoadingPlan(false);
     }
@@ -285,12 +345,34 @@ function PipelinesClientContent({
     setTfState(null);
     setTfPlan(null);
     setStateError('');
-    setFeedback(null); // Clear stale feedback when switching engines
+    setWorkflowGraph(null);
+    setGraphError('');
+    // Persist selected engine in URL so tab-switching preserves it
+    const params = new URLSearchParams(window.location.search);
+    params.set('engine', source.id);
+    router.replace(`/pipelines?${params.toString()}`, { scroll: false });
     await loadRuns(source.id);
     await loadPresets(source.id);
     // Auto-load state for terraform/ansible sources
     if (source.source_type === 'terraform' || source.source_type === 'ansible') {
       loadState(source.id);
+    }
+    // Auto-load workflow graph for CI/CD sources
+    if (source.source_type === 'github_actions' || source.source_type === 'gitlab_ci') {
+      loadWorkflowGraph(source.id);
+    }
+  };
+
+  const loadWorkflowGraph = async (sourceId: string) => {
+    setLoadingGraph(true);
+    setGraphError('');
+    try {
+      const data = await pipelineWorkflows.graph(sourceId);
+      setWorkflowGraph(data);
+    } catch (err) {
+      setGraphError(friendlyError(err).message);
+    } finally {
+      setLoadingGraph(false);
     }
   };
 
@@ -306,9 +388,10 @@ function PipelinesClientContent({
       setShowTriggerModal(false);
       setTriggerParams({});
       await loadRuns(selectedSource.id);
-      setFeedback({ ok: true, text: 'Pipeline run triggered successfully' });
+      loadStats();
+      addToast('Pipeline run triggered successfully', 'success');
     } catch (err) {
-      setFeedback({ ok: false, text: friendlyError(err).message });
+      addToast(friendlyError(err).message, 'error');
     } finally {
       setTriggering(false);
     }
@@ -319,8 +402,8 @@ function PipelinesClientContent({
     try {
       await pipelineRuns.refresh(selectedSource.id, runId);
       await loadRuns(selectedSource.id);
-      setFeedback({ ok: true, text: 'Pipeline run refreshed' });
-    } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+      addToast('Pipeline run refreshed', 'success');
+    } catch (err) { addToast(friendlyError(err).message, 'error'); }
   };
 
   const handleCancel = async (runId: string) => {
@@ -329,8 +412,8 @@ function PipelinesClientContent({
     try {
       await pipelineRuns.cancel(selectedSource.id, runId);
       await loadRuns(selectedSource.id);
-      setFeedback({ ok: true, text: 'Pipeline run cancelled' });
-    } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+      addToast('Pipeline run cancelled', 'success');
+    } catch (err) { addToast(friendlyError(err).message, 'error'); }
   };
 
   // Open trigger modal for Engines tab - dynamically load CI variables if connection available
@@ -401,8 +484,8 @@ function PipelinesClientContent({
     try {
       await pipelineSources.resolveSchema(source.id);
       await loadSources();
-      setFeedback({ ok: true, text: 'Schema resolved successfully' });
-    } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+      addToast('Schema resolved successfully', 'success');
+    } catch (err) { addToast(friendlyError(err).message, 'error'); }
   };
 
   const handleDeleteSource = async (source: PipelineSource) => {
@@ -411,23 +494,39 @@ function PipelinesClientContent({
       await pipelineSources.delete(source.id);
       if (selectedSource?.id === source.id) setSelectedSource(null);
       await loadSources();
-      setFeedback({ ok: true, text: 'Engine deleted' });
-    } catch (err) { setFeedback({ ok: false, text: friendlyError(err).message }); }
+      addToast('Engine deleted', 'success');
+    } catch (err) { addToast(friendlyError(err).message, 'error'); }
   };
 
   const handleSyncRuns = async () => {
     if (!selectedSource) return;
     setSyncing(true);
-    setFeedback({ ok: true, text: 'Syncing runs from remote...' });
+    addToast('Syncing runs from remote...', 'info');
     try {
       const result = await pipelineRuns.sync(selectedSource.id);
       await loadRuns(selectedSource.id);
-      setFeedback({ ok: true, text: `Synced ${result.synced} runs from remote` });
+      const newCount = result.synced;
+      const skippedCount = result.skipped || 0;
+      await loadStats();
+      addToast(`Synced ${newCount} run${newCount !== 1 ? 's' : ''} (${skippedCount} unchanged)`, 'success');
     } catch (err) {
       const errMsg = friendlyError(err).message;
-      setFeedback({ ok: false, text: 'Sync failed', hint: errMsg });
+      addToast('Sync failed', 'error', errMsg);
     }
     finally { setSyncing(false); }
+  };
+
+  const loadRunJobs = async (runId: string) => {
+    if (!selectedSource) return;
+    setLoadingRunJobs(runId);
+    try {
+      const data = await pipelineRuns.jobs(selectedSource.id, runId);
+      setRunJobs(prev => ({ ...prev, [runId]: data.jobs || [] }));
+    } catch {
+      setRunJobs(prev => ({ ...prev, [runId]: [] }));
+    } finally {
+      setLoadingRunJobs(null);
+    }
   };
 
   const toggleRunExpansion = async (runId: string) => {
@@ -436,16 +535,17 @@ function PipelinesClientContent({
       return;
     }
     setExpandedRunId(runId);
-    if (!runJobs[runId] && selectedSource) {
-      setLoadingRunJobs(runId);
+    if (!runJobs[runId]) {
+      await loadRunJobs(runId);
+    }
+    // Also fetch logs (needed for Ansible and other single-play runs)
+    if (!runLogs[runId] && selectedSource) {
+      setLoadingRunLogs(runId);
       try {
-        const data = await pipelineRuns.jobs(selectedSource.id, runId);
-        setRunJobs(prev => ({ ...prev, [runId]: data.jobs || [] }));
-      } catch {
-        setRunJobs(prev => ({ ...prev, [runId]: [] }));
-      } finally {
-        setLoadingRunJobs(null);
-      }
+        const logData = await pipelineRuns.logs(selectedSource.id, runId);
+        setRunLogs(prev => ({ ...prev, [runId]: logData.logs || '' }));
+      } catch { /* ignore */ }
+      setLoadingRunLogs(null);
     }
   };
 
@@ -460,10 +560,10 @@ function PipelinesClientContent({
       const result = await connectionsAPI.test(id);
       setConnections(prev => prev.map(c => c.id === id ? { ...c, status: result.status } : c));
       const ok = result.status === 'connected' || result.status === 'ok' || result.status === 'healthy';
-      setFeedback({ ok, text: ok ? `Connection works: ${result.message}` : `Test failed: ${result.message}` });
+      addToast(ok ? `Connection works: ${result.message}` : `Test failed: ${result.message}`, ok ? 'success' : 'error');
     } catch (err) {
       const fe = friendlyError(err);
-      setFeedback({ ok: false, text: `Test failed: ${fe.message}`, hint: fe.hint });
+      addToast(`Test failed: ${fe.message}`, 'error', fe.hint);
     } finally {
       setTesting(null);
     }
@@ -554,9 +654,9 @@ function PipelinesClientContent({
       // Refresh pipelines list
       const data = await gitBrowser.listPipelines(selectedProviderConn.id, pickerValue.repo_id);
       setPipelines(data.pipelines || []);
-      setFeedback({ ok: true, text: `Pipeline #${result.id} triggered successfully` });
+      addToast(`Pipeline #${result.id} triggered successfully`, 'success');
     } catch (err) {
-      setFeedback({ ok: false, text: `Trigger failed: ${friendlyError(err).message}` });
+      addToast(`Trigger failed: ${friendlyError(err).message}`, 'error');
     } finally {
       setProviderTriggering(false);
     }
@@ -653,6 +753,7 @@ function PipelinesClientContent({
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <div className="px-6 py-6 space-y-6">
         {/* Header */}
         <div className="page-animate flex items-center justify-between">
@@ -676,19 +777,6 @@ function PipelinesClientContent({
             )}
           </div>
         </div>
-
-        {/* Feedback */}
-        {feedback && (
-          <div className={`rounded-lg border p-3 flex items-start justify-between gap-3 mb-4 ${feedback.ok ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-            <div>
-              <p className={`text-sm font-medium ${feedback.ok ? 'text-emerald-600' : 'text-red-500'}`}>
-                {feedback.ok ? '✓ ' : '⚠ '}{feedback.text}
-              </p>
-              {feedback.hint && <p className="text-xs text-red-400 mt-1">{feedback.hint}</p>}
-            </div>
-            <button onClick={() => setFeedback(null)} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] shrink-0">✕</button>
-          </div>
-        )}
 
         {/* Tabs */}
         <div className="border-b border-[var(--border)] page-animate-up page-delay-1">
@@ -804,7 +892,9 @@ function PipelinesClientContent({
                         {sources.length === 0 ? 'No engines configured.' : 'No engines match the filters.'}
                       </div>
                     )}
-                    {filteredSources.map(source => (
+                    {filteredSources.map(source => {
+                      const stats = engineStats[source.id];
+                      return (
                       <div
                         key={source.id}
                         onClick={() => selectSource(source)}
@@ -816,13 +906,28 @@ function PipelinesClientContent({
                               <BrandIcon name={ENGINE_TYPE_INFO[source.source_type]?.icon || 'plugin'} size={16} />
                             </span>
                             <div>
-                              <p className="text-sm font-medium text-[var(--text-primary)]">{source.name}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-sm font-medium text-[var(--text-primary)]">{source.name}</p>
+                                {stats?.last_run_status && (
+                                  <span className={`w-2 h-2 rounded-full ${statusDotColors[stats.last_run_status] || 'bg-[var(--border)]'}`} title={`Last run: ${stats.last_run_status}`} />
+                                )}
+                              </div>
                               <p className="text-xs text-[var(--text-secondary)] mt-0.5">
                                 <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${ENGINE_TYPE_INFO[source.source_type]?.bgColor || 'bg-[var(--border-light)]'} ${ENGINE_TYPE_INFO[source.source_type]?.color || 'text-[var(--text-secondary)]'}`}>
                                   {sourceTypeLabels[source.source_type] || source.source_type}
                                 </span>
                                 {source.description && <span className="ml-1">— {source.description}</span>}
                               </p>
+                              {stats && (
+                                <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                                  {stats.total_runs} run{stats.total_runs !== 1 ? 's' : ''}
+                                  {stats.success_count > 0 && <span className="text-emerald-600"> · {stats.success_count} passed</span>}
+                                  {stats.failed_count > 0 && <span className="text-red-500"> · {stats.failed_count} failed</span>}
+                                  {stats.running_count > 0 && <span className="text-blue-500"> · {stats.running_count} running</span>}
+                                  {stats.last_run_at && <span> · {getTimeAgo(stats.last_run_at)}</span>}
+                                </p>
+                              )}
+                              {!stats && <p className="text-[11px] text-[var(--text-tertiary)] mt-1">No runs yet</p>}
                             </div>
                           </div>
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColors[source.status] || 'bg-[var(--border-light)] text-[var(--text-secondary)]'}`}>
@@ -830,7 +935,8 @@ function PipelinesClientContent({
                           </span>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -847,59 +953,98 @@ function PipelinesClientContent({
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="bg-[var(--surface)] rounded-lg shadow-sm border p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h2 className="text-lg font-semibold text-[var(--text-primary)]">{selectedSource.name}</h2>
-                          <p className="text-sm text-[var(--text-secondary)]">{sourceTypeLabels[selectedSource.source_type]} pipeline</p>
-                          {/* Config summary - shows what's configured */}
-                          {(() => {
-                            const cfg = selectedSource.config as Record<string, unknown> | undefined;
-                            if (!cfg) return null;
-                            let summary = '';
-                            if (selectedSource.source_type === 'terraform') {
-                              summary = cfg.local_path ? `Local: ${cfg.local_path}` : cfg.repo_url ? `Repo: ${cfg.repo_url}` : '';
-                              if (cfg.working_dir && cfg.working_dir !== '.') summary += ` → ${cfg.working_dir}`;
-                            } else if (selectedSource.source_type === 'ansible') {
-                              summary = cfg.local_path ? `Local: ${cfg.local_path}` : cfg.repo_url ? `Repo: ${cfg.repo_url}` : '';
-                              if (cfg.playbook) summary += ` / ${cfg.playbook}`;
-                            } else if (selectedSource.source_type === 'gitlab_ci') {
-                              summary = cfg.project_id ? `Project: ${cfg.project_id}` : '';
-                            } else if (selectedSource.source_type === 'github_actions') {
-                              summary = cfg.owner && cfg.repo ? `${cfg.owner}/${cfg.repo}` : cfg.repo_url ? String(cfg.repo_url).replace(/^https?:\/\//, '') : '';
-                              if (cfg.workflow) summary += ` / ${cfg.workflow}`;
-                            }
-                            return summary ? <p className="text-xs text-[var(--text-tertiary)] font-mono mt-1 truncate max-w-md" title={summary}>{summary}</p> : null;
-                          })()}
-                        </div>
-                        <div className="flex gap-2">
-                          {/* ── Primary action button (varies by provider) ── */}
+                    <div className="bg-[var(--surface)] rounded-lg shadow-sm border">
+                      {/* ── Header: title + info ── */}
+                      <div className="px-4 pt-4 pb-3">
+                        <h2 className="text-lg font-semibold text-[var(--text-primary)]">{selectedSource.name}</h2>
+                        <p className="text-sm text-[var(--text-secondary)]">{sourceTypeLabels[selectedSource.source_type]} pipeline</p>
+                        {/* Config summary */}
+                        {(() => {
+                          const cfg = selectedSource.config as Record<string, unknown> | undefined;
+                          if (!cfg) return null;
+                          let summary = '';
+                          if (selectedSource.source_type === 'terraform') {
+                            summary = cfg.local_path ? `Local: ${cfg.local_path}` : cfg.repo_url ? `Repo: ${cfg.repo_url}` : '';
+                            if (cfg.working_dir && cfg.working_dir !== '.') summary += ` → ${cfg.working_dir}`;
+                          } else if (selectedSource.source_type === 'ansible') {
+                            summary = cfg.local_path ? `Local: ${cfg.local_path}` : cfg.repo_url ? `Repo: ${cfg.repo_url}` : '';
+                            if (cfg.playbook) summary += ` / ${cfg.playbook}`;
+                          } else if (selectedSource.source_type === 'gitlab_ci') {
+                            summary = cfg.project_id ? `Project: ${cfg.project_id}` : '';
+                          } else if (selectedSource.source_type === 'github_actions') {
+                            summary = cfg.owner && cfg.repo ? `${cfg.owner}/${cfg.repo}` : cfg.repo_url ? String(cfg.repo_url).replace(/^https?:\/\//, '') : '';
+                            if (cfg.workflow) summary += ` / ${cfg.workflow}`;
+                          }
+                          return summary ? <p className="text-xs text-[var(--text-tertiary)] font-mono mt-1 truncate max-w-md" title={summary}>{summary}</p> : null;
+                        })()}
+                      </div>
+                      {/* ── Action toolbar ── */}
+                      <div className="flex items-center gap-2 px-4 pb-3 flex-wrap">
+                        {/* Primary actions */}
+                        <div className="flex items-center gap-1.5">
                           {selectedSource.source_type === 'terraform' ? (
                             <>
-                              <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="px-3 py-1.5 bg-purple-500/15 text-purple-500 rounded-md hover:bg-purple-500/25 text-sm font-medium border border-purple-500/20">View State</button>
-                              <button onClick={() => loadPlan(selectedSource.id)} disabled={loadingPlan} className="px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md hover:bg-amber-500/25 text-sm font-medium border border-amber-500/20 disabled:opacity-50">{loadingPlan ? 'Planning...' : 'Plan'}</button>
-                              <button onClick={() => setShowTerraformWizard(true)} className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">Apply</button>
+                              <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 text-purple-500 rounded-lg hover:bg-purple-500/20 text-[13px] font-medium border border-purple-500/20 transition-all">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                State
+                              </button>
+                              <button onClick={() => loadPlan(selectedSource.id)} disabled={loadingPlan} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-600 rounded-lg hover:bg-amber-500/20 text-[13px] font-medium border border-amber-500/20 transition-all disabled:opacity-50">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" /></svg>
+                                {loadingPlan ? 'Planning...' : 'Plan'}
+                              </button>
+                              <button onClick={() => setShowTerraformWizard(true)} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-[13px] font-semibold shadow-sm shadow-emerald-500/20 transition-all">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>
+                                Apply
+                              </button>
                             </>
                           ) : selectedSource.source_type === 'ansible' ? (
                             <>
-                              <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="px-3 py-1.5 bg-emerald-500/15 text-emerald-600 rounded-md hover:bg-emerald-500/25 text-sm font-medium border border-emerald-500/20">Hosts</button>
-                              <button onClick={() => handleAnsibleDryRun(selectedSource)} disabled={loadingPlan} className="px-3 py-1.5 bg-amber-500/15 text-amber-600 rounded-md hover:bg-amber-500/25 text-sm font-medium border border-amber-500/20 disabled:opacity-50">{loadingPlan ? 'Checking...' : 'Dry Run'}</button>
-                              <button onClick={() => setShowAnsibleWizard(true)} className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">Run Playbook</button>
+                              <button onClick={() => { setDetailTab('state'); if (!tfState && !loadingState) loadState(selectedSource.id); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-lg hover:bg-[var(--border)] text-[13px] font-medium transition-all">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 005.388-1.594L21 12l-.612-5.534a9.375 9.375 0 00-16.776 0L3 12l.612 5.534A9.38 9.38 0 009 19.128m0 0h6M12 12v7.5m-3-3.75h6" /></svg>
+                                Hosts
+                              </button>
+                              <button onClick={() => handleAnsibleDryRun(selectedSource)} disabled={loadingPlan} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 text-amber-600 rounded-lg hover:bg-amber-500/20 text-[13px] font-medium border border-amber-500/20 transition-all disabled:opacity-50">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                {loadingPlan ? 'Checking...' : 'Dry Run'}
+                              </button>
+                              <button onClick={() => setShowAnsibleWizard(true)} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-[13px] font-semibold shadow-sm shadow-emerald-500/20 transition-all">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>
+                                Run Playbook
+                              </button>
                             </>
                           ) : selectedSource.source_type === 'trivy' ? (
-                            <button onClick={() => openEngineTriggerModal(selectedSource)} className="px-3 py-1.5 bg-cyan-500/15 text-cyan-600 rounded-md hover:bg-cyan-500/25 text-sm font-medium border border-cyan-500/20 font-medium">Run Scan</button>
+                            <button onClick={() => openEngineTriggerModal(selectedSource)} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-500/10 text-cyan-600 rounded-lg hover:bg-cyan-500/20 text-[13px] font-semibold border border-cyan-500/20 transition-all">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m0-10.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.75c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z" /></svg>
+                              Run Scan
+                            </button>
                           ) : (
                             <>
-                              <button onClick={() => openEngineTriggerModal(selectedSource)} className="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">Run Pipeline</button>
-                              <button onClick={handleSyncRuns} disabled={syncing} className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm disabled:opacity-50">{syncing ? 'Syncing...' : 'Sync Runs'}</button>
+                              <button onClick={() => openEngineTriggerModal(selectedSource)} className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 text-[13px] font-semibold shadow-sm shadow-emerald-500/20 transition-all">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>
+                                Run Pipeline
+                              </button>
+                              <button onClick={handleSyncRuns} disabled={syncing} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-lg hover:bg-[var(--border)] text-[13px] font-medium transition-all disabled:opacity-50">
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
+                                {syncing ? 'Syncing...' : 'Sync Runs'}
+                              </button>
                             </>
                           )}
-                          {/* ── Common actions ── */}
-                          <button onClick={() => handleResolveSchema(selectedSource)} className="px-3 py-1.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded-md hover:bg-[var(--border)] text-sm">Refresh Schema</button>
-                          <button onClick={() => handleDeleteSource(selectedSource)} className="px-3 py-1.5 bg-red-500/10 text-red-500 rounded-md hover:bg-red-500/20 text-sm">Delete</button>
+                        </div>
+                        {/* Spacer pushes utility group to the right */}
+                        <div className="flex-1" />
+                        {/* Utility actions */}
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => handleResolveSchema(selectedSource)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[var(--text-tertiary)] rounded-lg hover:bg-[var(--border-light)] hover:text-[var(--text-secondary)] text-[12px] font-medium transition-all" title="Refresh Schema">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
+                            Schema
+                          </button>
+                          <button onClick={() => handleDeleteSource(selectedSource)} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[var(--text-tertiary)] rounded-lg hover:bg-red-500/10 hover:text-red-500 text-[12px] font-medium transition-all" title="Delete">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                            Delete
+                          </button>
                         </div>
                       </div>
-                      {selectedSource.last_error && <p className="mt-2 text-sm text-red-600">Error: {selectedSource.last_error}</p>}
+                      {selectedSource.last_error && <p className="px-4 pb-3 text-sm text-red-600">Error: {selectedSource.last_error}</p>}
                     </div>
 
                     <div className="bg-[var(--surface)] rounded-lg shadow-sm border">
@@ -907,6 +1052,11 @@ function PipelinesClientContent({
                         <button onClick={() => setDetailTab('runs')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'runs' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
                           Runs ({runs.length})
                         </button>
+                        {(selectedSource?.source_type === 'github_actions' || selectedSource?.source_type === 'gitlab_ci') && workflowGraph && (
+                          <button onClick={() => setDetailTab('graph')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'graph' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
+                            Graph ({workflowGraph.jobs.length})
+                          </button>
+                        )}
                         {selectedSource?.source_type !== 'trivy' && (
                           <button onClick={() => setDetailTab('presets')} className={`px-4 py-3 text-sm font-medium border-b-2 ${detailTab === 'presets' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}>
                             Presets ({presets.length})
@@ -1007,7 +1157,19 @@ function PipelinesClientContent({
                                         </div>
                                       )}
                                       {!isLoadingJobs && jobs && jobs.length === 0 && (
-                                        <p className="text-xs text-[var(--text-tertiary)] py-1">No jobs recorded for this run</p>
+                                        <div>
+                                          <p className="text-xs text-[var(--text-tertiary)] py-1">No jobs recorded for this run</p>
+                                          {/* Show run-level logs for Ansible / single-play runs */}
+                                          {loadingRunLogs === run.id && (
+                                            <div className="flex items-center gap-2 py-2">
+                                              <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-blue-600" />
+                                              <span className="text-xs text-[var(--text-secondary)]">Loading logs...</span>
+                                            </div>
+                                          )}
+                                          {runLogs[run.id] && (
+                                            <AnsiOutput text={runLogs[run.id]} mode="ansible" maxHeight="300px" />
+                                          )}
+                                        </div>
                                       )}
                                       {!isLoadingJobs && jobs && jobs.map((job, ji) => {
                                         const jobKey = `${run.id}:${job.id || ji}`;
@@ -1052,6 +1214,87 @@ function PipelinesClientContent({
                                 </div>
                               );
                             })}
+                          </div>
+                        )}
+                        {detailTab === 'graph' && (
+                          <div className="space-y-4">
+                            {loadingGraph && (
+                              <div className="flex items-center gap-2 py-6 justify-center">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600" />
+                                <span className="text-sm text-[var(--text-secondary)]">Loading workflow graph...</span>
+                              </div>
+                            )}
+                            {graphError && (
+                              <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20">
+                                <p className="text-sm text-amber-600 font-medium">Could not load workflow graph</p>
+                                <p className="text-xs text-[var(--text-secondary)] mt-1">{graphError}</p>
+                                <button onClick={() => selectedSource && loadWorkflowGraph(selectedSource.id)} className="mt-2 text-xs text-[var(--accent)] hover:underline">Retry</button>
+                              </div>
+                            )}
+                            {workflowGraph && (
+                              <>
+                                {/* Latest run summary */}
+                                {runs.length > 0 && (
+                                  <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--bg)] border">
+                                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${statusColors[runs[0].status] || 'bg-[var(--border-light)]'}`}>
+                                      {runs[0].status}
+                                    </span>
+                                    <div className="flex-1">
+                                      <p className="text-sm font-medium text-[var(--text-primary)]">
+                                        Latest run: #{runs[0].external_run_id || runs[0].id.slice(0, 8)}
+                                      </p>
+                                      <p className="text-xs text-[var(--text-tertiary)]">
+                                        {new Date(runs[0].created_at).toLocaleString()}
+                                        {runs[0].duration_ms ? ` — ${(runs[0].duration_ms / 1000).toFixed(1)}s` : ''}
+                                      </p>
+                                    </div>
+                                    <button
+                                      onClick={() => { setDetailTab('runs'); setExpandedRunId(runs[0].id); if (!runJobs[runs[0].id]) loadRunJobs(runs[0].id); }}
+                                      className="px-3 py-1.5 text-xs text-[var(--accent)] hover:bg-[var(--border-light)] rounded-md border border-[var(--border)]"
+                                    >
+                                      View details →
+                                    </button>
+                                  </div>
+                                )}
+                                {/* Workflow info header */}
+                                <div className="flex items-center gap-4 flex-wrap">
+                                  <div>
+                                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">{workflowGraph.name}</h3>
+                                    <p className="text-xs text-[var(--text-secondary)]">{workflowGraph.source === 'github_actions' ? 'GitHub Actions' : 'GitLab CI'}</p>
+                                  </div>
+                                  {(workflowGraph.triggers?.length ?? 0) > 0 && (
+                                    <div className="flex gap-1 flex-wrap">
+                                      {(workflowGraph.triggers || []).map(t => (
+                                        <span key={t} className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-500/10 text-blue-500 border border-blue-500/20">{t}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="text-xs text-[var(--text-tertiary)] ml-auto">
+                                    {(workflowGraph.jobs?.length ?? 0)} job{(workflowGraph.jobs?.length ?? 0) !== 1 ? 's' : ''} &middot; {(workflowGraph.stages?.length ?? 0)} level{(workflowGraph.stages?.length ?? 0) !== 1 ? 's' : ''}
+                                  </div>
+                                </div>
+                                {/* Pipeline DAG */}
+                                <div className="bg-[var(--bg)] rounded-lg border p-3">
+                                  <PipelineGraph
+                                    graph={workflowGraph}
+                                    runJobs={runs.length > 0 ? runJobs[runs[0].id] : undefined}
+                                    onJobClick={() => {
+                                      if (runs.length > 0) {
+                                        setDetailTab('runs');
+                                        setExpandedRunId(runs[0].id);
+                                        if (!runJobs[runs[0].id]) loadRunJobs(runs[0].id);
+                                      }
+                                    }}
+                                  />
+                                </div>
+                              </>
+                            )}
+                            {!loadingGraph && !graphError && !workflowGraph && (
+                              <div className="text-center py-8">
+                                <p className="text-sm text-[var(--text-secondary)]">No workflow file found</p>
+                                <p className="text-xs text-[var(--text-tertiary)] mt-1">Configure a pipeline source with a workflow file to see the visual graph.</p>
+                              </div>
+                            )}
                           </div>
                         )}
                         {detailTab === 'presets' && (
@@ -1160,7 +1403,7 @@ function PipelinesClientContent({
                                       </div>
                                     </div>
                                     {tfPlan.output_text && (
-                                      <pre className="text-[10px] font-mono text-[var(--text-secondary)] bg-[var(--surface)] rounded p-2 max-h-40 overflow-auto whitespace-pre-wrap">{tfPlan.output_text}</pre>
+                                      <AnsiOutput text={tfPlan.output_text} mode="iac" maxHeight="160px" />
                                     )}
                                   </div>
                                 )}
@@ -1877,6 +2120,7 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
   const [dryRunOutput, setDryRunOutput] = useState('');
   const [runningDryRun, setRunningDryRun] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [execDone, setExecDone] = useState(false);
   const [execOutput, setExecOutput] = useState('');
   const [error, setError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1939,8 +2183,19 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
           } else {
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
-            setExecOutput(prev => prev + '\n--- Run completed: ' + result.run.status + ' ---');
+            // Fetch final logs after a short delay to let the backend persist them
+            await new Promise(r => setTimeout(r, 1500));
+            try {
+              const logData = await pipelineRuns.logs(source.id, run.id);
+              const finalLogs = logData.logs || result.run.logs || '';
+              setExecOutput(finalLogs
+                ? `${finalLogs}\n--- Run completed: ${result.run.status} ---`
+                : `Playbook triggered. Run ID: ${run.id}\n--- Run completed: ${result.run.status} ---`);
+            } catch {
+              setExecOutput(prev => prev + '\n--- Run completed: ' + result.run.status + ' ---');
+            }
             setExecuting(false);
+            setExecDone(true);
             onRunComplete();
           }
         } catch {
@@ -1986,7 +2241,7 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
             <div className="space-y-4">
               <p className="text-sm font-medium text-[var(--text-secondary)]">Select a playbook to run:</p>
               <div className="space-y-2">
-                {inspection.playbooks.map(pb => (
+                {inspection.playbooks?.map(pb => (
                   <button
                     key={pb.file}
                     onClick={() => setSelectedPlaybook(pb.file)}
@@ -2008,7 +2263,7 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
                   </button>
                 ))}
               </div>
-              {inspection.roles.length > 0 && (
+              {inspection.roles?.length > 0 && (
                 <div>
                   <p className="text-xs font-medium text-[var(--text-tertiary)] mb-2">Discovered roles ({inspection.roles.length}):</p>
                   <div className="flex flex-wrap gap-1">
@@ -2026,7 +2281,7 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
             <div className="space-y-4">
               <p className="text-sm font-medium text-[var(--text-secondary)]">Select inventory:</p>
               <div className="space-y-2">
-                {inspection.inventories.map(inv => (
+                {inspection.inventories?.map(inv => (
                   <button
                     key={inv}
                     onClick={() => { setSelectedInventory(inv); setCustomInventory(''); }}
@@ -2095,7 +2350,7 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
                 </button>
               </div>
               {dryRunOutput && (
-                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{dryRunOutput}</pre>
+                <AnsiOutput text={dryRunOutput} mode="ansible" />
               )}
             </div>
           )}
@@ -2104,12 +2359,17 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-[var(--text-secondary)]">Execute Playbook</p>
-                <button onClick={handleExecute} disabled={executing} className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50">
-                  {executing ? 'Running...' : 'Execute'}
-                </button>
+                {!execDone && (
+                  <button onClick={handleExecute} disabled={executing} className="px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                    {executing ? 'Running...' : 'Execute'}
+                  </button>
+                )}
+                {execDone && (
+                  <span className="px-3 py-1.5 rounded-md text-sm font-medium bg-emerald-500/10 text-emerald-600">Done</span>
+                )}
               </div>
               {execOutput && (
-                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{execOutput}</pre>
+                <AnsiOutput text={execOutput} mode="ansible" />
               )}
             </div>
           )}
@@ -2117,10 +2377,10 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
 
         {/* Footer navigation */}
         <div className="flex justify-between p-6 pt-3 border-t shrink-0">
-          <button onClick={step === 0 ? onClose : () => setStep(s => s - 1)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">
-            {step === 0 ? 'Cancel' : 'Back'}
+          <button onClick={(step === 0 || execDone) ? onClose : () => setStep(s => s - 1)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">
+            {(step === 0 || execDone) ? 'Close' : 'Back'}
           </button>
-          {step < 4 && (
+          {step < 4 && !execDone && (
             <button
               onClick={() => setStep(s => s + 1)}
               disabled={loading || (step === 0 && !selectedPlaybook) || (step === 1 && !selectedInventory && !customInventory)}
@@ -2160,6 +2420,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
   const [planOutput, setPlanOutput] = useState('');
   const [runningPlan, setRunningPlan] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [applyDone, setApplyDone] = useState(false);
   const [applyOutput, setApplyOutput] = useState('');
   const [error, setError] = useState('');
   const tfPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -2211,8 +2472,19 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
           } else {
             if (tfPollRef.current) clearInterval(tfPollRef.current);
             tfPollRef.current = null;
-            setApplyOutput(prev => prev + '\n--- Apply completed: ' + result.run.status + ' ---');
+            // Fetch final logs after a short delay to let the backend persist them
+            await new Promise(r => setTimeout(r, 1500));
+            try {
+              const logData = await pipelineRuns.logs(source.id, run.id);
+              const finalLogs = logData.logs || result.run.logs || '';
+              setApplyOutput(finalLogs
+                ? `${finalLogs}\n--- Apply completed: ${result.run.status} ---`
+                : `Apply triggered. Run ID: ${run.id}\n--- Apply completed: ${result.run.status} ---`);
+            } catch {
+              setApplyOutput(prev => prev + '\n--- Apply completed: ' + result.run.status + ' ---');
+            }
             setApplying(false);
+            setApplyDone(true);
             onApplyComplete();
           }
         } catch {
@@ -2262,7 +2534,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
 
           {inspection && step === 0 && (
             <div className="space-y-4">
-              {inspection.modules.length > 0 && (
+              {(inspection.modules?.length ?? 0) > 0 && (
                 <div>
                   <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Modules ({inspection.modules.length})</p>
                   <div className="space-y-1">
@@ -2275,7 +2547,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
                   </div>
                 </div>
               )}
-              {inspection.resources.length > 0 && (
+              {(inspection.resources?.length ?? 0) > 0 && (
                 <div>
                   <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Resources ({inspection.resources.length})</p>
                   <div className="grid grid-cols-2 gap-1">
@@ -2289,7 +2561,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
                   </div>
                 </div>
               )}
-              {inspection.data_sources.length > 0 && (
+              {(inspection.data_sources?.length ?? 0) > 0 && (
                 <div>
                   <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Data Sources ({inspection.data_sources.length})</p>
                   <div className="flex flex-wrap gap-1">
@@ -2299,7 +2571,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
                   </div>
                 </div>
               )}
-              {inspection.outputs.length > 0 && (
+              {(inspection.outputs?.length ?? 0) > 0 && (
                 <div>
                   <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">Outputs ({inspection.outputs.length})</p>
                   <div className="flex flex-wrap gap-1">
@@ -2387,7 +2659,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
                 </button>
               </div>
               {planOutput && (
-                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{planOutput}</pre>
+                <AnsiOutput text={planOutput} mode="iac" />
               )}
             </div>
           )}
@@ -2396,15 +2668,22 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-[var(--text-secondary)]">Apply Changes</p>
-                <button onClick={handleApply} disabled={applying} className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
-                  {applying ? 'Applying...' : 'Apply'}
-                </button>
+                {!applyDone && (
+                  <button onClick={handleApply} disabled={applying} className="px-4 py-2 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 disabled:opacity-50">
+                    {applying ? 'Applying...' : 'Apply'}
+                  </button>
+                )}
+                {applyDone && (
+                  <span className="px-3 py-1.5 rounded-md text-sm font-medium bg-emerald-500/10 text-emerald-600">Done</span>
+                )}
               </div>
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-md text-xs text-amber-600">
-                This will apply infrastructure changes. Make sure you have reviewed the plan output.
-              </div>
+              {!applyDone && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-md text-xs text-amber-600">
+                  This will apply infrastructure changes. Make sure you have reviewed the plan output.
+                </div>
+              )}
               {applyOutput && (
-                <pre className="p-4 bg-[var(--bg)] rounded-lg border text-xs font-mono whitespace-pre-wrap max-h-80 overflow-y-auto text-[var(--text-secondary)]">{applyOutput}</pre>
+                <AnsiOutput text={applyOutput} mode="iac" />
               )}
             </div>
           )}
@@ -2412,10 +2691,10 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
 
         {/* Footer */}
         <div className="flex justify-between p-6 pt-3 border-t shrink-0">
-          <button onClick={step === 0 ? onClose : () => setStep(s => s - 1)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">
-            {step === 0 ? 'Cancel' : 'Back'}
+          <button onClick={(step === 0 || applyDone) ? onClose : () => setStep(s => s - 1)} className="px-4 py-2 text-[var(--text-secondary)] bg-[var(--border-light)] rounded-md hover:bg-[var(--border)] text-sm">
+            {(step === 0 || applyDone) ? 'Close' : 'Back'}
           </button>
-          {step < 4 && (
+          {step < 4 && !applyDone && (
             <button onClick={() => setStep(s => s + 1)} disabled={loading} className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium disabled:opacity-50">
               Next
             </button>
@@ -2669,8 +2948,8 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
               ) : (
                 <div>
                   <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Local Path <span className="text-red-500">*</span></label>
-                  <input type="text" value={ansLocalPath} onChange={e => setAnsLocalPath(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm font-mono" placeholder="/opt/ansible/playbooks" />
-                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Absolute path to a local directory with playbooks on the server</p>
+                  <input type="text" value={ansLocalPath} onChange={e => setAnsLocalPath(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm font-mono" placeholder="/Users/you/projects/ansible" />
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Absolute path to a local directory with playbooks. Host paths are auto-translated inside Docker.</p>
                 </div>
               )}
               <div>
@@ -2716,8 +2995,8 @@ function CreateSourceModal({ onClose, onCreated, connections, initialType }: { o
               ) : (
                 <div>
                   <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Local Path <span className="text-red-500">*</span></label>
-                  <input type="text" value={tfLocalPath} onChange={e => setTfLocalPath(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm font-mono" placeholder="/opt/terraform/stacks" />
-                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Absolute path to a local directory with .tf files on the server</p>
+                  <input type="text" value={tfLocalPath} onChange={e => setTfLocalPath(e.target.value)} className="w-full px-3 py-2 border rounded-md text-sm font-mono" placeholder="/Users/you/projects/terraform" />
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">Absolute path to a local directory with .tf files. Host paths are auto-translated inside Docker.</p>
                 </div>
               )}
               <div>
