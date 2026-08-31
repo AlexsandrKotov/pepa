@@ -211,6 +211,11 @@ func (c *Config) LoadFromEnv() {
 	if v := getenv("POSTGRES_HOST"); v != "" {
 		c.Database.Host = v
 	}
+	if v := getenv("POSTGRES_PORT"); v != "" {
+		if port, err := fmt.Sscanf(v, "%d", &c.Database.Port); err == nil && port == 1 {
+			// Successfully parsed port
+		}
+	}
 	if v := getenv("POSTGRES_DB"); v != "" {
 		c.Database.DBName = v
 	}
@@ -227,6 +232,11 @@ func (c *Config) LoadFromEnv() {
 	// Redis
 	if v := getenv("REDIS_HOST"); v != "" {
 		c.Redis.Host = v
+	}
+	if v := getenv("REDIS_PORT"); v != "" {
+		if port, err := fmt.Sscanf(v, "%d", &c.Redis.Port); err == nil && port == 1 {
+			// Successfully parsed port
+		}
 	}
 	if v := getenv("REDIS_PASSWORD"); v != "" {
 		c.Redis.Password = v

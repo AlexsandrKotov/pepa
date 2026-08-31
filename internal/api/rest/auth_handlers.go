@@ -193,16 +193,6 @@ func loginHandler(deps Dependencies) gin.HandlerFunc {
 		mustChangePassword, _ := deps.Repos.Auth.GetMustChangePassword(ctx, user.ID)
 		user.MustChangePassword = mustChangePassword
 
-		if err != nil {
-			// Record failure for both email and IP.
-			if deps.LoginLimiter != nil {
-				deps.LoginLimiter.RecordFailure(email)
-				deps.LoginLimiter.RecordFailure(clientIP)
-			}
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
-			return
-		}
-
 		// Use default tenant/org.
 		user.TenantID = uuid.MustParse(database.DefaultTenantID)
 		user.OrgID = uuid.MustParse(database.DefaultOrganizationID)

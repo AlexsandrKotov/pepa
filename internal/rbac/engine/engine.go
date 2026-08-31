@@ -77,6 +77,9 @@ func (e *Engine) ListRoles(ctx context.Context, tenantID uuid.UUID) ([]Role, err
 		}
 		roles = append(roles, r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate roles: %w", err)
+	}
 	return roles, nil
 }
 
@@ -187,6 +190,9 @@ func (e *Engine) GetRolePermissions(ctx context.Context, roleID uuid.UUID) ([]Pe
 		}
 		perms = append(perms, p)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate permissions: %w", err)
+	}
 	return perms, nil
 }
 
@@ -266,6 +272,9 @@ func (e *Engine) GetUserRoles(ctx context.Context, tenantID, userID uuid.UUID) (
 		}
 		a.TeamName = teamName
 		assignments = append(assignments, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate assignments: %w", err)
 	}
 	return assignments, nil
 }
@@ -392,6 +401,9 @@ func (e *Engine) ListAllAssignments(ctx context.Context, tenantID uuid.UUID) ([]
 		a.TeamName = teamName
 		assignments = append(assignments, a)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate assignments: %w", err)
+	}
 	return assignments, nil
 }
 
@@ -416,6 +428,9 @@ func (e *Engine) ListUserAssignments(ctx context.Context, tenantID uuid.UUID) ([
 			return nil, fmt.Errorf("scan assignment: %w", err)
 		}
 		assignments = append(assignments, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate assignments: %w", err)
 	}
 	return assignments, nil
 }
@@ -450,6 +465,9 @@ func (e *Engine) GetUserPermissions(ctx context.Context, tenantID, userID uuid.U
 			return nil, fmt.Errorf("scan permission: %w", err)
 		}
 		perms = append(perms, resource+":"+action)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate permissions: %w", err)
 	}
 	return perms, nil
 }

@@ -296,8 +296,9 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 			}
 
 			// Proactive AI endpoints (risk assessment, doc generation, cost analysis)
-			// These are registered but will return 503 if components aren't initialized
-			tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+			// These are registered but will return 503 if components aren't initialized.
+			// Use the default tenant ID from constants instead of hardcoding.
+			tenantID := uuid.MustParse(database.DefaultTenantID)
 			proactiveHandlers := NewProactiveAIHandlers(nil, nil, nil, nil, tenantID)
 			v1.POST("/ai/risk/assess", proactiveHandlers.AssessDeploymentRisk)
 			v1.POST("/ai/docs/generate", proactiveHandlers.GenerateServiceDocs)
@@ -371,8 +372,13 @@ func bootstrapGuardMiddleware(deps Dependencies) gin.HandlerFunc {
 		bootstrapLastCheck.Store(now)
 
 		// Check if there are any non-default users (real users besides the seeded admin).
+		// Use a bounded timeout to prevent hung database connections from blocking
+		// all requests indefinitely.
+		bootstrapCtx, bootstrapCancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer bootstrapCancel()
+
 		var userCount int
-		err := deps.DB.Pool.QueryRow(context.Background(), `
+		err := deps.DB.Pool.QueryRow(bootstrapCtx, `
 			SELECT COUNT(*) FROM users WHERE id != '00000000-0000-0000-0000-000000000010'
 		`).Scan(&userCount)
 		if err != nil {
@@ -384,7 +390,7 @@ func bootstrapGuardMiddleware(deps Dependencies) gin.HandlerFunc {
 			// Check if any bootstrap token has been used — definitive signal
 			// that the bootstrap flow was already completed.
 			var hasUsedToken bool
-			_ = deps.DB.Pool.QueryRow(context.Background(), `
+			_ = deps.DB.Pool.QueryRow(bootstrapCtx, `
 				SELECT EXISTS(
 					SELECT 1 FROM bootstrap_tokens WHERE used_at IS NOT NULL
 				)

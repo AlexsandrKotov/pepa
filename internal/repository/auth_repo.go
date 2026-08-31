@@ -121,6 +121,9 @@ func (r *AuthRepository) GetUserPermissions(ctx context.Context, tenantID, userI
 		}
 		permissions = append(permissions, perm)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate permissions: %w", err)
+	}
 	return permissions, nil
 }
 
@@ -186,7 +189,25 @@ func (r *AuthRepository) CreateUser(ctx context.Context, userID uuid.UUID, email
 	return nil
 }
 
+// allowedUserColumns is a whitelist of column names that UpdateUser is
+// permitted to modify. This prevents SQL injection if a caller ever passes
+// user-controlled data as a map key.
+var allowedUserColumns = map[string]bool{
+	"email":                true,
+	"name":                 true,
+	"password_hash":        true,
+	"is_active":            true,
+	"last_login_at":        true,
+	"must_change_password": true,
+	"token_version":        true,
+	"avatar_url":           true,
+	"auth_provider":        true,
+	"external_id":          true,
+}
+
 // UpdateUser updates user fields.
+// The fields map keys are validated against a whitelist of allowed column
+// names to prevent SQL injection. Unknown keys are silently ignored.
 func (r *AuthRepository) UpdateUser(ctx context.Context, userID uuid.UUID, fields map[string]interface{}) error {
 	if len(fields) == 0 {
 		return nil
@@ -197,9 +218,16 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID uuid.UUID, field
 	argIdx := 1
 
 	for key, value := range fields {
+		if !allowedUserColumns[key] {
+			continue // skip unknown columns to prevent SQL injection
+		}
 		setClauses = append(setClauses, fmt.Sprintf("%s = $%d", key, argIdx))
 		args = append(args, value)
 		argIdx++
+	}
+
+	if len(args) == 0 {
+		return nil // no valid fields to update
 	}
 
 	args = append(args, userID)
@@ -254,6 +282,9 @@ func (r *AuthRepository) ListUsers(ctx context.Context, search string, isActive 
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users: %w", err)
 	}
 	return users, nil
 }
