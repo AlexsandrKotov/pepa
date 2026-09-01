@@ -1,0 +1,5 @@
+FROM ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
+USER root
+COPY pepa-api-server-linux /api-server
+RUN chown pepa:pepa /api-server && chmod 755 /api-server
+USER pepa:pepa

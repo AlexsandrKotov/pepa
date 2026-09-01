@@ -158,6 +158,10 @@ services:
       # The backend auto-translates host paths → /host-home/... inside the container.
       # Read-only for security. Override with HOST_HOME_DIR in .env if needed.
       - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
+      # Docker compose needs the original host path so the Docker daemon can resolve
+      # bind mounts in compose files (volumes, build contexts). Without this mount,
+      # the daemon sees /host-home/... which doesn't exist on the host.
+      - ${HOST_HOME_DIR:-${HOME}}:${HOST_HOME_DIR:-${HOME}}:ro
       # WARNING: Mounting the Docker socket gives the api container control
       # over the Docker daemon (create/delete containers, read secrets, etc.).
       # Disabled by default (mounts /dev/null). Set MOUNT_DOCK_SOCKET to the
@@ -207,6 +211,8 @@ services:
       - custom-plugins:/custom-plugins
       # Host filesystem — same mount for the worker engine.
       - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
+      # Original host path for Docker compose bind-mount resolution.
+      - ${HOST_HOME_DIR:-${HOME}}:${HOST_HOME_DIR:-${HOME}}:ro
     depends_on:
       postgres:
         condition: service_healthy

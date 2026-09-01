@@ -50,6 +50,9 @@ func registerJiraRoutes(r *gin.RouterGroup, deps Dependencies) {
 		jira.GET("/sprints", listJiraSprints(deps))
 		jira.GET("/components", listJiraComponents(deps))
 
+		// Create in Jira (calls the plugin to create in remote Jira)
+		jira.POST("/create", createInJira(deps))
+
 		// Sync
 		jira.POST("/sync", syncJiraIssues(deps))
 

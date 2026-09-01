@@ -198,24 +198,35 @@ func (c *Client) ComposeUp(ctx context.Context, projectName, composeYaml string,
 // ComposeUpFromFolder deploys a compose stack from a project folder on the server.
 // The folder must contain a docker-compose.yml (or docker-compose.yaml).
 // Relative paths in the compose file (build context, volumes) are resolved relative to this folder.
+// When PEPA runs inside Docker, the host home directory is mounted at its original path
+// (e.g. /Users/alice) so the Docker daemon can resolve bind mounts in compose files.
+// As a fallback, the /host-home mount is also checked.
 func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPath string, envVars map[string]string) error {
 	// Validate path is absolute to prevent accidental relative path usage
 	if !filepath.IsAbs(folderPath) {
 		return fmt.Errorf("folder_path must be an absolute path, got: %s", folderPath)
 	}
 
-	// Verify the folder exists and contains a compose file
-	info, err := os.Stat(folderPath)
-	if err != nil {
-		return fmt.Errorf("folder not accessible: %s: %w", folderPath, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("folder_path is not a directory: %s", folderPath)
+	// Resolve the actual directory to use. The Docker daemon needs the original host
+	// path for bind mounts in compose files to work. When PEPA runs inside Docker:
+	// 1. Try the original host path (works when HOST_HOME_DIR is mounted at its own path)
+	// 2. Fall back to /host-home/... translation (for read-only file access)
+	workDir := folderPath
+	if info, err := os.Stat(folderPath); err != nil || !info.IsDir() {
+		translated := translateToHostHome(folderPath)
+		if translated != "" {
+			if info, err := os.Stat(translated); err == nil && info.IsDir() {
+				workDir = translated
+			}
+		}
+		if workDir == folderPath {
+			return fmt.Errorf("folder not accessible: %s: %w", folderPath, err)
+		}
 	}
 
-	composePath := filepath.Join(folderPath, "docker-compose.yml")
+	composePath := filepath.Join(workDir, "docker-compose.yml")
 	if _, err := os.Stat(composePath); os.IsNotExist(err) {
-		composePath = filepath.Join(folderPath, "docker-compose.yaml")
+		composePath = filepath.Join(workDir, "docker-compose.yaml")
 		if _, err := os.Stat(composePath); os.IsNotExist(err) {
 			return fmt.Errorf("no docker-compose.yml or docker-compose.yaml found in %s", folderPath)
 		}
@@ -223,7 +234,7 @@ func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPat
 
 	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "-d"}
 	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker compose with validated args
-	cmd.Dir = folderPath                               // set working directory for relative paths
+	cmd.Dir = workDir                                  // set working directory for relative paths
 	cmd.Env = c.env()
 	for k, v := range envVars {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -234,6 +245,24 @@ func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPat
 		return fmt.Errorf("docker compose up (folder): %s: %w", stderr.String(), err)
 	}
 	return nil
+}
+
+// translateToHostHome translates a host path like /Users/alice/project to /host-home/project.
+// Returns empty string if the path doesn't match known host home prefixes.
+func translateToHostHome(p string) string {
+	prefixes := []string{"/Users/", "/home/"}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(p, prefix) {
+			rest := strings.TrimPrefix(p, prefix)
+			if idx := strings.Index(rest, "/"); idx >= 0 {
+				rest = rest[idx+1:]
+			} else {
+				continue
+			}
+			return filepath.Join("/host-home", rest)
+		}
+	}
+	return ""
 }
 
 // ComposeDown removes a compose stack.
