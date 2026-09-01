@@ -90,9 +90,12 @@ export default function DockerServicesPage() {
     setForm({ ...form, env_vars: { ...form.env_vars, [form.env_key.trim()]: form.env_value }, env_key: '', env_value: '' });
   };
 
+  // Deploy target: 'local' or a Docker host ID
+  const [deployTarget, setDeployTarget] = useState<'local' | 'host'>('local');
+
   const handleDeploy = async () => {
     setError('');
-    if (!form.docker_host_id) {
+    if (deployTarget === 'host' && !form.docker_host_id) {
       setError('Please select a Docker host');
       return;
     }
@@ -109,13 +112,17 @@ export default function DockerServicesPage() {
       return;
     }
     try {
-      await dockerServices.create({
-        docker_host_id: form.docker_host_id,
+      const payload = {
         name: form.name.trim(),
-        compose_yaml: form.source === 'yaml' ? form.compose_yaml : '',
-        folder_path: form.source === 'folder' ? form.folder_path.trim() : '',
+        compose_yaml: form.source === 'yaml' ? form.compose_yaml : undefined,
+        folder_path: form.source === 'folder' ? form.folder_path.trim() : undefined,
         env_vars: form.env_vars,
-      });
+      };
+      if (deployTarget === 'local') {
+        await dockerServices.deployLocal(payload);
+      } else {
+        await dockerServices.create({ ...payload, docker_host_id: form.docker_host_id });
+      }
       setShowForm(false);
       load();
     } catch (err) {
@@ -395,7 +402,7 @@ export default function DockerServicesPage() {
 
       {/* Deploy Modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/30" onClick={() => setShowForm(false)} />
           <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
@@ -445,20 +452,59 @@ export default function DockerServicesPage() {
                 </div>
               </div>
 
+              {/* Deploy Target */}
               <div>
-                <label className="label">Docker Host *</label>
-                <select value={form.docker_host_id} onChange={e => setForm({ ...form, docker_host_id: e.target.value })} className="input">
-                  <option value="">Select host...</option>
-                  {hosts.map(h => (
-                    <option key={h.id} value={h.id}>{h.name} ({h.status})</option>
-                  ))}
-                </select>
-                {hosts.length === 0 && (
-                  <p className="text-[11px] text-orange-500 mt-1">
-                    No hosts configured. <Link href="/docker-hosts" className="underline">Add a Docker host</Link>
-                  </p>
-                )}
+                <label className="label">Deploy Target</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeployTarget('local')}
+                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                      deployTarget === 'local'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    <span className="text-lg">🐳</span>
+                    <div>
+                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Docker</p>
+                      <p className="text-[10px] text-[var(--text-tertiary)]">unix:///var/run/docker.sock</p>
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeployTarget('host')}
+                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                      deployTarget === 'host'
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                  >
+                    <span className="text-lg">🖥️</span>
+                    <div>
+                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Registered Host</p>
+                      <p className="text-[10px] text-[var(--text-tertiary)]">Remote via TCP/SSH/TLS</p>
+                    </div>
+                  </button>
+                </div>
               </div>
+
+              {deployTarget === 'host' && (
+                <div>
+                  <label className="label">Docker Host *</label>
+                  <select value={form.docker_host_id} onChange={e => setForm({ ...form, docker_host_id: e.target.value })} className="input">
+                    <option value="">Select host...</option>
+                    {hosts.map(h => (
+                      <option key={h.id} value={h.id}>{h.name} ({h.status})</option>
+                    ))}
+                  </select>
+                  {hosts.length === 0 && (
+                    <p className="text-[11px] text-orange-500 mt-1">
+                      No hosts configured. <Link href="/docker-hosts" className="underline">Add a Docker host</Link>
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="label">Service Name *</label>
@@ -546,7 +592,7 @@ export default function DockerServicesPage() {
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border)] shrink-0">
               <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
               <button onClick={handleDeploy} className="btn btn-primary">
-                Deploy to Host
+                {deployTarget === 'local' ? 'Deploy Locally' : 'Deploy to Host'}
               </button>
             </div>
           </div>
@@ -555,7 +601,7 @@ export default function DockerServicesPage() {
 
       {/* Logs Modal */}
       {showLogs && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/30" onClick={() => setShowLogs(null)} />
           <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-3xl mx-4 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
