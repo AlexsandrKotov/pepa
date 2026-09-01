@@ -58,9 +58,11 @@ type JiraFilters struct {
 	Labels      []string   `json:"labels"`
 	Priorities  []string   `json:"priorities"`
 	Assignee    string     `json:"assignee"`
+	Components  []string   `json:"components"`
 	Search      string     `json:"search"`
 	CreatedFrom *time.Time `json:"created_from"`
 	CreatedTo   *time.Time `json:"created_to"`
+	SprintID    string     `json:"sprint_id"`
 	Page        int        `json:"page"`
 	PageSize    int        `json:"page_size"`
 }
@@ -240,6 +242,16 @@ func (r *JiraRepository) ListWithFilters(ctx context.Context, tenantID uuid.UUID
 	if f.CreatedTo != nil {
 		conditions = append(conditions, fmt.Sprintf("created_at <= $%d", argIdx))
 		args = append(args, *f.CreatedTo)
+		argIdx++
+	}
+	if len(f.Components) > 0 {
+		conditions = append(conditions, fmt.Sprintf("components && $%d", argIdx))
+		args = append(args, f.Components)
+		argIdx++
+	}
+	if f.SprintID != "" {
+		conditions = append(conditions, fmt.Sprintf("fix_versions @> ARRAY[$%d]::text[]", argIdx))
+		args = append(args, f.SprintID)
 		argIdx++
 	}
 

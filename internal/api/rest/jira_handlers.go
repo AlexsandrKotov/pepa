@@ -2,6 +2,7 @@ package rest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -90,6 +91,12 @@ func listJiraIssues(deps Dependencies) gin.HandlerFunc {
 		}
 		if v := c.QueryArray("priority"); len(v) > 0 {
 			filters.Priorities = v
+		}
+		if v := c.QueryArray("components"); len(v) > 0 {
+			filters.Components = v
+		}
+		if v := c.Query("sprint_id"); v != "" {
+			filters.SprintID = v
 		}
 
 		items, total, err := deps.Repos.Jira.ListWithFilters(c.Request.Context(), tenantID, filters)
@@ -718,7 +725,7 @@ func addJiraWorklog(deps Dependencies) gin.HandlerFunc {
 		worklog := &repository.JiraWorklog{
 			TenantID:      tenantID,
 			IssueKey:      issue.IssueKey,
-			JiraWorklogID: uuid.New().String()[:8],
+			JiraWorklogID: fmt.Sprintf("pepa-%d-%s", time.Now().UnixMilli(), uuid.New().String()[:8]),
 			Author:        author,
 			TimeSpent:     req.TimeSpent,
 			TimeSpentSecs: req.TimeSpentSecs,

@@ -867,6 +867,12 @@ func (p *JiraPlugin) addWorklog(ctx context.Context, params []byte) ([]byte, err
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, err
 	}
+	if input.IssueKey == "" {
+		return nil, fmt.Errorf("issue_key is required")
+	}
+	if input.TimeSpent == "" && input.TimeSpentSecs <= 0 {
+		return nil, fmt.Errorf("either time_spent or time_spent_secs must be provided")
+	}
 
 	worklog := &jira.WorklogRecord{
 		Comment: input.Comment,
@@ -895,6 +901,9 @@ func (p *JiraPlugin) listWorklogs(ctx context.Context, params []byte) ([]byte, e
 	}
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, err
+	}
+	if input.IssueKey == "" {
+		return nil, fmt.Errorf("issue_key is required")
 	}
 
 	// Use REST API directly for worklogs
@@ -943,6 +952,12 @@ func (p *JiraPlugin) linkIssues(ctx context.Context, params []byte) ([]byte, err
 	}
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, err
+	}
+	if input.InwardKey == "" || input.OutwardKey == "" {
+		return nil, fmt.Errorf("inward_key and outward_key are required")
+	}
+	if input.LinkType == "" {
+		input.LinkType = "Relates"
 	}
 
 	// Use REST API to create issue link
