@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { services, serviceTemplates, clusters, helmRepositories, integrations, blueprints as blueprintsAPI, dockerHosts, dockerServices, type ServiceTemplate, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type ServiceBlueprint, type DockerHost } from '@/lib/api';
+import { services, serviceTemplates, clusters, helmRepositories, integrations, blueprints as blueprintsAPI, dockerHosts, dockerServices, connections, type ServiceTemplate, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type ServiceBlueprint, type DockerHost, type Connection } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
 import GitRepoPicker from '@/components/GitRepoPicker';
 import BrandIcon from '@/components/BrandIcon';
@@ -102,39 +102,86 @@ function NewServiceForm() {
   const [memory, setMemory] = useState('128Mi');
   const [replicas, setReplicas] = useState(1);
   const [error, setError] = useState<{ message: string; hint?: string } | null>(null);
+  const [savingBlueprint, setSavingBlueprint] = useState(false);
+  const [blueprintSaved, setBlueprintSaved] = useState(false);
 
   // Docker Compose Import state
   const [composeYaml, setComposeYaml] = useState('');
-  const [composeSource, setComposeSource] = useState<'yaml' | 'folder'>('yaml');
+  const [composeSource, setComposeSource] = useState<'yaml' | 'folder' | 'git'>('yaml');
   const [composeFolderPath, setComposeFolderPath] = useState('');
+  const [composeGitUrl, setComposeGitUrl] = useState('');
   const [composeDeployTarget, setComposeDeployTarget] = useState<'local' | 'host'>('local');
   const [composeHostId, setComposeHostId] = useState('');
   const [dockerHostList, setDockerHostList] = useState<DockerHost[]>([]);
 
   useEffect(() => {
-    loadTemplates();
+    loadAll();
     loadHelmRepos();
     loadGitlabIntegrations();
-    // Load blueprints from API
-    blueprintsAPI.list().then(res => setBlueprints(res.blueprints || [])).catch(() => {});
   }, []);
 
-  const loadTemplates = async () => {
+  const loadAll = async () => {
     try {
-      const [tmplData, clusterData] = await Promise.all([
-        serviceTemplates.list().catch(() => ({ templates: [], total: 0 })),
+      const [bpData, clusterData, connData] = await Promise.all([
+        blueprintsAPI.list().catch(() => ({ blueprints: [] })),
         clusters.list().catch(() => ({ clusters: [], total: 0 })),
+        connections.list('kubernetes').catch(() => ({ connections: [], total: 0 })),
       ]);
-      setTemplates(tmplData.templates || []);
-      setClusterList(clusterData.clusters || []);
+      const allBp = bpData.blueprints || [];
+      setBlueprints(allBp);
 
-      // Auto-select preselected template
+      // Also populate templates from system blueprints for backward compat
+      const systemBp = allBp.filter((bp: ServiceBlueprint) => bp.is_system);
+      const tmplList: ServiceTemplate[] = systemBp.map((bp: ServiceBlueprint) => ({
+        id: bp.id,
+        tenant_id: bp.tenant_id || '',
+        name: bp.name,
+        slug: bp.slug || bp.name.toLowerCase().replace(/\s+/g, '-'),
+        description: bp.description || '',
+        category: bp.category || 'general',
+        icon: bp.icon,
+        language: bp.language,
+        framework: bp.framework,
+        tags: bp.tags || [],
+        helm_chart: bp.helm_chart,
+        resource_defaults: bp.resource_defaults,
+        default_values: bp.default_values as Record<string, string> | undefined,
+        is_enabled: bp.is_enabled,
+        is_system: bp.is_system,
+        created_at: bp.created_at,
+      }));
+      setTemplates(tmplList);
+
+      // Merge clusters from /clusters and Kubernetes connections
+      const allClusters = [...(clusterData.clusters || [])];
+      const k8sConnections = connData.connections || [];
+      for (const conn of k8sConnections) {
+        if (!allClusters.some(c => c.name === conn.name)) {
+          allClusters.push({
+            id: conn.id,
+            tenant_id: '',
+            name: conn.name,
+            description: conn.description || '',
+            environment: 'connection',
+            api_server_url: '',
+            flux_installed: false,
+            status: conn.status || 'active',
+            node_count: 0,
+            kubernetes_version: '',
+            is_active: true,
+            created_at: '',
+            updated_at: '',
+          } as Cluster);
+        }
+      }
+      setClusterList(allClusters);
+
+      // Auto-select preselected template (by slug from system blueprints)
       if (preselectedTemplate) {
-        const tmpl = (tmplData.templates || []).find((t: ServiceTemplate) => t.slug === preselectedTemplate);
+        const tmpl = tmplList.find((t: ServiceTemplate) => t.slug === preselectedTemplate);
         if (tmpl) {
           setSelectedTemplate(tmpl);
           setStep('configure');
-          // Apply resource defaults
           if (tmpl.resource_defaults) {
             const defaults = tmpl.resource_defaults as Record<string, unknown>;
             if (defaults.cpu) setCpu(defaults.cpu as string);
@@ -144,7 +191,7 @@ function NewServiceForm() {
         }
       }
     } catch (err) {
-      console.error('Failed to load templates:', err);
+      console.error('Failed to load data:', err);
     } finally {
       setLoading(false);
     }
@@ -258,6 +305,19 @@ function NewServiceForm() {
     }
   };
 
+  const handleForkBlueprint = async (bp: ServiceBlueprint) => {
+    try {
+      const forked = await blueprintsAPI.fork(bp.id, { name: `${bp.name} (custom)` });
+      // Refresh blueprints list
+      const res = await blueprintsAPI.list();
+      setBlueprints(res.blueprints || []);
+      // Select the forked blueprint
+      handleSelectBlueprint(forked);
+    } catch (err) {
+      setError({ message: `Failed to fork blueprint: ${friendlyError(err)}` });
+    }
+  };
+
   // Category definitions
   const categories = [
     { key: 'all', label: 'All', icon: 'dashboard' },
@@ -292,15 +352,21 @@ function NewServiceForm() {
   }, [templates, templateCategory, templateSearch]);
 
   const filteredBlueprints = useMemo(() => {
+    // Only show user-created blueprints (not system)
+    const userBp = blueprints.filter(bp => !bp.is_system);
     if (templateCategory !== 'blueprints' && templateCategory !== 'all') return [];
-    if (!templateSearch.trim()) return blueprints;
+    if (!templateSearch.trim()) return userBp;
     const q = templateSearch.toLowerCase();
-    return blueprints.filter(bp =>
+    return userBp.filter(bp =>
       bp.name.toLowerCase().includes(q) ||
       bp.description?.toLowerCase().includes(q) ||
       bp.category?.toLowerCase().includes(q)
     );
   }, [blueprints, templateCategory, templateSearch]);
+
+  // System blueprints count (for category badge)
+  const systemBlueprintCount = useMemo(() => blueprints.filter(bp => bp.is_system).length, [blueprints]);
+  const userBlueprintCount = useMemo(() => blueprints.filter(bp => !bp.is_system).length, [blueprints]);
 
   const addEnvVar = () => setEnvVars([...envVars, { key: '', value: '' }]);
   const removeEnvVar = (idx: number) => setEnvVars(envVars.filter((_, i) => i !== idx));
@@ -361,12 +427,19 @@ function NewServiceForm() {
           setCreating(false);
           return;
         }
+        if (composeSource === 'git' && !composeGitUrl.trim()) {
+          setError({ message: 'Git repository URL is required' });
+          setCreating(false);
+          return;
+        }
 
         const composeData = {
           name: name.trim(),
           ...(composeSource === 'folder'
             ? { folder_path: composeFolderPath.trim() }
-            : { compose_yaml: composeYaml }),
+            : composeSource === 'git'
+              ? { git_url: composeGitUrl.trim() }
+              : { compose_yaml: composeYaml }),
           env_vars: envVarsObj,
         };
 
@@ -412,6 +485,50 @@ function NewServiceForm() {
       setError(friendlyError(err));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleSaveAsBlueprint = async () => {
+    if (!name.trim()) return;
+    setSavingBlueprint(true);
+    setError(null);
+    try {
+      const envVarsObj: Record<string, string> = {};
+      if (envMode === 'yaml' && valuesYaml.trim()) {
+        try {
+          const parsed = parseYamlToEnvVars(valuesYaml);
+          Object.assign(envVarsObj, parsed);
+        } catch { /* ignore */ }
+      } else {
+        envVars.filter(e => e.key).forEach(e => { envVarsObj[e.key] = e.value; });
+      }
+
+      const image = selectedBlueprint?.image || helmUrl || selectedTemplate?.helm_chart?.image || '';
+      const ports = selectedBlueprint?.ports?.length ? selectedBlueprint.ports : [8080];
+
+      await blueprintsAPI.create({
+        name: name.trim(),
+        description: description || selectedTemplate?.description || '',
+        source_type: image ? 'container' : (selectedBlueprint?.source_type || 'container'),
+        image,
+        chart_url: selectedBlueprint?.chart_url || '',
+        chart_name: selectedBlueprint?.chart_name || '',
+        chart_version: selectedBlueprint?.chart_version || '',
+        namespace: namespace || 'default',
+        cpu,
+        memory,
+        replicas,
+        ports,
+        category: selectedTemplate?.category || 'general',
+        values_yaml: envMode === 'yaml' ? valuesYaml : Object.entries(envVarsObj).map(([k, v]) => `${k}=${v}`).join('\n'),
+      });
+
+      setBlueprintSaved(true);
+      setTimeout(() => setBlueprintSaved(false), 3000);
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setSavingBlueprint(false);
     }
   };
 
@@ -536,7 +653,7 @@ function NewServiceForm() {
                   type="text"
                   value={templateSearch}
                   onChange={e => setTemplateSearch(e.target.value)}
-                  placeholder="Search templates by name, language, tag..."
+                  placeholder="Search blueprints by name, language, tag..."
                   className="input pl-10 w-full"
                 />
               </div>
@@ -545,9 +662,9 @@ function NewServiceForm() {
               <div className="flex gap-1.5 flex-wrap">
                 {categories.map(cat => {
                   const count = cat.key === 'all'
-                    ? templates.length + blueprints.length
+                    ? templates.length + userBlueprintCount
                     : cat.key === 'blueprints'
-                    ? blueprints.length
+                    ? userBlueprintCount
                     : templates.filter(t => t.category === cat.key).length;
                   if (count === 0 && cat.key !== 'all' && cat.key !== 'blueprints') return null;
                   return (
@@ -576,15 +693,15 @@ function NewServiceForm() {
           {(templateCategory === 'blueprints' || templateCategory === 'all') && filteredBlueprints.length > 0 && (
             <div className="card">
               <div className="card-header">
-                <h2 className="text-[13px] font-medium text-[var(--text-primary)]">⭐ My Blueprints</h2>
-                <span className="text-[11px] text-[var(--text-tertiary)]">Custom templates you created</span>
+                <h2 className="text-[13px] font-medium text-[var(--text-primary)]">My Blueprints</h2>
+                <span className="text-[11px] text-[var(--text-tertiary)]">Custom blueprints you created or forked</span>
               </div>
               <div className="card-body">
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                   {filteredBlueprints.map(bp => (
                     <button
                       key={bp.id}
-                      onClick={() => handleSelectBlueprint(bp)}
+                      onClick={() => router.push(`/pipeline-blueprints?edit=${bp.id}`)}
                       className={`p-4 rounded-lg border text-left transition-all hover:shadow-sm ${
                         selectedBlueprint?.id === bp.id
                           ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
@@ -621,9 +738,9 @@ function NewServiceForm() {
             <div className="card">
               <div className="card-header">
                 <h2 className="text-[13px] font-medium text-[var(--text-primary)]">
-                  {templateCategory === 'all' ? 'All Templates' : categories.find(c => c.key === templateCategory)?.label + ' Templates'}
+                  {templateCategory === 'all' ? 'System Blueprints' : categories.find(c => c.key === templateCategory)?.label + ' Blueprints'}
                 </h2>
-                <span className="text-[11px] text-[var(--text-tertiary)]">{filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''}</span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">{filteredTemplates.length} blueprint{filteredTemplates.length !== 1 ? 's' : ''} · Hover to fork</span>
               </div>
               <div className="card-body">
                 {filteredTemplates.length === 0 ? (
@@ -633,11 +750,14 @@ function NewServiceForm() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    {filteredTemplates.map(tmpl => (
-                      <button
+                    {filteredTemplates.map(tmpl => {
+                      // Find the corresponding system blueprint for fork
+                      const sysBp = blueprints.find(b => b.is_system && b.slug === tmpl.slug);
+                      return (
+                      <div
                         key={tmpl.id}
                         onClick={() => handleSelectTemplate(tmpl)}
-                        className={`p-4 rounded-lg border text-left transition-all hover:shadow-sm group ${
+                        className={`p-4 rounded-lg border text-left transition-all hover:shadow-sm group relative cursor-pointer ${
                           selectedTemplate?.id === tmpl.id
                             ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                             : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
@@ -645,7 +765,18 @@ function NewServiceForm() {
                       >
                         <div className="flex items-start justify-between">
                           <span className="text-[20px] leading-none"><BrandIcon name={tmpl.icon || (tmpl.category === 'backend' ? 'cicd' : tmpl.category === 'frontend' ? 'discovery' : tmpl.category === 'data' ? 'storage' : tmpl.category === 'infrastructure' ? 'kubernetes' : tmpl.category === 'messaging' ? 'slack' : tmpl.category === 'ml' ? 'ai' : tmpl.category === 'devops' ? 'gitlab' : 'storage')} size={20} /></span>
-                          <span className="text-[10px] px-1.5 py-0.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded capitalize">{tmpl.category}</span>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] px-1.5 py-0.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded capitalize">{tmpl.category}</span>
+                            {sysBp && (
+                              <button
+                                onClick={e => { e.stopPropagation(); handleForkBlueprint(sysBp); }}
+                                className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-subtle)] text-[var(--accent)] rounded font-medium opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--accent)] hover:text-white"
+                                title="Fork to customize"
+                              >
+                                Fork
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <h3 className="text-[13px] font-medium text-[var(--text-primary)] mt-2 group-hover:text-[var(--accent)] transition-colors">{tmpl.name}</h3>
                         <p className="text-[11px] text-[var(--text-tertiary)] mt-1 line-clamp-2">{tmpl.description}</p>
@@ -693,8 +824,9 @@ function NewServiceForm() {
                             {tmpl.framework && tmpl.framework !== 'none' && <span>{tmpl.framework}</span>}
                           </p>
                         )}
-                      </button>
-                    ))}
+                      </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -733,7 +865,7 @@ function NewServiceForm() {
                   {/* Compose Source */}
                   <div>
                     <label className="label">Compose Source</label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() => setComposeSource('yaml')}
@@ -745,8 +877,8 @@ function NewServiceForm() {
                       >
                         <span className="text-lg">📝</span>
                         <div>
-                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Paste / Upload YAML</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">docker-compose.yml content</p>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Paste YAML</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">docker-compose.yml</p>
                         </div>
                       </button>
                       <button
@@ -761,7 +893,22 @@ function NewServiceForm() {
                         <span className="text-lg">📂</span>
                         <div>
                           <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Folder</p>
-                          <p className="text-[10px] text-[var(--text-tertiary)]">Path on the PEPA server</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Server path</p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setComposeSource('git')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeSource === 'git'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">🔀</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Git Repo</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Clone & deploy</p>
                         </div>
                       </button>
                     </div>
@@ -773,6 +920,14 @@ function NewServiceForm() {
                       <input value={composeFolderPath} onChange={e => setComposeFolderPath(e.target.value)} className="input font-mono text-[12px]" placeholder="/data/compose-projects/my-app" />
                       <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
                         Folder containing <code className="bg-[var(--border-light)] px-1 rounded">docker-compose.yml</code>. Must be accessible from the PEPA api-server container.
+                      </p>
+                    </div>
+                  ) : composeSource === 'git' ? (
+                    <div>
+                      <label className="label">Git Repository URL *</label>
+                      <input value={composeGitUrl} onChange={e => setComposeGitUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://github.com/org/repo.git" />
+                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                        The repo will be cloned and deployed. Must contain a <code className="bg-[var(--border-light)] px-1 rounded">docker-compose.yml</code> in the root.
                       </p>
                     </div>
                   ) : (
@@ -1170,25 +1325,39 @@ env:
             </div>
           </div>
 
-          <div className="flex gap-3 justify-end">
-            <button onClick={() => setStep('template')} className="btn btn-secondary">← Back</button>
-            {isComposeImport ? (
-              <button
-                onClick={handleCreate}
-                disabled={!name || creating || (composeSource === 'yaml' && !composeYaml.trim()) || (composeSource === 'folder' && !composeFolderPath.trim())}
-                className="btn btn-primary"
-              >
-                {creating ? 'Deploying...' : composeDeployTarget === 'local' ? '🐳 Deploy Locally' : 'Deploy to Host'}
-              </button>
-            ) : (
-              <button
-                onClick={() => setStep('deploy')}
-                disabled={!name}
-                className="btn btn-primary"
-              >
-                Next: Deploy →
-              </button>
-            )}
+          <div className="flex gap-3 justify-between">
+            <div>
+              {!isComposeImport && (
+                <button
+                  onClick={handleSaveAsBlueprint}
+                  disabled={!name || savingBlueprint}
+                  className="btn btn-secondary text-[12px]"
+                  title="Save current configuration as a reusable blueprint"
+                >
+                  {savingBlueprint ? 'Saving...' : blueprintSaved ? '✓ Saved!' : '💾 Save as Blueprint'}
+                </button>
+              )}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setStep('template')} className="btn btn-secondary">← Back</button>
+              {isComposeImport ? (
+                <button
+                  onClick={handleCreate}
+                  disabled={!name || creating || (composeSource === 'yaml' && !composeYaml.trim()) || (composeSource === 'folder' && !composeFolderPath.trim()) || (composeSource === 'git' && !composeGitUrl.trim())}
+                  className="btn btn-primary"
+                >
+                  {creating ? 'Deploying...' : composeDeployTarget === 'local' ? '🐳 Deploy Locally' : 'Deploy to Host'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setStep('deploy')}
+                  disabled={!name}
+                  className="btn btn-primary"
+                >
+                  Next: Deploy →
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1215,33 +1384,48 @@ env:
               </div>
 
               <div>
-                <label className="label">Target Clusters</label>
-                <p className="text-[11px] text-[var(--text-tertiary)] mb-2">
-                  Where this service will be deployed. You can pick several (e.g. dev and staging) or skip for now.
-                </p>
-                {clusterList.length === 0 ? (
-                  <p className="text-[12px] text-[var(--text-tertiary)]">No clusters configured. <Link href="/clusters" className="text-[var(--accent)] hover:underline">Add a cluster</Link></p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {clusterList.map(cluster => (
-                      <button
-                        key={cluster.id}
-                        onClick={() => toggleCluster(cluster.id)}
-                        className={`p-3 rounded-lg border text-left transition-all ${
-                          selectedClusters.includes(cluster.id)
-                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
-                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${cluster.is_active ? 'bg-green-500' : 'bg-gray-300'}`} />
-                          <span className="text-[12px] font-medium">{cluster.name}</span>
-                        </div>
-                        <p className="text-[11px] text-[var(--text-tertiary)] mt-1">{cluster.environment} • {cluster.kubernetes_version}</p>
-                      </button>
-                    ))}
-                  </div>
+                <label className="label">Target Cluster *</label>
+                <select
+                  value={selectedClusters.length > 0 ? selectedClusters[0] : ''}
+                  onChange={e => {
+                    const id = e.target.value;
+                    if (id) {
+                      setSelectedClusters([id]);
+                    } else {
+                      setSelectedClusters([]);
+                    }
+                  }}
+                  className="input"
+                >
+                  <option value="">Select a cluster...</option>
+                  {clusterList.map(cluster => (
+                    <option key={cluster.id} value={cluster.id}>
+                      {cluster.name} ({cluster.environment})
+                    </option>
+                  ))}
+                </select>
+                {clusterList.length === 0 && (
+                  <p className="text-[11px] text-orange-500 mt-1">
+                    No clusters available. <Link href="/connections" className="underline">Add a Kubernetes connection</Link> or <Link href="/clusters" className="underline">register a cluster</Link>.
+                  </p>
                 )}
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                  Choose the Kubernetes cluster where this service will be deployed.
+                </p>
+              </div>
+
+              <div>
+                <label className="label">Namespace</label>
+                <input
+                  type="text"
+                  value={namespace}
+                  onChange={e => setNamespace(e.target.value)}
+                  className="input"
+                  placeholder="default"
+                />
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                  The Kubernetes namespace to deploy into. Will be created if it doesn't exist.
+                </p>
               </div>
             </div>
           </div>

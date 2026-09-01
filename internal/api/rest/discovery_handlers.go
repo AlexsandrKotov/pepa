@@ -1597,7 +1597,7 @@ func dockerContainerLogs(deps Dependencies) gin.HandlerFunc {
 		}
 
 		hostName := c.Param("host")
-		containerName := c.Param("name")
+		serviceName := c.Param("name")
 		tailLines := 200
 		if t := c.Query("tail"); t != "" {
 			if parsed, err := parseDockerTailInt(t); err == nil {
@@ -1606,35 +1606,46 @@ func dockerContainerLogs(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-
-		// Look up the Docker host by name
-		host, err := deps.Repos.DockerHost.GetHostByName(ctx, hostName)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("docker host %q not found", hostName)})
-			return
-		}
-
-		// Get decrypted credentials
-		hostDecrypted, err := deps.Repos.DockerHost.GetHostDecrypted(ctx, host.ID, host.TenantID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt docker host credentials"})
-			return
-		}
-
-		cfg := dockerpkg.HostConfig{
-			HostType:    hostDecrypted.HostType,
-			HostAddress: hostDecrypted.HostAddress,
-			TLSCACert:   hostDecrypted.TLSCACert,
-			TLSCert:     hostDecrypted.TLSCert,
-			TLSKey:      hostDecrypted.TLSKey,
-			SSHKey:      hostDecrypted.SSHKey,
-		}
-		client := dockerpkg.NewClient(cfg)
-
 		logsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
-		logs, err := client.ContainerLogs(logsCtx, containerName, tailLines)
+		var logs string
+		var err error
+
+		if hostName == "Local Docker" {
+			// Service deployed via local Docker socket — use ComposeLogs
+			client := dockerpkg.NewClient(dockerpkg.HostConfig{
+				HostType:    "local",
+				HostAddress: "unix:///var/run/docker.sock",
+			})
+			logs, err = client.ComposeLogs(logsCtx, serviceName, "", tailLines)
+		} else {
+			// Look up the Docker host by name
+			host, lookupErr := deps.Repos.DockerHost.GetHostByName(ctx, hostName)
+			if lookupErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("docker host %q not found", hostName)})
+				return
+			}
+
+			// Get decrypted credentials
+			hostDecrypted, decErr := deps.Repos.DockerHost.GetHostDecrypted(ctx, host.ID, host.TenantID)
+			if decErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to decrypt docker host credentials"})
+				return
+			}
+
+			cfg := dockerpkg.HostConfig{
+				HostType:    hostDecrypted.HostType,
+				HostAddress: hostDecrypted.HostAddress,
+				TLSCACert:   hostDecrypted.TLSCACert,
+				TLSCert:     hostDecrypted.TLSCert,
+				TLSKey:      hostDecrypted.TLSKey,
+				SSHKey:      hostDecrypted.SSHKey,
+			}
+			client := dockerpkg.NewClient(cfg)
+			logs, err = client.ContainerLogs(logsCtx, serviceName, tailLines)
+		}
+
 		if err != nil {
 			respondInternalError(c, err)
 			return
@@ -1642,7 +1653,7 @@ func dockerContainerLogs(deps Dependencies) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"logs":    logs,
-			"name":    containerName,
+			"name":    serviceName,
 			"cluster": hostName,
 		})
 	}

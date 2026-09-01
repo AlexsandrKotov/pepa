@@ -3,39 +3,25 @@
 import { useState, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { dockerHosts, dockerServices, getBase, authHeaders, type DockerHost, type DockerService, type DiscoveredDockerContainer } from '@/lib/api';
+import { dockerHosts, dockerServices, type DockerHost, type DockerService, type DiscoveredDockerContainer } from '@/lib/api';
 
 export default function DockerServicesPage() {
   const [services, setServices] = useState<DockerService[]>([]);
   const [hosts, setHosts] = useState<DockerHost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
   const [showLogs, setShowLogs] = useState<string | null>(null);
 
   useEscapeKey(() => {
     if (showLogs) setShowLogs(null);
-    else if (showForm) setShowForm(false);
-  }, showForm || showLogs !== null);
+  }, showLogs !== null);
   const [logs, setLogs] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [error, setError] = useState('');
-  const [deployOutput, setDeployOutput] = useState<string[]>([]);
-  const [isDeploying, setIsDeploying] = useState(false);
-  const [deployComplete, setDeployComplete] = useState(false);
 
   // Discovered containers from Docker hosts
   const [discoveredContainers, setDiscoveredContainers] = useState<{ hostName: string; containers: DiscoveredDockerContainer[] }[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [showDiscovered, setShowDiscovered] = useState(true);
-
-  // Form state
-  const [form, setForm] = useState({
-    docker_host_id: '', name: '', compose_yaml: '', folder_path: '',
-    source: 'yaml' as 'yaml' | 'folder',
-    env_mode: 'yaml' as 'yaml' | 'kv',
-    env_key: '', env_value: '', env_vars: {} as Record<string, string>,
-  });
 
   const load = async () => {
     try {
@@ -77,113 +63,6 @@ export default function DockerServicesPage() {
   const hostName = (id: string | null) => {
     if (!id) return 'Local Docker';
     return hosts.find(h => h.id === id)?.name || 'Unknown';
-  };
-
-  const openDeploy = () => {
-    setForm({
-      docker_host_id: hosts[0]?.id || '', name: '', compose_yaml: '', folder_path: '',
-      source: 'yaml', env_mode: 'yaml', env_key: '', env_value: '', env_vars: {},
-    });
-    setError('');
-    setShowForm(true);
-  };
-
-  const addEnvVar = () => {
-    if (!form.env_key.trim()) return;
-    setForm({ ...form, env_vars: { ...form.env_vars, [form.env_key.trim()]: form.env_value }, env_key: '', env_value: '' });
-  };
-
-  // Deploy target: 'local' or a Docker host ID
-  const [deployTarget, setDeployTarget] = useState<'local' | 'host'>('local');
-
-  const handleDeploy = async () => {
-    setError('');
-    if (deployTarget === 'host' && !form.docker_host_id) {
-      setError('Please select a Docker host');
-      return;
-    }
-    if (!form.name.trim()) {
-      setError('Service name is required');
-      return;
-    }
-    if (form.source === 'folder' && !form.folder_path.trim()) {
-      setError('Project folder path is required');
-      return;
-    }
-    if (form.source === 'yaml' && !form.compose_yaml.trim()) {
-      setError('Compose YAML is required');
-      return;
-    }
-
-    const payload = {
-      name: form.name.trim(),
-      compose_yaml: form.source === 'yaml' ? form.compose_yaml : undefined,
-      folder_path: form.source === 'folder' ? form.folder_path.trim() : undefined,
-      env_vars: form.env_vars,
-    };
-
-    // For local deployment, use streaming endpoint
-    if (deployTarget === 'local') {
-      setShowForm(false);
-      setIsDeploying(true);
-      setDeployOutput([]);
-      setDeployComplete(false);
-
-      try {
-        const response = await fetch(`${getBase()}/api/v1/docker-services/deploy-local-stream`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify(payload),
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || 'Deploy failed');
-        }
-
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
-
-        if (!reader) throw new Error('No response body');
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const text = decoder.decode(value);
-          const lines = text.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              setDeployOutput(prev => [...prev, data]);
-            } else if (line.startsWith('event: error')) {
-              // Next data line will have the error
-            } else if (line.startsWith('event: complete')) {
-              setDeployComplete(true);
-              setIsDeploying(false);
-            }
-          }
-        }
-
-        setIsDeploying(false);
-        setDeployComplete(true);
-        load();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Deploy failed');
-        setIsDeploying(false);
-      }
-    } else {
-      // For remote hosts, use the non-streaming endpoint
-      try {
-        await dockerServices.create({ ...payload, docker_host_id: form.docker_host_id });
-        setShowForm(false);
-        load();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Deploy failed');
-      }
-    }
   };
 
   const handleAction = async (id: string, action: 'start' | 'stop' | 'restart' | 'refresh' | 'delete') => {
@@ -250,9 +129,6 @@ export default function DockerServicesPage() {
           >
             {discovering ? 'Discovering...' : '🔍 Discover Containers'}
           </button>
-          <button onClick={openDeploy} className="btn btn-primary">
-            + Deploy Service
-          </button>
         </div>
       </div>
 
@@ -263,6 +139,7 @@ export default function DockerServicesPage() {
           </p>
         </div>
       )}
+
 
       {/* Services list */}
       {loading ? (
@@ -276,7 +153,7 @@ export default function DockerServicesPage() {
           <p className="text-[12px] text-[var(--text-tertiary)] mb-5">
             Deploy a Docker Compose stack to get started
           </p>
-          <button onClick={openDeploy} className="btn btn-primary">+ Deploy First Service</button>
+          <Link href="/services/new?template=docker-compose-import" className="btn btn-primary">+ Deploy First Service</Link>
         </div>
       ) : (
         <div className="space-y-4">
@@ -457,204 +334,6 @@ export default function DockerServicesPage() {
       )}
 
       {/* Deploy Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setShowForm(false)} />
-          <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
-              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Deploy Docker Compose Service</h2>
-              <button onClick={() => setShowForm(false)} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-[12px] text-red-500">{error}</div>
-              )}
-
-              {/* Deploy Source */}
-              <div>
-                <label className="label">Source</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, source: 'yaml' })}
-                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
-                      form.source === 'yaml'
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
-                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
-                    }`}
-                  >
-                    <span className="text-lg">📝</span>
-                    <div>
-                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Paste YAML</p>
-                      <p className="text-[10px] text-[var(--text-tertiary)]">Paste or upload compose file</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, source: 'folder' })}
-                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
-                      form.source === 'folder'
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
-                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
-                    }`}
-                  >
-                    <span className="text-lg">📂</span>
-                    <div>
-                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Project Folder</p>
-                      <p className="text-[10px] text-[var(--text-tertiary)]">Server-side folder path</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Deploy Target */}
-              <div>
-                <label className="label">Deploy Target</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDeployTarget('local')}
-                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
-                      deployTarget === 'local'
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
-                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
-                    }`}
-                  >
-                    <span className="text-lg">🐳</span>
-                    <div>
-                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Docker</p>
-                      <p className="text-[10px] text-[var(--text-tertiary)]">unix:///var/run/docker.sock</p>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeployTarget('host')}
-                    className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
-                      deployTarget === 'host'
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
-                        : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
-                    }`}
-                  >
-                    <span className="text-lg">🖥️</span>
-                    <div>
-                      <p className="text-[12px] font-medium text-[var(--text-primary)]">Registered Host</p>
-                      <p className="text-[10px] text-[var(--text-tertiary)]">Remote via TCP/SSH/TLS</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {deployTarget === 'host' && (
-                <div>
-                  <label className="label">Docker Host *</label>
-                  <select value={form.docker_host_id} onChange={e => setForm({ ...form, docker_host_id: e.target.value })} className="input">
-                    <option value="">Select host...</option>
-                    {hosts.map(h => (
-                      <option key={h.id} value={h.id}>{h.name} ({h.status})</option>
-                    ))}
-                  </select>
-                  {hosts.length === 0 && (
-                    <p className="text-[11px] text-orange-500 mt-1">
-                      No hosts configured. <Link href="/docker-hosts" className="underline">Add a Docker host</Link>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="label">Service Name *</label>
-                <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input" placeholder="my-service" />
-              </div>
-
-              {form.source === 'folder' ? (
-                <div>
-                  <label className="label">Project Folder Path *</label>
-                  <input
-                    value={form.folder_path}
-                    onChange={e => setForm({ ...form, folder_path: e.target.value })}
-                    className="input font-mono text-[12px]"
-                    placeholder="/opt/projects/my-app"
-                  />
-                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
-                    Full path to the project folder containing docker-compose.yml on the server
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="label mb-0">docker-compose.yml *</label>
-                    <label className="text-[11px] text-[var(--accent)] hover:underline cursor-pointer inline-flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                      Upload file
-                      <input
-                        type="file"
-                        accept=".yaml,.yml"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const text = await file.text();
-                          setForm({ ...form, compose_yaml: text });
-                        }}
-                      />
-                    </label>
-                  </div>
-                  <textarea
-                    value={form.compose_yaml}
-                    onChange={e => setForm({ ...form, compose_yaml: e.target.value })}
-                    className="input font-mono text-[12px] w-full"
-                    rows={12}
-                    spellCheck={false}
-                    placeholder={`version: '3.8'\nservices:\n  web:\n    image: nginx:latest\n    ports:\n      - "80:80"\n    environment:\n      - ENV=production`}
-                  />
-                </div>
-              )}
-
-              {/* Environment Variables */}
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <button
-                    onClick={() => setForm({ ...form, env_mode: 'yaml' })}
-                    className={`text-[11px] px-3 py-1 rounded-lg border transition-colors ${form.env_mode === 'yaml' ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border)] text-[var(--text-tertiary)]'}`}
-                  >
-                    Key-Value
-                  </button>
-                </div>
-                {Object.keys(form.env_vars).length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
-                    {Object.entries(form.env_vars).map(([k, v]) => (
-                      <span key={k} className="inline-flex items-center gap-1 text-[10px] px-2 py-1 bg-[var(--border-light)] rounded-lg">
-                        <span className="font-mono font-medium">{k}={v}</span>
-                        <button onClick={() => {
-                          const next = { ...form.env_vars };
-                          delete next[k];
-                          setForm({ ...form, env_vars: next });
-                        }} className="text-red-400 hover:text-red-600">&times;</button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <input value={form.env_key} onChange={e => setForm({ ...form, env_key: e.target.value })} className="input text-[12px] flex-1" placeholder="KEY" />
-                  <input value={form.env_value} onChange={e => setForm({ ...form, env_value: e.target.value })} className="input text-[12px] flex-1" placeholder="value" />
-                  <button onClick={addEnvVar} className="btn btn-secondary text-[11px] px-3">Add</button>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border)] shrink-0">
-              <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
-              <button onClick={handleDeploy} className="btn btn-primary">
-                {deployTarget === 'local' ? 'Deploy Locally' : 'Deploy to Host'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Logs Modal */}
       {showLogs && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center">
@@ -679,56 +358,6 @@ export default function DockerServicesPage() {
         </div>
       )}
 
-      {/* Deploy Output Modal */}
-      {(isDeploying || deployComplete) && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/50" />
-          <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[85vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
-              <div className="flex items-center gap-3">
-                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
-                  Deploying — {form.name}
-                </h2>
-                {isDeploying && (
-                  <span className="flex items-center gap-1.5 text-[11px] text-[var(--accent)]">
-                    <span className="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse" />
-                    In progress...
-                  </span>
-                )}
-                {deployComplete && (
-                  <span className="flex items-center gap-1.5 text-[11px] text-green-500">
-                    <span className="w-2 h-2 bg-green-500 rounded-full" />
-                    Complete
-                  </span>
-                )}
-              </div>
-              {deployComplete && (
-                <button onClick={() => { setDeployComplete(false); setDeployOutput([]); }} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
-              )}
-            </div>
-            <div className="flex-1 overflow-auto p-5 bg-[var(--bg)]">
-              <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed text-[var(--text-secondary)]">
-                {deployOutput.length === 0 ? (
-                  <span className="text-[var(--text-tertiary)]">Starting deployment...</span>
-                ) : (
-                  deployOutput.map((line, i) => (
-                    <div key={i} className={line.includes('error') || line.includes('Error') ? 'text-red-400' : line.includes('warning') ? 'text-yellow-400' : ''}>
-                      {line}
-                    </div>
-                  ))
-                )}
-              </pre>
-            </div>
-            {deployComplete && (
-              <div className="flex justify-end px-5 py-3 border-t border-[var(--border)] shrink-0">
-                <button onClick={() => { setDeployComplete(false); setDeployOutput([]); load(); }} className="btn btn-primary">
-                  Close
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
       </div>
     </div>
   );

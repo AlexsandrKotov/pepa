@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -235,6 +236,7 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 			Name        string            `json:"name" binding:"required"`
 			ComposeYaml string            `json:"compose_yaml"`
 			FolderPath  string            `json:"folder_path"`
+			GitURL      string            `json:"git_url"`
 			EnvVars     map[string]string `json:"env_vars"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -242,10 +244,20 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Require either compose_yaml or folder_path
-		if req.ComposeYaml == "" && req.FolderPath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "either compose_yaml or folder_path is required"})
+		// Require one of compose_yaml, folder_path, or git_url
+		if req.ComposeYaml == "" && req.FolderPath == "" && req.GitURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "one of compose_yaml, folder_path, or git_url is required"})
 			return
+		}
+
+		// Clone git repo if git_url is provided
+		if req.GitURL != "" {
+			clonedPath, cloneErr := cloneGitRepo(c.Request.Context(), req.GitURL)
+			if cloneErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": cloneErr.Error()})
+				return
+			}
+			req.FolderPath = clonedPath
 		}
 
 		// Validate folder path is accessible (tries original path, then /host-home translation)
@@ -314,6 +326,22 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// cloneGitRepo clones a git repository to a temporary directory and returns the path.
+func cloneGitRepo(ctx context.Context, gitURL string) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "pepa-compose-git-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, tmpDir) //nolint:gosec // G204: git clone with validated args
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("git clone failed: %s: %w", string(output), err)
+	}
+	return tmpDir, nil
+}
+
 // deployLocalDockerServiceStream handles streaming deployment with SSE output.
 func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -326,6 +354,7 @@ func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
 			Name        string            `json:"name" binding:"required"`
 			ComposeYaml string            `json:"compose_yaml"`
 			FolderPath  string            `json:"folder_path"`
+			GitURL      string            `json:"git_url"`
 			EnvVars     map[string]string `json:"env_vars"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -333,9 +362,19 @@ func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if req.ComposeYaml == "" && req.FolderPath == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "either compose_yaml or folder_path is required"})
+		if req.ComposeYaml == "" && req.FolderPath == "" && req.GitURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "one of compose_yaml, folder_path, or git_url is required"})
 			return
+		}
+
+		// Clone git repo if git_url is provided
+		if req.GitURL != "" {
+			clonedPath, cloneErr := cloneGitRepo(c.Request.Context(), req.GitURL)
+			if cloneErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": cloneErr.Error()})
+				return
+			}
+			req.FolderPath = clonedPath
 		}
 
 		if req.FolderPath != "" {

@@ -281,8 +281,8 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 		}
 	}
 
-	// Use --progress plain for line-by-line output, -d to detach after start
-	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "--progress", "plain", "-d"}
+	// --progress is a global flag on `docker compose`, must go before the subcommand
+	args := []string{"compose", "--progress", "plain", "-f", composePath, "-p", projectName, "up", "-d"}
 	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker compose with validated args
 	cmd.Dir = workDir
 	cmd.Env = c.env()

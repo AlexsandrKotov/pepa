@@ -13,7 +13,7 @@ interface ServiceManagementPanelProps {
 export default function ServiceManagementPanel({ service, onClose, onUpdate }: ServiceManagementPanelProps) {
   useEscapeKey(onClose);
   const [tab, setTab] = useState<'overview' | 'logs' | 'events' | 'edit'>('overview');
-  const isDockerContainer = service.source === 'docker-container';
+  const isDockerContainer = service.source === 'docker-container' || service.source === 'docker';
   const [deployInfo, setDeployInfo] = useState<DeploymentInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string>('');

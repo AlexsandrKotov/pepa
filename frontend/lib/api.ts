@@ -3661,19 +3661,41 @@ export interface ServiceBlueprint {
   group_ids: string[];
   compose_yaml: string;
   created_at: string;
+  // Template metadata (system blueprints)
+  slug?: string;
+  tenant_id?: string;
+  icon?: string;
+  language?: string;
+  framework?: string;
+  tags: string[];
+  is_enabled: boolean;
+  is_system: boolean;
+  dockerfile_tmpl?: string;
+  helm_chart?: ServiceTemplateHelmChart;
+  cicd_tmpl?: string;
+  default_values?: Record<string, unknown>;
+  resource_defaults?: Record<string, unknown>;
 }
 
 export const blueprints = {
-  list: () =>
-    fetchAPI<{ blueprints: ServiceBlueprint[] }>('/api/v1/blueprints'),
+  list: (params?: { type?: string; category?: string; search?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.type) qs.set('type', params.type);
+    if (params?.category) qs.set('category', params.category);
+    if (params?.search) qs.set('search', params.search);
+    const query = qs.toString();
+    return fetchAPI<{ blueprints: ServiceBlueprint[] }>(`/api/v1/blueprints${query ? `?${query}` : ''}`);
+  },
   get: (id: string) =>
     fetchAPI<ServiceBlueprint>(`/api/v1/blueprints/${id}`),
-  create: (data: Omit<ServiceBlueprint, 'id' | 'created_at'>) =>
+  create: (data: Partial<ServiceBlueprint> & { name: string; source_type: string }) =>
     fetchAPI<ServiceBlueprint>('/api/v1/blueprints', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: Omit<ServiceBlueprint, 'id' | 'created_at'>) =>
+  update: (id: string, data: Partial<ServiceBlueprint> & { name: string; source_type: string }) =>
     fetchAPI<ServiceBlueprint>(`/api/v1/blueprints/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) =>
     fetchAPI<{ ok: boolean }>(`/api/v1/blueprints/${id}`, { method: 'DELETE' }),
+  fork: (id: string, data?: { name?: string }) =>
+    fetchAPI<ServiceBlueprint>(`/api/v1/blueprints/${id}/fork`, { method: 'POST', body: JSON.stringify(data || {}) }),
   deployDocker: (id: string, dockerHostId: string, envVars?: Record<string, string>) =>
     fetchAPI<DockerService>(`/api/v1/blueprints/${id}/deploy-docker`, { method: 'POST', body: JSON.stringify({ docker_host_id: dockerHostId, env_vars: envVars || {} }) }),
   deployLocal: (id: string, envVars?: Record<string, string>) =>

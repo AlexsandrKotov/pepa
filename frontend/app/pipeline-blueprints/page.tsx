@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
@@ -14,6 +15,7 @@ const categoryIcons: Record<string, React.ReactNode> = {
 };
 
 export default function PipelineBlueprintsPage() {
+  const searchParams = useSearchParams();
   const [blueprints, setBlueprints] = useState<ServiceBlueprint[]>([]);
   const [groups, setGroups] = useState<BlueprintGroup[]>([]);
   const [helmRepos, setHelmRepos] = useState<HelmRepository[]>([]);
@@ -42,10 +44,23 @@ export default function PipelineBlueprintsPage() {
   }, showForm);
 
   useEffect(() => {
-    blueprintsAPI.list().then(res => setBlueprints(res.blueprints || [])).catch(() => {});
+    blueprintsAPI.list({ type: 'user' }).then(res => setBlueprints(res.blueprints || [])).catch(() => {});
     helmRepositories.list().then(res => setHelmRepos(res.helm_repositories || [])).catch(() => {});
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
   }, []);
+
+  // Auto-open edit modal when navigated with ?edit=<id>
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (editId && blueprints.length > 0) {
+      const bp = blueprints.find(b => b.id === editId);
+      if (bp) {
+        openEdit(bp);
+        // Clean up the URL parameter
+        window.history.replaceState(null, '', '/pipeline-blueprints');
+      }
+    }
+  }, [searchParams, blueprints]);
 
   const openCreate = () => {
     setEditing(null);
@@ -148,6 +163,7 @@ export default function PipelineBlueprintsPage() {
       setBlueprints(blueprints.filter(b => b.id !== id));
     } catch (err) {
       console.error('Failed to delete blueprint:', err);
+      alert(err instanceof Error ? err.message : 'Failed to delete blueprint');
     }
   };
 
@@ -327,9 +343,18 @@ export default function PipelineBlueprintsPage() {
                 )}
               </div>
               <div className="flex gap-2 pt-3 border-t border-[var(--border-light)]">
-                <button onClick={() => openEdit(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Edit</button>
-                <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded-lg transition-colors">Duplicate</button>
-                <button onClick={() => handleDelete(bp.id)} className="text-[11px] px-2.5 py-1 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors ml-auto">Delete</button>
+                {bp.is_system ? (
+                  <>
+                    <span className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-500 rounded-lg font-medium">System</span>
+                    <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Fork & Edit</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => openEdit(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Edit</button>
+                    <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded-lg transition-colors">Duplicate</button>
+                    <button onClick={() => handleDelete(bp.id)} className="text-[11px] px-2.5 py-1 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors ml-auto">Delete</button>
+                  </>
+                )}
               </div>
             </div>
           ))}

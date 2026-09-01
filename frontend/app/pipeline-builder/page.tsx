@@ -42,7 +42,7 @@ export default function PipelineBuilderPage() {
   const [groupsExpanded, setGroupsExpanded] = useState(true);
 
   useEffect(() => {
-    blueprintsAPI.list().then(res => setBlueprints(res.blueprints || [])).catch(() => {});
+    blueprintsAPI.list({ type: 'user' }).then(res => setBlueprints(res.blueprints || [])).catch(() => {});
     clusters.list().then(d => setClusterList(d.clusters || [])).catch(() => {});
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
     dockerHosts.list().then(res => setDockerHostList(res.docker_hosts || [])).catch(() => {});

@@ -58,12 +58,16 @@ func registerServiceRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 // ── Service Templates ────────────────────────────────────────
 
 // ListTemplates returns all service templates.
+// Deprecated: Use GET /api/v1/blueprints?type=system instead.
 func (h *ServiceHandlers) ListTemplates(c *gin.Context) {
 	templates, err := h.repo.ListTemplates(c.Request.Context())
 	if err != nil {
 		respondInternalError(c, err)
 		return
 	}
+	c.Header("Deprecation", "true")
+	c.Header("Sunset", "Sat, 01 Nov 2026 00:00:00 GMT")
+	c.Header("Link", `</api/v1/blueprints?type=system>; rel="successor-version"`)
 	c.JSON(http.StatusOK, gin.H{
 		"templates": templates,
 		"total":     len(templates),
@@ -71,6 +75,7 @@ func (h *ServiceHandlers) ListTemplates(c *gin.Context) {
 }
 
 // GetTemplate returns a single template.
+// Deprecated: Use GET /api/v1/blueprints/:id instead.
 func (h *ServiceHandlers) GetTemplate(c *gin.Context) {
 	slug := c.Param("slug")
 	template, err := h.repo.GetTemplate(c.Request.Context(), slug)
@@ -78,6 +83,9 @@ func (h *ServiceHandlers) GetTemplate(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
+	c.Header("Deprecation", "true")
+	c.Header("Sunset", "Sat, 01 Nov 2026 00:00:00 GMT")
+	c.Header("Link", `</api/v1/blueprints>; rel="successor-version"`)
 	c.JSON(http.StatusOK, template)
 }
 
