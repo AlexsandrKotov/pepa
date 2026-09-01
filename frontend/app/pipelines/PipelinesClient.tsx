@@ -8,6 +8,7 @@ import { pipelineSources, pipelineRuns, pipelinePresets, pipelineWorkflows, conn
 import { friendlyError } from '@/lib/errors';
 import { VaultInput, useVaultPicker } from '@/components/VaultInput';
 import GitRepoPicker from '@/components/GitRepoPicker';
+import GearIcon from '@/components/GearIcon';
 import BrandIcon from '@/components/BrandIcon';
 import PermissionGuard from '@/components/PermissionGuard';
 import AnsiOutput from '@/components/AnsiOutput';
@@ -1093,7 +1094,7 @@ function PipelinesClientContent({
                                   </>
                                 ) : selectedSource.source_type === 'ansible' ? (
                                   <>
-                                    <div className="text-2xl opacity-30">⚙</div>
+                                    <div className="text-2xl opacity-30"><GearIcon className="w-8 h-8" /></div>
                                     <p className="text-sm text-[var(--text-secondary)]">No Ansible runs yet</p>
                                     <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
                                       Click <strong>Run Playbook</strong> to execute your Ansible playbook, or <strong>Dry Run</strong> to preview changes without applying them.

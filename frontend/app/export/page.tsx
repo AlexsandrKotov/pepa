@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { services, workflows, entities } from '@/lib/api';
 import { Toast } from '@/components/Interactive';
+import GearIcon from '@/components/GearIcon';
 import ConceptHelp from '@/components/ConceptHelp';
 
 type ExportType = 'service' | 'workflow' | 'entity' | 'all';
@@ -106,10 +107,10 @@ export default function ExportPage() {
     }
   };
 
-  const exportOptions: { type: ExportType; icon: string; label: string; description: string }[] = [
+  const exportOptions: { type: ExportType; icon: React.ReactNode; label: string; description: string }[] = [
     { type: 'all', icon: '📁', label: 'All Data', description: 'Export everything at once' },
     { type: 'service', icon: '🚀', label: 'Services', description: 'Export service definitions' },
-    { type: 'workflow', icon: '⚙️', label: 'Workflows', description: 'Export workflow definitions' },
+    { type: 'workflow', icon: <GearIcon className="w-6 h-6" />, label: 'Workflows', description: 'Export workflow definitions' },
     { type: 'entity', icon: '📦', label: 'Entities', description: 'Export entity definitions' },
   ];
 

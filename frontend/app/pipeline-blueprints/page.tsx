@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
+import GearIcon from '@/components/GearIcon';
 import GitRepoPicker from '@/components/GitRepoPicker';
 import { helmRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup } from '@/lib/api';
 
-const categoryIcons: Record<string, string> = {
-  backend: '⚙️', frontend: '🌐', database: '🗄️', messaging: '📨',
+const categoryIcons: Record<string, React.ReactNode> = {
+  backend: <GearIcon className="w-4 h-4" />, frontend: '🌐', database: '🗄️', messaging: '📨',
   monitoring: '📊', security: '🔒', cache: '⚡', storage: '💾', general: '📦',
 };
 
@@ -356,8 +357,8 @@ export default function PipelineBlueprintsPage() {
                 <div>
                   <label className="label">Category</label>
                   <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="input">
-                    {Object.entries(categoryIcons).map(([k, v]) => (
-                      <option key={k} value={k}>{v} {k}</option>
+                    {Object.keys(categoryIcons).map((k) => (
+                      <option key={k} value={k}>{k}</option>
                     ))}
                   </select>
                 </div>

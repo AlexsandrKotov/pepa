@@ -23,6 +23,9 @@ func registerJiraRoutes(r *gin.RouterGroup, deps Dependencies) {
 		jira.DELETE("/issues/:id", deleteJiraIssue(deps))
 		jira.POST("/issues/:id/link", linkJiraDeployment(deps))
 
+		// My issues
+		jira.GET("/my-issues", listMyJiraIssues(deps))
+
 		// Comments
 		jira.GET("/issues/:id/comments", listJiraComments(deps))
 		jira.POST("/issues/:id/comments", addJiraComment(deps))
@@ -31,10 +34,20 @@ func registerJiraRoutes(r *gin.RouterGroup, deps Dependencies) {
 		jira.GET("/issues/:id/transitions", listJiraTransitions(deps))
 		jira.POST("/issues/:id/transition", transitionJiraIssue(deps))
 
+		// Worklogs
+		jira.GET("/issues/:id/worklogs", listJiraWorklogs(deps))
+		jira.POST("/issues/:id/worklogs", addJiraWorklog(deps))
+
+		// Issue Links
+		jira.GET("/issues/:id/links", listJiraIssueLinks(deps))
+
 		// Metadata
 		jira.GET("/labels", listJiraLabels(deps))
 		jira.GET("/stats", getJiraStats(deps))
 		jira.GET("/projects", listJiraProjects(deps))
+		jira.GET("/assignees", listJiraAssignees(deps))
+		jira.GET("/sprints", listJiraSprints(deps))
+		jira.GET("/components", listJiraComponents(deps))
 
 		// Sync
 		jira.POST("/sync", syncJiraIssues(deps))
@@ -600,6 +613,247 @@ func deleteAutomationRule(deps Dependencies) gin.HandlerFunc {
 }
 
 // ── Webhook Handler ───────────────────────────────────────────
+
+// ── My Issues Handler ─────────────────────────────────────────
+
+func listMyJiraIssues(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusOK, gin.H{"issues": []interface{}{}, "total": 0})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		assignee := c.Query("assignee")
+		if assignee == "" {
+			// Try to get current user's email as fallback
+			assignee = auth.GetEmail(c)
+		}
+		if assignee == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "assignee is required"})
+			return
+		}
+
+		statuses := c.QueryArray("status")
+		if len(statuses) == 0 {
+			statuses = []string{"Open", "To Do", "In Progress", "In Review"}
+		}
+
+		items, total, err := deps.Repos.Jira.GetMyIssues(c.Request.Context(), tenantID, assignee, statuses)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if items == nil {
+			items = []repository.JiraIssue{}
+		}
+		c.JSON(http.StatusOK, gin.H{"issues": items, "total": total})
+	}
+}
+
+// ── Worklog Handlers ──────────────────────────────────────────
+
+func listJiraWorklogs(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusOK, gin.H{"worklogs": []interface{}{}, "total_seconds": 0})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
+			return
+		}
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
+			return
+		}
+		worklogs, err := deps.Repos.Jira.ListWorklogs(c.Request.Context(), tenantID, issue.IssueKey)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		totalSecs, _ := deps.Repos.Jira.GetTotalTimeSpent(c.Request.Context(), tenantID, issue.IssueKey)
+		if worklogs == nil {
+			worklogs = []repository.JiraWorklog{}
+		}
+		c.JSON(http.StatusOK, gin.H{"worklogs": worklogs, "total_seconds": totalSecs})
+	}
+}
+
+func addJiraWorklog(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "jira repository not available"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
+			return
+		}
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
+			return
+		}
+
+		var req struct {
+			TimeSpent     string `json:"time_spent"`
+			TimeSpentSecs int    `json:"time_spent_secs"`
+			Comment       string `json:"comment"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		author := auth.GetEmail(c)
+		if author == "" {
+			author = "PEPA"
+		}
+
+		worklog := &repository.JiraWorklog{
+			TenantID:      tenantID,
+			IssueKey:      issue.IssueKey,
+			JiraWorklogID: uuid.New().String()[:8],
+			Author:        author,
+			TimeSpent:     req.TimeSpent,
+			TimeSpentSecs: req.TimeSpentSecs,
+			Comment:       req.Comment,
+			StartedAt:     time.Now().UTC(),
+		}
+		if err := deps.Repos.Jira.UpsertWorklog(c.Request.Context(), worklog); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		logAudit(deps, c, "create", "jira_worklog", worklog.ID.String(), nil, gin.H{"issue_key": issue.IssueKey})
+		c.JSON(http.StatusCreated, worklog)
+	}
+}
+
+// ── Issue Links Handler ───────────────────────────────────────
+
+func listJiraIssueLinks(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusOK, gin.H{"links": []interface{}{}})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
+			return
+		}
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
+			return
+		}
+		links, err := deps.Repos.Jira.ListIssueLinks(c.Request.Context(), tenantID, issue.IssueKey)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if links == nil {
+			links = []repository.JiraIssueLink{}
+		}
+		c.JSON(http.StatusOK, gin.H{"links": links})
+	}
+}
+
+// ── Assignees Handler ─────────────────────────────────────────
+
+func listJiraAssignees(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusOK, gin.H{"assignees": []interface{}{}})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+
+		// First try cached assignees
+		assignees, err := deps.Repos.Jira.ListAssignees(c.Request.Context(), tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		// If no cached assignees, fall back to distinct from issues
+		if len(assignees) == 0 {
+			names, err := deps.Repos.Jira.GetDistinctAssignees(c.Request.Context(), tenantID)
+			if err != nil {
+				respondInternalError(c, err)
+				return
+			}
+			result := make([]map[string]string, 0, len(names))
+			for _, n := range names {
+				result = append(result, map[string]string{"display_name": n, "jira_account": n})
+			}
+			c.JSON(http.StatusOK, gin.H{"assignees": result})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"assignees": assignees})
+	}
+}
+
+// ── Sprints Handler ───────────────────────────────────────────
+
+func listJiraSprints(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusOK, gin.H{"sprints": []interface{}{}})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		state := c.Query("state")
+		sprints, err := deps.Repos.Jira.ListSprints(c.Request.Context(), tenantID, state)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if sprints == nil {
+			sprints = []repository.JiraSprint{}
+		}
+		c.JSON(http.StatusOK, gin.H{"sprints": sprints})
+	}
+}
+
+// ── Components Handler ────────────────────────────────────────
+
+func listJiraComponents(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusOK, gin.H{"components": []interface{}{}})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		// Get distinct components from synced issues
+		items, err := deps.Repos.Jira.List(c.Request.Context(), tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		compSet := make(map[string]bool)
+		var components []string
+		for _, item := range items {
+			for _, c := range item.Components {
+				if !compSet[c] {
+					compSet[c] = true
+					components = append(components, c)
+				}
+			}
+		}
+		if components == nil {
+			components = []string{}
+		}
+		c.JSON(http.StatusOK, gin.H{"components": components})
+	}
+}
 
 func jiraWebhook(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {

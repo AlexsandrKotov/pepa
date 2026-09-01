@@ -5,6 +5,7 @@ import { vault, type VaultPath, type VaultEngine, type VaultConfig, type VaultSt
 import { listUsers, listTeams, getMe, type User, type Team } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 import { usePermission } from '@/hooks/usePermission';
+import GearIcon from '@/components/GearIcon';
 
 interface Props {
   initialPaths?: VaultPath[];
@@ -264,7 +265,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowConfig(!showConfig)} className="btn btn-secondary btn-sm">
-            ⚙ Configure
+            <GearIcon className="w-4 h-4" /> Configure
           </button>
           <button onClick={handleTestConnection} className="btn btn-secondary btn-sm">
             ◇ Test

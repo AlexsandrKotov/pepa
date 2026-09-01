@@ -54,6 +54,24 @@ actions:
     description: "Link a merge request to a Jira issue"
   - name: notify_deployment
     description: "Post deployment event notification to a Jira issue"
+  - name: list_assignees
+    description: "List assignable users for a project"
+  - name: list_sprints
+    description: "List active and future sprints"
+  - name: add_worklog
+    description: "Log time on an issue"
+  - name: list_worklogs
+    description: "List worklog entries for an issue"
+  - name: link_issues
+    description: "Link two Jira issues (blocks, duplicates, relates)"
+  - name: create_subtask
+    description: "Create a sub-task under a parent issue"
+  - name: sync_issues
+    description: "Sync issues from Jira to local database"
+  - name: list_components
+    description: "List components of a project"
+  - name: list_versions
+    description: "List versions/releases of a project"
 
 health_check:
   endpoint: /health

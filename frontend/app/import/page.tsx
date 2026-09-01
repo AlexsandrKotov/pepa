@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { services, workflows, entities } from '@/lib/api';
 import { Toast } from '@/components/Interactive';
 import ConceptHelp from '@/components/ConceptHelp';
+import GearIcon from '@/components/GearIcon';
 
 type ImportType = 'service' | 'workflow' | 'entity';
 
@@ -124,7 +125,7 @@ export default function ImportPage() {
                 : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
             }`}
           >
-            <div className="text-2xl mb-2">⚙️</div>
+            <div className="text-2xl mb-2"><GearIcon className="w-7 h-7" /></div>
             <div className="text-[14px] font-medium text-[var(--text-primary)]">Workflow</div>
             <div className="text-[12px] text-[var(--text-secondary)] mt-1">
               Import a workflow definition

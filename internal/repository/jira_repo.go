@@ -103,6 +103,57 @@ type JiraAutomationRule struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
+// JiraAssignee represents a cached Jira user/assignee.
+type JiraAssignee struct {
+	ID          uuid.UUID `json:"id"`
+	TenantID    uuid.UUID `json:"tenant_id"`
+	JiraAccount string    `json:"jira_account"`
+	DisplayName string    `json:"display_name"`
+	Email       string    `json:"email,omitempty"`
+	AvatarURL   string    `json:"avatar_url,omitempty"`
+	Active      bool      `json:"active"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// JiraSprint represents a cached Jira sprint.
+type JiraSprint struct {
+	ID        uuid.UUID  `json:"id"`
+	TenantID  uuid.UUID  `json:"tenant_id"`
+	JiraID    int        `json:"jira_id"`
+	BoardID   int        `json:"board_id"`
+	Name      string     `json:"name"`
+	State     string     `json:"state"` // active, future, closed
+	StartDate *time.Time `json:"start_date,omitempty"`
+	EndDate   *time.Time `json:"end_date,omitempty"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// JiraWorklog represents a cached Jira worklog entry.
+type JiraWorklog struct {
+	ID             uuid.UUID `json:"id"`
+	TenantID       uuid.UUID `json:"tenant_id"`
+	IssueKey       string    `json:"issue_key"`
+	JiraWorklogID  string    `json:"jira_worklog_id"`
+	Author         string    `json:"author"`
+	TimeSpent      string    `json:"time_spent"`
+	TimeSpentSecs  int       `json:"time_spent_secs"`
+	Comment        string    `json:"comment,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// JiraIssueLink represents a link between two Jira issues.
+type JiraIssueLink struct {
+	ID           uuid.UUID `json:"id"`
+	TenantID     uuid.UUID `json:"tenant_id"`
+	InwardKey    string    `json:"inward_key"`
+	OutwardKey   string    `json:"outward_key"`
+	LinkType     string    `json:"link_type"`
+	InwardLabel  string    `json:"inward_label,omitempty"`  // e.g. "is blocked by"
+	OutwardLabel string    `json:"outward_label,omitempty"` // e.g. "blocks"
+}
+
 // List returns all Jira issues for a tenant.
 func (r *JiraRepository) List(ctx context.Context, tenantID uuid.UUID) ([]JiraIssue, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -605,4 +656,306 @@ func (r *JiraRepository) MarkAutomationRuleTriggered(ctx context.Context, id uui
 		return fmt.Errorf("mark automation rule triggered: %w", err)
 	}
 	return nil
+}
+
+// ── Assignees ─────────────────────────────────────────────────
+
+// UpsertAssignee caches a Jira assignee.
+func (r *JiraRepository) UpsertAssignee(ctx context.Context, a *JiraAssignee) error {
+	if a.ID == uuid.Nil {
+		a.ID = uuid.New()
+	}
+	a.UpdatedAt = time.Now().UTC()
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO jira_assignees (id, tenant_id, jira_account, display_name, email, avatar_url, active, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (tenant_id, jira_account) DO UPDATE SET
+			display_name = EXCLUDED.display_name, email = EXCLUDED.email,
+			avatar_url = EXCLUDED.avatar_url, active = EXCLUDED.active, updated_at = EXCLUDED.updated_at
+	`, a.ID, a.TenantID, a.JiraAccount, a.DisplayName, a.Email, a.AvatarURL, a.Active, a.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert assignee: %w", err)
+	}
+	return nil
+}
+
+// ListAssignees returns all cached assignees for a tenant.
+func (r *JiraRepository) ListAssignees(ctx context.Context, tenantID uuid.UUID) ([]JiraAssignee, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, tenant_id, jira_account, display_name, COALESCE(email,''),
+		       COALESCE(avatar_url,''), active, updated_at
+		FROM jira_assignees WHERE tenant_id = $1 AND active = true
+		ORDER BY display_name
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list assignees: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]JiraAssignee, 0)
+	for rows.Next() {
+		var a JiraAssignee
+		if err := rows.Scan(&a.ID, &a.TenantID, &a.JiraAccount, &a.DisplayName,
+			&a.Email, &a.AvatarURL, &a.Active, &a.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan assignee: %w", err)
+		}
+		items = append(items, a)
+	}
+	return items, nil
+}
+
+// GetDistinctAssignees returns unique assignee names from synced issues.
+func (r *JiraRepository) GetDistinctAssignees(ctx context.Context, tenantID uuid.UUID) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT assignee FROM jira_issues
+		WHERE tenant_id = $1 AND assignee IS NOT NULL AND assignee != ''
+		ORDER BY assignee
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("get distinct assignees: %w", err)
+	}
+	defer rows.Close()
+
+	names := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("scan assignee name: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// ── Sprints ───────────────────────────────────────────────────
+
+// UpsertSprint caches a Jira sprint.
+func (r *JiraRepository) UpsertSprint(ctx context.Context, s *JiraSprint) error {
+	if s.ID == uuid.Nil {
+		s.ID = uuid.New()
+	}
+	s.UpdatedAt = time.Now().UTC()
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO jira_sprints (id, tenant_id, jira_id, board_id, name, state, start_date, end_date, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (tenant_id, jira_id) DO UPDATE SET
+			name = EXCLUDED.name, state = EXCLUDED.state,
+			start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
+			updated_at = EXCLUDED.updated_at
+	`, s.ID, s.TenantID, s.JiraID, s.BoardID, s.Name, s.State, s.StartDate, s.EndDate, s.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert sprint: %w", err)
+	}
+	return nil
+}
+
+// ListSprints returns cached sprints for a tenant.
+func (r *JiraRepository) ListSprints(ctx context.Context, tenantID uuid.UUID, state string) ([]JiraSprint, error) {
+	query := `
+		SELECT id, tenant_id, jira_id, board_id, name, state, start_date, end_date, updated_at
+		FROM jira_sprints WHERE tenant_id = $1
+	`
+	args := []interface{}{tenantID}
+	if state != "" {
+		query += " AND state = $2"
+		args = append(args, state)
+	}
+	query += " ORDER BY COALESCE(start_date, end_date, NOW()) DESC"
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list sprints: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]JiraSprint, 0)
+	for rows.Next() {
+		var s JiraSprint
+		if err := rows.Scan(&s.ID, &s.TenantID, &s.JiraID, &s.BoardID, &s.Name,
+			&s.State, &s.StartDate, &s.EndDate, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan sprint: %w", err)
+		}
+		items = append(items, s)
+	}
+	return items, nil
+}
+
+// ── Worklogs ──────────────────────────────────────────────────
+
+// UpsertWorklog caches a Jira worklog entry.
+func (r *JiraRepository) UpsertWorklog(ctx context.Context, w *JiraWorklog) error {
+	if w.ID == uuid.Nil {
+		w.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	w.UpdatedAt = now
+	if w.CreatedAt.IsZero() {
+		w.CreatedAt = now
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO jira_worklogs (id, tenant_id, issue_key, jira_worklog_id, author,
+			time_spent, time_spent_secs, comment, started_at, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		ON CONFLICT (tenant_id, issue_key, jira_worklog_id) DO UPDATE SET
+			time_spent = EXCLUDED.time_spent, time_spent_secs = EXCLUDED.time_spent_secs,
+			comment = EXCLUDED.comment, updated_at = EXCLUDED.updated_at
+	`, w.ID, w.TenantID, w.IssueKey, w.JiraWorklogID, w.Author,
+		w.TimeSpent, w.TimeSpentSecs, w.Comment, w.StartedAt, w.CreatedAt, w.UpdatedAt)
+	if err != nil {
+		return fmt.Errorf("upsert worklog: %w", err)
+	}
+	return nil
+}
+
+// ListWorklogs returns cached worklogs for an issue.
+func (r *JiraRepository) ListWorklogs(ctx context.Context, tenantID uuid.UUID, issueKey string) ([]JiraWorklog, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, tenant_id, issue_key, COALESCE(jira_worklog_id,''), COALESCE(author,''),
+		       COALESCE(time_spent,''), time_spent_secs, COALESCE(comment,''),
+		       started_at, created_at, updated_at
+		FROM jira_worklogs WHERE tenant_id = $1 AND issue_key = $2
+		ORDER BY started_at DESC
+	`, tenantID, issueKey)
+	if err != nil {
+		return nil, fmt.Errorf("list worklogs: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]JiraWorklog, 0)
+	for rows.Next() {
+		var w JiraWorklog
+		if err := rows.Scan(&w.ID, &w.TenantID, &w.IssueKey, &w.JiraWorklogID, &w.Author,
+			&w.TimeSpent, &w.TimeSpentSecs, &w.Comment, &w.StartedAt,
+			&w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan worklog: %w", err)
+		}
+		items = append(items, w)
+	}
+	return items, nil
+}
+
+// GetTotalTimeSpent returns total time spent (seconds) across all worklogs for an issue.
+func (r *JiraRepository) GetTotalTimeSpent(ctx context.Context, tenantID uuid.UUID, issueKey string) (int, error) {
+	var total int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(SUM(time_spent_secs), 0) FROM jira_worklogs
+		WHERE tenant_id = $1 AND issue_key = $2
+	`, tenantID, issueKey).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("get total time spent: %w", err)
+	}
+	return total, nil
+}
+
+// ── Issue Links ───────────────────────────────────────────────
+
+// UpsertIssueLink caches a Jira issue link.
+func (r *JiraRepository) UpsertIssueLink(ctx context.Context, l *JiraIssueLink) error {
+	if l.ID == uuid.Nil {
+		l.ID = uuid.New()
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO jira_issue_links (id, tenant_id, inward_key, outward_key, link_type, inward_label, outward_label)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		ON CONFLICT (tenant_id, inward_key, outward_key, link_type) DO UPDATE SET
+			inward_label = EXCLUDED.inward_label, outward_label = EXCLUDED.outward_label
+	`, l.ID, l.TenantID, l.InwardKey, l.OutwardKey, l.LinkType, l.InwardLabel, l.OutwardLabel)
+	if err != nil {
+		return fmt.Errorf("upsert issue link: %w", err)
+	}
+	return nil
+}
+
+// ListIssueLinks returns all cached links for an issue (both inward and outward).
+func (r *JiraRepository) ListIssueLinks(ctx context.Context, tenantID uuid.UUID, issueKey string) ([]JiraIssueLink, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, tenant_id, inward_key, outward_key, link_type,
+		       COALESCE(inward_label,''), COALESCE(outward_label,'')
+		FROM jira_issue_links
+		WHERE tenant_id = $1 AND (inward_key = $2 OR outward_key = $2)
+		ORDER BY created_at DESC
+	`, tenantID, issueKey)
+	if err != nil {
+		return nil, fmt.Errorf("list issue links: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]JiraIssueLink, 0)
+	for rows.Next() {
+		var l JiraIssueLink
+		if err := rows.Scan(&l.ID, &l.TenantID, &l.InwardKey, &l.OutwardKey,
+			&l.LinkType, &l.InwardLabel, &l.OutwardLabel); err != nil {
+			return nil, fmt.Errorf("scan issue link: %w", err)
+		}
+		items = append(items, l)
+	}
+	return items, nil
+}
+
+// ── Enhanced Sync ─────────────────────────────────────────────
+
+// BulkUpsert inserts or updates multiple issues at once.
+func (r *JiraRepository) BulkUpsert(ctx context.Context, issues []*JiraIssue) (int, error) {
+	if len(issues) == 0 {
+		return 0, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin bulk upsert: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now().UTC()
+	count := 0
+	for _, j := range issues {
+		j.SyncedAt = now
+		if j.CreatedAt.IsZero() {
+			j.CreatedAt = now
+		}
+		j.UpdatedAt = now
+		if j.ID == uuid.Nil {
+			j.ID = uuid.New()
+		}
+
+		_, err := tx.Exec(ctx, `
+			INSERT INTO jira_issues (id, tenant_id, issue_key, issue_id, project_key, summary,
+				description, issue_type, priority, status, assignee, reporter,
+				labels, components, fix_versions, story_points, parent_key,
+				jira_url, linked_mr_id, linked_mr_url, deployment_id,
+				synced_at, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+			ON CONFLICT (tenant_id, issue_key) DO UPDATE SET
+				summary = EXCLUDED.summary, status = EXCLUDED.status,
+				assignee = EXCLUDED.assignee, priority = EXCLUDED.priority,
+				description = EXCLUDED.description, labels = EXCLUDED.labels,
+				components = EXCLUDED.components, fix_versions = EXCLUDED.fix_versions,
+				story_points = EXCLUDED.story_points, parent_key = EXCLUDED.parent_key,
+				linked_mr_id = EXCLUDED.linked_mr_id, linked_mr_url = EXCLUDED.linked_mr_url,
+				deployment_id = EXCLUDED.deployment_id, synced_at = EXCLUDED.synced_at,
+				updated_at = EXCLUDED.updated_at
+		`, j.ID, j.TenantID, j.IssueKey, j.IssueID, j.ProjectKey, j.Summary,
+			j.Description, j.IssueType, j.Priority, j.Status, j.Assignee, j.Reporter,
+			j.Labels, j.Components, j.FixVersions, j.StoryPoints, j.ParentKey,
+			j.JiraURL, j.LinkedMRID, j.LinkedMRURL, j.DeploymentID,
+			j.SyncedAt, j.CreatedAt, j.UpdatedAt)
+		if err != nil {
+			return count, fmt.Errorf("bulk upsert jira issue %s: %w", j.IssueKey, err)
+		}
+		count++
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return count, fmt.Errorf("commit bulk upsert: %w", err)
+	}
+	return count, nil
+}
+
+// GetMyIssues returns issues assigned to a specific user.
+func (r *JiraRepository) GetMyIssues(ctx context.Context, tenantID uuid.UUID, assignee string, statuses []string) ([]JiraIssue, int, error) {
+	filters := JiraFilters{
+		Assignee: assignee,
+		Statuses: statuses,
+	}
+	return r.ListWithFilters(ctx, tenantID, filters)
 }

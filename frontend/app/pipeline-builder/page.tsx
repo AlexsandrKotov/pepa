@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { clusters, deployments, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, dockerHosts, type Cluster, type ServiceBlueprint, type BlueprintGroup, type DockerHost } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
+import GearIcon from '@/components/GearIcon';
 
 interface PipelineItem {
   id: string;
@@ -13,8 +14,8 @@ interface PipelineItem {
   groupName?: string; // from which group this was added
 }
 
-const categoryIcons: Record<string, string> = {
-  backend: '⚙️', frontend: '🌐', database: '🗄️', messaging: '📨',
+const categoryIcons: Record<string, React.ReactNode> = {
+  backend: <GearIcon className="w-4 h-4" />, frontend: '🌐', database: '🗄️', messaging: '📨',
   monitoring: '📊', security: '🔒', cache: '⚡', storage: '💾', general: '📦',
 };
 

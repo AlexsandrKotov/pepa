@@ -1592,6 +1592,46 @@ export interface JiraStats {
   by_type: Record<string, number>;
   by_priority: Record<string, number>;
   open_bugs: number;
+  by_assignee?: Record<string, number>;
+}
+
+export interface JiraAssignee {
+  id: string;
+  jira_account: string;
+  display_name: string;
+  email?: string;
+  avatar_url?: string;
+  active: boolean;
+}
+
+export interface JiraSprint {
+  id: string;
+  jira_id: number;
+  board_id: number;
+  name: string;
+  state: string;
+  start_date?: string;
+  end_date?: string;
+}
+
+export interface JiraWorklog {
+  id: string;
+  issue_key: string;
+  jira_worklog_id: string;
+  author: string;
+  time_spent: string;
+  time_spent_secs: number;
+  comment?: string;
+  started_at: string;
+}
+
+export interface JiraIssueLink {
+  id: string;
+  inward_key: string;
+  outward_key: string;
+  link_type: string;
+  inward_label?: string;
+  outward_label?: string;
 }
 
 export interface JiraFilters {
@@ -1604,6 +1644,8 @@ export interface JiraFilters {
   search?: string;
   created_from?: string;
   created_to?: string;
+  sprint_id?: string;
+  components?: string[];
   page?: number;
   page_size?: number;
 }
@@ -1682,6 +1724,36 @@ export const jira = {
     }),
   deleteAutomationRule: (id: string) =>
     fetchAPI<{ message: string }>(`/api/v1/jira/automation/rules/${id}`, { method: 'DELETE' }),
+  // My issues
+  getMyIssues: (assignee?: string, statuses?: string[]) => {
+    const params = new URLSearchParams();
+    if (assignee) params.set('assignee', assignee);
+    (statuses || []).forEach(s => params.append('status', s));
+    const qs = params.toString();
+    return fetchAPI<{ issues: JiraIssue[]; total: number }>(`/api/v1/jira/my-issues${qs ? '?' + qs : ''}`);
+  },
+  // Assignees
+  getAssignees: () =>
+    fetchAPI<{ assignees: JiraAssignee[] }>('/api/v1/jira/assignees'),
+  // Sprints
+  getSprints: (state?: string) => {
+    const qs = state ? `?state=${state}` : '';
+    return fetchAPI<{ sprints: JiraSprint[] }>(`/api/v1/jira/sprints${qs}`);
+  },
+  // Components
+  getComponents: () =>
+    fetchAPI<{ components: string[] }>('/api/v1/jira/components'),
+  // Worklogs
+  getWorklogs: (id: string) =>
+    fetchAPI<{ worklogs: JiraWorklog[]; total_seconds: number }>(`/api/v1/jira/issues/${id}/worklogs`),
+  addWorklog: (id: string, data: { time_spent: string; time_spent_secs?: number; comment?: string }) =>
+    fetchAPI<JiraWorklog>(`/api/v1/jira/issues/${id}/worklogs`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  // Issue Links
+  getIssueLinks: (id: string) =>
+    fetchAPI<{ links: JiraIssueLink[] }>(`/api/v1/jira/issues/${id}/links`),
 };
 
 // ── Connections ─────────────────────────────────────────────

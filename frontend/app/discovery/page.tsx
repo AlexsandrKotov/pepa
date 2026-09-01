@@ -7,6 +7,7 @@ import ConceptHelp from '@/components/ConceptHelp';
 import ResizableTable, { type ColumnDef } from '@/components/ResizableTable';
 import ServiceManagementPanel from '@/components/ServiceManagementPanel';
 import BrandIcon from '@/components/BrandIcon';
+import GearIcon from '@/components/GearIcon';
 
 export default function DiscoveryPage() {
   const [services, setServices] = useState<DiscoveredService[]>([]);
@@ -817,7 +818,7 @@ function DiscoveryTable({ services, sourceColors, sourceIcons, healthColors, act
             className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--accent)] hover:text-white transition-colors"
             title="Manage service"
           >
-            ⚙️
+            <GearIcon className="w-3.5 h-3.5" />
           </button>
         </div>
       ),

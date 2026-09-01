@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { audit, logout as doLogout, removeToken, getStoredUser, setStoredUser, getMe, setToken, workspaces, getBase, type AuditEntry, type Workspace } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
+import GearIcon from '@/components/GearIcon';
 
 const pageNames: Record<string, string> = {
   '/': 'Dashboard',
@@ -751,7 +752,7 @@ export default function TopBar() {
                 { href: '/connections', label: 'Connections', icon: '🔗', adminOnly: true, permission: 'connections' },
                 { href: '/deployments', label: 'Deployments', icon: '🚀' },
                 { href: '/clusters', label: 'Clusters', icon: '☸️', adminOnly: true, permission: 'clusters' },
-                { href: '/workflows', label: 'Workflows', icon: '⚙️' },
+                { href: '/workflows', label: 'Workflows', icon: <GearIcon className="w-4 h-4" /> },
                 { href: '/scorecards', label: 'Scorecards', icon: '📋' },
                 { href: '/security', label: 'Security', icon: '🛡️' },
                 { href: '/analytics', label: 'Analytics', icon: '📊' },
@@ -759,7 +760,7 @@ export default function TopBar() {
                 { href: '/knowledge-base', label: 'Knowledge Base', icon: '📚' },
                 { href: '/audit', label: 'Audit Log', icon: '📝', adminOnly: true, permission: 'audit' },
                 { href: '/roles', label: 'Roles', icon: '👥', adminOnly: true, permission: 'roles' },
-                { href: '/settings', label: 'Settings', icon: '⚙️', adminOnly: true, permission: 'settings' },
+                { href: '/settings', label: 'Settings', icon: <GearIcon className="w-4 h-4" />, adminOnly: true, permission: 'settings' },
               ].filter(item => !item.adminOnly || isAdmin || (item.permission && hasPermission(item.permission, 'read'))).map(item => (
                 <Link
                   key={item.href}
