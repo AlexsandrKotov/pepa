@@ -9,10 +9,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // HostConfig holds the connection details for a Docker host.
@@ -249,11 +251,9 @@ func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPat
 }
 
 // ComposeUpFromFolderStream runs docker compose up from a folder with streaming output.
-// The outputChan receives lines of output as they are produced.
-// Returns an error if the command fails.
+// Output is streamed line-by-line to outputChan. The command runs in detached mode (-d)
+// so containers keep running after the deploy completes.
 func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, folderPath string, envVars map[string]string, outputChan chan<- string) error {
-	defer close(outputChan)
-
 	// Validate path is absolute to prevent accidental relative path usage
 	if !filepath.IsAbs(folderPath) {
 		return fmt.Errorf("folder_path must be an absolute path, got: %s", folderPath)
@@ -281,8 +281,8 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 		}
 	}
 
-	// Use --progress plain to get line-by-line output
-	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "--progress", "plain"}
+	// Use --progress plain for line-by-line output, -d to detach after start
+	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "--progress", "plain", "-d"}
 	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker compose with validated args
 	cmd.Dir = workDir
 	cmd.Env = c.env()
@@ -290,7 +290,7 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	// Capture both stdout and stderr
+	// Capture both stdout and stderr via a combined pipe
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
@@ -304,24 +304,31 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 		return fmt.Errorf("failed to start docker compose: %w", err)
 	}
 
-	// Stream output from both stdout and stderr
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		scanner := bufio.NewScanner(stdout)
+	// Stream output from both stdout and stderr concurrently.
+	// Use a WaitGroup to ensure both scanners finish before closing the channel.
+	var wg sync.WaitGroup
+	scanStream := func(r io.Reader) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
 		for scanner.Scan() {
-			outputChan <- scanner.Text()
+			select {
+			case outputChan <- scanner.Text():
+			case <-ctx.Done():
+				return
+			}
 		}
+	}
+
+	wg.Add(2)
+	go scanStream(stdout)
+	go scanStream(stderr)
+
+	// Wait for both scanners to finish, then close the channel
+	go func() {
+		wg.Wait()
+		close(outputChan)
 	}()
 
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			outputChan <- scanner.Text()
-		}
-	}()
-
-	<-done
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("docker compose up failed: %w", err)
 	}

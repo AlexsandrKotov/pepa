@@ -255,22 +255,6 @@ func ghTopologicalLayers(jobMap map[string]*JobNode) map[string]int {
 	return layers
 }
 
-// ghLayerName returns a human-readable name for a topological layer.
-func ghLayerName(layer int) string {
-	switch layer {
-	case 0:
-		return "setup"
-	case 1:
-		return "build"
-	case 2:
-		return "test"
-	case 3:
-		return "deploy"
-	default:
-		return fmt.Sprintf("stage-%d", layer)
-	}
-}
-
 // ghLayerIndex extracts the layer index from a stage name.
 // Handles both numeric stages ("0", "1", "2") and named stages ("setup", "build", etc.)
 func ghLayerIndex(stage string) int {

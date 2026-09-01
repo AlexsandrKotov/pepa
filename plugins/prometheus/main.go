@@ -301,7 +301,7 @@ func (p *PrometheusPlugin) remoteWrite(ctx context.Context, endpoint, token stri
 	if err != nil {
 		return nil, fmt.Errorf("remote write failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		respBody, _ := io.ReadAll(resp.Body)

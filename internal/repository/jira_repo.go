@@ -916,7 +916,7 @@ func (r *JiraRepository) BulkUpsert(ctx context.Context, issues []*JiraIssue) (i
 	if err != nil {
 		return 0, fmt.Errorf("begin bulk upsert: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	now := time.Now().UTC()
 	count := 0

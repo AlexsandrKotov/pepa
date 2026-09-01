@@ -382,31 +382,35 @@ func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
 		defer cancel()
 
 		outputChan := make(chan string, 100)
-		var deployErr error
+		errChan := make(chan error, 1)
 
 		// Start deployment in a goroutine
 		go func() {
+			var err error
 			if svc.FolderPath != "" {
-				deployErr = client.ComposeUpFromFolderStream(ctx, svc.Name, svc.FolderPath, envVars, outputChan)
+				err = client.ComposeUpFromFolderStream(ctx, svc.Name, svc.FolderPath, envVars, outputChan)
 			} else {
-				// For YAML-based deployment, use the non-streaming version for now
-				deployErr = client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars)
+				err = client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars)
 				close(outputChan)
 			}
+			errChan <- err
 		}()
 
 		// Stream output to client
 		for line := range outputChan {
-			// Send SSE event
-			c.Writer.WriteString("data: " + line + "\n\n")
+			safeLine := strings.ReplaceAll(line, "\n", " ")
+			_, _ = c.Writer.WriteString("data: " + safeLine + "\n\n")
 			c.Writer.Flush()
 		}
+
+		// Wait for deploy goroutine to finish
+		deployErr := <-errChan
 
 		// Send completion event
 		if deployErr != nil {
 			svc.Status = "error"
 			_ = deps.Repos.DockerHost.UpdateService(context.Background(), svc)
-			c.Writer.WriteString("event: error\ndata: " + deployErr.Error() + "\n\n")
+			_, _ = c.Writer.WriteString("event: error\ndata: " + deployErr.Error() + "\n\n")
 		} else {
 			containers, err := client.ComposePs(ctx, svc.Name)
 			if err == nil {
@@ -415,7 +419,7 @@ func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
 			}
 			svc.Status = "running"
 			_ = deps.Repos.DockerHost.UpdateService(context.Background(), svc)
-			c.Writer.WriteString("event: complete\ndata: Deployment successful\n\n")
+			_, _ = c.Writer.WriteString("event: complete\ndata: Deployment successful\n\n")
 		}
 		c.Writer.Flush()
 

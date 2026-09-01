@@ -726,8 +726,8 @@ func (p *JiraPlugin) listAssignees(ctx context.Context, params []byte) ([]byte, 
 	}
 
 	// Use Jira REST API to search users
-	baseURL := p.client.GetBaseURL().String()
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/api/2/user/search?username=%s&maxResults=%d", baseURL, query, input.MaxResults), nil)
+	baseURL := p.client.GetBaseURL()
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/api/2/user/search?username=%s&maxResults=%d", baseURL.String(), query, input.MaxResults), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -804,8 +804,8 @@ func (p *JiraPlugin) listSprints(ctx context.Context, params []byte) ([]byte, er
 }
 
 func (p *JiraPlugin) findProjectBoards(ctx context.Context, projectKey string) ([]map[string]interface{}, error) {
-	baseURL := p.client.GetBaseURL().String()
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/agile/1.0/board?projectKeyOrId=%s", baseURL, projectKey), nil)
+	baseURL := p.client.GetBaseURL()
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/agile/1.0/board?projectKeyOrId=%s", baseURL.String(), projectKey), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -832,8 +832,8 @@ func (p *JiraPlugin) findProjectBoards(ctx context.Context, projectKey string) (
 }
 
 func (p *JiraPlugin) listBoardSprints(ctx context.Context, boardID int, state string) ([]map[string]interface{}, error) {
-	baseURL := p.client.GetBaseURL().String()
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/agile/1.0/board/%d/sprint?state=%s&maxResults=50", baseURL, boardID, state), nil)
+	baseURL := p.client.GetBaseURL()
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/agile/1.0/board/%d/sprint?state=%s&maxResults=50", baseURL.String(), boardID, state), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -910,8 +910,8 @@ func (p *JiraPlugin) listWorklogs(ctx context.Context, params []byte) ([]byte, e
 	}
 
 	// Use REST API directly for worklogs
-	baseURL := p.client.GetBaseURL().String()
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/api/2/issue/%s/worklog", baseURL, input.IssueKey), nil)
+	baseURL := p.client.GetBaseURL()
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/api/2/issue/%s/worklog", baseURL.String(), input.IssueKey), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -975,8 +975,8 @@ func (p *JiraPlugin) linkIssues(ctx context.Context, params []byte) ([]byte, err
 	}
 
 	reqBody, _ := json.Marshal(body)
-	baseURL := p.client.GetBaseURL().String()
-	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/rest/api/2/issueLink", baseURL), strings.NewReader(string(reqBody)))
+	baseURL := p.client.GetBaseURL()
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/rest/api/2/issueLink", baseURL.String()), strings.NewReader(string(reqBody)))
 	if err != nil {
 		return nil, err
 	}
@@ -1120,8 +1120,8 @@ func (p *JiraPlugin) listVersions(ctx context.Context, params []byte) ([]byte, e
 	}
 
 	// Use REST API directly for versions
-	baseURL := p.client.GetBaseURL().String()
-	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/api/2/project/%s/versions", baseURL, input.ProjectKey), nil)
+	baseURL := p.client.GetBaseURL()
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/rest/api/2/project/%s/versions", baseURL.String(), input.ProjectKey), nil)
 	if err != nil {
 		return nil, err
 	}

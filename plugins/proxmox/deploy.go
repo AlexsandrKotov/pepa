@@ -151,7 +151,7 @@ func (p *ProxmoxPlugin) deployDocker(client *Client, config map[string]string, p
 	if err != nil {
 		return nil, fmt.Errorf("deploy_docker: %w (container %d is running at %s)", err, vmid, ip)
 	}
-	defer sshClient.Close()
+	defer func() { _ = sshClient.Close() }()
 	logLines = append(logLines, "SSH connected")
 
 	// 4. Ensure Docker is installed.
@@ -258,7 +258,7 @@ func runSSH(client *ssh.Client, cmd string, timeout time.Duration) (string, erro
 	if err != nil {
 		return "", err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	var out strings.Builder
 	sess.Stdout = &out
 	sess.Stderr = &out
@@ -286,26 +286,26 @@ func streamDockerImage(client *ssh.Client, image string) error {
 
 	sess, err := client.NewSession()
 	if err != nil {
-		saveCmd.Process.Kill()
+		_ = saveCmd.Process.Kill()
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	stdin, err := sess.StdinPipe()
 	if err != nil {
-		saveCmd.Process.Kill()
+		_ = saveCmd.Process.Kill()
 		return err
 	}
 	var out strings.Builder
 	sess.Stdout = &out
 	sess.Stderr = &out
 	if err := sess.Start("docker load"); err != nil {
-		saveCmd.Process.Kill()
+		_ = saveCmd.Process.Kill()
 		return err
 	}
 	if _, err := io.Copy(stdin, saveOut); err != nil {
 		return err
 	}
-	stdin.Close()
+	_ = stdin.Close()
 	if err := saveCmd.Wait(); err != nil {
 		return fmt.Errorf("docker save %s: %w (does the image exist locally?)", image, err)
 	}
@@ -332,26 +332,26 @@ func streamFolder(client *ssh.Client, folderPath, remoteDir string) error {
 
 	sess, err := client.NewSession()
 	if err != nil {
-		tarCmd.Process.Kill()
+		_ = tarCmd.Process.Kill()
 		return err
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 	stdin, err := sess.StdinPipe()
 	if err != nil {
-		tarCmd.Process.Kill()
+		_ = tarCmd.Process.Kill()
 		return err
 	}
 	var out strings.Builder
 	sess.Stdout = &out
 	sess.Stderr = &out
 	if err := sess.Start(fmt.Sprintf("mkdir -p %s && tar -xzf - -C %s", shellQuote(remoteDir), shellQuote(remoteDir))); err != nil {
-		tarCmd.Process.Kill()
+		_ = tarCmd.Process.Kill()
 		return err
 	}
 	if _, err := io.Copy(stdin, tarOut); err != nil {
 		return err
 	}
-	stdin.Close()
+	_ = stdin.Close()
 	if err := tarCmd.Wait(); err != nil {
 		return fmt.Errorf("tar %s: %w", folderPath, err)
 	}

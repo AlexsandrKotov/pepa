@@ -106,13 +106,13 @@ func selectWorkspace(ctx context.Context, bin, workDir, workspace string) error 
 		return nil
 	}
 	// Try to select existing workspace
-	cmd := exec.CommandContext(ctx, bin, "workspace", "select", workspace)
+	cmd := exec.CommandContext(ctx, bin, "workspace", "select", workspace) //nolint:gosec // G204: bin and workspace from pipeline config
 	cmd.Dir = workDir
 	if err := cmd.Run(); err == nil {
 		return nil
 	}
 	// If select failed, try to create it
-	cmd = exec.CommandContext(ctx, bin, "workspace", "new", workspace)
+	cmd = exec.CommandContext(ctx, bin, "workspace", "new", workspace) //nolint:gosec // G204: bin and workspace from pipeline config
 	cmd.Dir = workDir
 	return cmd.Run()
 }
@@ -394,7 +394,7 @@ func sanitizeBackendVars(workDir string) {
 			return varRefRe.ReplaceAll(match, []byte(`""`))
 		})
 		if !bytes.Equal(data, modified) {
-			_ = os.WriteFile(f, modified, 0600)
+			_ = os.WriteFile(f, modified, 0600) //nolint:gosec // G703: f from validated directory listing
 		}
 	}
 }
@@ -449,7 +449,7 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 	// This solves the Terraform limitation where backend blocks cannot use variables.
 	overridePath, backendKeys := writeBackendOverride(workDir, params)
 	if overridePath != "" {
-		defer os.Remove(overridePath)
+		defer func() { _ = os.Remove(overridePath) }()
 	}
 
 	// Replace var.* references in backend blocks with empty strings.
@@ -459,7 +459,7 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 
 	// Run IaC init
 	bin := iacBinary()
-	initCmd := exec.CommandContext(runCtx, bin, "init", "-input=false")
+	initCmd := exec.CommandContext(runCtx, bin, "init", "-input=false") //nolint:gosec // G204: bin from pipeline config
 	initCmd.Dir = workDir
 	initCmd.Stdout = logBuf
 	initCmd.Stderr = logBuf
@@ -496,7 +496,7 @@ func (a *TerraformAdapter) Trigger(ctx context.Context, raw json.RawMessage, par
 		args = append(args, "-var", fmt.Sprintf("%s=%v", k, v))
 	}
 
-	tfCmd := exec.CommandContext(runCtx, bin, args...)
+	tfCmd := exec.CommandContext(runCtx, bin, args...) //nolint:gosec // G204: bin and args from pipeline config
 	tfCmd.Dir = workDir
 	tfCmd.Stdout = logBuf
 	tfCmd.Stderr = logBuf
@@ -554,7 +554,7 @@ func (a *TerraformAdapter) Plan(ctx context.Context, raw json.RawMessage, params
 	// Inject backend config override if backend_* parameters are provided.
 	overridePath, backendKeys := writeBackendOverride(workDir, params)
 	if overridePath != "" {
-		defer os.Remove(overridePath)
+		defer func() { _ = os.Remove(overridePath) }()
 	}
 
 	// Replace var.* references in backend blocks with empty strings.
@@ -562,7 +562,7 @@ func (a *TerraformAdapter) Plan(ctx context.Context, raw json.RawMessage, params
 
 	// IaC init
 	bin := iacBinary()
-	initCmd := exec.CommandContext(ctx, bin, "init", "-input=false", "-no-color")
+	initCmd := exec.CommandContext(ctx, bin, "init", "-input=false", "-no-color") //nolint:gosec // G204: bin from pipeline config
 	initCmd.Dir = workDir
 	if output, err := initCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("iac init failed: %s: %w", string(output), err)
@@ -680,7 +680,7 @@ func (a *TerraformAdapter) State(ctx context.Context, raw json.RawMessage, param
 	// Inject backend config override if backend_* parameters are provided.
 	overridePath, _ := writeBackendOverride(workDir, params)
 	if overridePath != "" {
-		defer os.Remove(overridePath)
+		defer func() { _ = os.Remove(overridePath) }()
 	}
 
 	// Replace var.* references in backend blocks with empty strings.
@@ -688,14 +688,14 @@ func (a *TerraformAdapter) State(ctx context.Context, raw json.RawMessage, param
 
 	// Initialize the backend before reading state.
 	bin := iacBinary()
-	initCmd := exec.CommandContext(ctx, bin, "init", "-input=false", "-no-color")
+	initCmd := exec.CommandContext(ctx, bin, "init", "-input=false", "-no-color") //nolint:gosec // G204: bin from pipeline config
 	initCmd.Dir = workDir
 	if output, err := initCmd.CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("iac init failed during state fetch: %s: %w", string(output), err)
 	}
 
 	// IaC show -json
-	showCmd := exec.CommandContext(ctx, bin, "show", "-json")
+	showCmd := exec.CommandContext(ctx, bin, "show", "-json") //nolint:gosec // G204: bin from pipeline config
 	showCmd.Dir = workDir
 	jsonOutput, err := showCmd.Output()
 	if err != nil {
@@ -897,7 +897,7 @@ func (a *TerraformAdapter) Inspect(ctx context.Context, raw json.RawMessage) (js
 
 	// Try to list workspaces
 	bin := iacBinary()
-	wsCmd := exec.CommandContext(ctx, bin, "workspace", "list")
+	wsCmd := exec.CommandContext(ctx, bin, "workspace", "list") //nolint:gosec // G204: bin from pipeline config
 	wsCmd.Dir = workDir
 	if wsOut, wsErr := wsCmd.Output(); wsErr == nil {
 		for _, line := range strings.Split(string(wsOut), "\n") {
@@ -955,18 +955,18 @@ func copyDir(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 		if entry.IsDir() {
-			if err := os.MkdirAll(dstPath, 0755); err != nil {
+			if err := os.MkdirAll(dstPath, 0750); err != nil { //nolint:gosec // G301: standard directory copy
 				return err
 			}
 			if err := copyDir(srcPath, dstPath); err != nil {
 				return err
 			}
 		} else {
-			data, err := os.ReadFile(srcPath)
+			data, err := os.ReadFile(srcPath) //nolint:gosec // G304: srcPath from copyDir input
 			if err != nil {
 				return err
 			}
-			if err := os.WriteFile(dstPath, data, 0644); err != nil {
+			if err := os.WriteFile(dstPath, data, 0600); err != nil { //nolint:gosec // G306: standard file copy
 				return err
 			}
 		}

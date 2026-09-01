@@ -24,7 +24,7 @@ type Client struct {
 func NewClient(baseURL, tokenID, tokenSecret string, insecureTLS bool) *Client {
 	transport := &http.Transport{}
 	if insecureTLS {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // G402: user-configured per-connection setting
 	}
 	return &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
@@ -81,7 +81,7 @@ func (c *Client) do(method, path string, body url.Values) (json.RawMessage, erro
 	if err != nil {
 		return nil, fmt.Errorf("proxmox: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {

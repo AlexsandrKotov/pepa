@@ -254,7 +254,7 @@ func (p *SyslogPlugin) testConnection(ctx context.Context, config map[string]str
 	if err != nil {
 		return nil, fmt.Errorf("connection test failed: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Try to send a test message
 	testMsg := "<14>PEPA syslog connection test" // facility local0, severity info
