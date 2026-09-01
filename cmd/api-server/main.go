@@ -145,6 +145,7 @@ func main() {
 			CredentialShare:  comp.CredentialShareRepo,
 			Organization:     comp.OrganizationRepo,
 			RAG:              comp.RAGRepo,
+			SSHHost:          comp.SSHHostRepo,
 		},
 		Services: &rest.Services{
 			Deployment: service.NewDeploymentService(

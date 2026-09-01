@@ -154,3 +154,19 @@ func IsPlatformAdmin(c *gin.Context) bool {
 	}
 	return false
 }
+
+// ValidateJWT parses and validates a JWT token string, returning the claims.
+// Used by WebSocket handlers where the token is passed as a query parameter.
+func ValidateJWT(tokenStr, jwtSecret string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return []byte(jwtSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, jwt.ErrSignatureInvalid
+	}
+	return claims, nil
+}

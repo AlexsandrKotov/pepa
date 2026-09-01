@@ -51,6 +51,13 @@ const pluginSections: Record<string, { title: string; icon: string; items: { hre
       { href: '/jira', label: 'Jira', permission: 'jira' },
     ],
   },
+  'remote-console': {
+    title: 'Remote Access',
+    icon: 'M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z',
+    items: [
+      { href: '/remote-console', label: 'SSH Console', permission: null },
+    ],
+  },
 };
 
 // Collapsible sections for additional pages
@@ -151,6 +158,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/settings/users', label: 'Users', permission: 'settings', adminOnly: true },
       { href: '/settings/teams', label: 'Teams', permission: 'settings', adminOnly: true },
       { href: '/settings/workspaces', label: 'Workspaces', permission: 'settings', adminOnly: true },
+      { href: '/settings/observability', label: 'Observability', permission: 'settings', adminOnly: true },
       { href: '/roles', label: 'Roles', permission: 'roles', adminOnly: true },
       { href: '/audit', label: 'Audit Log', permission: 'audit', adminOnly: true },
     ],

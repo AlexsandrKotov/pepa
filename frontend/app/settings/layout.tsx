@@ -11,6 +11,7 @@ const tabs = [
   { href: '/settings/workspaces', label: 'Workspaces' },
   { href: '/settings/users', label: 'Users' },
   { href: '/settings/teams', label: 'Teams' },
+  { href: '/settings/observability', label: 'Observability' },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

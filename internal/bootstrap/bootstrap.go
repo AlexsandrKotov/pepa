@@ -68,6 +68,7 @@ type Components struct {
 	CredentialShareRepo *repository.CredentialShareRepository
 	OrganizationRepo    *repository.OrganizationRepository
 	RAGRepo             *repository.RAGRepository
+	SSHHostRepo         *repository.SSHHostRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -243,6 +244,7 @@ func Bootstrap() (*Components, error) {
 		CredentialShareRepo: repository.NewCredentialShareRepository(db.Pool),
 		OrganizationRepo:    repository.NewOrganizationRepository(db.Pool),
 		RAGRepo:             repository.NewRAGRepository(db),
+		SSHHostRepo:         repository.NewSSHHostRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry

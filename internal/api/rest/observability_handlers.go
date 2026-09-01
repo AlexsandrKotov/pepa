@@ -2,7 +2,9 @@ package rest
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -25,6 +27,11 @@ func registerObservabilityRoutes(r *gin.RouterGroup, deps Dependencies) {
 		obs.GET("/alerts", observabilityAlerts(deps))
 		obs.POST("/alerts/:id/resolve", observabilityResolveAlert(deps))
 		obs.GET("/correlate", observabilityCorrelate(deps)) // Correlate trace/logs/metrics
+		// Observability settings (log export configuration)
+		obs.GET("/settings", observabilitySettingsGet(deps))
+		obs.PUT("/settings", observabilitySettingsUpdate(deps))
+		obs.POST("/settings/test-syslog", observabilityTestSyslog(deps))
+		obs.POST("/settings/test-otlp", observabilityTestOTLP(deps))
 	}
 }
 
@@ -412,6 +419,179 @@ func observabilityResolveAlert(deps Dependencies) gin.HandlerFunc {
 				"status": "resolved",
 			},
 			"message": "Alert resolved successfully",
+		})
+	}
+}
+
+// observabilitySettingsGet returns the current observability configuration.
+func observabilitySettingsGet(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg := deps.Config.Observability
+		c.JSON(http.StatusOK, gin.H{
+			"otel_enabled":       cfg.Enabled,
+			"otel_endpoint":      cfg.OTLPEndpoint,
+			"otel_service_name":  cfg.ServiceName,
+			"otel_sampling_rate": cfg.SamplingRate,
+			"otel_insecure":      cfg.Insecure,
+			"syslog_enabled":     cfg.Syslog.Enabled,
+			"syslog_network":     cfg.Syslog.Network,
+			"syslog_address":     cfg.Syslog.Address,
+			"syslog_tag":         cfg.Syslog.Tag,
+			"syslog_facility":    cfg.Syslog.Facility,
+		})
+	}
+}
+
+// observabilitySettingsUpdate updates the observability configuration at runtime.
+func observabilitySettingsUpdate(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			OtelEnabled      *bool    `json:"otel_enabled"`
+			OtelEndpoint     *string  `json:"otel_endpoint"`
+			OtelServiceName  *string  `json:"otel_service_name"`
+			OtelSamplingRate *float64 `json:"otel_sampling_rate"`
+			OtelInsecure     *bool    `json:"otel_insecure"`
+			SyslogEnabled    *bool    `json:"syslog_enabled"`
+			SyslogNetwork    *string  `json:"syslog_network"`
+			SyslogAddress    *string  `json:"syslog_address"`
+			SyslogTag        *string  `json:"syslog_tag"`
+			SyslogFacility   *string  `json:"syslog_facility"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Apply OTLP/SigNoz settings
+		if req.OtelEnabled != nil {
+			deps.Config.Observability.Enabled = *req.OtelEnabled
+		}
+		if req.OtelEndpoint != nil {
+			deps.Config.Observability.OTLPEndpoint = *req.OtelEndpoint
+		}
+		if req.OtelServiceName != nil {
+			deps.Config.Observability.ServiceName = *req.OtelServiceName
+		}
+		if req.OtelSamplingRate != nil {
+			rate := *req.OtelSamplingRate
+			if rate < 0 || rate > 1 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "sampling_rate must be between 0.0 and 1.0"})
+				return
+			}
+			deps.Config.Observability.SamplingRate = rate
+		}
+		if req.OtelInsecure != nil {
+			deps.Config.Observability.Insecure = *req.OtelInsecure
+		}
+
+		// Apply Syslog settings
+		if req.SyslogEnabled != nil {
+			deps.Config.Observability.Syslog.Enabled = *req.SyslogEnabled
+		}
+		if req.SyslogNetwork != nil {
+			deps.Config.Observability.Syslog.Network = *req.SyslogNetwork
+		}
+		if req.SyslogAddress != nil {
+			deps.Config.Observability.Syslog.Address = *req.SyslogAddress
+		}
+		if req.SyslogTag != nil {
+			deps.Config.Observability.Syslog.Tag = *req.SyslogTag
+		}
+		if req.SyslogFacility != nil {
+			deps.Config.Observability.Syslog.Facility = *req.SyslogFacility
+		}
+
+		slog.Info("observability settings updated",
+			"otel_enabled", deps.Config.Observability.Enabled,
+			"otel_endpoint", deps.Config.Observability.OTLPEndpoint,
+			"syslog_enabled", deps.Config.Observability.Syslog.Enabled,
+			"syslog_address", deps.Config.Observability.Syslog.Address,
+		)
+
+		logAudit(deps, c, "update", "observability_settings", "", nil, req)
+		c.JSON(http.StatusOK, gin.H{"message": "observability settings updated"})
+	}
+}
+
+// observabilityTestSyslog tests connectivity to the syslog server.
+func observabilityTestSyslog(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Network string `json:"network"`
+			Address string `json:"address"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Network == "" {
+			req.Network = "udp"
+		}
+		// Validate network protocol to prevent SSRF via arbitrary protocols
+		if req.Network != "udp" && req.Network != "tcp" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "network must be udp or tcp"})
+			return
+		}
+		if req.Address == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "address is required"})
+			return
+		}
+
+		conn, err := net.DialTimeout(req.Network, req.Address, 5*time.Second)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "error",
+				"message": fmt.Sprintf("Connection failed: %v", err),
+			})
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		testMsg := "<14>PEPA syslog connection test"
+		if _, err := conn.Write([]byte(testMsg)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "error",
+				"message": fmt.Sprintf("Write failed: %v", err),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"message": "Syslog connection test successful",
+		})
+	}
+}
+
+// observabilityTestOTLP tests connectivity to the OTLP endpoint (SigNoz, etc).
+func observabilityTestOTLP(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Endpoint string `json:"endpoint"`
+			Insecure bool   `json:"insecure"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.Endpoint == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint is required"})
+			return
+		}
+
+		conn, err := net.DialTimeout("tcp", req.Endpoint, 5*time.Second)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "error",
+				"message": fmt.Sprintf("Connection failed: %v", err),
+			})
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"message": "OTLP endpoint reachable",
 		})
 	}
 }

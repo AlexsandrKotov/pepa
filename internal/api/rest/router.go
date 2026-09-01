@@ -59,6 +59,7 @@ type Repositories struct {
 	CredentialShare *repository.CredentialShareRepository
 	Organization    *repository.OrganizationRepository
 	RAG             *repository.RAGRepository
+	SSHHost         *repository.SSHHostRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -251,6 +252,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerOrganizationRoutes(v1, deps)
 		registerProxmoxRoutes(v1, deps)
 		registerObservabilityRoutes(v1, deps)
+		registerRemoteConsoleRoutes(v1, deps)
 
 		// System info
 		v1.GET("/system/info", func(c *gin.Context) {

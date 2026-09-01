@@ -15,11 +15,13 @@ import (
 )
 // auditLogCh is a bounded channel for async audit log writes.
 // It prevents unbounded goroutine creation when the DB is overloaded.
-var auditLogCh = make(chan *models.AuditLog, 256)
+// Capacity increased to 1024 since we now log ALL requests (including GET).
+var auditLogCh = make(chan *models.AuditLog, 1024)
 
 func init() {
 	// Start a pool of audit log writer goroutines.
-	for i := 0; i < 4; i++ {
+	// More workers since we log every request now.
+	for i := 0; i < 8; i++ {
 		go func() {
 			for entry := range auditLogCh {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -146,21 +148,23 @@ func auditStats(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
-// apiAuditMiddleware logs all state-changing API requests (POST/PUT/PATCH/DELETE)
-// to the audit log. This acts as a catch-all so that no mutation goes unrecorded,
-// even if the handler itself forgets to call logAudit explicitly.
+// apiAuditMiddleware logs ALL API requests to the audit log with full detail.
+// Every request (GET, POST, PUT, PATCH, DELETE) is recorded so we can see
+// exactly what each user did: which page they visited, what they clicked,
+// what they launched, etc.
 func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Only log write operations
-		method := c.Request.Method
-		if method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE" {
+		// Skip health and system info endpoints to reduce noise
+		path := c.Request.URL.Path
+		if path == "/api/v1/system/info" || path == "/health" || path == "/metrics" {
 			c.Next()
 			return
 		}
-
-		// Skip health and system info endpoints
-		path := c.Request.URL.Path
-		if path == "/api/v1/system/info" {
+		// Skip audit and observability read endpoints to avoid self-referential log spam
+		if (path == "/api/v1/audit" || path == "/api/v1/audit-logs" ||
+			path == "/api/v1/audit/stats" || path == "/api/v1/audit-logs/stats" ||
+			path == "/api/v1/observability/logs" || path == "/api/v1/observability/overview" ||
+			path == "/api/v1/observability/settings") && c.Request.Method == "GET" {
 			c.Next()
 			return
 		}
@@ -168,16 +172,15 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 		// Process request
 		c.Next()
 
-		// Only log if the audit repo is available and response was successful (2xx)
+		// Only log if the audit repo is available
 		if deps.Repos.Audit == nil {
 			return
 		}
+
 		status := c.Writer.Status()
-		if status < 200 || status >= 300 {
-			return
-		}
 
 		// Derive action from HTTP method
+		method := c.Request.Method
 		action := methodToAction(method)
 
 		// Derive entity type from URL path
@@ -204,34 +207,66 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 				entry.EntityID = &id
 			}
 		} else if entityID := c.Param("name"); entityID != "" {
-			// For settings and other named resources
 			entry.EntityID = nil
 		}
 
-		// Fire-and-forget
-		go func() {
+		// Build detailed metadata for the audit entry
+		meta := map[string]interface{}{
+			"method":      method,
+			"path":        path,
+			"status_code": status,
+		}
+		if qs := c.Request.URL.RawQuery; qs != "" {
+			meta["query"] = qs
+		}
+		if userID != nil {
+			meta["user_id"] = userID.String()
+		}
+		meta["ip"] = c.ClientIP()
+		meta["user_agent"] = c.Request.UserAgent()
+
+		// For state-changing requests, include content metadata
+		if (method == "POST" || method == "PUT" || method == "PATCH") && status >= 200 && status < 300 {
+			if c.Request.ContentLength > 0 && c.Request.ContentLength < 10240 {
+				meta["content_type"] = c.ContentType()
+				meta["content_length"] = c.Request.ContentLength
+			}
+		}
+
+		metaJSON, _ := json.Marshal(meta)
+		entry.NewValues = metaJSON
+
+		// Send to bounded worker pool
+		select {
+		case auditLogCh <- entry:
+		default:
+			slog.Info("audit log channel full, writing synchronously")
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := deps.Repos.Audit.Create(ctx, entry); err != nil {
-				slog.Info("api audit middleware write failed", "error", err)
+			if auditRepo != nil {
+				if err := auditRepo.Create(ctx, entry); err != nil {
+					slog.Info("audit log write failed", "error", err)
+				}
 			}
-		}()
+		}
 	}
 }
 
 // methodToAction maps HTTP method to an audit action verb.
 func methodToAction(method string) string {
 	switch method {
+	case "GET":
+		return "view"
 	case "POST":
-		return "api_create"
+		return "create"
 	case "PUT":
-		return "api_update"
+		return "update"
 	case "PATCH":
-		return "api_patch"
+		return "patch"
 	case "DELETE":
-		return "api_delete"
+		return "delete"
 	default:
-		return "api_request"
+		return "request"
 	}
 }
 
@@ -284,8 +319,18 @@ func pathSegmentToType(segment string) string {
 		"users":             "user",
 		"credentials":       "credential",
 		"audit":             "audit",
+		"audit-logs":        "audit",
 		"storage":           "storage",
 		"ai":                "ai",
+		"observability":     "observability",
+		"organization":      "organization",
+		"workspaces":        "workspace",
+		"blueprints":        "blueprint",
+		"blueprint-groups":  "blueprint_group",
+		"s3-browser":        "s3",
+		"virtualization":    "virtualization",
+		"rbac":              "rbac",
+		"auth":              "auth",
 	}
 	if t, ok := mapping[segment]; ok {
 		return t

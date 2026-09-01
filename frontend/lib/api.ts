@@ -2650,6 +2650,19 @@ export interface AlertEntry {
   description: string;
 }
 
+export interface ObservabilitySettings {
+  otel_enabled: boolean;
+  otel_endpoint: string;
+  otel_service_name: string;
+  otel_sampling_rate: number;
+  otel_insecure: boolean;
+  syslog_enabled: boolean;
+  syslog_network: string;
+  syslog_address: string;
+  syslog_tag: string;
+  syslog_facility: string;
+}
+
 export const observability = {
   overview: () => fetchAPI<Record<string, unknown>>('/api/v1/observability/overview'),
   logs: (params?: Record<string, string>) => {
@@ -2670,6 +2683,14 @@ export const observability = {
     return fetchAPI<{ alerts: AlertEntry[]; total: number; summary: Record<string, unknown> }>(`/api/v1/observability/alerts${qs}`);
   },
   resolveAlert: (id: string) => fetchAPI<{ alert: AlertEntry; message: string }>(`/api/v1/observability/alerts/${id}/resolve`, { method: 'POST' }),
+  // Observability settings (log export)
+  getSettings: () => fetchAPI<ObservabilitySettings>('/api/v1/observability/settings'),
+  updateSettings: (data: Partial<ObservabilitySettings>) =>
+    fetchAPI<{ message: string }>('/api/v1/observability/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  testSyslog: (network: string, address: string) =>
+    fetchAPI<{ status: string; message: string }>('/api/v1/observability/settings/test-syslog', { method: 'POST', body: JSON.stringify({ network, address }) }),
+  testOTLP: (endpoint: string, insecure: boolean) =>
+    fetchAPI<{ status: string; message: string }>('/api/v1/observability/settings/test-otlp', { method: 'POST', body: JSON.stringify({ endpoint, insecure }) }),
 };
 
 // ── Cost (Phase 3.3) ─────────────────────────────────────────

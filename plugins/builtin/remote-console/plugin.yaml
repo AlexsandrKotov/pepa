@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: Plugin
+metadata:
+  name: remote-console
+  version: "1.0.0"
+  description: "SSH remote console — connect to hosts via SSH with a full web terminal. Supports LDAP credential passthrough, SSH key authentication, and per-host credential management."
+  author: "PEPA Team"
+  license: "Apache-2.0"
+  icon: "terminal"
+  categories:
+    - infrastructure
+    - security
+spec:
+  displayName: "Remote Console"
+  type: builtin
+  configSchema:
+    type: object
+    properties:
+      default_ssh_port:
+        type: integer
+        description: "Default SSH port for new hosts (default: 22)"
+        default: 22
+      connection_timeout:
+        type: integer
+        description: "SSH connection timeout in seconds"
+        default: 30
+      idle_timeout:
+        type: integer
+        description: "Disconnect idle sessions after N seconds (0 = no timeout)"
+        default: 3600
+      ldap_passthrough:
+        type: boolean
+        description: "Enable LDAP credential passthrough — use PEPA login credentials for SSH authentication"
+        default: true
+      max_sessions_per_user:
+        type: integer
+        description: "Maximum concurrent SSH sessions per user (0 = unlimited)"
+        default: 5
+  actions:
+    - name: list_hosts
+      description: "List configured SSH hosts"
+    - name: add_host
+      description: "Add a new SSH host"
+    - name: remove_host
+      description: "Remove an SSH host"
+    - name: test_connection
+      description: "Test SSH connectivity to a host"
+    - name: connect
+      description: "Open an SSH terminal session (WebSocket)"
+  healthCheck:
+    endpoint: "/health"
+    interval: "60s"
