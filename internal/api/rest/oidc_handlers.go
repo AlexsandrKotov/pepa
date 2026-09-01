@@ -151,10 +151,8 @@ func oidcCallbackHandler(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 		}
-		if len(roles) == 0 {
-			roles = []string{"user"}
-		}
-
+		// No hardcoded fallback roles — only explicit role_assignments grant access.
+		
 		// Generate JWT token
 		tokenExpiry := deps.Config.Auth.TokenExpiry
 		if tokenExpiry == 0 {
@@ -232,6 +230,9 @@ func findOrCreateOIDCUser(ctx context.Context, deps Dependencies, userInfo *auth
 	if err != nil {
 		return nil, err
 	}
+
+	// Auto-assign default viewer role so new users have minimal access.
+	assignDefaultViewerRole(ctx, deps, userID)
 
 	// Return created user
 	createdUser, err := deps.Repos.Auth.GetUserByEmail(ctx, userInfo.Email)

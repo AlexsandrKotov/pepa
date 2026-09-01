@@ -250,9 +250,7 @@ func loginHandler(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 		}
-		if len(roles) == 0 {
-			roles = []string{"viewer"}
-		}
+		// No hardcoded fallback — only explicit role_assignments grant access.
 
 		// Generate JWT
 		tokenExpiry := deps.Config.Auth.SessionDuration
@@ -345,9 +343,7 @@ func refreshTokenHandler(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 		}
-		if len(roles) == 0 {
-			roles = []string{"viewer"}
-		}
+		// No hardcoded fallback — only explicit role_assignments grant access.
 
 		tokenExpiry := deps.Config.Auth.SessionDuration
 		if tokenExpiry == 0 {
@@ -673,6 +669,9 @@ func createUserHandler(deps Dependencies) gin.HandlerFunc {
 					_, _ = deps.RBAC.AssignRole(ctx, tenantID, userID, roleID, auth.GetUserID(c))
 				}
 			}
+		} else {
+			// No roles specified: auto-assign default viewer role
+			assignDefaultViewerRole(ctx, deps, userID)
 		}
 
 		logAudit(deps, c, "create", "user", userID.String(), nil, gin.H{"email": email, "name": req.Name})
@@ -1344,4 +1343,26 @@ func SeedBootstrapToken(deps Dependencies) (string, error) {
 	}
 
 	return rawToken, nil
+}
+
+// assignDefaultViewerRole assigns the viewer role in the default workspace to
+// a newly created user. This ensures new users have minimal read-only access
+// until an administrator grants additional permissions.
+func assignDefaultViewerRole(ctx context.Context, deps Dependencies, userID uuid.UUID) {
+	if deps.RBAC == nil {
+		return
+	}
+	tenantID := uuid.MustParse(database.DefaultTenantID)
+	var viewerRoleID uuid.UUID
+	err := deps.DB.Pool.QueryRow(ctx,
+		`SELECT id FROM roles WHERE tenant_id = $1 AND slug = 'viewer'`,
+		tenantID,
+	).Scan(&viewerRoleID)
+	if err != nil {
+		slog.Info("assignDefaultViewerRole: viewer role not found, skipping", "error", err)
+		return
+	}
+	if _, err := deps.RBAC.AssignRole(ctx, tenantID, userID, viewerRoleID, nil); err != nil {
+		slog.Info("assignDefaultViewerRole: failed to assign viewer role", "user_id", userID, "error", err)
+	}
 }

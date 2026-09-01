@@ -137,10 +137,8 @@ func githubCallbackHandler(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 		}
-		if len(roles) == 0 {
-			roles = []string{"user"}
-		}
-
+		// No hardcoded fallback roles — only explicit role_assignments grant access.
+		
 		// Generate JWT
 		tokenExpiry := deps.Config.Auth.TokenExpiry
 		if tokenExpiry == 0 {
@@ -212,6 +210,9 @@ func findOrCreateGitHubUser(ctx context.Context, deps Dependencies, info *auth.G
 	if err != nil {
 		return nil, err
 	}
+
+	// Auto-assign default viewer role so new users have minimal access.
+	assignDefaultViewerRole(ctx, deps, userID)
 
 	slog.Info("created new user via GitHub", "user_id", createdUser.ID, "email", createdUser.Email)
 	return createdUser, nil

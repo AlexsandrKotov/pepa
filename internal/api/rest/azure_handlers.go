@@ -134,10 +134,8 @@ func azureCallbackHandler(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 		}
-		if len(roles) == 0 {
-			roles = []string{"user"}
-		}
-
+		// No hardcoded fallback roles — only explicit role_assignments grant access.
+		
 		// Generate JWT
 		tokenExpiry := deps.Config.Auth.TokenExpiry
 		if tokenExpiry == 0 {
@@ -218,6 +216,9 @@ func findOrCreateAzureUser(ctx context.Context, deps Dependencies, info *auth.Az
 	if err != nil {
 		return nil, err
 	}
+
+	// Auto-assign default viewer role so new users have minimal access.
+	assignDefaultViewerRole(ctx, deps, userID)
 
 	slog.Info("created new user via Azure AD", "user_id", createdUser.ID, "email", createdUser.Email)
 	return createdUser, nil

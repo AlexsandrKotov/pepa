@@ -520,12 +520,9 @@ func switchWorkspace(deps Dependencies) gin.HandlerFunc {
 				canCreate, _ := deps.RBAC.CheckPermission(c.Request.Context(), id, *userID, "workspace", "create")
 				if canCreate {
 					roles = []string{"admin"}
-				} else {
-					roles = []string{"viewer"}
 				}
-			} else {
-				roles = []string{"viewer"}
 			}
+			// No fallback — users without explicit role_assignments get empty roles.
 		}
 
 		email := auth.GetEmail(c)
