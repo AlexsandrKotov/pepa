@@ -20,6 +20,9 @@ export default function DockerServicesPage() {
   const [logsLoading, setLogsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [deployOutput, setDeployOutput] = useState<string[]>([]);
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deployComplete, setDeployComplete] = useState(false);
 
   // Discovered containers from Docker hosts
   const [discoveredContainers, setDiscoveredContainers] = useState<{ hostName: string; containers: DiscoveredDockerContainer[] }[]>([]);
@@ -111,22 +114,74 @@ export default function DockerServicesPage() {
       setError('Compose YAML is required');
       return;
     }
-    try {
-      const payload = {
-        name: form.name.trim(),
-        compose_yaml: form.source === 'yaml' ? form.compose_yaml : undefined,
-        folder_path: form.source === 'folder' ? form.folder_path.trim() : undefined,
-        env_vars: form.env_vars,
-      };
-      if (deployTarget === 'local') {
-        await dockerServices.deployLocal(payload);
-      } else {
-        await dockerServices.create({ ...payload, docker_host_id: form.docker_host_id });
-      }
+
+    const payload = {
+      name: form.name.trim(),
+      compose_yaml: form.source === 'yaml' ? form.compose_yaml : undefined,
+      folder_path: form.source === 'folder' ? form.folder_path.trim() : undefined,
+      env_vars: form.env_vars,
+    };
+
+    // For local deployment, use streaming endpoint
+    if (deployTarget === 'local') {
       setShowForm(false);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Deploy failed');
+      setIsDeploying(true);
+      setDeployOutput([]);
+      setDeployComplete(false);
+
+      try {
+        const response = await fetch('/api/v1/docker-services/deploy-local-stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Deploy failed');
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (!reader) throw new Error('No response body');
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = decoder.decode(value);
+          const lines = text.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              setDeployOutput(prev => [...prev, data]);
+            } else if (line.startsWith('event: error')) {
+              // Next data line will have the error
+            } else if (line.startsWith('event: complete')) {
+              setDeployComplete(true);
+              setIsDeploying(false);
+            }
+          }
+        }
+
+        setIsDeploying(false);
+        setDeployComplete(true);
+        load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Deploy failed');
+        setIsDeploying(false);
+      }
+    } else {
+      // For remote hosts, use the non-streaming endpoint
+      try {
+        await dockerServices.create({ ...payload, docker_host_id: form.docker_host_id });
+        setShowForm(false);
+        load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Deploy failed');
+      }
     }
   };
 
@@ -619,6 +674,57 @@ export default function DockerServicesPage() {
                 </pre>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deploy Output Modal */}
+      {(isDeploying || deployComplete) && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-4xl mx-4 max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
+              <div className="flex items-center gap-3">
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Deploying — {form.name}
+                </h2>
+                {isDeploying && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-[var(--accent)]">
+                    <span className="w-2 h-2 bg-[var(--accent)] rounded-full animate-pulse" />
+                    In progress...
+                  </span>
+                )}
+                {deployComplete && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-green-500">
+                    <span className="w-2 h-2 bg-green-500 rounded-full" />
+                    Complete
+                  </span>
+                )}
+              </div>
+              {deployComplete && (
+                <button onClick={() => { setDeployComplete(false); setDeployOutput([]); }} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
+              )}
+            </div>
+            <div className="flex-1 overflow-auto p-5 bg-[var(--bg)]">
+              <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed text-[var(--text-secondary)]">
+                {deployOutput.length === 0 ? (
+                  <span className="text-[var(--text-tertiary)]">Starting deployment...</span>
+                ) : (
+                  deployOutput.map((line, i) => (
+                    <div key={i} className={line.includes('error') || line.includes('Error') ? 'text-red-400' : line.includes('warning') ? 'text-yellow-400' : ''}>
+                      {line}
+                    </div>
+                  ))
+                )}
+              </pre>
+            </div>
+            {deployComplete && (
+              <div className="flex justify-end px-5 py-3 border-t border-[var(--border)] shrink-0">
+                <button onClick={() => { setDeployComplete(false); setDeployOutput([]); load(); }} className="btn btn-primary">
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

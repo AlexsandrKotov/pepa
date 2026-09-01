@@ -65,6 +65,7 @@ func registerDockerServiceRoutes(r *gin.RouterGroup, deps Dependencies) {
 		dockerServices.GET("", listDockerServices(deps))
 		dockerServices.POST("", createDockerService(deps))
 		dockerServices.POST("/deploy-local", deployLocalDockerService(deps))
+		dockerServices.POST("/deploy-local-stream", deployLocalDockerServiceStream(deps))
 		dockerServices.GET("/:id", getDockerService(deps))
 		dockerServices.POST("/:id/refresh", refreshDockerService(deps))
 		dockerServices.POST("/:id/restart", restartDockerService(deps))
@@ -310,6 +311,115 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 
 		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local", "folder_path": svc.FolderPath})
 		c.JSON(http.StatusCreated, svc)
+	}
+}
+
+// deployLocalDockerServiceStream handles streaming deployment with SSE output.
+func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DockerHost == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "docker service repository not available"})
+			return
+		}
+
+		var req struct {
+			Name        string            `json:"name" binding:"required"`
+			ComposeYaml string            `json:"compose_yaml"`
+			FolderPath  string            `json:"folder_path"`
+			EnvVars     map[string]string `json:"env_vars"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if req.ComposeYaml == "" && req.FolderPath == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "either compose_yaml or folder_path is required"})
+			return
+		}
+
+		if req.FolderPath != "" {
+			if _, resolveErr := resolveHostPath(req.FolderPath); resolveErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
+				return
+			}
+		}
+
+		envVars := req.EnvVars
+		if envVars == nil {
+			envVars = make(map[string]string)
+		}
+		envJSON, _ := json.Marshal(envVars)
+
+		svc := &repository.DockerService{
+			TenantID:     auth.GetTenantID(c),
+			DockerHostID: nil,
+			Name:         req.Name,
+			ComposeYaml:  req.ComposeYaml,
+			FolderPath:   req.FolderPath,
+			EnvVars:      envJSON,
+			Status:       "deploying",
+			Containers:   json.RawMessage("[]"),
+		}
+
+		if err := deps.Repos.DockerHost.CreateService(c.Request.Context(), svc); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		// Set up SSE
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+
+		client := dockerpkg.NewClient(dockerpkg.HostConfig{
+			HostType:    "local",
+			HostAddress: "unix:///var/run/docker.sock",
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
+		defer cancel()
+
+		outputChan := make(chan string, 100)
+		var deployErr error
+
+		// Start deployment in a goroutine
+		go func() {
+			if svc.FolderPath != "" {
+				deployErr = client.ComposeUpFromFolderStream(ctx, svc.Name, svc.FolderPath, envVars, outputChan)
+			} else {
+				// For YAML-based deployment, use the non-streaming version for now
+				deployErr = client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars)
+				close(outputChan)
+			}
+		}()
+
+		// Stream output to client
+		for line := range outputChan {
+			// Send SSE event
+			c.Writer.WriteString("data: " + line + "\n\n")
+			c.Writer.Flush()
+		}
+
+		// Send completion event
+		if deployErr != nil {
+			svc.Status = "error"
+			_ = deps.Repos.DockerHost.UpdateService(context.Background(), svc)
+			c.Writer.WriteString("event: error\ndata: " + deployErr.Error() + "\n\n")
+		} else {
+			containers, err := client.ComposePs(ctx, svc.Name)
+			if err == nil {
+				cJSON, _ := json.Marshal(containers)
+				svc.Containers = cJSON
+			}
+			svc.Status = "running"
+			_ = deps.Repos.DockerHost.UpdateService(context.Background(), svc)
+			c.Writer.WriteString("event: complete\ndata: Deployment successful\n\n")
+		}
+		c.Writer.Flush()
+
+		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local", "folder_path": svc.FolderPath})
 	}
 }
 

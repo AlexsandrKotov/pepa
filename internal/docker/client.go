@@ -4,6 +4,7 @@
 package docker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -243,6 +244,86 @@ func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPat
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker compose up (folder): %s: %w", stderr.String(), err)
+	}
+	return nil
+}
+
+// ComposeUpFromFolderStream runs docker compose up from a folder with streaming output.
+// The outputChan receives lines of output as they are produced.
+// Returns an error if the command fails.
+func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, folderPath string, envVars map[string]string, outputChan chan<- string) error {
+	defer close(outputChan)
+
+	// Validate path is absolute to prevent accidental relative path usage
+	if !filepath.IsAbs(folderPath) {
+		return fmt.Errorf("folder_path must be an absolute path, got: %s", folderPath)
+	}
+
+	// Resolve the actual directory to use
+	workDir := folderPath
+	if info, err := os.Stat(folderPath); err != nil || !info.IsDir() {
+		translated := translateToHostHome(folderPath)
+		if translated != "" {
+			if info, err := os.Stat(translated); err == nil && info.IsDir() {
+				workDir = translated
+			}
+		}
+		if workDir == folderPath {
+			return fmt.Errorf("folder not accessible: %s: %w", folderPath, err)
+		}
+	}
+
+	composePath := filepath.Join(workDir, "docker-compose.yml")
+	if _, err := os.Stat(composePath); os.IsNotExist(err) {
+		composePath = filepath.Join(workDir, "docker-compose.yaml")
+		if _, err := os.Stat(composePath); os.IsNotExist(err) {
+			return fmt.Errorf("no docker-compose.yml or docker-compose.yaml found in %s", folderPath)
+		}
+	}
+
+	// Use --progress plain to get line-by-line output
+	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "--progress", "plain"}
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // G204: docker compose with validated args
+	cmd.Dir = workDir
+	cmd.Env = c.env()
+	for k, v := range envVars {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+
+	// Capture both stdout and stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start docker compose: %w", err)
+	}
+
+	// Stream output from both stdout and stderr
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			outputChan <- scanner.Text()
+		}
+	}()
+
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			outputChan <- scanner.Text()
+		}
+	}()
+
+	<-done
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("docker compose up failed: %w", err)
 	}
 	return nil
 }
