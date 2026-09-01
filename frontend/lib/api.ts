@@ -1754,6 +1754,24 @@ export const jira = {
   // Issue Links
   getIssueLinks: (id: string) =>
     fetchAPI<{ links: JiraIssueLink[] }>(`/api/v1/jira/issues/${id}/links`),
+  // Create in remote Jira (via plugin)
+  createInJira: (data: {
+    project_key: string;
+    summary: string;
+    issue_type: string;
+    description?: string;
+    priority?: string;
+    assignee?: string;
+    labels?: string[];
+    parent_key?: string;
+    epic_link?: string;
+    linked_issue_key?: string;
+    link_type?: string;
+  }) =>
+    fetchAPI<{ issue_key: string; summary: string; status: string; issue: JiraIssue }>('/api/v1/jira/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // ── Connections ─────────────────────────────────────────────

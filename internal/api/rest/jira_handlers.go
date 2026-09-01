@@ -212,6 +212,166 @@ func createJiraIssue(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// createInJira creates an issue directly in remote Jira via the plugin,
+// then caches it locally. Supports Task, Story, Bug, Epic, Sub-task,
+// with optional epic link and issue linking.
+func createInJira(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.ProviderRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available"})
+			return
+		}
+
+		var req struct {
+			ProjectKey     string   `json:"project_key" binding:"required"`
+			Summary        string   `json:"summary" binding:"required"`
+			IssueType      string   `json:"issue_type" binding:"required"` // Task, Story, Bug, Epic, Sub-task
+			Description    string   `json:"description"`
+			Priority       string   `json:"priority"`
+			Assignee       string   `json:"assignee"`
+			Labels         []string `json:"labels"`
+			ParentKey      string   `json:"parent_key"`       // for Sub-task
+			EpicLink       string   `json:"epic_link"`        // epic issue key to link to
+			LinkedIssueKey string   `json:"linked_issue_key"` // another issue to link/relate
+			LinkType       string   `json:"link_type"`        // "Blocks", "Clones", "Relates", etc.
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, c.Request.Context())
+
+		var createdKey string
+		var createdSummary string
+
+		if req.IssueType == "Sub-task" {
+			// Use create_subtask action
+			if req.ParentKey == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "parent_key is required for Sub-task"})
+				return
+			}
+			params, _ := json.Marshal(map[string]interface{}{
+				"parent_key":  req.ParentKey,
+				"summary":     req.Summary,
+				"description": req.Description,
+				"assignee":    req.Assignee,
+				"priority":    req.Priority,
+			})
+			resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "jira", "create_subtask", params, mergedConfig)
+			if err != nil {
+				respondInternalError(c, err)
+				return
+			}
+			if !resp.Success {
+				c.JSON(http.StatusBadGateway, gin.H{"error": resp.Error})
+				return
+			}
+			var output map[string]interface{}
+			if err := json.Unmarshal(resp.Output, &output); err == nil {
+				if k, ok := output["key"].(string); ok {
+					createdKey = k
+				}
+				if s, ok := output["summary"].(string); ok {
+					createdSummary = s
+				}
+			}
+		} else {
+			// Use create_issue action for Task, Story, Bug, Epic
+			params, _ := json.Marshal(map[string]interface{}{
+				"project_key": req.ProjectKey,
+				"summary":     req.Summary,
+				"description": req.Description,
+				"type":        req.IssueType,
+				"priority":    req.Priority,
+				"assignee":    req.Assignee,
+				"labels":      req.Labels,
+			})
+			resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "jira", "create_issue", params, mergedConfig)
+			if err != nil {
+				respondInternalError(c, err)
+				return
+			}
+			if !resp.Success {
+				c.JSON(http.StatusBadGateway, gin.H{"error": resp.Error})
+				return
+			}
+			var output map[string]interface{}
+			if err := json.Unmarshal(resp.Output, &output); err == nil {
+				if k, ok := output["key"].(string); ok {
+					createdKey = k
+				}
+				if s, ok := output["summary"].(string); ok {
+					createdSummary = s
+				}
+			}
+		}
+
+		if createdKey == "" {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "Jira did not return an issue key"})
+			return
+		}
+
+		// Link to epic if specified
+		if req.EpicLink != "" && req.IssueType != "Epic" {
+			linkParams, _ := json.Marshal(map[string]interface{}{
+				"inward_key":  createdKey,
+				"outward_key": req.EpicLink,
+				"link_type":   "Epic-Child Link",
+			})
+			_, _ = deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "jira", "link_issues", linkParams, mergedConfig)
+		}
+
+		// Link to related issue if specified
+		if req.LinkedIssueKey != "" {
+			linkType := req.LinkType
+			if linkType == "" {
+				linkType = "Relates"
+			}
+			linkParams, _ := json.Marshal(map[string]interface{}{
+				"inward_key":  createdKey,
+				"outward_key": req.LinkedIssueKey,
+				"link_type":   linkType,
+			})
+			_, _ = deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "jira", "link_issues", linkParams, mergedConfig)
+		}
+
+		// Cache locally
+		tenantID := auth.GetTenantID(c)
+		issue := &repository.JiraIssue{
+			TenantID:   tenantID,
+			IssueKey:   createdKey,
+			ProjectKey: req.ProjectKey,
+			Summary:    createdSummary,
+			Description: req.Description,
+			IssueType:  req.IssueType,
+			Priority:   req.Priority,
+			Assignee:   req.Assignee,
+			Labels:     req.Labels,
+			Status:     "Open",
+		}
+		if issue.Labels == nil {
+			issue.Labels = []string{}
+		}
+		if req.IssueType == "Sub-task" {
+			issue.ParentKey = req.ParentKey
+		}
+		_ = deps.Repos.Jira.Upsert(c.Request.Context(), issue)
+
+		logAudit(deps, c, "create", "jira_issue_remote", issue.ID.String(), nil, gin.H{
+			"issue_key":  createdKey,
+			"issue_type": req.IssueType,
+			"project":    req.ProjectKey,
+		})
+		c.JSON(http.StatusCreated, gin.H{
+			"issue_key": createdKey,
+			"summary":   createdSummary,
+			"status":    "created_in_jira",
+			"issue":     issue,
+		})
+	}
+}
+
 func updateJiraIssue(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Jira == nil {

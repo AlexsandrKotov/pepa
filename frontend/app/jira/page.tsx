@@ -85,7 +85,13 @@ export default function JiraPage() {
 
   // Create issue
   const [createOpen, setCreateOpen] = useState(false);
-  const [newIssue, setNewIssue] = useState({ summary: '', project_key: '', issue_type: 'Task', description: '', priority: 'Medium', assignee: '', labels: '' as string });
+  const [createDropdownOpen, setCreateDropdownOpen] = useState(false);
+  const [newIssue, setNewIssue] = useState({
+    summary: '', project_key: '', issue_type: 'Task', description: '', priority: 'Medium',
+    assignee: '', labels: '' as string,
+    parent_key: '', epic_link: '', linked_issue_key: '', link_type: 'Relates',
+  });
+  const [creating, setCreating] = useState(false);
 
   // Edit issue
   const [editOpen, setEditOpen] = useState(false);
@@ -98,12 +104,13 @@ export default function JiraPage() {
   const [deleteRuleConfirm, setDeleteRuleConfirm] = useState<string | null>(null);
 
   // Escape key closes modals/panels
-  const anyModalOpen = selectedIssue !== null || createOpen || editOpen || ruleModalOpen || deleteRuleConfirm !== null;
+  const anyModalOpen = selectedIssue !== null || createOpen || createDropdownOpen || editOpen || ruleModalOpen || deleteRuleConfirm !== null;
   useEscapeKey(() => {
     if (deleteRuleConfirm) setDeleteRuleConfirm(null);
     else if (ruleModalOpen) { setRuleModalOpen(false); setEditingRule(null); }
     else if (editOpen) { setEditOpen(false); setEditIssue(null); }
     else if (createOpen) setCreateOpen(false);
+    else if (createDropdownOpen) setCreateDropdownOpen(false);
     else if (selectedIssue) setSelectedIssue(null);
   }, anyModalOpen);
 
@@ -223,23 +230,44 @@ export default function JiraPage() {
   };
 
   const handleCreateIssue = async () => {
+    if (!newIssue.summary || !newIssue.project_key) return;
+    setCreating(true);
     try {
-      await jira.create({
+      const result = await jira.createInJira({
         summary: newIssue.summary,
         project_key: newIssue.project_key,
         issue_type: newIssue.issue_type,
-        description: newIssue.description,
-        priority: newIssue.priority,
-        assignee: newIssue.assignee,
-        labels: newIssue.labels ? newIssue.labels.split(',').map(l => l.trim()) : [],
+        description: newIssue.description || undefined,
+        priority: newIssue.priority || undefined,
+        assignee: newIssue.assignee || undefined,
+        labels: newIssue.labels ? newIssue.labels.split(',').map(l => l.trim()).filter(Boolean) : undefined,
+        parent_key: newIssue.issue_type === 'Sub-task' ? newIssue.parent_key : undefined,
+        epic_link: newIssue.epic_link || undefined,
+        linked_issue_key: newIssue.linked_issue_key || undefined,
+        link_type: newIssue.linked_issue_key ? newIssue.link_type : undefined,
       });
-      setToast({ message: 'Issue created', type: 'success' });
+      setToast({ message: `${result.issue_key} created in Jira`, type: 'success' });
       setCreateOpen(false);
-      setNewIssue({ summary: '', project_key: '', issue_type: 'Task', description: '', priority: 'Medium', assignee: '', labels: '' });
+      setCreateDropdownOpen(false);
+      resetCreateForm();
       await refresh();
     } catch {
-      setToast({ message: 'Failed to create issue', type: 'error' });
+      setToast({ message: 'Failed to create in Jira', type: 'error' });
     }
+    setCreating(false);
+  };
+
+  const resetCreateForm = () => {
+    setNewIssue({
+      summary: '', project_key: '', issue_type: 'Task', description: '', priority: 'Medium',
+      assignee: '', labels: '', parent_key: '', epic_link: '', linked_issue_key: '', link_type: 'Relates',
+    });
+  };
+
+  const openCreateModal = (type: string) => {
+    setNewIssue(n => ({ ...n, issue_type: type }));
+    setCreateDropdownOpen(false);
+    setCreateOpen(true);
   };
 
   const openEditModal = (issue: JiraIssue) => {
@@ -441,9 +469,32 @@ export default function JiraPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setCreateOpen(true)} className="px-3 py-1.5 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-lg hover:bg-[var(--bg)]">
-            + Create Issue
-          </button>
+          <div className="relative">
+            <button onClick={() => setCreateDropdownOpen(!createDropdownOpen)} className="px-3 py-1.5 bg-[var(--surface)] border border-[var(--border)] text-[var(--text-primary)] text-sm rounded-lg hover:bg-[var(--bg)] flex items-center gap-1.5">
+              + Create
+              <svg className="w-3.5 h-3.5 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            {createDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setCreateDropdownOpen(false)} />
+                <div className="absolute right-0 mt-1 w-48 bg-[var(--surface)] border border-[var(--border)] rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                  {[
+                    { type: 'Task', icon: '\u2705', label: 'Task' },
+                    { type: 'Story', icon: '\u{1F4D6}', label: 'Story' },
+                    { type: 'Bug', icon: '\u{1F41B}', label: 'Bug' },
+                    { type: 'Epic', icon: '\u{1F3D4}', label: 'Epic' },
+                    { type: 'Sub-task', icon: '\u{1F517}', label: 'Sub-task' },
+                  ].map(item => (
+                    <button key={item.type} onClick={() => openCreateModal(item.type)}
+                      className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg)] flex items-center gap-2 transition-colors">
+                      <span className="text-sm">{item.icon}</span>
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={handleSync} disabled={syncing} className="px-3 py-1.5 bg-[var(--accent)] text-white text-sm rounded-lg hover:opacity-90 disabled:opacity-50 transition-opacity">
             {syncing ? 'Syncing...' : 'Sync from Jira'}
           </button>
@@ -896,15 +947,28 @@ export default function JiraPage() {
         </div>
       )}
 
-      {/* ── Create Issue Modal ──────────────────────────── */}
+      {/* ── Create Modal ────────────────────────────────── */}
       {createOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setCreateOpen(false)} />
-          <div className="relative bg-[var(--surface)] rounded-xl shadow-2xl border border-[var(--border)] w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-[var(--border-light)]">
-              <h3 className="text-[15px] font-semibold text-[var(--text-primary)]">Create Jira Issue</h3>
+          <div className="relative bg-[var(--surface)] rounded-xl shadow-2xl border border-[var(--border)] w-full max-w-lg mx-4 overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-[var(--border-light)] flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-base">{typeIcons[newIssue.issue_type] || '\u{1F4C4}'}</span>
+                <h3 className="text-[15px] font-semibold text-[var(--text-primary)]">Create {newIssue.issue_type}</h3>
+              </div>
+              <div className="flex items-center gap-1">
+                {['Task', 'Story', 'Bug', 'Epic', 'Sub-task'].map(t => (
+                  <button key={t} onClick={() => setNewIssue(n => ({ ...n, issue_type: t }))}
+                    className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${newIssue.issue_type === t ? 'bg-[var(--accent)] text-white border-[var(--accent)]' : 'bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border)] hover:bg-[var(--bg)]'}`}
+                    title={t}>
+                    {typeIcons[t]} {t}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto">
+              {/* Project */}
               <div>
                 <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Project Key *</label>
                 <select value={newIssue.project_key} onChange={e => setNewIssue(n => ({ ...n, project_key: e.target.value }))}
@@ -913,29 +977,19 @@ export default function JiraPage() {
                   {projects.map(p => <option key={p.key} value={p.key}>{p.key}</option>)}
                 </select>
               </div>
+              {/* Summary */}
               <div>
                 <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Summary *</label>
-                <input value={newIssue.summary} onChange={e => setNewIssue(n => ({ ...n, summary: e.target.value }))} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)]" placeholder="Issue summary" />
+                <input value={newIssue.summary} onChange={e => setNewIssue(n => ({ ...n, summary: e.target.value }))} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)]" placeholder={`${newIssue.issue_type} summary`} />
               </div>
+              {/* Priority + Assignee */}
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Type</label>
-                  <select value={newIssue.issue_type} onChange={e => setNewIssue(n => ({ ...n, issue_type: e.target.value }))} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] bg-[var(--surface)]">
-                    {['Task', 'Story', 'Bug', 'Epic', 'Sub-task', 'Spike'].map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
                 <div>
                   <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Priority</label>
                   <select value={newIssue.priority} onChange={e => setNewIssue(n => ({ ...n, priority: e.target.value }))} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] bg-[var(--surface)]">
                     {['Critical', 'High', 'Medium', 'Low', 'Lowest'].map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Description</label>
-                <textarea value={newIssue.description} onChange={e => setNewIssue(n => ({ ...n, description: e.target.value }))} rows={3} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] resize-none" placeholder="Issue description" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Assignee</label>
                   <select value={newIssue.assignee} onChange={e => setNewIssue(n => ({ ...n, assignee: e.target.value }))}
@@ -944,15 +998,71 @@ export default function JiraPage() {
                     {assignees.map(a => <option key={a.jira_account} value={a.jira_account}>{a.display_name}</option>)}
                   </select>
                 </div>
+              </div>
+              {/* Description */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Description</label>
+                <textarea value={newIssue.description} onChange={e => setNewIssue(n => ({ ...n, description: e.target.value }))} rows={3} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] resize-none" placeholder="Describe the issue..." />
+              </div>
+              {/* Labels */}
+              <div>
+                <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Labels (comma-separated)</label>
+                <input value={newIssue.labels} onChange={e => setNewIssue(n => ({ ...n, labels: e.target.value }))} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)]" placeholder="frontend, backend" />
+              </div>
+
+              {/* ── Sub-task: Parent Key ── */}
+              {newIssue.issue_type === 'Sub-task' && (
                 <div>
-                  <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Labels (comma-separated)</label>
-                  <input value={newIssue.labels} onChange={e => setNewIssue(n => ({ ...n, labels: e.target.value }))} className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)]" placeholder="frontend, bug" />
+                  <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Parent Issue Key *</label>
+                  <input value={newIssue.parent_key} onChange={e => setNewIssue(n => ({ ...n, parent_key: e.target.value }))}
+                    className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] font-mono"
+                    placeholder="e.g. PROJ-123" />
+                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">The parent issue this sub-task belongs to</p>
+                </div>
+              )}
+
+              {/* ── Epic/Story/Task/Bug: Link to Epic ── */}
+              {newIssue.issue_type !== 'Sub-task' && newIssue.issue_type !== 'Epic' && (
+                <div>
+                  <label className="text-xs text-[var(--text-tertiary)] mb-1 block">Link to Epic (optional)</label>
+                  <input value={newIssue.epic_link} onChange={e => setNewIssue(n => ({ ...n, epic_link: e.target.value }))}
+                    className="w-full text-sm border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] font-mono"
+                    placeholder="e.g. PROJ-100" />
+                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Epic issue key to associate this {newIssue.issue_type.toLowerCase()} with</p>
+                </div>
+              )}
+
+              {/* ── Link to another issue ── */}
+              <div className="border-t border-[var(--border-light)] pt-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <svg className="w-3.5 h-3.5 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758 4.829a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                  <span className="text-xs font-medium text-[var(--text-secondary)]">Link to another issue</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-[var(--text-tertiary)] mb-1 block">Issue Key</label>
+                    <input value={newIssue.linked_issue_key} onChange={e => setNewIssue(n => ({ ...n, linked_issue_key: e.target.value }))}
+                      className="w-full text-xs border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] font-mono"
+                      placeholder="e.g. PROJ-456" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[var(--text-tertiary)] mb-1 block">Link Type</label>
+                    <select value={newIssue.link_type} onChange={e => setNewIssue(n => ({ ...n, link_type: e.target.value }))}
+                      className="w-full text-xs border border-[var(--border)] rounded-lg px-3 py-2 outline-none focus:border-[var(--accent)] bg-[var(--surface)]">
+                      <option value="Relates">Relates to</option>
+                      <option value="Blocks">Blocks</option>
+                      <option value="Clones">Clones</option>
+                      <option value="Duplicate">Duplicate of</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 px-6 py-3 bg-[var(--bg)] border-t border-[var(--border-light)]">
-              <button onClick={() => setCreateOpen(false)} className="btn btn-secondary flex-1 justify-center">Cancel</button>
-              <button onClick={handleCreateIssue} disabled={!newIssue.summary || !newIssue.project_key} className="btn btn-primary flex-1 justify-center">Create Issue</button>
+            <div className="flex items-center gap-2 px-6 py-3 bg-[var(--bg)] border-t border-[var(--border-light)] shrink-0">
+              <button onClick={() => { setCreateOpen(false); resetCreateForm(); }} className="btn btn-secondary flex-1 justify-center">Cancel</button>
+              <button onClick={handleCreateIssue} disabled={!newIssue.summary || !newIssue.project_key || creating || (newIssue.issue_type === 'Sub-task' && !newIssue.parent_key)} className="btn btn-primary flex-1 justify-center">
+                {creating ? 'Creating...' : `Create ${newIssue.issue_type}`}
+              </button>
             </div>
           </div>
         </div>
