@@ -153,7 +153,7 @@ func googleCallbackHandler(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 		// No hardcoded fallback roles — only explicit role_assignments grant access.
-		
+
 		// Generate JWT
 		tokenExpiry := deps.Config.Auth.TokenExpiry
 		if tokenExpiry == 0 {

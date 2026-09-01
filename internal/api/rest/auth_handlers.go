@@ -327,21 +327,24 @@ func refreshTokenHandler(deps Dependencies) gin.HandlerFunc {
 		orgID := auth.GetOrgID(c)
 
 		// Re-fetch roles from the database so role changes apply on refresh.
-		roles := auth.GetRoles(c)
+		// Always trust the DB result (even if empty) to ensure revocations take effect.
+		var roles []string
 		if deps.RBAC != nil {
 			if assignments, err := deps.RBAC.GetUserRoles(ctx, tenantID, *userID); err == nil {
-				fresh := make([]string, 0, len(assignments))
+				roles = make([]string, 0, len(assignments))
 				for _, a := range assignments {
 					slug := a.RoleSlug
 					if slug == "" {
 						slug = a.RoleName
 					}
-					fresh = append(fresh, slug)
+					roles = append(roles, slug)
 				}
-				if len(fresh) > 0 {
-					roles = fresh
-				}
+			} else {
+				// DB error: fall back to JWT roles rather than denying access
+				roles = auth.GetRoles(c)
 			}
+		} else {
+			roles = auth.GetRoles(c)
 		}
 		// No hardcoded fallback — only explicit role_assignments grant access.
 
