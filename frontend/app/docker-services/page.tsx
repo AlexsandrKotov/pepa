@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { dockerHosts, dockerServices, type DockerHost, type DockerService, type DiscoveredDockerContainer } from '@/lib/api';
+import { dockerHosts, dockerServices, getBase, authHeaders, type DockerHost, type DockerService, type DiscoveredDockerContainer } from '@/lib/api';
 
 export default function DockerServicesPage() {
   const [services, setServices] = useState<DockerService[]>([]);
@@ -130,10 +130,11 @@ export default function DockerServicesPage() {
       setDeployComplete(false);
 
       try {
-        const response = await fetch('/api/v1/docker-services/deploy-local-stream', {
+        const response = await fetch(`${getBase()}/api/v1/docker-services/deploy-local-stream`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify(payload),
+          credentials: 'include',
         });
 
         if (!response.ok) {
