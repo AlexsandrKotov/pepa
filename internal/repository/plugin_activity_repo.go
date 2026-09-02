@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -25,19 +26,19 @@ type SSHCommandLog struct {
 
 // PluginActionLog represents a plugin action (VM start/stop/create/delete etc.).
 type PluginActionLog struct {
-	ID           uuid.UUID  `json:"id" db:"id"`
-	TenantID     uuid.UUID  `json:"tenant_id" db:"tenant_id"`
-	UserID       *uuid.UUID `json:"user_id,omitempty" db:"user_id"`
-	PluginName   string     `json:"plugin_name" db:"plugin_name"`
-	Action       string     `json:"action" db:"action"`
-	EntityType   string     `json:"entity_type" db:"entity_type"`
-	EntityID     string     `json:"entity_id" db:"entity_id"`
-	EntityName   string     `json:"entity_name" db:"entity_name"`
-	Params       string     `json:"params,omitempty" db:"params"`
-	Status       string     `json:"status" db:"status"`
-	ErrorMessage string     `json:"error_message,omitempty" db:"error_message"`
-	IPAddress    string    `json:"ip_address,omitempty" db:"ip_address"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	ID           uuid.UUID       `json:"id" db:"id"`
+	TenantID     uuid.UUID       `json:"tenant_id" db:"tenant_id"`
+	UserID       *uuid.UUID      `json:"user_id,omitempty" db:"user_id"`
+	PluginName   string          `json:"plugin_name" db:"plugin_name"`
+	Action       string          `json:"action" db:"action"`
+	EntityType   string          `json:"entity_type" db:"entity_type"`
+	EntityID     string          `json:"entity_id" db:"entity_id"`
+	EntityName   string          `json:"entity_name" db:"entity_name"`
+	Params       json.RawMessage `json:"params,omitempty" db:"params"`
+	Status       string          `json:"status" db:"status"`
+	ErrorMessage string          `json:"error_message,omitempty" db:"error_message"`
+	IPAddress    string          `json:"ip_address,omitempty" db:"ip_address"`
+	CreatedAt    time.Time       `json:"created_at" db:"created_at"`
 }
 
 // PluginActivityRepository handles SSH command and plugin action log operations.

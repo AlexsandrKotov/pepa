@@ -361,6 +361,18 @@ func deleteSSHHost(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Verify tenant isolation before deletion
+		tenantID := auth.GetTenantID(c)
+		host, err := deps.Repos.SSHHost.GetByID(ctx, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "host not found"})
+			return
+		}
+		if host.TenantID != tenantID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
 		if err := deps.Repos.SSHHost.Delete(ctx, id); err != nil {
 			respondInternalError(c, err)
 			return
@@ -712,6 +724,11 @@ var wsUpgrader = websocket.Upgrader{
 		if originHost == "" {
 			originHost = originURL.Host // no port in Origin
 		}
+		// If the request Host is empty, reject the connection to prevent
+		// origin validation bypass via empty hostname matching.
+		if r.Host == "" {
+			return false
+		}
 		reqHost, _, _ := net.SplitHostPort(r.Host)
 		if reqHost == "" {
 			reqHost = r.Host // no port in Host
@@ -732,9 +749,35 @@ type wsMessage struct {
 
 // sessionTracker tracks active SSH sessions per user.
 var (
-	activeSessions   = make(map[uuid.UUID]int) // userID -> session count
+	activeSessions   = make(map[uuid.UUID]int)      // userID -> session count
+	activeSessionAge = make(map[uuid.UUID]time.Time) // userID -> last activity
 	activeSessionsMu sync.Mutex
 )
+
+// sessionCleanupInterval is how often we scan for stale session entries.
+const sessionCleanupInterval = 5 * time.Minute
+
+// sessionMaxAge is the maximum time a session entry can persist without activity.
+const sessionMaxAge = 24 * time.Hour
+
+func init() {
+	// Periodic cleanup of stale session entries to prevent unbounded map growth.
+	go func() {
+		ticker := time.NewTicker(sessionCleanupInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			activeSessionsMu.Lock()
+			cutoff := time.Now().Add(-sessionMaxAge)
+			for uid, lastSeen := range activeSessionAge {
+				if lastSeen.Before(cutoff) {
+					delete(activeSessions, uid)
+					delete(activeSessionAge, uid)
+				}
+			}
+			activeSessionsMu.Unlock()
+		}
+	}()
+}
 
 func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -761,6 +804,7 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		activeSessions[*userID]++
+		activeSessionAge[*userID] = time.Now()
 		activeSessionsMu.Unlock()
 
 		defer func() {
@@ -768,6 +812,7 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 			activeSessions[*userID]--
 			if activeSessions[*userID] <= 0 {
 				delete(activeSessions, *userID)
+				delete(activeSessionAge, *userID)
 			}
 			activeSessionsMu.Unlock()
 		}()
@@ -946,10 +991,18 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 			}
 
 			for {
+				// Set read deadline for idle timeout (30 minutes)
+				ws.SetReadDeadline(time.Now().Add(30 * time.Minute))
 				_, msg, err := ws.ReadMessage()
 				if err != nil {
+					// Check if it's a timeout error
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+						_ = wsWrite(websocket.TextMessage, []byte("\r\n\x1b[33mSession idle timeout (30 minutes). Disconnecting.\x1b[0m\r\n"))
+					}
 					return
 				}
+				// Reset read deadline on activity
+				ws.SetReadDeadline(time.Time{})
 				// Handle window resize messages (JSON format)
 				if len(msg) > 0 && msg[0] == '{' {
 					var resizeMsg wsMessage

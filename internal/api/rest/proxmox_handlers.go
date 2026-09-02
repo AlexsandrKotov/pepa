@@ -76,7 +76,7 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 		respondInternalError(c, err)
 		// Log the failed action
 		if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
-			logPluginActionAsync(deps, c, "proxmox", action, entityType, string(params), false, err.Error())
+			logPluginActionAsync(deps, c, "proxmox", action, entityType, params, false, err.Error())
 		}
 		return
 	}
@@ -84,7 +84,7 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 		c.JSON(http.StatusBadGateway, gin.H{"error": resp.Error})
 		// Log the failed action
 		if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
-			logPluginActionAsync(deps, c, "proxmox", action, entityType, string(params), false, resp.Error)
+			logPluginActionAsync(deps, c, "proxmox", action, entityType, params, false, resp.Error)
 		}
 		return
 	}
@@ -96,7 +96,7 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 
 	// Log successful state-changing actions
 	if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
-		logPluginActionAsync(deps, c, "proxmox", action, entityType, string(params), true, "")
+		logPluginActionAsync(deps, c, "proxmox", action, entityType, params, true, "")
 	}
 }
 

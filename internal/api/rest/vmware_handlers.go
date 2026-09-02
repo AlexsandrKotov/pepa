@@ -61,7 +61,7 @@ func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.Ra
 		slog.Error("vmware plugin action failed", "action", action, "error", err)
 		respondInternalError(c, err)
 		if entityType, isStateChange := stateChangingVMwareActions[action]; isStateChange {
-			logPluginActionAsync(deps, c, "vmware", action, entityType, string(params), false, err.Error())
+			logPluginActionAsync(deps, c, "vmware", action, entityType, params, false, err.Error())
 		}
 		return
 	}
@@ -69,7 +69,7 @@ func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.Ra
 		slog.Error("vmware plugin action returned error", "action", action, "error", resp.Error)
 		c.JSON(http.StatusBadGateway, gin.H{"error": resp.Error})
 		if entityType, isStateChange := stateChangingVMwareActions[action]; isStateChange {
-			logPluginActionAsync(deps, c, "vmware", action, entityType, string(params), false, resp.Error)
+			logPluginActionAsync(deps, c, "vmware", action, entityType, params, false, resp.Error)
 		}
 		return
 	}
@@ -80,7 +80,7 @@ func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.Ra
 	c.JSON(http.StatusOK, gin.H{"data": out})
 
 	if entityType, isStateChange := stateChangingVMwareActions[action]; isStateChange {
-		logPluginActionAsync(deps, c, "vmware", action, entityType, string(params), true, "")
+		logPluginActionAsync(deps, c, "vmware", action, entityType, params, true, "")
 	}
 }
 

@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
@@ -47,7 +48,7 @@ var stateChangingVMwareActions = map[string]string{
 // Called from proxmoxExec/vmwareExec after the action completes.
 // IMPORTANT: all gin.Context values are captured synchronously before the goroutine
 // is spawned, because Gin may recycle the context after the handler returns.
-func logPluginActionAsync(deps Dependencies, c *gin.Context, pluginName, action, entityType string, params string, success bool, errMsg string) {
+func logPluginActionAsync(deps Dependencies, c *gin.Context, pluginName, action, entityType string, params json.RawMessage, success bool, errMsg string) {
 	if deps.Repos.PluginActivity == nil {
 		return
 	}

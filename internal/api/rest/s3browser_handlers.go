@@ -166,12 +166,12 @@ func s3CreateBucket(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if err := client.CreateBucketNamed(c.Request.Context(), bucketName); err != nil {
-			logPluginActionAsync(deps, c, "s3", "create_bucket", "bucket", string(mustMarshal(map[string]string{"bucket": bucketName})), false, err.Error())
+			logPluginActionAsync(deps, c, "s3", "create_bucket", "bucket", mustMarshal(map[string]string{"bucket": bucketName}), false, err.Error())
 			respondInternalError(c, err)
 			return
 		}
 
-		logPluginActionAsync(deps, c, "s3", "create_bucket", "bucket", string(mustMarshal(map[string]string{"bucket": bucketName})), true, "")
+		logPluginActionAsync(deps, c, "s3", "create_bucket", "bucket", mustMarshal(map[string]string{"bucket": bucketName}), true, "")
 		c.JSON(http.StatusCreated, gin.H{
 			"message": "bucket created",
 			"bucket":  bucketName,
@@ -202,12 +202,12 @@ func s3DeleteBucket(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if err := client.DeleteBucketNamed(c.Request.Context(), bucketName); err != nil {
-			logPluginActionAsync(deps, c, "s3", "delete_bucket", "bucket", string(mustMarshal(map[string]string{"bucket": bucketName})), false, err.Error())
+			logPluginActionAsync(deps, c, "s3", "delete_bucket", "bucket", mustMarshal(map[string]string{"bucket": bucketName}), false, err.Error())
 			respondInternalError(c, err)
 			return
 		}
 
-		logPluginActionAsync(deps, c, "s3", "delete_bucket", "bucket", string(mustMarshal(map[string]string{"bucket": bucketName})), true, "")
+		logPluginActionAsync(deps, c, "s3", "delete_bucket", "bucket", mustMarshal(map[string]string{"bucket": bucketName}), true, "")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "bucket deleted",
 			"bucket":  bucketName,
@@ -328,12 +328,12 @@ func s3UploadObject(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if err := client.UploadToBucket(c.Request.Context(), bucketName, key, file, header.Size, contentType); err != nil {
-			logPluginActionAsync(deps, c, "s3", "upload_object", "object", string(mustMarshal(map[string]string{"bucket": bucketName, "key": key})), false, err.Error())
+			logPluginActionAsync(deps, c, "s3", "upload_object", "object", mustMarshal(map[string]string{"bucket": bucketName, "key": key}), false, err.Error())
 			respondInternalError(c, err)
 			return
 		}
 
-		logPluginActionAsync(deps, c, "s3", "upload_object", "object", string(mustMarshal(map[string]string{"bucket": bucketName, "key": key, "size": fmt.Sprintf("%d", header.Size)})), true, "")
+		logPluginActionAsync(deps, c, "s3", "upload_object", "object", mustMarshal(map[string]string{"bucket": bucketName, "key": key, "size": fmt.Sprintf("%d", header.Size)}), true, "")
 		c.JSON(http.StatusCreated, gin.H{
 			"message": "object uploaded",
 			"key":     key,
@@ -579,12 +579,12 @@ func s3DeleteObject(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if err := client.DeleteFromBucket(c.Request.Context(), bucketName, key); err != nil {
-			logPluginActionAsync(deps, c, "s3", "delete_object", "object", string(mustMarshal(map[string]string{"bucket": bucketName, "key": key})), false, err.Error())
+			logPluginActionAsync(deps, c, "s3", "delete_object", "object", mustMarshal(map[string]string{"bucket": bucketName, "key": key}), false, err.Error())
 			respondInternalError(c, err)
 			return
 		}
 
-		logPluginActionAsync(deps, c, "s3", "delete_object", "object", string(mustMarshal(map[string]string{"bucket": bucketName, "key": key})), true, "")
+		logPluginActionAsync(deps, c, "s3", "delete_object", "object", mustMarshal(map[string]string{"bucket": bucketName, "key": key}), true, "")
 		c.JSON(http.StatusOK, gin.H{
 			"message": "object deleted",
 			"key":     key,
