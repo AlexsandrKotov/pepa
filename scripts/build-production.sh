@@ -154,6 +154,10 @@ FRONTEND_PORT=3000
 # Adjust to your actual domain(s)
 CORS_ORIGINS=https://localhost,https://127.0.0.1
 
+# ── Plugin Security ───────────────────────────────────────────
+PLUGIN_SIGNATURE_VERIFY=true
+PLUGIN_SIGNATURE_ENFORCE=true
+
 # ── Vault ────────────────────────────────────────────────────
 VAULT_ALLOW_PRIVATE_IPS=false
 
@@ -208,6 +212,8 @@ x-common-env: &common-env
   ENCRYPTION_KEY: ${ENCRYPTION_KEY}
   AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
   PLUGIN_DIR: /plugins
+  PLUGIN_SIGNATURE_VERIFY: "true"
+  PLUGIN_SIGNATURE_ENFORCE: "true"
   VAULT_ALLOW_PRIVATE_IPS: ${VAULT_ALLOW_PRIVATE_IPS:-false}
 
 services:
@@ -424,43 +430,39 @@ COMPOSE_EOF
 
 ok "docker-compose.yml created"
 
+# ── Verify plugin signatures ──────────────────────────────────
+step "Verifying plugin signatures"
+
+if [ -d "$PROJECT_DIR/plugins/bin" ] && [ "$(ls -A "$PROJECT_DIR/plugins/bin" 2>/dev/null)" ]; then
+  if bash "$PROJECT_DIR/scripts/sign-plugin.sh" --verify; then
+    ok "All plugin signatures verified"
+  else
+    err "Plugin signature verification failed! Run 'make sign-plugins' first."
+    exit 1
+  fi
+else
+  warn "No plugin binaries found. Run 'make plugins' first."
+fi
+
 # ── Copy plugins ──────────────────────────────────────────────
 step "Copying plugins"
 
-# Copy built-in plugin binaries
-if [ -d "$PROJECT_DIR/plugins/bin/builtin" ] && [ "$(ls -A "$PROJECT_DIR/plugins/bin/builtin" 2>/dev/null)" ]; then
-  mkdir -p "$PACKAGE_DIR/plugins/bin/builtin"
-  cp -r "$PROJECT_DIR/plugins/bin/builtin/"* "$PACKAGE_DIR/plugins/bin/builtin/"
-  BUILTIN_BIN_COUNT=$(ls -1 "$PACKAGE_DIR/plugins/bin/builtin" | wc -l | tr -d ' ')
-  ok "$BUILTIN_BIN_COUNT built-in plugin binaries copied"
+# Copy plugin binaries (plugins/bin/<name>/<name> — flat structure)
+if [ -d "$PROJECT_DIR/plugins/bin" ] && [ "$(ls -A "$PROJECT_DIR/plugins/bin" 2>/dev/null)" ]; then
+  mkdir -p "$PACKAGE_DIR/plugins/bin"
+  cp -r "$PROJECT_DIR/plugins/bin/"* "$PACKAGE_DIR/plugins/bin/"
+  PLUGIN_BIN_COUNT=$(ls -1 "$PACKAGE_DIR/plugins/bin" | wc -l | tr -d ' ')
+  ok "$PLUGIN_BIN_COUNT plugin binaries copied"
 else
-  warn "No built-in plugin binaries found. Run 'make plugins-builtin' first."
+  warn "No plugin binaries found. Run 'make plugins' first."
 fi
 
-# Copy community plugin binaries
-if [ -d "$PROJECT_DIR/plugins/bin/community" ] && [ "$(ls -A "$PROJECT_DIR/plugins/bin/community" 2>/dev/null)" ]; then
-  mkdir -p "$PACKAGE_DIR/plugins/bin/community"
-  cp -r "$PROJECT_DIR/plugins/bin/community/"* "$PACKAGE_DIR/plugins/bin/community/"
-  COMMUNITY_BIN_COUNT=$(ls -1 "$PACKAGE_DIR/plugins/bin/community" | wc -l | tr -d ' ')
-  ok "$COMMUNITY_BIN_COUNT community plugin binaries copied"
-else
-  warn "No community plugin binaries found. Run 'make plugins-community' first."
-fi
-
-# Copy builtin plugin definitions (plugin.yaml) — required for Marketplace
+# Copy plugin definitions (plugin.yaml) — required for Marketplace
 if [ -d "$PROJECT_DIR/plugins/builtin" ]; then
   mkdir -p "$PACKAGE_DIR/plugins/builtin"
   cp -r "$PROJECT_DIR/plugins/builtin/"* "$PACKAGE_DIR/plugins/builtin/"
   BUILTIN_DEF_COUNT=$(ls -1 "$PACKAGE_DIR/plugins/builtin" | wc -l | tr -d ' ')
-  ok "$BUILTIN_DEF_COUNT built-in plugin definitions copied"
-fi
-
-# Copy community plugin definitions
-if [ -d "$PROJECT_DIR/plugins/community" ]; then
-  mkdir -p "$PACKAGE_DIR/plugins/community"
-  cp -r "$PROJECT_DIR/plugins/community/"* "$PACKAGE_DIR/plugins/community/"
-  COMMUNITY_DEF_COUNT=$(ls -1 "$PACKAGE_DIR/plugins/community" | wc -l | tr -d ' ')
-  ok "$COMMUNITY_DEF_COUNT community plugin definitions copied"
+  ok "$BUILTIN_DEF_COUNT plugin definitions copied"
 fi
 
 # ── Copy supporting files ─────────────────────────────────────
@@ -553,6 +555,24 @@ http {
         # Security headers
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
+        # ── AI endpoints (long timeouts for LLM inference) ──
+        location /api/v1/ai/ {
+            limit_req zone=api burst=20 nodelay;
+
+            set $api_backend "http://api-server:8080";
+            proxy_pass $api_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection "";
+
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 600s;
+            proxy_read_timeout 600s;
+        }
+
         # ── API routes ───────────────────────────────────────
         location /api/ {
             limit_req zone=api burst=50 nodelay;
@@ -567,18 +587,64 @@ http {
             proxy_set_header Connection "";
 
             proxy_connect_timeout 10s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
+            proxy_send_timeout 120s;
+            proxy_read_timeout 120s;
         }
 
-        # ── SSE streaming ────────────────────────────────────
-        location /api/v1/events/stream {
+        # ── Auth endpoints (stricter rate limit) ─────────────
+        location /api/v1/auth/ {
+            limit_req zone=login burst=10 nodelay;
+
             set $api_backend "http://api-server:8080";
             proxy_pass $api_backend;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # ── GraphQL endpoint ─────────────────────────────────
+        location /graphql {
+            limit_req zone=api burst=20 nodelay;
+
+            set $api_backend "http://api-server:8080";
+            proxy_pass $api_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Connection "";
+        }
+
+        # ── WebSocket (real-time events) ─────────────────────
+        location /ws {
+            set $api_backend "http://api-server:8080";
+            proxy_pass $api_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+
+        # ── SSE streaming ────────────────────────────────────
+        location /api/v1/events/ {
+            limit_req zone=api burst=10 nodelay;
+
+            set $api_backend "http://api-server:8080";
+            proxy_pass $api_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Connection '';
             proxy_buffering off;
             proxy_cache off;

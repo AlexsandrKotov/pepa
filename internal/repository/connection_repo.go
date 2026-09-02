@@ -31,6 +31,7 @@ const (
 	ConnectionDocker       ConnectionType = "docker"
 	ConnectionSecret       ConnectionType = "secret"
 	ConnectionNotification ConnectionType = "notification"
+	ConnectionSonarQube    ConnectionType = "sonarqube"
 )
 
 // Connection represents an external service connection.

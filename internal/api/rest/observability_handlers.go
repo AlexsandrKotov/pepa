@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -342,7 +343,7 @@ func observabilityAlerts(deps Dependencies) gin.HandlerFunc {
 			WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour'
 		`).Scan(&failedPipelines)
 
-		if failedPipelines > 5 {
+		if failedPipelines > 5 && !isAlertResolved("high-pipeline-failures") {
 			alerts = append(alerts, map[string]interface{}{
 				"id":          "high-pipeline-failures",
 				"name":        "High Pipeline Failure Rate",
@@ -363,7 +364,7 @@ func observabilityAlerts(deps Dependencies) gin.HandlerFunc {
 			WHERE status = 'failed' AND created_at > NOW() - INTERVAL '1 hour'
 		`).Scan(&failedDeployments)
 
-		if failedDeployments > 3 {
+		if failedDeployments > 3 && !isAlertResolved("high-deployment-failures") {
 			alerts = append(alerts, map[string]interface{}{
 				"id":          "high-deployment-failures",
 				"name":        "High Deployment Failure Rate",
@@ -382,7 +383,7 @@ func observabilityAlerts(deps Dependencies) gin.HandlerFunc {
 		runtime.ReadMemStats(&m)
 		memUsageMB := float64(m.Alloc) / 1024 / 1024
 
-		if memUsageMB > 500 {
+		if memUsageMB > 500 && !isAlertResolved("high-memory-usage") {
 			alerts = append(alerts, map[string]interface{}{
 				"id":          "high-memory-usage",
 				"name":        "High Memory Usage",
@@ -400,9 +401,20 @@ func observabilityAlerts(deps Dependencies) gin.HandlerFunc {
 			alerts = []map[string]interface{}{}
 		}
 
+		resolvedCount := 0
+		resolvedAlerts.Range(func(key, value interface{}) bool {
+			if expiry, ok := value.(time.Time); ok && time.Now().After(expiry) {
+				resolvedAlerts.Delete(key)
+			} else {
+				resolvedCount++
+			}
+			return true
+		})
+
 		summary := map[string]interface{}{
-			"total":  len(alerts),
-			"firing": len(alerts),
+			"total":    len(alerts) + resolvedCount,
+			"firing":   len(alerts),
+			"resolved": resolvedCount,
 		}
 
 		c.JSON(http.StatusOK, gin.H{
@@ -413,17 +425,43 @@ func observabilityAlerts(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// resolvedAlerts tracks manually resolved alert IDs with their expiry time.
+// Alerts auto-expire after 6 hours so they can fire again if the condition persists.
+var resolvedAlerts sync.Map
+
+func isAlertResolved(id string) bool {
+	val, ok := resolvedAlerts.Load(id)
+	if !ok {
+		return false
+	}
+	expiry, ok := val.(time.Time)
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		resolvedAlerts.Delete(id)
+		return false
+	}
+	return true
+}
+
 // observabilityResolveAlert resolves a specific alert by ID.
+// The resolution persists for 6 hours or until the underlying condition clears.
 func observabilityResolveAlert(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		alertID := c.Param("id")
+
+		// Store the resolved alert with a 6-hour TTL
+		resolvedAlerts.Store(alertID, time.Now().Add(6*time.Hour))
+
+		logAudit(deps, c, "resolve", "alert", alertID, nil, nil)
 
 		c.JSON(http.StatusOK, gin.H{
 			"alert": map[string]interface{}{
 				"id":     alertID,
 				"status": "resolved",
 			},
-			"message": "Alert resolved successfully",
+			"message": "Alert resolved. It will re-activate in 6 hours if the condition persists.",
 		})
 	}
 }

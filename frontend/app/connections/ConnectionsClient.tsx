@@ -18,6 +18,7 @@ const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; col
   { type: 'proxmox', label: 'Proxmox VE', icon: 'proxmox', color: '#E57000', description: 'Virtual machines and LXC containers', requiredPlugins: ['proxmox'] },
   { type: 'vmware', label: 'VMware vCenter', icon: 'vmware', color: '#607D8B', description: 'ESXi virtual machines via vCenter', requiredPlugins: ['vmware'] },
   { type: 'notification', label: 'Notifications', icon: 'slack', color: '#E01E5A', description: 'Email, Webhook, Slack, Telegram, Microsoft Teams' },
+  { type: 'sonarqube', label: 'SonarQube', icon: 'sonarqube', color: '#4E9BCD', description: 'Code quality and security analysis', requiredPlugins: ['sonarqube'] },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -38,6 +39,9 @@ const TYPE_REQUIREMENTS: Record<ConnectionType, string> = {
   proxmox: 'You need the Proxmox VE API URL (e.g. https://proxmox.local:8006), an API Token ID (user@realm!tokenname), and the Token Secret. Create an API token in Proxmox under Datacenter → Permissions → API Tokens.',
   vmware: 'You need the vCenter Server URL (e.g. https://vcenter.example.com), a username (e.g. administrator@vsphere.local), and the password. Ensure the account has sufficient privileges to manage virtual machines.',
   notification: 'Configure a notification service to receive deployment alerts and workflow notifications. Choose Email (SMTP server), Webhook (any HTTP endpoint), Slack (webhook URL or bot token), Telegram (bot token + chat ID), or Microsoft Teams (incoming webhook URL).',
+  docker: 'Provide the Docker host address. For local Docker, no configuration is needed. For remote Docker, provide the TCP host address.',
+  secret: 'Configure a Vault server for secret management. Provide the Vault server address and an authentication token.',
+  sonarqube: 'You need your SonarQube server URL and a user token. Create a token in SonarQube under My Account → Security → Generate Token.',
 };
 
 // Default Base URL / Model per AI provider

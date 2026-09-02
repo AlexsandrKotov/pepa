@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -241,8 +244,7 @@ func (p *S3Plugin) uploadObject(ctx context.Context, client *minio.Client, param
 		Bucket      string `json:"bucket"`
 		Key         string `json:"key"`
 		ContentType string `json:"content_type"`
-		// Data is not included here — in practice, uploads go through
-		// the REST API (s3browser_handlers.go) which handles multipart.
+		DataB64     string `json:"data_b64"`
 	}
 	if err := sdk.JSONUnmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("parse params: %w", err)
@@ -250,25 +252,43 @@ func (p *S3Plugin) uploadObject(ctx context.Context, client *minio.Client, param
 	if req.Bucket == "" || req.Key == "" {
 		return nil, fmt.Errorf("bucket and key are required")
 	}
+	if req.DataB64 == "" {
+		return nil, fmt.Errorf("data_b64 is required (provide file content as base64)")
+	}
 
-	// This action is a placeholder — actual file uploads go through the
-	// dedicated REST endpoint for multipart streaming.
-	return sdk.JSONMarshal(map[string]string{
+	data, err := base64.StdEncoding.DecodeString(req.DataB64)
+	if err != nil {
+		return nil, fmt.Errorf("decode base64: %w", err)
+	}
+
+	contentType := req.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	info, err := client.PutObject(ctx, req.Bucket, req.Key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("put object: %w", err)
+	}
+
+	return sdk.JSONMarshal(map[string]interface{}{
 		"status":  "ok",
-		"message": "Use the REST upload endpoint for file uploads",
 		"bucket":  req.Bucket,
 		"key":     req.Key,
+		"size":    info.Size,
+		"etag":    info.ETag,
 	})
 }
 
-// uploadObjects uploads multiple files to a bucket, preserving directory structure.
-// Each entry in the "keys" array maps to a corresponding entry in "data_b64" (base64).
-// In practice, bulk uploads go through the REST endpoint; this is for plugin API completeness.
+// uploadObjects uploads multiple files to a bucket from base64-encoded data.
 func (p *S3Plugin) uploadObjects(ctx context.Context, client *minio.Client, params []byte) ([]byte, error) {
 	var req struct {
-		Bucket string   `json:"bucket"`
-		Prefix string   `json:"prefix"`
-		Keys   []string `json:"keys"`
+		Bucket  string   `json:"bucket"`
+		Prefix  string   `json:"prefix"`
+		Keys    []string `json:"keys"`
+		DataB64 []string `json:"data_b64"`
 	}
 	if err := sdk.JSONUnmarshal(params, &req); err != nil {
 		return nil, fmt.Errorf("parse params: %w", err)
@@ -279,17 +299,44 @@ func (p *S3Plugin) uploadObjects(ctx context.Context, client *minio.Client, para
 	if len(req.Keys) == 0 {
 		return nil, fmt.Errorf("at least one key is required")
 	}
+	if len(req.DataB64) != len(req.Keys) {
+		return nil, fmt.Errorf("keys and data_b64 must have the same length")
+	}
 
-	// This action is a metadata placeholder — actual multi-file uploads go
-	// through the dedicated REST endpoint POST /upload-multiple which handles
-	// multipart streaming of real file data.
-	return sdk.JSONMarshal(map[string]any{
-		"status":  "ok",
-		"message": "Use the REST upload-multiple endpoint for bulk file uploads",
-		"bucket":  req.Bucket,
-		"prefix":  req.Prefix,
-		"count":   len(req.Keys),
-	})
+	prefix := strings.TrimRight(req.Prefix, "/")
+	uploaded := 0
+	var errors []string
+	for i, key := range req.Keys {
+		data, err := base64.StdEncoding.DecodeString(req.DataB64[i])
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: decode error: %v", key, err))
+			continue
+		}
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "/" + key
+		}
+		_, err = client.PutObject(ctx, req.Bucket, fullKey, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+			ContentType: "application/octet-stream",
+		})
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", key, err))
+			continue
+		}
+		uploaded++
+	}
+
+	result := map[string]interface{}{
+		"status":   "ok",
+		"bucket":   req.Bucket,
+		"prefix":   req.Prefix,
+		"uploaded": uploaded,
+		"total":    len(req.Keys),
+	}
+	if len(errors) > 0 {
+		result["errors"] = errors
+	}
+	return sdk.JSONMarshal(result)
 }
 
 // deleteObject removes an object.

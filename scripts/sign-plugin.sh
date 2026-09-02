@@ -23,15 +23,14 @@ PUBLIC_KEY="${PROJECT_DIR}/internal/plugin/signature/pepa-plugins-public.pem"
 
 sign_binary() {
     local plugin_name="$1"
-    local category="$2"
-    local bin_path="${PLUGIN_BIN_DIR}/${category}/${plugin_name}/${plugin_name}"
+    local bin_path="${PLUGIN_BIN_DIR}/${plugin_name}/${plugin_name}"
 
     if [[ ! -f "$bin_path" ]]; then
         echo "  SKIP: binary not found: $bin_path"
         return 0
     fi
 
-    local checksum_path="${PLUGIN_BIN_DIR}/${category}/${plugin_name}/checksum"
+    local checksum_path="${PLUGIN_BIN_DIR}/${plugin_name}/checksum"
     local sig_path="${checksum_path}.sig"
 
     # SHA-256 hash of binary
@@ -70,9 +69,8 @@ sign_yaml() {
 
 verify_binary() {
     local plugin_name="$1"
-    local category="$2"
-    local bin_path="${PLUGIN_BIN_DIR}/${category}/${plugin_name}/${plugin_name}"
-    local checksum_path="${PLUGIN_BIN_DIR}/${category}/${plugin_name}/checksum"
+    local bin_path="${PLUGIN_BIN_DIR}/${plugin_name}/${plugin_name}"
+    local checksum_path="${PLUGIN_BIN_DIR}/${plugin_name}/checksum"
     local sig_path="${checksum_path}.sig"
 
     if [[ ! -f "$bin_path" ]]; then
@@ -80,8 +78,8 @@ verify_binary() {
         return 0
     fi
     if [[ ! -f "$checksum_path" ]] || [[ ! -f "$sig_path" ]]; then
-        echo "  SKIP: ${plugin_name} binary not signed (run sign-plugins first)"
-        return 0
+        echo "  UNSIGNED: ${plugin_name} (no checksum/signature files)"
+        return 1
     fi
 
     # Verify hash matches
@@ -197,30 +195,15 @@ else
     fi
 fi
 
-# Determine which plugins to process
-# PLUGINS and CATEGORIES are parallel arrays
+# Determine which plugins to process (flat structure: plugins/bin/<name>/)
 if [[ -n "$TARGET" ]]; then
     PLUGINS=("$TARGET")
-    # Auto-detect category for single target
-    if [[ -d "${PLUGIN_BIN_DIR}/builtin/${TARGET}" ]]; then
-        CATEGORIES=("builtin")
-    elif [[ -d "${PLUGIN_BIN_DIR}/community/${TARGET}" ]]; then
-        CATEGORIES=("community")
-    else
-        CATEGORIES=("builtin")  # fallback
-    fi
 else
     PLUGINS=()
-    CATEGORIES=()
     if [[ -d "$PLUGIN_BIN_DIR" ]]; then
-        for category_dir in "$PLUGIN_BIN_DIR"/*/; do
-            [[ -d "$category_dir" ]] || continue
-            local_category="$(basename "$category_dir")"
-            for plugin_dir in "$category_dir"*/; do
-                [[ -d "$plugin_dir" ]] || continue
-                PLUGINS+=("$(basename "$plugin_dir")")
-                CATEGORIES+=("$local_category")
-            done
+        for plugin_dir in "$PLUGIN_BIN_DIR"/*/; do
+            [[ -d "$plugin_dir" ]] || continue
+            PLUGINS+=("$(basename "$plugin_dir")")
         done
     fi
     if [[ ${#PLUGINS[@]} -eq 0 ]]; then
@@ -236,16 +219,14 @@ echo ""
 
 FAILED=0
 
-for i in "${!PLUGINS[@]}"; do
-    name="${PLUGINS[$i]}"
-    category="${CATEGORIES[$i]}"
+for name in "${PLUGINS[@]}"; do
     if [[ "$MODE" == "sign" ]]; then
         echo "[$name]"
-        sign_binary "$name" "$category"
+        sign_binary "$name"
         sign_yaml "$name"
     elif [[ "$MODE" == "verify" ]]; then
         echo "[$name]"
-        if ! verify_binary "$name" "$category"; then
+        if ! verify_binary "$name"; then
             FAILED=$((FAILED + 1))
         fi
         if ! verify_yaml "$name"; then

@@ -265,18 +265,15 @@ jobs:
           echo "================================"
           for arch in amd64 arm64; do
             mkdir -p "plugins/bin-${arch}"
-            # Extract binaries: staging has builtin/<name>/<name>, we want bin-<arch>/<name>
-            for dir in builtin community; do
-              if [ -d "staging/${arch}/${dir}" ]; then
-                for plugin_dir in "staging/${arch}/${dir}"/*/; do
-                  [ -d "$plugin_dir" ] || continue
-                  name=$(basename "$plugin_dir")
-                  if [ -f "${plugin_dir}${name}" ]; then
-                    cp "${plugin_dir}${name}" "plugins/bin-${arch}/${name}"
-                  fi
-                done
-              fi
-            done
+            # Plugins are flat: staging/<arch>/<name>/<name> -> bin-<arch>/<name>/
+            if [ -d "staging/${arch}" ]; then
+              for plugin_dir in "staging/${arch}"/*/; do
+                [ -d "$plugin_dir" ] || continue
+                name=$(basename "$plugin_dir")
+                mkdir -p "plugins/bin-${arch}/${name}"
+                cp -r "${plugin_dir}"* "plugins/bin-${arch}/${name}/"
+              done
+            fi
           done
           # Copy manifests (shared across architectures, from separate artifact)
           cp -r staging/manifests/* plugins/builtin/ 2>/dev/null || true
@@ -351,24 +348,21 @@ jobs:
           for arch in amd64 arm64; do
             PKG="pepa-plugins-${VERSION}-linux-${arch}"
             mkdir -p "${PKG}/bin" "${PKG}/builtin"
-            # Extract binaries: staging has builtin/<name>/<name>, we want bin/<name>
-            for dir in builtin community; do
-              if [ -d "staging/${arch}/${dir}" ]; then
-                for plugin_dir in "staging/${arch}/${dir}"/*/; do
-                  [ -d "$plugin_dir" ] || continue
-                  name=$(basename "$plugin_dir")
-                  if [ -f "${plugin_dir}${name}" ]; then
-                    cp "${plugin_dir}${name}" "${PKG}/bin/${name}"
-                  fi
-                done
-              fi
-            done
+            # Plugins are flat: staging/<arch>/<name>/<name> -> bin/<name>/
+            if [ -d "staging/${arch}" ]; then
+              for plugin_dir in "staging/${arch}"/*/; do
+                [ -d "$plugin_dir" ] || continue
+                name=$(basename "$plugin_dir")
+                mkdir -p "${PKG}/bin/${name}"
+                cp -r "${plugin_dir}"* "${PKG}/bin/${name}/"
+              done
+            fi
             # Copy manifests: staging has <name>/plugin.yaml, we want builtin/<name>/plugin.yaml
             if [ -d "staging/manifests" ]; then
               cp -r staging/manifests/* "${PKG}/builtin/" 2>/dev/null || true
             fi
             # Ensure binaries are executable
-            chmod +x "${PKG}/bin/"* 2>/dev/null || true
+            find "${PKG}/bin" -type f -name '[^.]*' -exec chmod +x {} \; 2>/dev/null || true
             tar czf "${PKG}.tar.gz" "${PKG}"
             echo "Built ${PKG}.tar.gz"
             echo "Contents:"
@@ -438,7 +432,7 @@ jobs:
         run: |
           VERSION="${RELEASE_TAG#v}"
           PKG="pepa-production-${VERSION}"
-          mkdir -p "${PKG}/nginx/ssl" "${PKG}/plugins/bin"
+          mkdir -p "${PKG}/nginx/ssl" "${PKG}/nginx/conf.d" "${PKG}/plugins/bin"
 
           # Copy supporting files
           cp deployments/compose/init-db.sql "${PKG}/init-db.sql"
@@ -460,19 +454,28 @@ jobs:
           REDIS_PASSWORD=${REDIS_PASSWORD}
           REDIS_PORT=6379
           AUTH_JWT_SECRET=${JWT_SECRET}
+          AUTH_SESSION_DURATION=168h
           ENCRYPTION_KEY=${ENCRYPTION_KEY}
           API_PORT=8088
           FRONTEND_PORT=3000
           CORS_ORIGINS=https://localhost,https://127.0.0.1
           VAULT_ALLOW_PRIVATE_IPS=false
           MOUNT_DOCK_SOCKET=/dev/null
+          PLUGIN_SIGNATURE_VERIFY=true
+          PLUGIN_SIGNATURE_ENFORCE=true
+          # OTEL_ENABLED=false
+          # OTEL_ENDPOINT=
+          # OTEL_SERVICE_NAME=pepa
+          # OTEL_SAMPLING_RATE=1.0
+          # OTEL_INSECURE=true
+          # HOST_HOME_DIR=/custom/path
           ENVEOF
 
           # Generate self-signed SSL cert
           openssl req -x509 -nodes -days 365 \
             -newkey rsa:2048 \
-            -keyout "${PKG}/nginx/ssl/key.pem" \
-            -out "${PKG}/nginx/ssl/cert.pem" \
+            -keyout "${PKG}/nginx/ssl/privkey.pem" \
+            -out "${PKG}/nginx/ssl/fullchain.pem" \
             -subj "/C=US/ST=State/L=City/O=PEPA/CN=localhost" 2>/dev/null
 
           echo "Package built"
@@ -498,6 +501,8 @@ jobs:
             redis-data:
               driver: local
             custom-plugins:
+              driver: local
+            pepa-token-tmpfs:
               driver: local
             nginx-logs:
               driver: local
@@ -549,6 +554,13 @@ jobs:
               image: ${GHCR}/pepa-api-server:${VERSION}
               container_name: pepa-api
               restart: unless-stopped
+              read_only: true
+              security_opt:
+                - no-new-privileges:true
+              group_add:
+                - "0"
+              tmpfs:
+                - /tmp:size=256m,exec
               environment:
                 POSTGRES_HOST: postgres
                 POSTGRES_PORT: "5432"
@@ -561,14 +573,23 @@ jobs:
                 REDIS_PASSWORD: \${REDIS_PASSWORD}
                 ENCRYPTION_KEY: \${ENCRYPTION_KEY}
                 AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
+                AUTH_SESSION_DURATION: \${AUTH_SESSION_DURATION:-168h}
                 PLUGIN_DIR: /plugins
+                CUSTOM_PLUGIN_DIR: /custom-plugins
+                PLUGIN_SIGNATURE_VERIFY: \${PLUGIN_SIGNATURE_VERIFY:-true}
+                PLUGIN_SIGNATURE_ENFORCE: \${PLUGIN_SIGNATURE_ENFORCE:-true}
                 VAULT_ALLOW_PRIVATE_IPS: false
                 SERVER_PORT: "8080"
                 SERVER_HOST: "0.0.0.0"
                 SERVER_ENV: production
-                LOG_LEVEL: info
-                CUSTOM_PLUGIN_DIR: /custom-plugins
                 CORS_ORIGINS: \${CORS_ORIGINS:-https://localhost}
+                IAC_BINARY: \${IAC_BINARY:-}
+                ANSIBLE_LOCAL_TEMP: /tmp/ansible
+                OTEL_ENABLED: \${OTEL_ENABLED:-false}
+                OTEL_ENDPOINT: \${OTEL_ENDPOINT:-}
+                OTEL_SERVICE_NAME: \${OTEL_SERVICE_NAME:-pepa}
+                OTEL_SAMPLING_RATE: \${OTEL_SAMPLING_RATE:-1.0}
+                OTEL_INSECURE: \${OTEL_INSECURE:-true}
               ports:
                 - "\${API_PORT:-8088}:8080"
               healthcheck:
@@ -580,6 +601,10 @@ jobs:
               volumes:
                 - ./plugins:/plugins:ro
                 - custom-plugins:/custom-plugins
+                - \${HOST_HOME_DIR:-/root}:/host-home:ro
+                - \${HOST_HOME_DIR:-/root}:\${HOST_HOME_DIR:-/root}:ro
+                - \${MOUNT_DOCK_SOCKET:-/dev/null}:/var/run/docker.sock:ro
+                - pepa-token-tmpfs:/var/run/pepa
               depends_on:
                 postgres:
                   condition: service_healthy
@@ -591,6 +616,11 @@ jobs:
               image: ${GHCR}/pepa-worker:${VERSION}
               container_name: pepa-worker
               restart: unless-stopped
+              read_only: true
+              security_opt:
+                - no-new-privileges:true
+              tmpfs:
+                - /tmp:noexec,nosuid,size=64m
               environment:
                 POSTGRES_HOST: postgres
                 POSTGRES_PORT: "5432"
@@ -604,13 +634,13 @@ jobs:
                 ENCRYPTION_KEY: \${ENCRYPTION_KEY}
                 AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
                 PLUGIN_DIR: /plugins
-                VAULT_ALLOW_PRIVATE_IPS: false
                 CUSTOM_PLUGIN_DIR: /custom-plugins
-                SERVER_ENV: production
-                LOG_LEVEL: info
+                VAULT_ALLOW_PRIVATE_IPS: false
               volumes:
                 - ./plugins:/plugins:ro
                 - custom-plugins:/custom-plugins
+                - \${HOST_HOME_DIR:-/root}:/host-home:ro
+                - \${HOST_HOME_DIR:-/root}:\${HOST_HOME_DIR:-/root}:ro
               depends_on:
                 postgres:
                   condition: service_healthy
@@ -632,13 +662,21 @@ jobs:
               image: nginx:1.31-alpine
               container_name: pepa-nginx
               restart: unless-stopped
+              security_opt:
+                - no-new-privileges:true
               ports:
                 - "80:80"
                 - "443:443"
               volumes:
                 - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+                - ./nginx/conf.d:/etc/nginx/conf.d:ro
                 - ./nginx/ssl:/etc/nginx/ssl:ro
                 - nginx-logs:/var/log/nginx
+              healthcheck:
+                test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+                interval: 10s
+                timeout: 5s
+                retries: 3
               depends_on:
                 api-server:
                   condition: service_started
@@ -650,7 +688,7 @@ jobs:
           sed -i 's/^          //' "${PKG}/docker-compose.yml"
 
           # Copy nginx config from the repo
-          cp deployments/compose/nginx.conf "${PKG}/nginx/nginx.conf"
+          cp deployments/compose/nginx/nginx.conf "${PKG}/nginx/nginx.conf"
 
       - name: Create deploy.sh and stop.sh
         env:

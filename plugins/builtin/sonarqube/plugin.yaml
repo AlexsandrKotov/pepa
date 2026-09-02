@@ -1,0 +1,118 @@
+name: sonarqube
+version: "0.1.0"
+display_name: "SonarQube Code Quality"
+description: "Code quality and security analysis platform. Detects bugs, vulnerabilities, code smells, and measures code coverage across multiple languages."
+category: security_scanner
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+icon: sonarqube
+
+config_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: "SonarQube server URL (e.g., https://sonarqube.example.com)"
+    token:
+      type: string
+      description: "SonarQube authentication token"
+    project_key:
+      type: string
+      description: "Default project key to analyze"
+    branch:
+      type: string
+      description: "Default branch to analyze"
+      default: "main"
+    quality_gate:
+      type: boolean
+      description: "Check quality gate status"
+      default: true
+  required:
+    - url
+    - token
+    - project_key
+
+actions:
+  - name: analyze
+    description: "Run code quality analysis on the configured project"
+    parameters:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: "Override project key"
+        branch:
+          type: string
+          description: "Override branch to analyze"
+
+  - name: get_quality_gate
+    description: "Get quality gate status for the project"
+    parameters:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: "Override project key"
+
+  - name: get_issues
+    description: "Get code issues (bugs, vulnerabilities, code smells)"
+    parameters:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: "Override project key"
+        types:
+          type: string
+          description: "Comma-separated issue types (BUG,VULNERABILITY,CODE_SMELL)"
+          default: "BUG,VULNERABILITY,CODE_SMELL"
+        severities:
+          type: string
+          description: "Comma-separated severities (BLOCKER,CRITICAL,MAJOR,MINOR,INFO)"
+        statuses:
+          type: string
+          description: "Comma-separated statuses (OPEN,CONFIRMED,REOPENED,RESOLVED,CLOSED)"
+          default: "OPEN,CONFIRMED,REOPENED"
+        page_size:
+          type: integer
+          description: "Number of issues per page"
+          default: 100
+
+  - name: get_coverage
+    description: "Get code coverage metrics"
+    parameters:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: "Override project key"
+        branch:
+          type: string
+          description: "Override branch"
+
+  - name: get_measures
+    description: "Get project measures (metrics)"
+    parameters:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: "Override project key"
+        metric_keys:
+          type: string
+          description: "Comma-separated metric keys"
+          default: "ncloc,complexity,violations,bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
+
+  - name: get_project_summary
+    description: "Get comprehensive project quality summary"
+    parameters:
+      type: object
+      properties:
+        project_key:
+          type: string
+          description: "Override project key"
+
+health_check:
+  endpoint: /health
+  interval: 60s

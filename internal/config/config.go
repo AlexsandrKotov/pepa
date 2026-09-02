@@ -24,10 +24,12 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port     string `mapstructure:"port"`
-	Host     string `mapstructure:"host"`
-	Env      string `mapstructure:"env"`
-	LogLevel string `mapstructure:"log_level"`
+	Port         string `mapstructure:"port"`
+	Host         string `mapstructure:"host"`
+	Env          string `mapstructure:"env"`
+	LogLevel     string `mapstructure:"log_level"`
+	PlatformName string `mapstructure:"platform_name"`
+	BaseURL      string `mapstructure:"base_url"`
 }
 
 type DatabaseConfig struct {
@@ -177,10 +179,12 @@ type SyslogConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Port:     "8080",
-			Host:     "127.0.0.1",
-			Env:      "development",
-			LogLevel: "info",
+			Port:         "8080",
+			Host:         "127.0.0.1",
+			Env:          "development",
+			LogLevel:     "info",
+			PlatformName: "PEPA",
+			BaseURL:      "http://localhost:8088",
 		},
 		Database: DatabaseConfig{
 			Host:     "localhost",
@@ -215,9 +219,10 @@ func DefaultConfig() *Config {
 			},
 		},
 		Plugin: PluginConfig{
-			Dir:             "./plugins",
-			LogLevel:        "info",
-			SignatureVerify: true, // verify plugin signatures on load (warn unless enforced)
+			Dir:              "./plugins",
+			LogLevel:         "info",
+			SignatureVerify:  true,  // verify plugin signatures on load
+			SignatureEnforce: true,  // reject unsigned plugins (set false for dev)
 		},
 		AI: AIConfig{
 			Enabled:         false,
@@ -259,6 +264,12 @@ func (c *Config) LoadFromEnv() {
 	}
 	if v := getenv("SERVER_LOG_LEVEL"); v != "" {
 		c.Server.LogLevel = v
+	}
+	if v := getenv("PLATFORM_NAME"); v != "" {
+		c.Server.PlatformName = v
+	}
+	if v := getenv("BASE_URL"); v != "" {
+		c.Server.BaseURL = v
 	}
 
 	// Database

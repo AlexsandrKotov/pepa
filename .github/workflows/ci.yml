@@ -152,8 +152,7 @@ jobs:
         with:
           name: signed-plugins
           path: |
-            plugins/bin/builtin/
-            plugins/bin/community/
+            plugins/bin/
             plugins/builtin/*/plugin.yaml
             plugins/builtin/*/plugin.yaml.checksum
             plugins/builtin/*/plugin.yaml.checksum.sig

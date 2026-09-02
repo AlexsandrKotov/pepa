@@ -27,6 +27,7 @@ import (
 	"github.com/pepa/pepa/internal/queue"
 	rbacengine "github.com/pepa/pepa/internal/rbac/engine"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/internal/security"
 	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/internal/storage"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
@@ -64,6 +65,8 @@ type Repositories struct {
 	SSHHost         *repository.SSHHostRepository
 	SSHHostGroup    *repository.SSHHostGroupRepository
 	PluginActivity  *repository.PluginActivityRepository
+	SecurityScan    *repository.SecurityScanRepository
+	DevOps          *repository.DevOpsRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -83,6 +86,7 @@ type Dependencies struct {
 	RBAC             *rbacengine.Engine
 	Storage          storage.Storage
 	LoginLimiter     *auth.LoginRateLimiter
+	Scanner          *security.Scanner
 	Version          string
 	BuildTime        string
 }
@@ -134,7 +138,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	r.Use(correlationMiddleware()) // Add trace ID to all requests
 	r.Use(requestLogger())
 	r.Use(metrics.GinMiddleware())
-	r.Use(corsMiddleware(deps.Config.CORS))
+	r.Use(corsMiddleware(&deps.Config.CORS))
 	r.Use(securityHeadersMiddleware())
 	r.Use(maxBodySizeMiddleware(100 << 20))          // 100 MB request body limit (plugin uploads)
 	rateLimiter := newRateLimiter(1000, time.Minute) // 1000 req/min per IP
@@ -264,6 +268,8 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerObservabilityRoutes(v1, deps)
 		registerRemoteConsoleRoutes(v1, deps)
 		registerPluginActivityRoutes(v1, deps)
+		registerSecurityScanRoutes(v1, deps)
+		registerDevOpsRoutes(v1, deps)
 
 		// System info
 		v1.GET("/system/info", func(c *gin.Context) {
@@ -458,7 +464,7 @@ func requestLogger() gin.HandlerFunc {
 	}
 }
 
-func corsMiddleware(cfg config.CORSConfig) gin.HandlerFunc {
+func corsMiddleware(cfg *config.CORSConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		for _, allowed := range cfg.Origins {

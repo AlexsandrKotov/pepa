@@ -306,13 +306,9 @@ func (m *Manager) DiscoverAndLoad() error {
 		dir = "./plugins"
 	}
 
-	loaded, err := m.scanDir(dir)
-	if err != nil {
-		return err
-	}
-
-	// Also scan the bin/ sub-directory (output of `make plugins`).
-	// Binaries live at <dir>/bin/<name>/<name> or <dir>/bin/builtin/<name>/<name>.
+	// Scan the bin/ sub-directory (output of `make plugins`).
+	// All plugin binaries live at <dir>/bin/<name>/<name> (flat structure).
+	loaded := 0
 	binSubdir := filepath.Join(dir, "bin")
 	if info, err := os.Stat(binSubdir); err == nil && info.IsDir() {
 		binLoaded, err := m.scanDir(binSubdir)
@@ -320,26 +316,6 @@ func (m *Manager) DiscoverAndLoad() error {
 			slog.Warn("bin/ scan failed", "error", err)
 		} else {
 			loaded += binLoaded
-		}
-		// Also scan bin/builtin/ for built-in plugins
-		builtinSubdir := filepath.Join(binSubdir, "builtin")
-		if info, err := os.Stat(builtinSubdir); err == nil && info.IsDir() {
-			builtinLoaded, err := m.scanDir(builtinSubdir)
-			if err != nil {
-				slog.Warn("bin/builtin/ scan failed", "error", err)
-			} else {
-				loaded += builtinLoaded
-			}
-		}
-		// Also scan bin/community/ for community plugins
-		communitySubdir := filepath.Join(binSubdir, "community")
-		if info, err := os.Stat(communitySubdir); err == nil && info.IsDir() {
-			communityLoaded, err := m.scanDir(communitySubdir)
-			if err != nil {
-				slog.Warn("bin/community/ scan failed", "error", err)
-			} else {
-				loaded += communityLoaded
-			}
 		}
 	}
 

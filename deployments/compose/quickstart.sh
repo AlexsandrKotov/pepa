@@ -21,20 +21,15 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 err()  { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # ── Parse arguments ──────────────────────────────────────────
-WITH_AI=false
 DETACH=true
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --all)        WITH_AI=true; shift ;;
-    --ai)         WITH_AI=true; shift ;;
     --interactive) DETACH=false; shift ;;
     --help|-h)
       echo "Usage: quickstart.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --all              Start everything (AI)"
-      echo "  --ai               Include local LLM (Ollama)"
       echo "  --interactive      Run in foreground (don't detach)"
       echo "  --help, -h         Show this help"
       exit 0
@@ -89,10 +84,6 @@ fi
 
 # ── Build profiles ────────────────────────────────────────────
 PROFILES=""
-if $WITH_AI; then
-  PROFILES="$PROFILES --profile ai"
-  log "AI profile enabled (local LLM via Ollama)"
-fi
 
 # ── Start services ────────────────────────────────────────────
 echo ""

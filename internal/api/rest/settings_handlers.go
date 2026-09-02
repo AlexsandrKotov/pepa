@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/logging"
 )
 
 func registerSettingsRoutes(r *gin.RouterGroup, deps Dependencies) {
@@ -100,6 +101,8 @@ func updateSetting(deps Dependencies) gin.HandlerFunc {
 			applyGitHubSettings(deps, req.Value)
 		case "ldap":
 			applyLDAPSettings(deps, req.Value)
+		case "general":
+			applyGeneralSettings(deps, req.Value)
 		}
 
 		// Strip secrets from values persisted in the DB so they are never
@@ -658,7 +661,7 @@ func applyLDAPSettings(deps Dependencies, value json.RawMessage) {
 	deps.Config.Auth.LDAP.URL = ldapSettings.URL
 	deps.Config.Auth.LDAP.BindDN = ldapSettings.BindDN
 	// If the bind_password contains mask characters, keep the existing password
-	if ldapSettings.BindPassword != "" && !strings.Contains(ldapSettings.BindPassword, "\u2022") {
+	if ldapSettings.BindPassword != "" && !strings.Contains(ldapSettings.BindPassword, "•") {
 		deps.Config.Auth.LDAP.BindPassword = ldapSettings.BindPassword
 	}
 	deps.Config.Auth.LDAP.BaseDN = ldapSettings.BaseDN
@@ -669,13 +672,61 @@ func applyLDAPSettings(deps Dependencies, value json.RawMessage) {
 	deps.Config.Auth.LDAP.StartTLS = ldapSettings.StartTLS
 	deps.Config.Auth.LDAP.InsecureSkipVerify = ldapSettings.InsecureSkipVerify
 	// If the ca_certificate contains mask characters, keep the existing certificate
-	if ldapSettings.CACertificate != "" && !strings.Contains(ldapSettings.CACertificate, "\u2022") {
+	if ldapSettings.CACertificate != "" && !strings.Contains(ldapSettings.CACertificate, "•") {
 		deps.Config.Auth.LDAP.CACertificate = ldapSettings.CACertificate
 	}
 	if ldapSettings.GroupMapping != nil {
 		deps.Config.Auth.LDAP.GroupMapping = ldapSettings.GroupMapping
 	}
 	slog.Info("LDAP settings updated at runtime", "enabled", ldapSettings.Enabled, "url", ldapSettings.URL)
+}
+
+// applyGeneralSettings reads the general platform settings and applies runtime changes.
+func applyGeneralSettings(deps Dependencies, value json.RawMessage) {
+	var generalSettings struct {
+		PlatformName string `json:"platform_name"`
+		BaseURL      string `json:"base_url"`
+		LogLevel     string `json:"log_level"`
+		CORSOrigins  string `json:"cors_origins"`
+	}
+	if err := json.Unmarshal(value, &generalSettings); err != nil {
+		slog.Error("failed to unmarshal general settings", "error", err)
+		return
+	}
+
+	// Apply platform name and base URL to runtime config
+	if generalSettings.PlatformName != "" {
+		deps.Config.Server.PlatformName = generalSettings.PlatformName
+	}
+	if generalSettings.BaseURL != "" {
+		deps.Config.Server.BaseURL = generalSettings.BaseURL
+	}
+
+	// Apply log level change at runtime (validate against accepted values)
+	if generalSettings.LogLevel != "" && generalSettings.LogLevel != deps.Config.Server.LogLevel {
+		switch strings.ToLower(generalSettings.LogLevel) {
+		case "debug", "info", "warn", "error":
+			deps.Config.Server.LogLevel = generalSettings.LogLevel
+			logging.SetLevel(generalSettings.LogLevel)
+			slog.Info("log level changed at runtime", "level", generalSettings.LogLevel)
+		default:
+			slog.Warn("invalid log level rejected", "level", generalSettings.LogLevel)
+		}
+	}
+
+	// Apply CORS origins change at runtime (trim whitespace from each origin)
+	if generalSettings.CORSOrigins != "" {
+		rawOrigins := strings.Split(generalSettings.CORSOrigins, ",")
+		newOrigins := make([]string, 0, len(rawOrigins))
+		for _, o := range rawOrigins {
+			trimmed := strings.TrimSpace(o)
+			if trimmed != "" {
+				newOrigins = append(newOrigins, trimmed)
+			}
+		}
+		deps.Config.CORS.Origins = newOrigins
+		slog.Info("CORS origins updated at runtime", "origins", newOrigins)
+	}
 }
 
 // stripLDAPSecret removes bind_password and ca_certificate from the JSON so they are not persisted in the DB.

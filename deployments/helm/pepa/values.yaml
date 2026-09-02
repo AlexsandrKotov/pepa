@@ -71,7 +71,7 @@ frontend:
     repository: ghcr.io/alexsandrkotov/pepa/pepa-frontend
     tag: ""  # Defaults to Chart.appVersion if empty
     pullPolicy: IfNotPresent
-  port: 80
+  port: 3000
   replicaCount: 2
   resources:
     requests:

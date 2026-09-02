@@ -1778,7 +1778,7 @@ export const jira = {
 
 // ── Connections ─────────────────────────────────────────────
 
-export type ConnectionType = 'kubernetes' | 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification';
+export type ConnectionType = 'kubernetes' | 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification' | 'docker' | 'secret' | 'sonarqube';
 
 export interface Connection {
   id: string;
@@ -2458,6 +2458,87 @@ export const security = {
   },
   fixVulnerability: (id: string) =>
     fetchAPI<{ vulnerability: Vulnerability; message: string }>(`/api/v1/security/vulnerabilities/${id}/fix`, { method: 'POST' }),
+};
+
+// ── SonarQube Code Quality ────────────────────────────────────
+
+export interface SonarQubeQualityGate {
+  status: string; // OK, ERROR, WARN, NONE
+  conditions: Array<{
+    status: string;
+    metric_key: string;
+    comparator: string;
+    period_index: number;
+    error_threshold: string;
+    actual_value: string;
+  }>;
+}
+
+export interface SonarQubeIssue {
+  key: string;
+  rule: string;
+  severity: string;
+  status: string;
+  message: string;
+  component: string;
+  project: string;
+  line?: number;
+  type: string; // BUG, VULNERABILITY, CODE_SMELL
+  tags?: string[];
+  creation_date: string;
+  update_date: string;
+}
+
+export interface SonarQubeMeasure {
+  metric: string;
+  value: string;
+  best_value?: boolean;
+}
+
+export interface SonarQubeMeasures {
+  component: string;
+  branch?: string;
+  metrics: SonarQubeMeasure[];
+}
+
+export interface SonarQubeIssueSummary {
+  bugs: number;
+  vulnerabilities: number;
+  code_smells: number;
+  by_severity: Record<string, number>;
+}
+
+export interface SonarQubeProjectSummary {
+  project_key: string;
+  branch: string;
+  quality_gate?: SonarQubeQualityGate;
+  measures?: SonarQubeMeasures;
+  issue_summary?: SonarQubeIssueSummary;
+  fetched_at: string;
+}
+
+export const sonarqube = {
+  /** Execute a SonarQube plugin action via the plugin execute endpoint. */
+  execute: (action: string, params?: Record<string, unknown>) =>
+    plugins.execute('sonarqube', action, params),
+
+  getProjectSummary: (projectKey?: string) =>
+    sonarqube.execute('get_project_summary', projectKey ? { project_key: projectKey } : undefined),
+
+  getQualityGate: (projectKey?: string) =>
+    sonarqube.execute('get_quality_gate', projectKey ? { project_key: projectKey } : undefined),
+
+  getIssues: (params?: { project_key?: string; types?: string; severities?: string; page_size?: number }) =>
+    sonarqube.execute('get_issues', params),
+
+  getCoverage: (projectKey?: string) =>
+    sonarqube.execute('get_coverage', projectKey ? { project_key: projectKey } : undefined),
+
+  getMeasures: (projectKey?: string, metricKeys?: string) =>
+    sonarqube.execute('get_measures', {
+      ...(projectKey ? { project_key: projectKey } : {}),
+      ...(metricKeys ? { metric_keys: metricKeys } : {}),
+    }),
 };
 
 // ── Environments (Phase 2.4) ─────────────────────────────────
@@ -4252,5 +4333,119 @@ export const pluginActivity = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return fetchAPI<{ items: PluginActionEntry[]; total: number }>(`/api/v1/plugin-activity/plugin-actions${qs}`);
   },
+};
+
+// ── Security Scanning ──────────────────────────────────────────
+
+export type ScannerType = 'trivy' | 'sonarqube' | 'both';
+export type TargetType = 'image' | 'git_repo' | 'filesystem' | 'container' | 'service' | 'sonarqube_project';
+export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TriggerType = 'manual' | 'schedule' | 'pipeline' | 'webhook';
+
+export interface ScanTarget {
+  id: string;
+  tenant_id: string;
+  name: string;
+  scanner_type: ScannerType;
+  target_type: TargetType;
+  target_ref: string;
+  connection_id?: string;
+  scan_config: Record<string, unknown>;
+  enabled: boolean;
+  last_scan_at?: string;
+  last_scan_status?: string;
+  last_scan_summary?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScanRun {
+  id: string;
+  tenant_id: string;
+  target_id: string;
+  scanner_type: ScannerType;
+  status: ScanStatus;
+  trigger_type: TriggerType;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  result_summary?: Record<string, unknown>;
+  result_full?: Record<string, unknown>;
+  error_message?: string;
+  report_url?: string;
+  created_at: string;
+  target_name?: string;
+  target_ref?: string;
+}
+
+export interface ScanSchedule {
+  id: string;
+  tenant_id: string;
+  target_id: string;
+  cron_expression: string;
+  enabled: boolean;
+  last_run_at?: string;
+  next_run_at?: string;
+  workflow_id?: string;
+  created_at: string;
+  updated_at: string;
+  target_name?: string;
+  target_ref?: string;
+  scanner_type?: string;
+}
+
+export interface SecurityDashboard {
+  targets: { total: number; enabled: number };
+  recent_scans: ScanRun[];
+  scan_summary: { completed: number; failed: number; running: number; pending: number };
+  schedules: { total: number; enabled: number };
+}
+
+export const securityScan = {
+  // Scan Targets
+  listTargets: () => fetchAPI<ScanTarget[]>('/api/v1/security/targets'),
+  
+  getTarget: (id: string) => fetchAPI<ScanTarget>(`/api/v1/security/targets/${id}`),
+  
+  createTarget: (data: Partial<ScanTarget>) =>
+    fetchAPI<ScanTarget>('/api/v1/security/targets', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updateTarget: (id: string, data: Partial<ScanTarget>) =>
+    fetchAPI<ScanTarget>(`/api/v1/security/targets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  
+  deleteTarget: (id: string) =>
+    fetchAPI<void>(`/api/v1/security/targets/${id}`, { method: 'DELETE' }),
+  
+  triggerScan: (id: string) =>
+    fetchAPI<{ message: string; target_id: string }>(`/api/v1/security/targets/${id}/scan`, { method: 'POST' }),
+  
+  // Scan Runs
+  listScans: (params?: { target_id?: string; status?: string; limit?: number; offset?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([_, v]) => v !== undefined).reduce((acc, [k, v]) => ({ ...acc, [k]: String(v) }), {})
+    ).toString() : '';
+    return fetchAPI<ScanRun[]>(`/api/v1/security/scans${qs}`);
+  },
+  
+  getScan: (id: string) => fetchAPI<ScanRun>(`/api/v1/security/scans/${id}`),
+  
+  // Scan Schedules
+  listSchedules: () => fetchAPI<ScanSchedule[]>('/api/v1/security/schedules'),
+  
+  getSchedule: (id: string) => fetchAPI<ScanSchedule>(`/api/v1/security/schedules/${id}`),
+  
+  createSchedule: (data: { target_id: string; cron_expression: string; enabled?: boolean }) =>
+    fetchAPI<ScanSchedule>('/api/v1/security/schedules', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updateSchedule: (id: string, data: { cron_expression?: string; enabled?: boolean }) =>
+    fetchAPI<ScanSchedule>(`/api/v1/security/schedules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  
+  deleteSchedule: (id: string) =>
+    fetchAPI<void>(`/api/v1/security/schedules/${id}`, { method: 'DELETE' }),
+  
+  // Dashboard & Bulk Operations
+  getDashboard: () => fetchAPI<SecurityDashboard>('/api/v1/security/dashboard-v2'),
+  
+  scanAll: () => fetchAPI<{ message: string }>('/api/v1/security/scan-all', { method: 'POST' }),
 };
 

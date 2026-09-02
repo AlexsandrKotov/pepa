@@ -53,14 +53,10 @@ export default function GitOpsRepoPage() {
   const [suspendCommitMsg, setSuspendCommitMsg] = useState('');
   const [suspending, setSuspending] = useState(false);
 
-  // Create
-  const [showCreateModal, setShowCreateModal] = useState(false);
-
   // Escape key closes modals
-  const anyModalOpen = editMode || suspendModal !== null || showCreateModal;
+  const anyModalOpen = editMode || suspendModal !== null;
   useEscapeKey(() => {
-    if (showCreateModal) setShowCreateModal(false);
-    else if (suspendModal) setSuspendModal(null);
+    if (suspendModal) setSuspendModal(null);
     else if (editMode) setEditMode(false);
   }, anyModalOpen);
 
@@ -246,7 +242,7 @@ export default function GitOpsRepoPage() {
             {scanning ? 'Scanning...' : 'Re-scan'}
           </button>
           <button
-            onClick={() => setShowCreateModal(true)}
+            onClick={() => router.push(`/services/new?gitops_repo=${encodeURIComponent(repo?.name || '')}&gitops_url=${encodeURIComponent(repo?.repo_url || '')}`)}
             className="btn btn-primary text-[12px]"
           >
             + New Service
@@ -642,24 +638,6 @@ export default function GitOpsRepoPage() {
               >
                 {suspending ? 'Processing...' : suspendModal.suspend ? 'Suspend' : 'Resume'}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Modal Placeholder */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/30" onClick={() => setShowCreateModal(false)} />
-          <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-lg mx-4">
-            <div className="px-5 py-3 border-b border-[var(--border)]">
-              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Create New Service</h2>
-            </div>
-            <div className="px-5 py-4 text-center text-[var(--text-tertiary)] text-[12px]">
-              Create service form coming soon...
-            </div>
-            <div className="flex justify-end px-5 py-3 border-t border-[var(--border)]">
-              <button onClick={() => setShowCreateModal(false)} className="btn text-[12px]">Close</button>
             </div>
           </div>
         </div>

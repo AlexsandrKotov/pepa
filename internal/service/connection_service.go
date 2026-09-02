@@ -722,3 +722,42 @@ func (s *ConnectionService) TestS3Credential(ctx context.Context, endpoint, acce
 	}
 	return TestResult{Status: "error", Message: "S3 credentials rejected by server"}
 }
+
+// TestSonarQubeConnection tests a SonarQube connection.
+func (s *ConnectionService) TestSonarQubeConnection(ctx context.Context, url, token string) TestResult {
+	if url == "" {
+		return TestResult{Status: "error", Message: "SonarQube URL is required"}
+	}
+	if token == "" {
+		return TestResult{Status: "error", Message: "SonarQube token is required"}
+	}
+
+	// Call /api/system/status endpoint
+	req, err := http.NewRequestWithContext(ctx, "GET", url+"/api/system/status", nil)
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Failed to create request: %v", err)}
+	}
+	// SonarQube uses Basic Auth with token as username and empty password
+	req.SetBasicAuth(token, "")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach SonarQube: %v", err)}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == 401 {
+		return TestResult{Status: "error", Message: "Invalid token - authentication failed"}
+	}
+	if resp.StatusCode != 200 {
+		return TestResult{Status: "error", Message: fmt.Sprintf("SonarQube returned status %d", resp.StatusCode)}
+	}
+
+	var statusResp map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&statusResp); err == nil {
+		if status, ok := statusResp["status"].(string); ok {
+			return TestResult{Status: "connected", Message: fmt.Sprintf("Successfully connected to SonarQube. System status: %s", status)}
+		}
+	}
+	return TestResult{Status: "connected", Message: "Successfully connected to SonarQube"}
+}

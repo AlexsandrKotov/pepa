@@ -32,16 +32,8 @@ config_schema:
       default: 5
 
 actions:
-  - name: list_hosts
-    description: "List configured SSH hosts"
-  - name: add_host
-    description: "Add a new SSH host"
-  - name: remove_host
-    description: "Remove an SSH host"
   - name: test_connection
     description: "Test SSH connectivity to a host"
-  - name: connect
-    description: "Open an SSH terminal session (WebSocket)"
 
 health_check:
   endpoint: /health

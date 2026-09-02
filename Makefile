@@ -138,8 +138,8 @@ deploy: clean plugins docker-build
 	@echo ""
 	@echo "✓ PEPA deployed!"
 	@echo ""
-	@echo "  API:       https://localhost (via nginx)"
-	@echo "  Frontend:  https://localhost"
+	@echo "  API:       http://localhost:$${API_PORT:-8088}"
+	@echo "  Frontend:  http://localhost:$${FRONTEND_PORT:-3000}"
 	@echo "  Postgres:  localhost:$${POSTGRES_PORT:-5432}"
 	@echo "  Redis:     localhost:$${REDIS_PORT:-6379}"
 	@echo ""
@@ -198,48 +198,30 @@ build-plugin-example:
 
 # ── Plugins ──────────────────────────────────────────────────
 
-# Plugin directories by category
-PLUGIN_DIRS_BUILTIN := $(shell find plugins/builtin -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
-PLUGIN_DIRS_COMMUNITY := $(shell find plugins/community -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
-
-# Legacy support - all plugins except builtin/community
-PLUGIN_DIRS := $(shell find plugins -mindepth 1 -maxdepth 1 -type d ! -name bin ! -name examples ! -name sdk-go ! -name builtin ! -name community ! -name README.md)
+# All plugin source directories (plugins/<name>/ with Go files)
+PLUGIN_DIRS := $(shell find plugins -mindepth 1 -maxdepth 1 -type d \
+	! -name bin ! -name examples ! -name sdk-go ! -name builtin \
+	! -name community ! -name premium ! -name premium-bin ! -name README.md 2>/dev/null)
 
 # Plugins default to Linux/amd64 for Docker containers.
 # Override: make plugins GOOS= GOARCH=
 PLUGIN_GOOS   ?= linux
 PLUGIN_GOARCH ?= amd64
 
-# Build all plugins (builtin + community)
-plugins: plugins-builtin plugins-community
-	@echo "✓ All plugins built"
-
-# Build built-in plugins (source in plugins/<name>/, metadata in plugins/builtin/<name>/)
-plugins-builtin:
-	@echo "→ Building built-in plugins ($(PLUGIN_GOOS)/$(PLUGIN_GOARCH))..."
-	@for dir in $(PLUGIN_DIRS_BUILTIN); do \
+# Build all plugins to plugins/bin/<name>/<name> (flat structure)
+plugins:
+	@echo "→ Building all plugins ($(PLUGIN_GOOS)/$(PLUGIN_GOARCH))..."
+	@for dir in $(PLUGIN_DIRS); do \
 		name=$$(basename $$dir); \
-		src="plugins/$$name"; \
-		if [ ! -d "$$src" ] || [ -z "$$(ls $$src/*.go 2>/dev/null)" ]; then \
+		if [ ! -d "$$dir" ] || [ -z "$$(ls $$dir/*.go 2>/dev/null)" ]; then \
 			echo "  ⚠ $$name — no Go source, skipping"; \
 			continue; \
 		fi; \
-		echo "  → $$name (builtin)"; \
-		mkdir -p plugins/bin/builtin/$$name; \
-		CGO_ENABLED=0 GOOS=$(PLUGIN_GOOS) GOARCH=$(PLUGIN_GOARCH) go build -o plugins/bin/builtin/$$name/$$name ./$$src; \
+		echo "  → $$name"; \
+		mkdir -p plugins/bin/$$name; \
+		CGO_ENABLED=0 GOOS=$(PLUGIN_GOOS) GOARCH=$(PLUGIN_GOARCH) go build -o plugins/bin/$$name/$$name ./$$dir; \
 	done
-	@echo "✓ Built-in plugins built in plugins/bin/builtin/<name>/"
-
-# Build community plugins (free, downloadable)
-plugins-community:
-	@echo "→ Building community plugins ($(PLUGIN_GOOS)/$(PLUGIN_GOARCH))..."
-	@for dir in $(PLUGIN_DIRS_COMMUNITY); do \
-		name=$$(basename $$dir); \
-		echo "  → $$name (community)"; \
-		mkdir -p plugins/bin/community/$$name; \
-		CGO_ENABLED=0 GOOS=$(PLUGIN_GOOS) GOARCH=$(PLUGIN_GOARCH) go build -o plugins/bin/community/$$name/$$name ./$$dir; \
-	done
-	@echo "✓ Community plugins built in plugins/bin/community/<name>/"
+	@echo "✓ All plugins built in plugins/bin/<name>/"
 
 clean-plugins:
 	@echo "→ Cleaning plugins..."
@@ -291,10 +273,8 @@ release-checksums:
 release-plugins-image: plugins sign-plugins verify-plugins
 	@echo "→ Building plugins image ($(RELEASE_TAG))..."
 	@mkdir -p plugins/bin-amd64 plugins/bin-arm64
-	@cp -r plugins/bin/builtin plugins/bin-amd64/builtin
-	@cp -r plugins/bin/community plugins/bin-amd64/community 2>/dev/null || mkdir -p plugins/bin-amd64/community
-	@cp -r plugins/bin/builtin plugins/bin-arm64/builtin
-	@cp -r plugins/bin/community plugins/bin-arm64/community 2>/dev/null || mkdir -p plugins/bin-arm64/community
+	@cp -r plugins/bin/* plugins/bin-amd64/
+	@cp -r plugins/bin/* plugins/bin-arm64/
 	@docker buildx build \
 		--platform linux/amd64,linux/arm64 \
 		-f deployments/docker/Dockerfile.plugins \

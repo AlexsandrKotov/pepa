@@ -237,36 +237,9 @@ function ObservabilitySettingsContent() {
           </div>
         </div>
 
-        {/* Audit Log Detail Section */}
-        <div className="card page-animate-up page-delay-3" style={{ borderRadius: '12px' }}>
-          <div className="card-header">
-            <span className="text-[13px] font-medium text-[var(--text-primary)]">Audit Log Detail</span>
-            <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Every user action is logged with full detail: page views, clicks, API calls, pipeline launches, deployments</p>
-          </div>
-          <div className="card-body">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-[var(--bg)] rounded-lg p-3">
-                <p className="text-[11px] text-[var(--text-tertiary)]">Log Level</p>
-                <p className="text-[13px] font-medium text-[var(--text-primary)]">Detailed</p>
-              </div>
-              <div className="bg-[var(--bg)] rounded-lg p-3">
-                <p className="text-[11px] text-[var(--text-tertiary)]">Tracked Actions</p>
-                <p className="text-[13px] font-medium text-[var(--text-primary)]">view, create, update, delete</p>
-              </div>
-              <div className="bg-[var(--bg)] rounded-lg p-3">
-                <p className="text-[11px] text-[var(--text-tertiary)]">Metadata</p>
-                <p className="text-[13px] font-medium text-[var(--text-primary)]">path, query, IP, user agent</p>
-              </div>
-              <div className="bg-[var(--bg)] rounded-lg p-3">
-                <p className="text-[11px] text-[var(--text-tertiary)]">Export Targets</p>
-                <p className="text-[13px] font-medium text-[var(--text-primary)]">Syslog, OTLP/SigNoz</p>
-              </div>
-            </div>
-          </div>
-        </div>
 
         {/* Save Button */}
-        <div className="flex justify-end page-animate-up page-delay-4">
+        <div className="flex justify-end page-animate-up page-delay-3">
           <button onClick={handleSave} disabled={saving} className="btn btn-primary">
             {saving ? 'Saving...' : 'Save Observability Settings'}
           </button>

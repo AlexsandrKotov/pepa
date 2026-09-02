@@ -3,6 +3,7 @@ package rest
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -649,8 +650,113 @@ func listJiraProjects(deps Dependencies) gin.HandlerFunc {
 
 func syncJiraIssues(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Placeholder — actual sync would call the Jira plugin
-		c.JSON(http.StatusOK, gin.H{"message": "sync initiated", "synced": 0})
+		if deps.Repos.Jira == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "jira repository not available"})
+			return
+		}
+		if deps.ProviderRegistry == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available"})
+			return
+		}
+
+		var req struct {
+			ProjectKey string `json:"project_key"`
+			JQL        string `json:"jql"`
+			MaxResults int    `json:"max_results"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			// Allow empty body — defaults are fine
+			req = struct {
+				ProjectKey string `json:"project_key"`
+				JQL        string `json:"jql"`
+				MaxResults int    `json:"max_results"`
+			}{}
+		}
+		if req.MaxResults == 0 {
+			req.MaxResults = 200
+		}
+
+		// Merge stored connection config for the Jira plugin
+		mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, c.Request.Context())
+
+		// Build plugin params
+		pluginParams, _ := json.Marshal(map[string]interface{}{
+			"project_key": req.ProjectKey,
+			"jql":         req.JQL,
+			"max_results": req.MaxResults,
+		})
+
+		// Call the Jira plugin's sync_issues action
+		resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "jira", "sync_issues", pluginParams, mergedConfig)
+		if err != nil {
+			respondInternalError(c, fmt.Errorf("jira sync plugin call failed: %w", err))
+			return
+		}
+		if !resp.Success {
+			c.JSON(http.StatusBadGateway, gin.H{"error": resp.Error})
+			return
+		}
+
+		// Parse the plugin output
+		var output struct {
+			Issues []struct {
+				ID          string   `json:"id"`
+				Key         string   `json:"key"`
+				Summary     string   `json:"summary"`
+				Description string   `json:"description"`
+				Status      string   `json:"status"`
+				Priority    string   `json:"priority"`
+				Type        string   `json:"type"`
+				Assignee    string   `json:"assignee"`
+				Reporter    string   `json:"reporter"`
+				Labels      []string `json:"labels"`
+				URL         string   `json:"url"`
+			} `json:"issues"`
+			Total  int `json:"total"`
+			Synced int `json:"synced"`
+		}
+		if err := json.Unmarshal(resp.Output, &output); err != nil {
+			respondInternalError(c, fmt.Errorf("parse sync output: %w", err))
+			return
+		}
+
+		tenantID := auth.GetTenantID(c)
+
+		// Convert to repository structs and bulk upsert
+		dbIssues := make([]*repository.JiraIssue, 0, len(output.Issues))
+		for _, iss := range output.Issues {
+			dbIssues = append(dbIssues, &repository.JiraIssue{
+				ID:          uuid.New(),
+				TenantID:    tenantID,
+				IssueKey:    iss.Key,
+				IssueID:     iss.ID,
+				Summary:     iss.Summary,
+				Description: iss.Description,
+				IssueType:   iss.Type,
+				Priority:    iss.Priority,
+				Status:      iss.Status,
+				Assignee:    iss.Assignee,
+				Reporter:    iss.Reporter,
+				Labels:      iss.Labels,
+				JiraURL:     iss.URL,
+			})
+		}
+
+		upserted, err := deps.Repos.Jira.BulkUpsert(c.Request.Context(), dbIssues)
+		if err != nil {
+			slog.Warn("jira sync: bulk upsert partial failure", "error", err, "upserted", upserted)
+		}
+
+		logAudit(deps, c, "sync", "jira_issues", "", nil, map[string]interface{}{
+			"project_key": req.ProjectKey,
+			"synced":      upserted,
+		})
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "sync completed",
+			"synced":  upserted,
+			"total":   output.Total,
+		})
 	}
 }
 

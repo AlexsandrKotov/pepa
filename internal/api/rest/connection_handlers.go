@@ -439,6 +439,19 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		case repository.ConnectionNotification:
 			result := deps.Services.Connection.TestNotificationConnection(ctx, conn.Config)
 			status, message = result.Status, result.Message
+		case repository.ConnectionSonarQube:
+			url, urlOk := conn.Config["url"].(string)
+			token, tokenOk := conn.Config["token"].(string)
+			if !urlOk || url == "" {
+				status = "error"
+				message = "No URL configured"
+			} else if !tokenOk || token == "" {
+				status = "error"
+				message = "No token configured"
+			} else {
+				result := deps.Services.Connection.TestSonarQubeConnection(ctx, url, token)
+				status, message = result.Status, result.Message
+			}
 		default:
 			status = "disconnected"
 			message = "Unknown connection type"

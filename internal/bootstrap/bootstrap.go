@@ -26,6 +26,7 @@ import (
 	"github.com/pepa/pepa/internal/provider"
 	"github.com/pepa/pepa/internal/queue"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/internal/security"
 	"github.com/pepa/pepa/internal/storage"
 )
 
@@ -71,6 +72,7 @@ type Components struct {
 	SSHHostRepo         *repository.SSHHostRepository
 	SSHHostGroupRepo    *repository.SSHHostGroupRepository
 	PluginActivityRepo  *repository.PluginActivityRepository
+	SecurityScanRepo    *repository.SecurityScanRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -187,6 +189,36 @@ func Bootstrap() (*Components, error) {
 		}
 	}
 
+	// Load persisted general settings (platform name, base URL, log level, CORS origins).
+	// This allows runtime overrides of env defaults via the web UI.
+	if genSettings, err := settingsRepo.Get(context.Background(), "general"); err == nil {
+		var genCfg struct {
+			PlatformName string `json:"platform_name"`
+			BaseURL      string `json:"base_url"`
+			LogLevel     string `json:"log_level"`
+			CORSOrigins  string `json:"cors_origins"`
+		}
+		if json.Unmarshal(genSettings, &genCfg) == nil {
+			if genCfg.PlatformName != "" {
+				cfg.Server.PlatformName = genCfg.PlatformName
+			}
+			if genCfg.BaseURL != "" {
+				cfg.Server.BaseURL = genCfg.BaseURL
+			}
+			if genCfg.LogLevel != "" {
+				cfg.Server.LogLevel = genCfg.LogLevel
+			}
+			if genCfg.CORSOrigins != "" {
+				cfg.CORS.Origins = strings.Split(genCfg.CORSOrigins, ",")
+			}
+			slog.Info("general settings loaded from database",
+				"platform_name", cfg.Server.PlatformName,
+				"base_url", cfg.Server.BaseURL,
+				"log_level", cfg.Server.LogLevel,
+			)
+		}
+	}
+
 	// Initialize OpenTelemetry (traces + metrics + logs) after DB settings are loaded.
 	ctx := context.Background()
 	var otelShutdown func(context.Context) error
@@ -294,6 +326,7 @@ func Bootstrap() (*Components, error) {
 		SSHHostRepo:         repository.NewSSHHostRepository(db.Pool),
 		SSHHostGroupRepo:    repository.NewSSHHostGroupRepository(db.Pool),
 		PluginActivityRepo:  repository.NewPluginActivityRepository(db),
+		SecurityScanRepo:    repository.NewSecurityScanRepository(db),
 	}
 
 	// Initialize pipeline provider registry
@@ -304,6 +337,9 @@ func Bootstrap() (*Components, error) {
 	pipelineRegistry.Register("terraform", pipeline.NewTerraformAdapter())
 	pipelineRegistry.Register("github_actions", pipeline.NewGitHubActionsAdapter())
 	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
+	// Register security scan adapter for pipeline integration
+	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo)
+	pipelineRegistry.Register("security_scan", pipeline.NewSecurityScanAdapter(secScanner, c.SecurityScanRepo))
 	c.PipelineRegistry = pipelineRegistry
 	slog.Info("pipeline registry initialized", "adapters", pipelineRegistry.List())
 

@@ -339,6 +339,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [platformName, setPlatformName] = useState('PEPA');
   // 'unknown' until fetched — avoids hiding Get Started before the check completes
   const [tourStatus, setTourStatus] = useState<'unknown' | 'incomplete' | 'done'>('unknown');
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string>>(new Set());
@@ -382,6 +383,20 @@ export default function Sidebar() {
       }
       setConnectionTypes(types);
     }).catch(() => {});
+  }, []);
+
+  // Fetch platform name from settings to display in sidebar
+  useEffect(() => {
+    platformSettings.get('general')
+      .then(res => {
+        if (res.value && typeof res.value === 'object') {
+          const settings = res.value as { platform_name?: string };
+          if (settings.platform_name) {
+            setPlatformName(settings.platform_name);
+          }
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Get Started hides itself once the guided tour is completed.
@@ -582,7 +597,7 @@ export default function Sidebar() {
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="font-semibold text-sm leading-tight">PEPA</span>
+              <span className="font-semibold text-sm leading-tight">{platformName}</span>
               <span className="text-[9px] text-white/30 leading-tight">Platform Engine</span>
             </div>
           )}

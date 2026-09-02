@@ -17,6 +17,7 @@ import (
 	"github.com/pepa/pepa/internal/bootstrap"
 	"github.com/pepa/pepa/internal/database"
 	rbacengine "github.com/pepa/pepa/internal/rbac/engine"
+	"github.com/pepa/pepa/internal/security"
 	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/pkg/models"
 )
@@ -148,6 +149,7 @@ func main() {
 			SSHHost:          comp.SSHHostRepo,
 			SSHHostGroup:     comp.SSHHostGroupRepo,
 			PluginActivity:   comp.PluginActivityRepo,
+			SecurityScan:     comp.SecurityScanRepo,
 		},
 		Services: &rest.Services{
 			Deployment: service.NewDeploymentService(
@@ -172,6 +174,7 @@ func main() {
 		RAGPipeline:      comp.RAGPipeline,
 		RBAC:             rbacEngine,
 		Storage:          comp.Storage,
+		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo),
 		Version:          version,
 		BuildTime:        buildTime,
 	})

@@ -17,6 +17,13 @@ import (
 	"log/syslog"
 	"os"
 	"strings"
+	"sync"
+)
+
+// activeCfg stores the current logging configuration for runtime updates.
+var (
+	activeCfg Config
+	activeMu  sync.RWMutex
 )
 
 // Config holds logging configuration.
@@ -49,6 +56,23 @@ func Init(env, level string) {
 
 // InitWithConfig configures logging with full configuration including syslog.
 func InitWithConfig(cfg Config) {
+	activeMu.Lock()
+	activeCfg = cfg
+	activeMu.Unlock()
+	applyConfig(cfg)
+}
+
+// SetLevel updates the log level at runtime without affecting syslog configuration.
+func SetLevel(level string) {
+	activeMu.Lock()
+	activeCfg.Level = level
+	cfg := activeCfg
+	activeMu.Unlock()
+	applyConfig(cfg)
+}
+
+// applyConfig is the internal implementation that configures the logger.
+func applyConfig(cfg Config) {
 	var lvl slog.Level
 	switch strings.ToLower(cfg.Level) {
 	case "debug":

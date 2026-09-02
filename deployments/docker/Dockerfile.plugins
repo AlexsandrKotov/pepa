@@ -1,7 +1,9 @@
-# PEPA Plugins — plugin binaries + manifests.
+# PEPA Plugins — signed plugin binaries + manifests.
 #
-# Build context must contain pre-built binaries at:
-#   plugins/bin-<arch>/<name>              (flat binaries, no subdirectories)
+# Build context must contain pre-built and signed binaries at:
+#   plugins/bin-<arch>/<name>/<name>       (plugin binary)
+#   plugins/bin-<arch>/<name>/checksum     (SHA-256 hash)
+#   plugins/bin-<arch>/<name>/checksum.sig (Ed25519 signature)
 #   plugins/builtin/<name>/plugin.yaml     (manifests)
 #
 # Note: Plugin signatures are verified in the CI 'plugins' job via
@@ -20,7 +22,7 @@ FROM alpine:3.24
 ARG TARGETARCH
 
 LABEL org.opencontainers.image.title="PEPA Plugins" \
-      org.opencontainers.image.description="Built-in and community plugin binaries with manifests" \
+      org.opencontainers.image.description="Signed plugin binaries with manifests" \
       org.opencontainers.image.vendor="PEPA" \
       org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
 
