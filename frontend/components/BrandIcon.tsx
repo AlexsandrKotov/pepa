@@ -332,6 +332,15 @@ const BRAND_ICONS: Record<string, React.ReactNode> = {
     </g>
   ),
 
+  // VMware — stacked layers in VMware blue-grey
+  vmware: (
+    <g>
+      <path d="M4 14l8-4 8 4-8 4-8-4z" fill="none" stroke="#607D8B" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M4 10l8-4 8 4-8 4-8-4z" fill="none" stroke="#607D8B" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M4 6l8-4 8 4-8 4-8-4z" fill="none" stroke="#607D8B" strokeWidth="1.8" strokeLinejoin="round" />
+    </g>
+  ),
+
   // Telegram — paper plane in blue
   telegram: (
     <path d="M11.944 0A12 12 0 1 0 24 12.055C24 5.495 18.627.15 11.944 0zM16.93 8.12l-1.76 8.29c-.13.59-.46.73-.93.46l-2.74-2.02-1.32 1.27c-.15.15-.27.27-.56.27l.2-2.84 5.16-4.66c.22-.2-.05-.31-.35-.11l-6.37 4.01-2.74-.86c-.6-.18-.61-.6.12-.88l10.7-4.13c.5-.18.93.12.79.88z" fill="#0088CC" />

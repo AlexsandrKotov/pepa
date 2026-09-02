@@ -146,6 +146,8 @@ func main() {
 			Organization:     comp.OrganizationRepo,
 			RAG:              comp.RAGRepo,
 			SSHHost:          comp.SSHHostRepo,
+			SSHHostGroup:     comp.SSHHostGroupRepo,
+			PluginActivity:   comp.PluginActivityRepo,
 		},
 		Services: &rest.Services{
 			Deployment: service.NewDeploymentService(

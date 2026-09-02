@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getOIDCAdminConfig, getAzureAdminConfig, getLDAPAdminConfig, testLDAPConnection, getGoogleAdminConfig, getGitHubAdminConfig, platformSettings } from '@/lib/api';
+import { getOIDCAdminConfig, getAzureAdminConfig, getLDAPAdminConfig, testLDAPConnection, getGoogleAdminConfig, getGitHubAdminConfig, platformSettings, rbac } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 
 type Tab = 'sso' | 'azure' | 'google' | 'github' | 'ldap';
@@ -477,8 +477,10 @@ function LDAPSettingsPanel() {
   const [error, setError] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ status: string; message: string } | null>(null);
+  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; slug: string }[]>([]);
 
   useEffect(() => {
+    rbac.listRoles().then(data => setAvailableRoles(data.roles || [])).catch(() => {});
     (async () => {
       try {
         const cfg = await getLDAPAdminConfig();
@@ -699,24 +701,45 @@ function LDAPSettingsPanel() {
           {/* Group → Role mapping */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Group &rarr; Role Mapping</label>
-              <button onClick={addGroupMapping} disabled={!form.enabled} className="text-[11px] text-[var(--accent)] hover:underline">+ Add mapping</button>
+              <div>
+                <label className="label mb-0">Group &rarr; Role Mapping</label>
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Map LDAP groups to PEPA roles for automatic role assignment</p>
+              </div>
+              <button onClick={addGroupMapping} disabled={!form.enabled} className="shrink-0 ml-4 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-medium border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg)] transition-colors disabled:opacity-40">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                Add mapping
+              </button>
             </div>
             {form.group_mappings.length === 0 && (
-              <p className="text-[11px] text-[var(--text-tertiary)]">No group mappings configured. Add mappings to assign PEPA roles based on LDAP group membership.</p>
+              <div className="py-6 px-4 rounded-lg border border-dashed border-[var(--border)] text-center">
+                <p className="text-[12px] text-[var(--text-tertiary)]">No group mappings configured</p>
+                <p className="text-[11px] text-[var(--text-tertiary)] mt-1">Add mappings to assign PEPA roles based on LDAP group membership</p>
+              </div>
             )}
-            <div className="space-y-2">
-              {form.group_mappings.map((m, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <input value={m.group} onChange={e => updateGroupMapping(idx, 'group', e.target.value)} className="input flex-1 text-[12px]" placeholder="CN=Admins,DC=example,DC=com" disabled={!form.enabled} />
-                  <span className="text-[11px] text-[var(--text-tertiary)]">&rarr;</span>
-                  <input value={m.role} onChange={e => updateGroupMapping(idx, 'role', e.target.value)} className="input w-32 text-[12px]" placeholder="admin" disabled={!form.enabled} />
-                  <button onClick={() => removeGroupMapping(idx)} disabled={!form.enabled} className="text-red-400 hover:text-red-500 p-1">
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </div>
-              ))}
-            </div>
+            {form.group_mappings.length > 0 && (
+              <div className="space-y-2">
+                {form.group_mappings.map((m, idx) => (
+                  <div key={idx} className="flex items-center gap-3">
+                    <input value={m.group} onChange={e => updateGroupMapping(idx, 'group', e.target.value)} className="input flex-1 text-[12px]" placeholder="CN=Admins,DC=example,DC=com" disabled={!form.enabled} />
+                    <span className="text-[var(--text-tertiary)] shrink-0">&rarr;</span>
+                    <div className="relative w-44 shrink-0">
+                      <select value={m.role} onChange={e => updateGroupMapping(idx, 'role', e.target.value)} disabled={!form.enabled} className="select text-[12px] cursor-pointer appearance-none pr-8 w-full">
+                        <option value="">Select role...</option>
+                        {availableRoles.map(r => (
+                          <option key={r.id} value={r.slug}>{r.name}</option>
+                        ))}
+                      </select>
+                      <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    </div>
+                    <button onClick={() => removeGroupMapping(idx)} disabled={!form.enabled} className="shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-40">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div className="card-footer flex justify-end">

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { connections as connectionsAPI, virtualization, type Connection } from '@/lib/api';
 import Link from 'next/link';
 
-export default function ProxmoxHostsPage() {
+export default function HostsPage() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState<string | null>(null);
@@ -15,24 +15,32 @@ export default function ProxmoxHostsPage() {
   const loadConnections = async () => {
     try {
       const res = await connectionsAPI.list();
-      setConnections((res.connections || []).filter(c => c.type === 'proxmox'));
+      setConnections((res.connections || []).filter(c => c.type === 'proxmox' || c.type === 'vmware'));
     } catch { /* ignore */ }
     setLoading(false);
   };
 
-  const handleTest = async (id: string) => {
-    setTesting(id);
+  const handleTest = async (conn: Connection) => {
+    setTesting(conn.id);
     try {
-      const result = await virtualization.proxmox.testConnection();
-      const warning = result.data?.warning;
-      setTestResult(prev => ({
-        ...prev,
-        [id]: warning
-          ? { status: 'error', message: warning }
-          : { status: 'connected', message: 'Connection successful' },
-      }));
+      if (conn.type === 'proxmox') {
+        const result = await virtualization.proxmox.testConnection();
+        const warning = result.data?.warning;
+        setTestResult(prev => ({
+          ...prev,
+          [conn.id]: warning
+            ? { status: 'error', message: warning }
+            : { status: 'connected', message: 'Connection successful' },
+        }));
+      } else {
+        const result = await virtualization.vmware.testConnection();
+        setTestResult(prev => ({
+          ...prev,
+          [conn.id]: { status: 'connected', message: 'Connected to vCenter successfully' },
+        }));
+      }
     } catch (err) {
-      setTestResult(prev => ({ ...prev, [id]: { status: 'error', message: err instanceof Error ? err.message : 'Test failed' } }));
+      setTestResult(prev => ({ ...prev, [conn.id]: { status: 'error', message: err instanceof Error ? err.message : 'Test failed' } }));
     }
     setTesting(null);
   };
@@ -45,15 +53,34 @@ export default function ProxmoxHostsPage() {
     }
   };
 
+  const providerLabel = (type: string) => {
+    switch (type) {
+      case 'proxmox': return 'Proxmox VE';
+      case 'vmware': return 'VMware vCenter';
+      default: return type;
+    }
+  };
+
+  const providerIcon = (type: string) => {
+    switch (type) {
+      case 'proxmox': return '🖥';
+      case 'vmware': return '⬡';
+      default: return '🔗';
+    }
+  };
+
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
       <div className="px-6 py-6 space-y-6">
         <div className="page-animate flex items-center justify-between">
           <div>
-            <h1 className="page-title-modern">Proxmox Hosts</h1>
-            <p className="page-subtitle-modern">Manage Proxmox VE connections and credentials</p>
+            <h1 className="page-title-modern">Host Management</h1>
+            <p className="page-subtitle-modern">Manage virtualization connections and credentials</p>
           </div>
-          <Link href="/connections?type=proxmox" className="btn btn-primary">+ Add Proxmox Host</Link>
+          <div className="flex gap-2">
+            <Link href="/connections?type=proxmox" className="btn btn-primary">+ Add Proxmox</Link>
+            <Link href="/connections?type=vmware" className="btn btn-secondary">+ Add VMware</Link>
+          </div>
         </div>
 
         {loading ? (
@@ -69,11 +96,14 @@ export default function ProxmoxHostsPage() {
         ) : connections.length === 0 ? (
           <div className="card card-body text-center py-16">
             <div className="text-5xl mb-4 opacity-20">🖥</div>
-            <p className="text-[14px] text-[var(--text-secondary)] mb-1">No Proxmox connections configured</p>
+            <p className="text-[14px] text-[var(--text-secondary)] mb-1">No virtualization connections configured</p>
             <p className="text-[12px] text-[var(--text-tertiary)] mb-5">
-              Add a Proxmox VE connection to start managing virtual machines and containers
+              Add a Proxmox VE or VMware vCenter connection to start managing virtual machines
             </p>
-            <Link href="/connections?type=proxmox" className="btn btn-primary">+ Add First Connection</Link>
+            <div className="flex gap-2">
+              <Link href="/connections?type=proxmox" className="btn btn-primary">+ Add Proxmox</Link>
+              <Link href="/connections?type=vmware" className="btn btn-secondary">+ Add VMware</Link>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -83,10 +113,10 @@ export default function ProxmoxHostsPage() {
                 <div key={conn.id} className="card p-5 modern-card-hover group" style={{ borderRadius: '12px' }}>
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xl">🖥</span>
+                      <span className="text-xl">{providerIcon(conn.type)}</span>
                       <div>
                         <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">{conn.name}</h3>
-                        <span className="text-[10px] text-[var(--text-tertiary)]">Proxmox VE</span>
+                        <span className="text-[10px] text-[var(--text-tertiary)]">{providerLabel(conn.type)}</span>
                       </div>
                     </div>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${statusColor(conn.status)}`}>
@@ -103,10 +133,18 @@ export default function ProxmoxHostsPage() {
                       <span className="text-[var(--text-tertiary)] w-14">URL:</span>
                       <span className="font-mono text-[var(--text-secondary)] truncate">{String(conn.config?.url || '-')}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <span className="text-[var(--text-tertiary)] w-14">Token:</span>
-                      <span className="font-mono text-[var(--text-secondary)] truncate">{String(conn.config?.token_id || '-')}</span>
-                    </div>
+                    {conn.type === 'proxmox' && (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="text-[var(--text-tertiary)] w-14">Token:</span>
+                        <span className="font-mono text-[var(--text-secondary)] truncate">{String(conn.config?.token_id || '-')}</span>
+                      </div>
+                    )}
+                    {conn.type === 'vmware' && (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="text-[var(--text-tertiary)] w-14">User:</span>
+                        <span className="font-mono text-[var(--text-secondary)] truncate">{String(conn.config?.username || '-')}</span>
+                      </div>
+                    )}
                   </div>
 
                   {tr && (
@@ -117,7 +155,7 @@ export default function ProxmoxHostsPage() {
 
                   <div className="flex gap-2 pt-3 border-t border-[var(--border-light)]">
                     <button
-                      onClick={() => handleTest(conn.id)}
+                      onClick={() => handleTest(conn)}
                       disabled={testing === conn.id}
                       className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors disabled:opacity-50"
                     >
@@ -133,14 +171,25 @@ export default function ProxmoxHostsPage() {
           </div>
         )}
 
-        {/* Info box */}
-        <div className="card card-body">
-          <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">How to configure Proxmox</h3>
-          <div className="text-[12px] text-[var(--text-secondary)] space-y-1">
-            <p>1. Go to Proxmox VE web interface → Datacenter → Permissions → API Tokens</p>
-            <p>{`2. Create a new API Token for a user (uncheck "Privilege Separation" for full access)`}</p>
-            <p>3. Copy the Token ID (format: user@realm!tokenname) and Token Secret</p>
-            <p>4. Add a new Proxmox connection in the Connections page with these credentials</p>
+        {/* Info boxes */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="card card-body">
+            <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">Proxmox VE</h3>
+            <div className="text-[12px] text-[var(--text-secondary)] space-y-1">
+              <p>1. Go to Proxmox VE → Datacenter → Permissions → API Tokens</p>
+              <p>{`2. Create a new API Token (uncheck "Privilege Separation" for full access)`}</p>
+              <p>3. Copy the Token ID and Token Secret</p>
+              <p>4. Add a new Proxmox connection with these credentials</p>
+            </div>
+          </div>
+          <div className="card card-body">
+            <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">VMware vCenter</h3>
+            <div className="text-[12px] text-[var(--text-secondary)] space-y-1">
+              <p>1. Ensure vCenter Server 7.0+ with REST API enabled</p>
+              <p>2. Create a service account with appropriate VM privileges</p>
+              <p>3. Add a new VMware connection with the vCenter URL and credentials</p>
+              <p>4. Enable &quot;Skip TLS verification&quot; if using self-signed certificates</p>
+            </div>
           </div>
         </div>
       </div>

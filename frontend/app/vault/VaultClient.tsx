@@ -6,6 +6,7 @@ import { listUsers, listTeams, getMe, type User, type Team } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 import { usePermission } from '@/hooks/usePermission';
 import GearIcon from '@/components/GearIcon';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface Props {
   initialPaths?: VaultPath[];
@@ -41,6 +42,9 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
   const [rotating, setRotating] = useState(false);
   const [aclEntries, setAclEntries] = useState<VaultACLEntry[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [rotateConfirm, setRotateConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const clipboardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revealTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -159,9 +163,14 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
   };
 
   const handleDelete = async (path: string) => {
-    if (!confirm(`Delete secret at "${path}"?`)) return;
+    setDeleteConfirm(path);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`/api/v1/vault/secrets/${path}`, {
+      const res = await fetch(`/api/v1/vault/secrets/${deleteConfirm}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -175,6 +184,8 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
     } catch (err) {
       showToast(`Delete failed: ${err}`, 'error');
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleSaveSecret = async (path: string, data: Record<string, string>): Promise<void> => {
@@ -198,8 +209,12 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
   };
 
   const handleRotateKeys = async () => {
-    if (!confirm('Re-encrypt all secrets with Argon2id per-path keys? This is safe and does not change secret values.')) return;
+    setRotateConfirm(true);
+  };
+
+  const confirmRotateKeys = async () => {
     setRotating(true);
+    setRotateConfirm(false);
     try {
       const res = await vault.rotateKeys();
       showToast(res.message, res.errors?.length ? 'error' : 'success');
@@ -572,6 +587,30 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
           />
         </div>
       )}
+
+      {/* Delete Secret Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this secret?"
+        description={`The secret at "${deleteConfirm || ''}" will be permanently deleted. This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
+
+      {/* Rotate Keys Confirmation */}
+      <ConfirmModal
+        open={rotateConfirm}
+        title="Re-encrypt all secrets?"
+        description="All secrets will be re-encrypted with Argon2id per-path keys. This is safe and does not change secret values."
+        confirmLabel="Re-encrypt"
+        variant="warning"
+        loading={rotating}
+        onConfirm={confirmRotateKeys}
+        onCancel={() => setRotateConfirm(false)}
+      />
       </div>
     </div>
   );

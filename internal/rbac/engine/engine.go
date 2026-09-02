@@ -531,7 +531,7 @@ func (e *Engine) SeedDefaultRoles(ctx context.Context, tenantID uuid.UUID) error
 	// Admin gets all permissions
 	// NOTE: resource names must be PLURAL to match the frontend permission checks (e.g. "services", not "service").
 	resources := []string{
-		"entities", "services", "deployments", "workflows", "clusters", "connections", "scorecards", "plugins", "roles", "audit", "settings", "policies", "vault",
+		"entities", "services", "deployments", "workflows", "clusters", "connections", "scorecards", "plugins", "roles", "audit", "plugin_activity", "settings", "policies", "vault",
 		"pipelines", "gitops", "docker", "helm", "environments", "discovery", "import", "ai", "jira", "credentials", "virtualization", "observability",
 	}
 	actions := []string{"read", "create", "update", "delete"}

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { deployments, clusters, type Deployment, type Cluster } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface LogEntry {
   timestamp: string;
@@ -21,6 +22,8 @@ export default function DeploymentDetailPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'timeline' | 'logs' | 'history'>('timeline');
+  const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
+  const [rollingBack, setRollingBack] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -52,8 +55,14 @@ export default function DeploymentDetailPage() {
   };
 
   const handleRollback = async () => {
-    if (!confirm('Rollback this deployment?')) return;
+    setShowRollbackConfirm(true);
+  };
+
+  const confirmRollback = async () => {
+    setRollingBack(true);
     try { await deployments.rollback(id); await loadData(); } catch { /* ignore */ }
+    setRollingBack(false);
+    setShowRollbackConfirm(false);
   };
 
   if (loading) {
@@ -319,6 +328,18 @@ export default function DeploymentDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Rollback Confirmation */}
+      <ConfirmModal
+        open={showRollbackConfirm}
+        title="Rollback this deployment?"
+        description="This deployment will be rolled back to the previous version. This action cannot be undone."
+        confirmLabel="Rollback"
+        variant="warning"
+        loading={rollingBack}
+        onConfirm={confirmRollback}
+        onCancel={() => setShowRollbackConfirm(false)}
+      />
       </div>
     </div>
   );

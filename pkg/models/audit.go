@@ -2,7 +2,6 @@ package models
 
 import (
 	"encoding/json"
-	"net"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,7 +23,7 @@ type AuditLog struct {
 	OldValues  json.RawMessage `json:"old_values,omitempty" db:"old_values"`
 	NewValues  json.RawMessage `json:"new_values,omitempty" db:"new_values"`
 	Diff       json.RawMessage `json:"diff,omitempty" db:"diff"`
-	IPAddress  net.IP          `json:"ip_address,omitempty" db:"ip_address"`
+	IPAddress  string          `json:"ip_address,omitempty" db:"ip_address"`
 	UserAgent  string          `json:"user_agent,omitempty" db:"user_agent"`
 	RequestID  *uuid.UUID      `json:"request_id,omitempty" db:"request_id"`
 	CreatedAt  time.Time       `json:"created_at" db:"created_at"`

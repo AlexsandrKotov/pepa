@@ -8,6 +8,7 @@ import ResizableTable, { type ColumnDef } from '@/components/ResizableTable';
 import ServiceManagementPanel from '@/components/ServiceManagementPanel';
 import BrandIcon from '@/components/BrandIcon';
 import GearIcon from '@/components/GearIcon';
+import ConfirmModal from '@/components/ConfirmModal';
 
 export default function DiscoveryPage() {
   const [services, setServices] = useState<DiscoveredService[]>([]);
@@ -34,6 +35,8 @@ export default function DiscoveryPage() {
   // FluxCD action state
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DiscoveredService | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Service management panel
   const [managingService, setManagingService] = useState<DiscoveredService | null>(null);
@@ -100,7 +103,8 @@ export default function DiscoveryPage() {
 
   // FluxCD actions
   const handleFluxcdAction = async (action: 'suspend' | 'resume' | 'reconcile' | 'delete', svc: DiscoveredService) => {
-    if (action === 'delete' && !confirm(`Delete HelmRelease ${svc.namespace}/${svc.name} from cluster ${svc.cluster}?`)) {
+    if (action === 'delete') {
+      setDeleteConfirm(svc);
       return;
     }
     const key = `${svc.cluster}-${svc.namespace}-${svc.name}-${action}`;
@@ -111,7 +115,6 @@ export default function DiscoveryPage() {
       if (action === 'suspend') result = await discovery.fluxcdSuspend(svc.cluster, svc.namespace, svc.name);
       else if (action === 'resume') result = await discovery.fluxcdResume(svc.cluster, svc.namespace, svc.name);
       else if (action === 'reconcile') result = await discovery.fluxcdReconcile(svc.cluster, svc.namespace, svc.name);
-      else if (action === 'delete') result = await discovery.fluxcdDelete(svc.cluster, svc.namespace, svc.name);
       setActionMessage({ type: 'success', text: result?.message || `Action ${action} completed` });
       setTimeout(() => setActionMessage(null), 3000);
       // Reload after action
@@ -121,6 +124,28 @@ export default function DiscoveryPage() {
       setTimeout(() => setActionMessage(null), 5000);
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const confirmFluxcdDelete = async () => {
+    if (!deleteConfirm) return;
+    const svc = deleteConfirm;
+    const key = `${svc.cluster}-${svc.namespace}-${svc.name}-delete`;
+    setDeleting(true);
+    setActionLoading(key);
+    setActionMessage(null);
+    try {
+      const result = await discovery.fluxcdDelete(svc.cluster, svc.namespace, svc.name);
+      setActionMessage({ type: 'success', text: result?.message || 'HelmRelease deleted' });
+      setTimeout(() => setActionMessage(null), 3000);
+      await loadServices();
+    } catch (err) {
+      setActionMessage({ type: 'error', text: `Failed to delete: ${err}` });
+      setTimeout(() => setActionMessage(null), 5000);
+    } finally {
+      setActionLoading(null);
+      setDeleting(false);
+      setDeleteConfirm(null);
     }
   };
 
@@ -539,6 +564,18 @@ export default function DiscoveryPage() {
           onUpdate={loadServices}
         />
       )}
+
+      {/* Delete HelmRelease Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete HelmRelease?"
+        description={`Delete HelmRelease ${deleteConfirm?.namespace || ''}/${deleteConfirm?.name || ''} from cluster ${deleteConfirm?.cluster || ''}? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmFluxcdDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
       </div>
     </div>
   );

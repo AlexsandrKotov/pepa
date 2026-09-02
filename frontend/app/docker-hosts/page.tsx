@@ -6,6 +6,7 @@ import { dockerHosts, type DockerHost, type DockerHostTestResult } from '@/lib/a
 import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/VaultInput';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const defaultForm = {
   name: '', description: '', host_type: 'local' as DockerHost['host_type'],
@@ -27,6 +28,8 @@ export default function DockerHostsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, DockerHostTestResult>>({});
   const [error, setError] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
 
   const load = async () => {
@@ -78,11 +81,18 @@ export default function DockerHostsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this Docker host?')) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await dockerHosts.delete(id);
+      await dockerHosts.delete(deleteConfirm);
       load();
     } catch { /* ignore */ }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleTest = async (id: string) => {
@@ -368,6 +378,19 @@ export default function DockerHostsPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this Docker host?"
+        description="This host will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
+
       {VaultPicker}
       </div>
     </div>

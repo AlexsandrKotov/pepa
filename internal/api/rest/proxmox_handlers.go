@@ -24,8 +24,9 @@ func registerProxmoxRoutes(r *gin.RouterGroup, deps Dependencies) {
 			c.JSON(http.StatusOK, gin.H{
 				"providers": []gin.H{
 					{"id": "proxmox", "name": "Proxmox VE", "status": "available"},
+					{"id": "vmware", "name": "VMware vCenter", "status": "available"},
 				},
-				"total": 1,
+				"total": 2,
 			})
 		})
 	}
@@ -73,10 +74,18 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 	resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "proxmox", action, params, mergedConfig)
 	if err != nil {
 		respondInternalError(c, err)
+		// Log the failed action
+		if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
+			logPluginActionAsync(deps, c, "proxmox", action, entityType, string(params), false, err.Error())
+		}
 		return
 	}
 	if !resp.Success {
 		c.JSON(http.StatusBadGateway, gin.H{"error": resp.Error})
+		// Log the failed action
+		if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
+			logPluginActionAsync(deps, c, "proxmox", action, entityType, string(params), false, resp.Error)
+		}
 		return
 	}
 	out := json.RawMessage(resp.Output)
@@ -84,6 +93,11 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 		out = json.RawMessage("null")
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
+
+	// Log successful state-changing actions
+	if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
+		logPluginActionAsync(deps, c, "proxmox", action, entityType, string(params), true, "")
+	}
 }
 
 func proxmoxTestConnection(deps Dependencies) gin.HandlerFunc {

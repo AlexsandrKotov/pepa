@@ -505,6 +505,7 @@ var pluginToConnType = map[string]string{
 	"fluxcd":    "kubernetes",
 	"argocd":    "kubernetes",
 	"proxmox":   "proxmox",
+	"vmware":    "vmware",
 }
 
 // mergeStoredPluginConfig builds the final config for a plugin action by merging

@@ -14,11 +14,14 @@ import {
 import { getStoredUser } from '@/lib/api';
 import CollapsibleSection from '@/components/CollapsibleSection';
 import {
-  StatCard, QuickActionButton, TimelineItem, ClusterRow,
+  StatCard, QuickActionButton, ClusterRow,
   DeploymentHealthWidget, PipelineActivityWidget, EnvironmentOverviewWidget,
   GitOpsStatusWidget, SecurityComplianceWidget, ServicesCatalogWidget,
-  EnhancedSystemStatus,
+  PlatformHealthBar,
 } from '@/components/DashboardWidgets';
+import { AttentionBanner, buildAttentionItems } from '@/components/AttentionBanner';
+import { MyWorkspaceWidget } from '@/components/MyWorkspaceWidget';
+import { useSmartActions } from '@/hooks/useSmartActions';
 import BrandIcon from '@/components/BrandIcon';
 import { useDashboardProfile, PROFILE_CONFIGS, type DashboardProfile } from '@/hooks/useDashboardProfile';
 import { usePermission } from '@/hooks/usePermission';
@@ -164,32 +167,6 @@ function WelcomeBanner({ userName, onDismiss }: { userName: string; onDismiss: (
   );
 }
 
-// ── Quick Actions Config ─────────────────────────────────────
-
-interface QuickActionDef {
-  id: string;
-  href: string;
-  label: string;
-  icon: string; // SVG path
-  primary?: boolean;
-  adminOnly?: boolean;
-  permission?: string; // RBAC resource for override (e.g. 'audit', 'settings')
-}
-
-const ALL_QUICK_ACTIONS: Record<string, QuickActionDef> = {
-  'new-pipeline': { id: 'new-pipeline', href: '/pipeline-builder', label: 'New Pipeline', icon: 'M12 4.5v15m7.5-7.5h-15', primary: true },
-  'deploy-service': { id: 'deploy-service', href: '/services/new', label: 'Deploy Service', icon: 'M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12' },
-  'add-connection': { id: 'add-connection', href: '/connections', label: 'Add Connection', icon: 'M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m9.86-2.54a4.5 4.5 0 00-1.242-7.244l-4.5-4.5a4.5 4.5 0 00-6.364 6.364L4.34 8.374' },
-  'add-cluster': { id: 'add-cluster', href: '/clusters', label: 'Add Cluster', icon: 'M12 4.5v15m7.5-7.5h-15' },
-  'check-drift': { id: 'check-drift', href: '/gitops/drift', label: 'Check Drift', icon: 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z' },
-  'view-pipelines': { id: 'view-pipelines', href: '/pipelines', label: 'View Pipelines', icon: 'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z' },
-  'browse-services': { id: 'browse-services', href: '/services', label: 'Browse Services', icon: 'M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9' },
-  'my-scorecards': { id: 'my-scorecards', href: '/scorecards', label: 'Scorecards', icon: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z' },
-  'audit-log': { id: 'audit-log', href: '/audit', label: 'Audit Log', icon: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08', adminOnly: true, permission: 'audit' },
-  'vault-secrets': { id: 'vault-secrets', href: '/vault', label: 'Vault Secrets', icon: 'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z' },
-  'manage-users': { id: 'manage-users', href: '/settings/users', label: 'Manage Users', icon: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z', adminOnly: true, permission: 'settings' },
-};
-
 // ── Greeting helper ──────────────────────────────────────────
 
 function getGreeting(): string {
@@ -208,9 +185,22 @@ export default function DashboardClient() {
   const [tourCompleted, setTourCompleted] = useState(false);
   const { profile, setProfile, config, hasWidget } = useDashboardProfile();
   const { isAdmin, hasPermission } = usePermission();
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const user = getStoredUser();
   const userName = user?.name?.split(' ')[0] || 'User';
+
+  // Smart actions hook (must be called before any early return)
+  const smartActions = useSmartActions({
+    deployments: data?.deploymentList ?? [],
+    pipelineRuns: data?.pipelineRunList ?? [],
+    pipelineSources: data?.pipelineSourceList ?? [],
+    connections: data?.connList ?? [],
+    vaultNeedsRotation: data?.vaultNeedsRotation ?? false,
+    vaultSecrets: data?.vaultSecrets ?? 0,
+    inactiveClusters: data ? data.clusterList.length - data.clusterList.filter(c => c.is_active).length : 0,
+    isAdmin,
+  });
 
   // Fetch all dashboard data
   useEffect(() => {
@@ -254,6 +244,7 @@ export default function DashboardClient() {
           vaultNeedsRotation: vaultData.status?.needs_rotation || false,
           vaultSealed: false,
         });
+        setLastUpdated(new Date());
         setLoading(false);
       });
     });
@@ -293,6 +284,21 @@ export default function DashboardClient() {
   const pendingDeploys = deploymentList.filter(d => d.status === 'pending' || d.status === 'progressing').length;
   const deploySuccessRate = deploymentList.length > 0 ? Math.round((successfulDeploys / deploymentList.length) * 100) : 0;
   const runningContainers = dockerServiceList.filter(s => s.status === 'running').length;
+  const unhealthyConnections = connList.filter(c => c.status !== 'connected' && c.status !== 'active').length;
+  const inactiveClusters = clusterList.length - activeClusters;
+
+  // Build attention items
+  const attentionItems = buildAttentionItems({
+    deployments: deploymentList,
+    pipelineRuns: pipelineRunList,
+    pipelineSources: pipelineSourceList,
+    vaultNeedsRotation,
+    vaultSecrets,
+    unhealthyConnections,
+    totalConnections: connList.length,
+    inactiveClusters,
+    totalClusters: clusterList.length,
+  });
 
   // Build dynamic stat cards based on profile
   const statCardDefs: Record<string, { href: string; icon: React.ReactNode; label: string; value: number; subtitle?: string; subtitleColor?: string; iconBg: string; child?: React.ReactNode }> = {
@@ -307,9 +313,6 @@ export default function DashboardClient() {
   };
 
   const visibleStatCards = config.statCards.filter(k => k in statCardDefs);
-
-  // Build quick actions based on profile (admin-only actions filtered; RBAC can override)
-  const visibleQuickActions = config.quickActions.map(id => ALL_QUICK_ACTIONS[id]).filter(a => a && (!a.adminOnly || isAdmin || (a.permission ? hasPermission(a.permission, 'read') : false)));
 
   // Map pipeline runs for the widget
   const pipelineRunItems = pipelineRunList.map(r => {
@@ -330,7 +333,14 @@ export default function DashboardClient() {
       <div className="flex items-center justify-between dash-animate-in">
         <div>
           <h1 className="page-title">{getGreeting()}, {userName}</h1>
-          <p className="page-subtitle">{config.description}</p>
+          <p className="page-subtitle">
+            {config.description}
+            {lastUpdated && (
+              <span className="ml-2 text-[11px] text-[var(--text-tertiary)]">
+                Updated {lastUpdated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <ProfileSelector current={profile} onChange={setProfile} />
@@ -345,6 +355,11 @@ export default function DashboardClient() {
           </kbd>
         </div>
       </div>
+
+      {/* ─── Attention Banner ────────────────────────────────── */}
+      {attentionItems.length > 0 && (
+        <AttentionBanner items={attentionItems} />
+      )}
 
       {/* ─── Welcome Banner ─────────────────────────────────── */}
       {showWelcome && (
@@ -375,7 +390,7 @@ export default function DashboardClient() {
 
       {/* ─── Quick Actions ──────────────────────────────────── */}
       <div className="flex flex-wrap gap-2.5 dash-animate-in" style={{ animationDelay: '0.3s' }}>
-        {visibleQuickActions.map((action, i) => (
+        {smartActions.map((action, i) => (
           <QuickActionButton
             key={action.id}
             href={action.href}
@@ -391,6 +406,16 @@ export default function DashboardClient() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* ─── Left Column ─────────────────────────────────── */}
         <div className="space-y-6">
+          {/* My Workspace */}
+          {hasWidget('my-workspace') && user && (
+            <MyWorkspaceWidget
+              userId={user.id}
+              deployments={deploymentList}
+              recentAudit={recentAudit}
+              totalServices={serviceTotal}
+            />
+          )}
+
           {/* Deployment Health */}
           {hasWidget('deployment-health') && deploymentList.length > 0 && (
             <DeploymentHealthWidget
@@ -456,47 +481,15 @@ export default function DashboardClient() {
         </div>
       </div>
 
-      {/* ─── Full Width Sections ────────────────────────────── */}
-      <div className="space-y-6">
-        {/* Recent Activity */}
-        {hasWidget('recent-activity') && (
-          <CollapsibleSection id="recent-activity" title="Recent Activity" defaultExpanded={true} action={<Link href="/audit" className="text-[12px] text-[var(--accent)] hover:underline">View all</Link>}>
-            <div className="divide-y divide-[var(--border-light)]">
-              {recentAudit.length === 0 ? (
-                <div className="px-4 py-12 text-center">
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--border-light)] flex items-center justify-center mx-auto mb-3">
-                    <svg className="w-5 h-5 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <p className="text-[13px] text-[var(--text-secondary)] mb-1">No activity yet</p>
-                  <p className="text-[11px] text-[var(--text-tertiary)]">Actions across the platform will appear here</p>
-                </div>
-              ) : (
-                recentAudit.slice(0, 8).map((a, i) => (
-                  <TimelineItem
-                    key={a.id}
-                    action={a.action}
-                    entityType={a.entity_type}
-                    time={new Date(a.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    delay={i + 1}
-                  />
-                ))
-              )}
-            </div>
-          </CollapsibleSection>
-        )}
-
-        {/* Enhanced System Status */}
-        {hasWidget('system-status') && (
-          <EnhancedSystemStatus
-            connections={{ total: connList.length, healthy: connList.length }}
-            clusters={{ total: clusterList.length, active: activeClusters }}
-            deployments={{ total: deploymentList.length, successRate: deploySuccessRate }}
-            vault={{ sealed: vaultSealed, secrets: vaultSecrets }}
-          />
-        )}
-      </div>
+      {/* ─── Platform Health Bar ────────────────────────────── */}
+      {hasWidget('platform-health') && (
+        <PlatformHealthBar
+          connections={{ total: connList.length, healthy: connList.length - unhealthyConnections }}
+          clusters={{ total: clusterList.length, active: activeClusters }}
+          deployments={{ total: deploymentList.length, successRate: deploySuccessRate }}
+          vault={{ sealed: vaultSealed, secrets: vaultSecrets }}
+        />
+      )}
     </div>
   );
 }

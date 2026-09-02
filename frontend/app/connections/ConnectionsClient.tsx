@@ -16,6 +16,7 @@ const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; col
   { type: 'ai', label: 'AI Provider', icon: 'ai', color: '#8B5CF6', description: 'AI and LLM services' },
   { type: 'storage', label: 'Storage', icon: 'storage', color: '#F59E0B', description: 'Object storage (S3, MinIO)', requiredPlugins: ['s3'] },
   { type: 'proxmox', label: 'Proxmox VE', icon: 'proxmox', color: '#E57000', description: 'Virtual machines and LXC containers', requiredPlugins: ['proxmox'] },
+  { type: 'vmware', label: 'VMware vCenter', icon: 'vmware', color: '#607D8B', description: 'ESXi virtual machines via vCenter', requiredPlugins: ['vmware'] },
   { type: 'notification', label: 'Notifications', icon: 'slack', color: '#E01E5A', description: 'Email, Webhook, Slack, Telegram, Microsoft Teams' },
 ];
 
@@ -35,6 +36,7 @@ const TYPE_REQUIREMENTS: Record<ConnectionType, string> = {
   ai: 'This is the single place to configure AI providers for the AI Assistant. Pick a provider (OpenAI, Anthropic, Groq, Qoder) and provide an API key and model, or use a Base URL for local models (Ollama, LM Studio). The most recently configured connection is used as the default provider.',
   storage: 'You need an S3-compatible endpoint plus access/secret keys (AWS S3, MinIO).',
   proxmox: 'You need the Proxmox VE API URL (e.g. https://proxmox.local:8006), an API Token ID (user@realm!tokenname), and the Token Secret. Create an API token in Proxmox under Datacenter → Permissions → API Tokens.',
+  vmware: 'You need the vCenter Server URL (e.g. https://vcenter.example.com), a username (e.g. administrator@vsphere.local), and the password. Ensure the account has sufficient privileges to manage virtual machines.',
   notification: 'Configure a notification service to receive deployment alerts and workflow notifications. Choose Email (SMTP server), Webhook (any HTTP endpoint), Slack (webhook URL or bot token), Telegram (bot token + chat ID), or Microsoft Teams (incoming webhook URL).',
 };
 
@@ -58,6 +60,7 @@ const VAULT_FIELDS: Record<string, string[]> = {
   ai: ['api_key'],
   storage: ['access_key', 'secret_key'],
   proxmox: ['token_secret', 'ssh_private_key'],
+  vmware: ['password'],
   notification: ['bot_token', 'webhook_url'],
 };
 
@@ -820,6 +823,58 @@ function AddConnectionModal({
               <p className="text-xs text-[var(--text-tertiary)] -mt-2">
                 Used to provision Docker workloads inside LXC containers. Generate with <code className="font-mono">ssh-keygen -t ed25519</code> — PEPA injects the public part into new containers automatically.
               </p>
+            </>
+          )}
+
+          {selectedType === 'vmware' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">vCenter URL *</label>
+                <input
+                  type="url"
+                  value={config.url || ''}
+                  onChange={e => setConfig({ ...config, url: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                  placeholder="https://vcenter.example.com"
+                />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">The base URL of your VMware vCenter Server.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Username *</label>
+                <input
+                  type="text"
+                  value={config.username || ''}
+                  onChange={e => setConfig({ ...config, username: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                  placeholder="administrator@vsphere.local"
+                />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">vCenter SSO username (e.g. administrator@vsphere.local).</p>
+              </div>
+              <VaultInput
+                label="Password *"
+                field="password"
+                value={config.password || ''}
+                onChange={v => setConfig({ ...config, password: v })}
+                vaultRef={vaultRefs.password}
+                onOpenVault={onOpenVaultPicker}
+                onRemoveVault={onRemoveVault}
+                placeholder="vCenter password"
+                required
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="vmware_insecure_tls"
+                  checked={config.insecure_tls === 'true'}
+                  onChange={e => setConfig({ ...config, insecure_tls: e.target.checked ? 'true' : 'false' })}
+                  className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                />
+                <label htmlFor="vmware_insecure_tls" className="text-sm text-[var(--text-secondary)]">
+                  Skip TLS verification (for self-signed certificates)
+                </label>
+              </div>
             </>
           )}
 

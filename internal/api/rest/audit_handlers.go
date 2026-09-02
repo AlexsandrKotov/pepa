@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
@@ -74,8 +73,17 @@ func logAudit(deps Dependencies, c *gin.Context, action, entityType, entityID st
 		UserID:     userID,
 		Action:     action,
 		EntityType: entityType,
-		IPAddress:  net.ParseIP(c.ClientIP()),
+		IPAddress:  c.ClientIP(),
 		UserAgent:  c.Request.UserAgent(),
+	}
+
+	// Build metadata with user info
+	meta := map[string]interface{}{}
+	if userID != nil {
+		meta["user_id"] = userID.String()
+	}
+	if email := auth.GetEmail(c); email != "" {
+		meta["user_email"] = email
 	}
 
 	if entityID != "" {
@@ -89,7 +97,21 @@ func logAudit(deps Dependencies, c *gin.Context, action, entityType, entityID st
 		entry.OldValues = data
 	}
 	if newValues != nil {
-		data, _ := json.Marshal(newValues)
+		// Merge user info into newValues for richer context
+		if nvMap, ok := newValues.(map[string]interface{}); ok {
+			for k, v := range meta {
+				if _, exists := nvMap[k]; !exists {
+					nvMap[k] = v
+				}
+			}
+			data, _ := json.Marshal(nvMap)
+			entry.NewValues = data
+		} else {
+			data, _ := json.Marshal(newValues)
+			entry.NewValues = data
+		}
+	} else if len(meta) > 0 {
+		data, _ := json.Marshal(meta)
 		entry.NewValues = data
 	}
 
@@ -156,7 +178,7 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Skip health and system info endpoints to reduce noise
 		path := c.Request.URL.Path
-		if path == "/api/v1/system/info" || path == "/health" || path == "/metrics" {
+		if path == "/api/v1/system/info" || path == "/health" || path == "/healthz" || path == "/metrics" {
 			c.Next()
 			return
 		}
@@ -197,7 +219,7 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 			UserID:     userID,
 			Action:     action,
 			EntityType: entityType,
-			IPAddress:  net.ParseIP(c.ClientIP()),
+			IPAddress:  c.ClientIP(),
 			UserAgent:  c.Request.UserAgent(),
 		}
 
@@ -221,6 +243,9 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 		}
 		if userID != nil {
 			meta["user_id"] = userID.String()
+		}
+		if email := auth.GetEmail(c); email != "" {
+			meta["user_email"] = email
 		}
 		meta["ip"] = c.ClientIP()
 		meta["user_agent"] = c.Request.UserAgent()

@@ -446,12 +446,12 @@ export default function LoginPage() {
                   <input
                     id="email"
                     name="email"
-                    type="email"
+                    type="text"
                     ref={emailRef}
                     autoComplete="username"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@local"
+                    placeholder={ldapEnabled ? 'Email or LDAP username' : 'admin@local'}
                     required
                     className="w-full pl-10 pr-3.5 py-2.5 border border-white/10 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#0052CC] focus:border-transparent bg-white/5 text-white placeholder-white/30"
                   />

@@ -6,6 +6,7 @@ import { helmRepositories, type HelmRepository, type HelmChart, type HelmChartVe
 import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/VaultInput';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const defaultForm = {
   name: '', description: '', repo_type: 'http' as HelmRepository['repo_type'],
@@ -30,6 +31,8 @@ export default function HelmRepositoriesPage() {
   const [selectedChart, setSelectedChart] = useState<HelmChart | null>(null);
   const [chartVersions, setChartVersions] = useState<HelmChartVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEscapeKey(() => {
     if (selectedChart) { setSelectedChart(null); setChartVersions([]); }
@@ -88,11 +91,18 @@ export default function HelmRepositoriesPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this Helm repository?')) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await helmRepositories.delete(id);
+      await helmRepositories.delete(deleteConfirm);
       load();
     } catch { /* ignore */ }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const openChartBrowser = async (repo: HelmRepository) => {
@@ -505,6 +515,18 @@ export default function HelmRepositoriesPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this Helm repository?"
+        description="This repository will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
       </div>
     </div>
   );

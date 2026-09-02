@@ -55,6 +55,8 @@ var rbacResourceMap = map[string]string{
 	"virtualization":      "virtualization",
 	"s3-browser":          "connections",
 	"observability":       "observability",
+	"plugin-activity":    "audit",
+	"ssh-hosts":          "audit",
 }
 
 // rbacSkipPrefixes are paths that only require authentication, not a

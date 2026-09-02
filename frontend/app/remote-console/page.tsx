@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { getBase } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
 import { Terminal } from './Terminal';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface SSHHost {
   id: string;
@@ -16,6 +17,17 @@ interface SSHHost {
   has_password: boolean;
   tags: string[];
   description: string;
+  group_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+interface SSHHostGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  host_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -34,6 +46,13 @@ export default function RemoteConsolePage() {
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [terminalKey, setTerminalKey] = useState(0);
+  const [groups, setGroups] = useState<SSHHostGroup[]>([]);
+  const [filterGroup, setFilterGroup] = useState<string | null>(null);
+  const [showGroupDialog, setShowGroupDialog] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<SSHHostGroup | null>(null);
+  const [deleteHostConfirm, setDeleteHostConfirm] = useState<string | null>(null);
+  const [deleteGroupConfirm, setDeleteGroupConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const { isAdmin } = usePermission();
 
   const fetchHosts = useCallback(async () => {
@@ -49,7 +68,21 @@ export default function RemoteConsolePage() {
     }
   }, []);
 
-  useEffect(() => { fetchHosts(); }, [fetchHosts]);
+  const fetchGroups = useCallback(async () => {
+    try {
+      const res = await fetch(`${getBase()}/api/v1/ssh-host-groups`, { credentials: 'include' });
+      if (!res.ok) {
+        console.warn('Failed to fetch groups:', res.status);
+        return;
+      }
+      const data = await res.json();
+      setGroups(data.groups || []);
+    } catch (err) { 
+      console.warn('Failed to fetch groups:', err);
+    }
+  }, []);
+
+  useEffect(() => { fetchHosts(); fetchGroups(); }, [fetchHosts, fetchGroups]);
 
   const handleConnect = (host: SSHHost) => {
     if (host.auth_method === 'ldap_passthrough' && !host.has_password) {
@@ -81,18 +114,49 @@ export default function RemoteConsolePage() {
   };
 
   const handleDeleteHost = async (id: string) => {
-    if (!confirm('Delete this host?')) return;
+    setDeleteHostConfirm(id);
+  };
+
+  const confirmDeleteHost = async () => {
+    if (!deleteHostConfirm) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`${getBase()}/api/v1/ssh-hosts/${id}`, {
+      const res = await fetch(`${getBase()}/api/v1/ssh-hosts/${deleteHostConfirm}`, {
         method: 'DELETE',
         credentials: 'include',
       });
       if (!res.ok) throw new Error('Failed to delete host');
       setToast({ message: 'Host deleted', type: 'success' });
       fetchHosts();
+      fetchGroups();
     } catch (err) {
       setToast({ message: String(err), type: 'error' });
     }
+    setDeleting(false);
+    setDeleteHostConfirm(null);
+  };
+
+  const handleDeleteGroup = async (id: string) => {
+    setDeleteGroupConfirm(id);
+  };
+
+  const confirmDeleteGroup = async () => {
+    if (!deleteGroupConfirm) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`${getBase()}/api/v1/ssh-host-groups/${deleteGroupConfirm}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to delete group');
+      setToast({ message: 'Group deleted', type: 'success' });
+      fetchGroups();
+      fetchHosts();
+    } catch (err) {
+      setToast({ message: String(err), type: 'error' });
+    }
+    setDeleting(false);
+    setDeleteGroupConfirm(null);
   };
 
   const handleTestConnection = async (id: string) => {
@@ -139,12 +203,20 @@ export default function RemoteConsolePage() {
           <p className="page-subtitle-modern">SSH terminal access to your infrastructure</p>
         </div>
         {isAdmin && (
-          <button onClick={() => { setEditingHost(null); setShowAddHost(true); }} className="btn btn-primary btn-sm">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Add Host
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setEditingGroup(null); setShowGroupDialog(true); }} className="btn btn-secondary btn-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+              Groups
+            </button>
+            <button onClick={() => { setEditingHost(null); setShowAddHost(true); }} className="btn btn-primary btn-sm">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Add Host
+            </button>
+          </div>
         )}
       </div>
 
@@ -156,22 +228,51 @@ export default function RemoteConsolePage() {
         </p>
       </div>
 
+      {/* Group Filter Chips */}
+      {groups.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 page-animate-up">
+          <button
+            onClick={() => setFilterGroup(null)}
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+              filterGroup === null ? 'bg-[var(--primary)] text-white' : 'bg-[var(--bg)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            All ({hosts.length})
+          </button>
+          {groups.map(g => (
+            <button
+              key={g.id}
+              onClick={() => setFilterGroup(filterGroup === g.id ? null : g.id)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                filterGroup === g.id ? 'text-white' : 'hover:opacity-80'
+              }`}
+              style={filterGroup === g.id ? { backgroundColor: g.color } : { backgroundColor: g.color + '20', color: g.color }}
+            >
+              {g.name} ({g.host_count})
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Hosts List */}
       {loading ? (
         <div className="text-center py-12 text-[var(--text-tertiary)]">Loading hosts...</div>
-      ) : hosts.length === 0 ? (
-        <div className="card" style={{ borderRadius: '12px' }}>
-          <div className="card-body text-center text-[var(--text-tertiary)] py-12">
-            <svg className="w-12 h-12 mx-auto mb-4 text-[var(--text-tertiary)] opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
-            </svg>
-            <p className="mb-2">No SSH hosts configured</p>
-            {isAdmin && <p className="text-xs">Click &quot;Add Host&quot; to get started</p>}
+      ) : (() => {
+        const filtered = filterGroup ? hosts.filter(h => h.group_ids?.includes(filterGroup)) : hosts;
+        if (filtered.length === 0) return (
+          <div className="card" style={{ borderRadius: '12px' }}>
+            <div className="card-body text-center text-[var(--text-tertiary)] py-12">
+              <svg className="w-12 h-12 mx-auto mb-4 text-[var(--text-tertiary)] opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+              </svg>
+              <p className="mb-2">{filterGroup ? 'No hosts in this group' : 'No SSH hosts configured'}</p>
+              {isAdmin && !filterGroup && <p className="text-xs">Click &quot;Add Host&quot; to get started</p>}
+            </div>
           </div>
-        </div>
-      ) : (
+        );
+        return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {hosts.map(host => (
+          {filtered.map(host => (
             <div key={host.id} className="card modern-card-hover" style={{ borderRadius: '12px' }}>
               <div className="card-body">
                 <div className="flex items-start justify-between mb-3">
@@ -202,6 +303,23 @@ export default function RemoteConsolePage() {
                     <span>{host.username}@{host.hostname}</span>
                   </div>
                   {host.description && <p className="mt-2 text-[var(--text-secondary)]">{host.description}</p>}
+                  {host.group_ids && host.group_ids.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {host.group_ids.map(gid => {
+                        const group = groups.find(g => g.id === gid);
+                        if (!group) return null;
+                        return (
+                          <span
+                            key={gid}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                            style={{ backgroundColor: group.color + '20', color: group.color }}
+                          >
+                            {group.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                   {host.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
                       {host.tags.map(tag => (
@@ -257,16 +375,52 @@ export default function RemoteConsolePage() {
             </div>
           ))}
         </div>
-      )}
+      );
+      })()}
 
       {/* Add/Edit Host Dialog */}
       {showAddHost && (
         <HostFormDialog
           host={editingHost}
+          groups={groups}
           onClose={() => { setShowAddHost(false); setEditingHost(null); }}
-          onSaved={() => { setShowAddHost(false); setEditingHost(null); fetchHosts(); }}
+          onSaved={() => { setShowAddHost(false); setEditingHost(null); fetchHosts(); fetchGroups(); }}
         />
       )}
+
+      {/* Group Management Dialog */}
+      {showGroupDialog && (
+        <GroupDialog
+          group={editingGroup}
+          onClose={() => { setShowGroupDialog(false); setEditingGroup(null); }}
+          onSaved={() => { setShowGroupDialog(false); setEditingGroup(null); fetchGroups(); fetchHosts(); }}
+          onDelete={(id) => { setShowGroupDialog(false); setEditingGroup(null); handleDeleteGroup(id); }}
+        />
+      )}
+
+      {/* Delete Host Confirmation */}
+      <ConfirmModal
+        open={!!deleteHostConfirm}
+        title="Delete this host?"
+        description="This host will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDeleteHost}
+        onCancel={() => setDeleteHostConfirm(null)}
+      />
+
+      {/* Delete Group Confirmation */}
+      <ConfirmModal
+        open={!!deleteGroupConfirm}
+        title="Delete this group?"
+        description="Hosts in this group will not be deleted. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDeleteGroup}
+        onCancel={() => setDeleteGroupConfirm(null)}
+      />
 
       {/* Password Dialog for LDAP Passthrough */}
       {showPasswordDialog && activeHost && (
@@ -309,8 +463,9 @@ export default function RemoteConsolePage() {
 
 // ─── Host Form Dialog ─────────────────────────────────────────────────────────
 
-function HostFormDialog({ host, onClose, onSaved }: {
+function HostFormDialog({ host, groups, onClose, onSaved }: {
   host: SSHHost | null;
+  groups: SSHHostGroup[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -325,6 +480,7 @@ function HostFormDialog({ host, onClose, onSaved }: {
     tags: host?.tags?.join(', ') || '',
     description: host?.description || '',
   });
+  const [selectedGroups, setSelectedGroups] = useState<string[]>(host?.group_ids || []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -358,15 +514,32 @@ function HostFormDialog({ host, onClose, onSaved }: {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to save host');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to save host');
       }
+      const result = await res.json().catch(() => ({}));
       onSaved();
+      // Save group assignments
+      const hostId = host ? host.id : result.id;
+      if (hostId) {
+        try {
+          await fetch(`${getBase()}/api/v1/ssh-hosts/${hostId}/groups`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_ids: selectedGroups }),
+          });
+        } catch { /* groups are secondary */ }
+      }
     } catch (err) {
       setError(String(err));
     } finally {
       setSaving(false);
     }
+  };
+
+  const toggleGroup = (gid: string) => {
+    setSelectedGroups(prev => prev.includes(gid) ? prev.filter(id => id !== gid) : [...prev, gid]);
   };
 
   return (
@@ -458,6 +631,29 @@ function HostFormDialog({ host, onClose, onSaved }: {
               placeholder="Optional description..."
             />
           </div>
+
+          {groups.length > 0 && (
+            <div>
+              <label className="label">Groups</label>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {groups.map(g => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => toggleGroup(g.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                      selectedGroups.includes(g.id)
+                        ? 'border-transparent text-white'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
+                    }`}
+                    style={selectedGroups.includes(g.id) ? { backgroundColor: g.color } : {}}
+                  >
+                    {g.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
@@ -465,6 +661,120 @@ function HostFormDialog({ host, onClose, onSaved }: {
           <button onClick={handleSubmit} disabled={saving} className="btn btn-primary">
             {saving ? 'Saving...' : (host ? 'Update' : 'Add Host')}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Group Dialog ─────────────────────────────────────────────────────────────
+
+function GroupDialog({ group, onClose, onSaved, onDelete }: {
+  group: SSHHostGroup | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onDelete: (id: string) => void;
+}) {
+  const [form, setForm] = useState({
+    name: group?.name || '',
+    description: group?.description || '',
+    color: group?.color || '#7aa2f7',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async () => {
+    if (!form.name) {
+      setError('Group name is required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+
+    try {
+      const url = group ? `${getBase()}/api/v1/ssh-host-groups/${group.id}` : `${getBase()}/api/v1/ssh-host-groups`;
+      const method = group ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method,
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to save group');
+      }
+      onSaved();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const presetColors = ['#7aa2f7', '#f7768e', '#9ece6a', '#e0af68', '#bb9af7', '#7dcfff', '#ff9e64'];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-6 w-[450px] shadow-2xl">
+        <h3 className="text-lg font-medium text-[var(--text-primary)] mb-4">
+          {group ? 'Edit Group' : 'New Group'}
+        </h3>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-500">
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div>
+            <label className="label">Name *</label>
+            <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="input mt-1" placeholder="Production Servers" />
+          </div>
+
+          <div>
+            <label className="label">Description</label>
+            <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="input mt-1" placeholder="Optional description" />
+          </div>
+
+          <div>
+            <label className="label">Color</label>
+            <div className="flex items-center gap-2 mt-1">
+              {presetColors.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setForm({ ...form, color: c })}
+                  className={`w-7 h-7 rounded-full transition-transform ${form.color === c ? 'ring-2 ring-offset-2 ring-offset-[var(--surface)] ring-[var(--text-secondary)]' : ''}`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+              <input
+                type="color"
+                value={form.color}
+                onChange={e => setForm({ ...form, color: e.target.value })}
+                className="w-10 h-10 rounded cursor-pointer border border-[var(--border)] ml-2"
+                title="Choose custom color"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between gap-2 mt-6">
+          <div>
+            {group && (
+              <button onClick={() => onDelete(group.id)} className="btn btn-secondary text-red-400 hover:text-red-300">
+                Delete Group
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn btn-secondary">Cancel</button>
+            <button onClick={handleSubmit} disabled={saving} className="btn btn-primary">
+              {saving ? 'Saving...' : (group ? 'Update' : 'Create')}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { platformSettings, plugins } from '@/lib/api';
+import { platformSettings, plugins, connections as connectionsAPI } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
 
 // Main navigation — pinned items (daily golden path), always visible
@@ -20,23 +20,6 @@ const pluginNavItems: Record<string, { section: string; item: { href: string; la
 
 // Plugin-dependent collapsible sections — entire sections shown only when plugin is enabled
 const pluginSections: Record<string, { title: string; icon: string; items: { href: string; label: string; permission: string | null; adminOnly?: boolean }[]; subGroups?: NavSubGroup[] }> = {
-  proxmox: {
-    title: 'Virtualization',
-    icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2',
-    items: [],
-    subGroups: [
-      {
-        label: 'Proxmox',
-        items: [
-          { href: '/virtualization', label: 'Dashboard', permission: 'virtualization' },
-          { href: '/virtualization/hosts', label: 'Hosts', permission: 'virtualization' },
-          { href: '/virtualization/vms', label: 'Virtual Machines', permission: 'virtualization' },
-          { href: '/virtualization/containers', label: 'Containers', permission: 'virtualization' },
-          { href: '/virtualization/logs', label: 'Logs', permission: 'virtualization' },
-        ],
-      },
-    ],
-  },
   s3: {
     title: 'Object Storage',
     icon: 'M3 6c0-1.657 4.03-3 9-3s9 1.343 9 3v2c0 1.657-4.03 3-9 3S3 9.657 3 8V6zm0 4c0 1.657 4.03 3 9 3s9-1.343 9-3v2c0 1.657-4.03 3-9 3s-9-1.343-9-3v-2zm0 4c0 1.657 4.03 3 9 3s9-1.343 9-3v2c0 1.657-4.03 3-9 3s-9-1.343-9-3v-2z',
@@ -66,6 +49,36 @@ interface NavSubGroup {
   label: string;
   items: { href: string; label: string; permission: string | null; adminOnly?: boolean }[];
 }
+
+// Connection-driven collapsible sections — shown when connections of the matching type exist.
+// Each key maps to a connection type; sub-groups are filtered by which types have connections.
+const connectionDrivenSections: Record<string, { title: string; icon: string; connectionTypes: string[]; subGroups: Record<string, NavSubGroup> }> = {
+  virtualization: {
+    title: 'Virtualization',
+    icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2',
+    connectionTypes: ['proxmox', 'vmware'],
+    subGroups: {
+      proxmox: {
+        label: 'Proxmox',
+        items: [
+          { href: '/virtualization', label: 'Dashboard', permission: 'virtualization' },
+          { href: '/virtualization/hosts', label: 'Hosts', permission: 'virtualization' },
+          { href: '/virtualization/vms', label: 'Virtual Machines', permission: 'virtualization' },
+          { href: '/virtualization/containers', label: 'Containers', permission: 'virtualization' },
+          { href: '/virtualization/logs', label: 'Logs', permission: 'virtualization' },
+        ],
+      },
+      vmware: {
+        label: 'VMware',
+        items: [
+          { href: '/virtualization', label: 'Dashboard', permission: 'virtualization' },
+          { href: '/virtualization/hosts', label: 'Hosts', permission: 'virtualization' },
+          { href: '/virtualization/vms', label: 'Virtual Machines', permission: 'virtualization' },
+        ],
+      },
+    },
+  },
+};
 
 // Grouped by user journey: Catalog → Delivery → Infrastructure → Automation → Integrations → Administration.
 // Developer-facing sections come first, admin-facing last.
@@ -161,6 +174,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/settings/observability', label: 'Observability', permission: 'settings', adminOnly: true },
       { href: '/roles', label: 'Roles', permission: 'roles', adminOnly: true },
       { href: '/audit', label: 'Audit Log', permission: 'audit', adminOnly: true },
+      { href: '/plugin-activity', label: 'Plugin Activity', permission: 'plugin_activity', adminOnly: true },
     ],
   },
 ];
@@ -181,6 +195,9 @@ const allNavHrefs = [
   ...Object.values(pluginNavItems).map(e => e.item.href),
   ...Object.values(pluginSections).flatMap(s =>
     s.subGroups ? s.subGroups.flatMap(sg => sg.items.map(i => i.href)) : s.items.map(i => i.href)
+  ),
+  ...Object.values(connectionDrivenSections).flatMap(s =>
+    Object.values(s.subGroups).flatMap(sg => sg.items.map(i => i.href))
   ),
   '/pipelines/edit',
 ];
@@ -325,6 +342,7 @@ export default function Sidebar() {
   // 'unknown' until fetched — avoids hiding Get Started before the check completes
   const [tourStatus, setTourStatus] = useState<'unknown' | 'incomplete' | 'done'>('unknown');
   const [enabledPlugins, setEnabledPlugins] = useState<Set<string>>(new Set());
+  const [connectionTypes, setConnectionTypes] = useState<Set<string>>(new Set());
   const { hasPermission, isAdmin } = usePermission();
 
   // Helper: check if user can see a nav item (permission: null = always visible)
@@ -352,6 +370,17 @@ export default function Sidebar() {
         if (p.enabled) enabled.add(p.name);
       }
       setEnabledPlugins(enabled);
+    }).catch(() => {});
+  }, []);
+
+  // Fetch connection types to conditionally show connection-driven sections (e.g. Virtualization)
+  useEffect(() => {
+    connectionsAPI.list().then(res => {
+      const types = new Set<string>();
+      for (const c of res.connections || []) {
+        types.add(c.type);
+      }
+      setConnectionTypes(types);
     }).catch(() => {});
   }, []);
 
@@ -413,7 +442,7 @@ export default function Sidebar() {
         break;
       }
     }
-  }, [pathname, enabledPlugins]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pathname, enabledPlugins, connectionTypes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = () => {
     setCollapsed(!collapsed);
@@ -474,7 +503,7 @@ export default function Sidebar() {
       })
       .filter(Boolean) as typeof collapsibleSections;
 
-    // Add plugin-dependent sections (e.g., Virtualization for proxmox)
+    // Add plugin-dependent sections (e.g., Object Storage for s3, Jira)
     const extraSections: typeof collapsibleSections = [];
     for (const [pluginName, section] of Object.entries(pluginSections)) {
       if (enabledPlugins.has(pluginName)) {
@@ -495,7 +524,29 @@ export default function Sidebar() {
       }
     }
 
-    // Insert Virtualization section after Infrastructure
+    // Add connection-driven sections (e.g., Virtualization when proxmox/vmware connections exist)
+    for (const [, cfg] of Object.entries(connectionDrivenSections)) {
+      const activeSubGroups: NavSubGroup[] = [];
+      for (const connType of cfg.connectionTypes) {
+        if (connectionTypes.has(connType) && cfg.subGroups[connType]) {
+          const sg = cfg.subGroups[connType];
+          const filtered = sg.items.filter(i => canSee(i.permission, i.adminOnly));
+          if (filtered.length > 0) {
+            activeSubGroups.push({ ...sg, items: filtered });
+          }
+        }
+      }
+      if (activeSubGroups.length > 0) {
+        extraSections.push({
+          title: cfg.title,
+          icon: cfg.icon,
+          items: [],
+          subGroups: activeSubGroups,
+        });
+      }
+    }
+
+    // Insert extra sections after Infrastructure
     const infraIdx = sections.findIndex(s => s.title === 'Infrastructure');
     if (infraIdx >= 0 && extraSections.length > 0) {
       sections.splice(infraIdx + 1, 0, ...extraSections);
@@ -504,7 +555,7 @@ export default function Sidebar() {
     }
 
     return sections;
-  }, [enabledPlugins, hasPermission, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabledPlugins, connectionTypes, hasPermission, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <aside className={`flex flex-col h-full bg-[#1e2128] text-white transition-all duration-300 ease-in-out ${collapsed ? 'w-[56px]' : 'w-[190px]'}`}>

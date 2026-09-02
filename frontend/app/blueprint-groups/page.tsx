@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { blueprintGroups as blueprintGroupsAPI, blueprints as blueprintsAPI, type BlueprintGroup, type ServiceBlueprint } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const sourceIcons: Record<string, string> = {
   container: '🐳', helm_git: '🔀', helm_http: '🌐', helm_oci: '📦', docker_compose: '🐙',
@@ -21,6 +22,8 @@ export default function BlueprintGroupsPage() {
   const [dragOverGroupIdx, setDragOverGroupIdx] = useState<number | null>(null);
   const [deploying, setDeploying] = useState<string | null>(null);
   const [deployLog, setDeployLog] = useState<{ groupId: string; lines: string[] } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEscapeKey(() => {
     if (showForm) { setShowForm(false); setEditing(null); }
@@ -29,7 +32,7 @@ export default function BlueprintGroupsPage() {
 
   const load = () => {
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
-    blueprintsAPI.list().then(res => setAllBlueprints(res.blueprints || [])).catch(() => {});
+    blueprintsAPI.list({ type: 'user' }).then(res => setAllBlueprints(res.blueprints || [])).catch(() => {});
   };
 
   useEffect(() => { load(); }, []);
@@ -62,13 +65,20 @@ export default function BlueprintGroupsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this group? Blueprints will become ungrouped.')) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await blueprintGroupsAPI.delete(id);
+      await blueprintGroupsAPI.delete(deleteConfirm);
       load();
     } catch (err) {
       console.error('Failed to delete group:', err);
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleAddBlueprints = async (groupId: string) => {
@@ -417,6 +427,18 @@ export default function BlueprintGroupsPage() {
             </div>
           </div>
         )}
+
+        {/* Delete Confirmation */}
+        <ConfirmModal
+          open={!!deleteConfirm}
+          title="Delete this group?"
+          description="Blueprints will become ungrouped. This action cannot be undone."
+          confirmLabel="Delete"
+          variant="danger"
+          loading={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirm(null)}
+        />
       </div>
     </div>
   );

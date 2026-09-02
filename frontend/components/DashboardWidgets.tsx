@@ -39,10 +39,12 @@ interface StatCardProps {
   iconBg: string;
   delay: number;
   accent?: boolean;
+  trend?: 'up' | 'down' | 'neutral';
+  trendLabel?: string;
   children?: React.ReactNode;
 }
 
-export const StatCard = React.memo(function StatCard({ href, icon, label, value, subtitle, subtitleColor, iconBg, delay, accent, children }: StatCardProps) {
+export const StatCard = React.memo(function StatCard({ href, icon, label, value, subtitle, subtitleColor, iconBg, delay, accent, trend, trendLabel, children }: StatCardProps) {
   const router = useRouter();
 
   const handleClick = (e: React.MouseEvent) => {
@@ -59,9 +61,20 @@ export const StatCard = React.memo(function StatCard({ href, icon, label, value,
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">{label}</p>
-          <p className="text-[26px] font-bold text-[var(--text-primary)] leading-tight tracking-tight">
-            <AnimatedCounter value={value} />
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-[26px] font-bold text-[var(--text-primary)] leading-tight tracking-tight">
+              <AnimatedCounter value={value} />
+            </p>
+            {trend && trendLabel && (
+              <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                trend === 'up' ? 'bg-emerald-500/10 text-emerald-600' :
+                trend === 'down' ? 'bg-red-500/10 text-red-500' :
+                'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+              }`}>
+                {trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→'} {trendLabel}
+              </span>
+            )}
+          </div>
           {subtitle && (
             <p className={`text-[11px] ${subtitleColor || 'text-[var(--text-tertiary)]'}`}>{subtitle}</p>
           )}
@@ -103,31 +116,6 @@ export const QuickActionButton = React.memo(function QuickActionButton({ href, i
   );
 });
 QuickActionButton.displayName = 'QuickActionButton';
-
-/* ─── Activity Timeline Item ────────────────────────────── */
-
-interface TimelineItemProps {
-  action: string;
-  entityType: string;
-  time: string;
-  delay: number;
-}
-
-export const TimelineItem = React.memo(function TimelineItem({ action, entityType, time, delay }: TimelineItemProps) {
-  return (
-    <div className="dash-animate-in flex items-center gap-3 px-4 py-3 hover:bg-[var(--bg)] transition-all duration-200" style={{ animationDelay: `${delay * 0.06}s` }}>
-      <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="badge badge-accent text-[10px]">{action}</span>
-          <span className="text-[12px] text-[var(--text-secondary)] truncate">{entityType}</span>
-        </div>
-      </div>
-      <span className="text-[11px] text-[var(--text-tertiary)] whitespace-nowrap">{time}</span>
-    </div>
-  );
-});
-TimelineItem.displayName = 'TimelineItem';
 
 /* ─── Deployment Row ────────────────────────────────────── */
 
@@ -349,23 +337,25 @@ export const PipelineActivityWidget = React.memo(function PipelineActivityWidget
     canceled: 'badge-default',
   };
 
+  // Calculate average duration for completed runs
+  const completedRuns = runs.filter(r => r.duration_ms && r.duration_ms > 0);
+  const avgDuration = completedRuns.length > 0
+    ? Math.round(completedRuns.reduce((sum, r) => sum + (r.duration_ms || 0), 0) / completedRuns.length)
+    : 0;
+
   return (
     <div className="dash-animate-in card" style={{ animationDelay: '0.2s' }}>
       <div className="card-header flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-medium text-[var(--text-primary)]">Pipeline Activity</span>
           {totalSources > 0 && <span className="badge badge-default text-[10px]">{totalSources} sources</span>}
+          {avgDuration > 0 && <span className="text-[10px] text-[var(--text-tertiary)]">avg {formatDuration(avgDuration)}</span>}
         </div>
         <Link href="/pipelines" className="text-[12px] text-[var(--accent)] hover:underline">View all</Link>
       </div>
       <div className="divide-y divide-[var(--border-light)]">
         {runs.length === 0 ? (
-          <div className="px-4 py-10 text-center">
-            <div className="w-10 h-10 rounded-2xl bg-[var(--border-light)] flex items-center justify-center mx-auto mb-2">
-              <svg className="w-4 h-4 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-              </svg>
-            </div>
+          <div className="px-4 py-6 text-center">
             <p className="text-[12px] text-[var(--text-secondary)]">No pipeline runs yet</p>
             <Link href="/pipeline-builder" className="text-[11px] text-[var(--accent)] hover:underline mt-1 inline-block">Create a pipeline &rarr;</Link>
           </div>
@@ -420,7 +410,7 @@ export const EnvironmentOverviewWidget = React.memo(function EnvironmentOverview
       </div>
       <div className="divide-y divide-[var(--border-light)]">
         {environments.length === 0 ? (
-          <div className="px-4 py-8 text-center">
+          <div className="px-4 py-5 text-center">
             <p className="text-[12px] text-[var(--text-secondary)]">No environments configured</p>
             <Link href="/environments" className="text-[11px] text-[var(--accent)] hover:underline mt-1 inline-block">Add environment &rarr;</Link>
           </div>
@@ -482,7 +472,7 @@ export const GitOpsStatusWidget = React.memo(function GitOpsStatusWidget({ repos
       </div>
       <div className="divide-y divide-[var(--border-light)]">
         {repos.length === 0 ? (
-          <div className="px-4 py-8 text-center">
+          <div className="px-4 py-5 text-center">
             <p className="text-[12px] text-[var(--text-secondary)]">No GitOps repositories</p>
             <Link href="/gitops" className="text-[11px] text-[var(--accent)] hover:underline mt-1 inline-block">Configure GitOps &rarr;</Link>
           </div>
@@ -556,10 +546,10 @@ export const SecurityComplianceWidget = React.memo(function SecurityComplianceWi
             <p className="text-[16px] font-bold text-blue-600"><AnimatedCounter value={totalConnections} /></p>
             <p className="text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider mt-0.5">Connections</p>
           </div>
-          <div className="bg-amber-500/5 rounded-lg px-3 py-2 text-center">
+          <Link href="/audit" className="bg-amber-500/5 rounded-lg px-3 py-2 text-center hover:bg-amber-500/10 transition-colors">
             <p className="text-[16px] font-bold text-amber-600"><AnimatedCounter value={recentAuditCount} /></p>
             <p className="text-[9px] text-[var(--text-tertiary)] uppercase tracking-wider mt-0.5">Audit (24h)</p>
-          </div>
+          </Link>
         </div>
       </div>
     </div>
@@ -603,7 +593,7 @@ export const ServicesCatalogWidget = React.memo(function ServicesCatalogWidget({
       </div>
       <div className="divide-y divide-[var(--border-light)]">
         {services.length === 0 ? (
-          <div className="px-4 py-10 text-center">
+          <div className="px-4 py-6 text-center">
             <p className="text-[12px] text-[var(--text-secondary)]">No services registered</p>
             <Link href="/services/new" className="text-[11px] text-[var(--accent)] hover:underline mt-1 inline-block">Deploy a service &rarr;</Link>
           </div>
@@ -627,17 +617,16 @@ export const ServicesCatalogWidget = React.memo(function ServicesCatalogWidget({
 });
 ServicesCatalogWidget.displayName = 'ServicesCatalogWidget';
 
-/* ─── Enhanced System Status ────────────────────────────── */
+/* ─── Platform Health Bar (compact) ─────────────────────── */
 
-interface EnhancedSystemStatusProps {
+interface PlatformHealthBarProps {
   connections: { total: number; healthy: number };
   clusters: { total: number; active: number };
   deployments: { total: number; successRate: number };
   vault: { sealed: boolean; secrets: number };
 }
 
-export const EnhancedSystemStatus = React.memo(function EnhancedSystemStatus({ connections, clusters, deployments, vault }: EnhancedSystemStatusProps) {
-  // Compute overall health score (0-100)
+export const PlatformHealthBar = React.memo(function PlatformHealthBar({ connections, clusters, deployments, vault }: PlatformHealthBarProps) {
   let score = 100;
   if (connections.total > 0) score -= Math.round(((connections.total - connections.healthy) / connections.total) * 25);
   if (clusters.total > 0) score -= Math.round(((clusters.total - clusters.active) / clusters.total) * 25);
@@ -652,34 +641,25 @@ export const EnhancedSystemStatus = React.memo(function EnhancedSystemStatus({ c
 
   return (
     <div className="dash-animate-in card overflow-hidden" style={{ animationDelay: '0.4s' }}>
-      <div className="px-4 py-3 border-b border-[var(--border-light)]" style={{ background: `linear-gradient(135deg, ${score >= 90 ? 'rgba(16,185,129,0.04)' : score >= 60 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)'}, transparent)` }}>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className={`w-2.5 h-2.5 rounded-full ${healthBg}`} />
-            <div className={`absolute inset-0 w-2.5 h-2.5 rounded-full ${healthBg} opacity-40 animate-ping`} />
-          </div>
-          <div className="flex-1">
-            <p className="text-[13px] font-semibold text-[var(--text-primary)]">Platform Health: <span className={healthColor}>{score}/100</span></p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">{healthLabel}</p>
-          </div>
-          <span className={`badge ${badgeClass}`}>{healthLabel}</span>
+      <div className="px-4 py-2.5 flex items-center gap-3">
+        <div className="relative flex-shrink-0">
+          <div className={`w-2 h-2 rounded-full ${healthBg}`} />
+          {score < 90 && (
+            <div className={`absolute inset-0 w-2 h-2 rounded-full ${healthBg} opacity-40 animate-ping`} />
+          )}
         </div>
-      </div>
-      <div className="grid grid-cols-4 divide-x divide-[var(--border-light)]">
-        {[
-          { label: 'Connections', value: `${connections.healthy}/${connections.total}`, sub: connections.healthy === connections.total ? 'All healthy' : `${connections.total - connections.healthy} issues` },
-          { label: 'Clusters', value: `${clusters.active}/${clusters.total}`, sub: clusters.active === clusters.total ? 'All active' : `${clusters.total - clusters.active} inactive` },
-          { label: 'Deploy Rate', value: `${deployments.successRate}%`, sub: `${deployments.total} total` },
-          { label: 'Vault', value: vault.sealed ? 'Sealed' : 'Open', sub: `${vault.secrets} secrets` },
-        ].map((item, i) => (
-          <div key={i} className="py-3 text-center">
-            <p className="text-[16px] font-bold text-[var(--text-primary)] tracking-tight">{item.value}</p>
-            <p className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider mt-0.5">{item.label}</p>
-            <p className="text-[9px] text-[var(--text-tertiary)] mt-0.5">{item.sub}</p>
-          </div>
-        ))}
+        <span className="text-[12px] font-medium text-[var(--text-primary)]">Platform Health</span>
+        <span className={`text-[12px] font-bold ${healthColor}`}>{score}/100</span>
+        <span className={`badge ${badgeClass} text-[10px]`}>{healthLabel}</span>
+        <div className="flex-1" />
+        <div className="flex items-center gap-4 text-[10px] text-[var(--text-tertiary)]">
+          <span>{connections.healthy}/{connections.total} connections</span>
+          <span>{clusters.active}/{clusters.total} clusters</span>
+          <span>{deployments.successRate}% deploy</span>
+          <span>{vault.secrets} secrets</span>
+        </div>
       </div>
     </div>
   );
 });
-EnhancedSystemStatus.displayName = 'EnhancedSystemStatus';
+PlatformHealthBar.displayName = 'PlatformHealthBar';

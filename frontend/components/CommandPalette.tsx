@@ -46,6 +46,7 @@ const pages: PaletteItem[] = [
   { id: 'roles', label: 'Roles', description: 'RBAC roles', href: '/roles', icon: 'plugin', category: 'Administration' },
   { id: 'vault', label: 'Vault', description: 'Encrypted secrets management', href: '/vault', icon: 'vault', category: 'Administration' },
   { id: 'audit', label: 'Audit Log', description: 'Activity history', href: '/audit', icon: 'discovery', category: 'Administration' },
+  { id: 'plugin-activity', label: 'Plugin Activity', description: 'SSH commands & VM operations', href: '/plugin-activity', icon: 'plugin', category: 'Administration' },
   { id: 'security', label: 'Security', description: 'Security dashboard', href: '/security', icon: 'vault', category: 'Administration' },
 ];
 

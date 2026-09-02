@@ -5,6 +5,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { listTeams, createTeam, deleteTeam, listTeamMembers, addTeamMember, removeTeamMember, listUsers, type Team, type TeamMember, type User } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 import { usePermission } from '@/hooks/usePermission';
+import ConfirmModal from '@/components/ConfirmModal';
 
 export default function TeamsPage() {
   return (
@@ -23,6 +24,8 @@ function TeamsPageContent() {
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { loadTeams(); }, []);
 
@@ -39,15 +42,22 @@ function TeamsPageContent() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this team?')) return;
+    setDeleteConfirm(id);
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await deleteTeam(id);
+      await deleteTeam(deleteConfirm);
       await loadTeams(true);
-      if (selectedTeam?.id === id) setSelectedTeam(null);
+      if (selectedTeam?.id === deleteConfirm) setSelectedTeam(null);
       setFeedback({ ok: true, text: 'Team deleted' });
     } catch (err) {
       setFeedback({ ok: false, text: err instanceof Error ? err.message : 'Failed' });
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   }
 
   // Build tree structure
@@ -124,6 +134,18 @@ function TeamsPageContent() {
       </div>
 
       {showCreate && <CreateTeamModal onClose={() => setShowCreate(false)} onCreated={() => loadTeams(true)} teams={teams} />}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this team?"
+        description="This team will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

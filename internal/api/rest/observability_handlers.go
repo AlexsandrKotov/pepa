@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,7 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/logging"
+	"github.com/pepa/pepa/internal/observability"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel"
 )
 
 // registerObservabilityRoutes registers observability API endpoints.
@@ -32,6 +36,7 @@ func registerObservabilityRoutes(r *gin.RouterGroup, deps Dependencies) {
 		obs.PUT("/settings", observabilitySettingsUpdate(deps))
 		obs.POST("/settings/test-syslog", observabilityTestSyslog(deps))
 		obs.POST("/settings/test-otlp", observabilityTestOTLP(deps))
+		obs.POST("/debug/send-test", observabilitySendTestTelemetry(deps)) // Send test trace+metric+log to OTLP
 	}
 }
 
@@ -424,21 +429,39 @@ func observabilityResolveAlert(deps Dependencies) gin.HandlerFunc {
 }
 
 // observabilitySettingsGet returns the current observability configuration.
+// It first tries to load persisted settings from the database, falling back to config defaults.
 func observabilitySettingsGet(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg := deps.Config.Observability
-		c.JSON(http.StatusOK, gin.H{
-			"otel_enabled":       cfg.Enabled,
-			"otel_endpoint":      cfg.OTLPEndpoint,
-			"otel_service_name":  cfg.ServiceName,
-			"otel_sampling_rate": cfg.SamplingRate,
-			"otel_insecure":      cfg.Insecure,
-			"syslog_enabled":     cfg.Syslog.Enabled,
-			"syslog_network":     cfg.Syslog.Network,
-			"syslog_address":     cfg.Syslog.Address,
-			"syslog_tag":         cfg.Syslog.Tag,
-			"syslog_facility":    cfg.Syslog.Facility,
-		})
+		// Start with config defaults
+		result := gin.H{
+			"otel_enabled":       deps.Config.Observability.Enabled,
+			"otel_endpoint":      deps.Config.Observability.OTLPEndpoint,
+			"otel_service_name":  deps.Config.Observability.ServiceName,
+			"otel_sampling_rate": deps.Config.Observability.SamplingRate,
+			"otel_insecure":      deps.Config.Observability.Insecure,
+			"syslog_enabled":     deps.Config.Observability.Syslog.Enabled,
+			"syslog_network":     deps.Config.Observability.Syslog.Network,
+			"syslog_address":     deps.Config.Observability.Syslog.Address,
+			"syslog_tag":         deps.Config.Observability.Syslog.Tag,
+			"syslog_facility":    deps.Config.Observability.Syslog.Facility,
+		}
+
+		// Try to load persisted settings from DB
+		if deps.Repos.Settings != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+			defer cancel()
+			if data, err := deps.Repos.Settings.Get(ctx, "observability"); err == nil {
+				var saved map[string]interface{}
+				if json.Unmarshal(data, &saved) == nil {
+					// Override defaults with saved values
+					for k, v := range saved {
+						result[k] = v
+					}
+				}
+			}
+		}
+
+		c.JSON(http.StatusOK, result)
 	}
 }
 
@@ -508,7 +531,53 @@ func observabilitySettingsUpdate(deps Dependencies) gin.HandlerFunc {
 			"syslog_address", deps.Config.Observability.Syslog.Address,
 		)
 
+		// Persist settings to database
+		if deps.Repos.Settings != nil {
+			savedData, _ := json.Marshal(map[string]interface{}{
+				"otel_enabled":       deps.Config.Observability.Enabled,
+				"otel_endpoint":      deps.Config.Observability.OTLPEndpoint,
+				"otel_service_name":  deps.Config.Observability.ServiceName,
+				"otel_sampling_rate": deps.Config.Observability.SamplingRate,
+				"otel_insecure":      deps.Config.Observability.Insecure,
+				"syslog_enabled":     deps.Config.Observability.Syslog.Enabled,
+				"syslog_network":     deps.Config.Observability.Syslog.Network,
+				"syslog_address":     deps.Config.Observability.Syslog.Address,
+				"syslog_tag":         deps.Config.Observability.Syslog.Tag,
+				"syslog_facility":    deps.Config.Observability.Syslog.Facility,
+			})
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+			defer cancel()
+			if err := deps.Repos.Settings.Set(ctx, "observability", savedData); err != nil {
+				slog.Warn("failed to persist observability settings", "error", err)
+			}
+		}
+
 		logAudit(deps, c, "update", "observability_settings", "", nil, req)
+
+		// Hot-reload: reinitialize OTel providers with the new settings.
+		// This makes traces, metrics, and logs start flowing immediately
+		// without requiring an application restart.
+		if deps.Config.Observability.Enabled && deps.Config.Observability.OTLPEndpoint != "" {
+			go func() {
+				reinitCtx, reinitCancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer reinitCancel()
+				_, err := observability.ReinitOTel(reinitCtx, observability.TracingConfig{
+					Enabled:      deps.Config.Observability.Enabled,
+					OTLPEndpoint: deps.Config.Observability.OTLPEndpoint,
+					ServiceName:  deps.Config.Observability.ServiceName,
+					SamplingRate: deps.Config.Observability.SamplingRate,
+					Insecure:     deps.Config.Observability.Insecure,
+				})
+				if err != nil {
+					slog.Warn("failed to reinitialize OpenTelemetry", "error", err)
+				} else {
+					slog.Info("OpenTelemetry reinitialized (traces + metrics + logs)",
+						"endpoint", deps.Config.Observability.OTLPEndpoint,
+						"service", deps.Config.Observability.ServiceName)
+				}
+			}()
+		}
+
 		c.JSON(http.StatusOK, gin.H{"message": "observability settings updated"})
 	}
 }
@@ -708,5 +777,75 @@ func observabilityCorrelate(deps Dependencies) gin.HandlerFunc {
 		result["total_metrics"] = len(metrics)
 
 		c.JSON(http.StatusOK, result)
+	}
+}
+
+// observabilitySendTestTelemetry sends a test trace, metric, and log to the OTLP backend.
+// This helps verify that SigNoz/Jaeger/Tempo is receiving data from PEPA.
+func observabilitySendTestTelemetry(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !deps.Config.Observability.Enabled || deps.Config.Observability.OTLPEndpoint == "" {
+			c.JSON(http.StatusOK, gin.H{
+				"status":  "skipped",
+				"message": "OTLP is not enabled. Enable it in Settings → Observability.",
+			})
+			return
+		}
+
+		results := map[string]interface{}{}
+
+		// 1. Send a test trace span
+		tracer := observability.GetTracer("pepa-test")
+		ctx, span := tracer.Start(c.Request.Context(), "pepa-otel-diagnostic-test")
+		span.AddEvent("diagnostic test span created")
+		traceID := span.SpanContext().TraceID().String()
+		spanID := span.SpanContext().SpanID().String()
+		span.End()
+		results["trace"] = gin.H{
+			"sent":     true,
+			"trace_id": traceID,
+			"span_id":  spanID,
+			"service":  deps.Config.Observability.ServiceName,
+			"endpoint": deps.Config.Observability.OTLPEndpoint,
+		}
+
+		// 2. Send a test log via OTLP (using the OTel slog bridge)
+		log := logging.LogFromContext(ctx)
+		log.Info("pepa-otel-diagnostic-test",
+			"trace_id", traceID,
+			"test", true,
+			"message", "If you see this in SigNoz, OTLP log export is working",
+		)
+		results["log"] = gin.H{
+			"sent":     true,
+			"trace_id": traceID,
+			"body":     "pepa-otel-diagnostic-test",
+		}
+
+		// 3. Record a test metric
+		meter := otel.GetMeterProvider().Meter("pepa-test")
+		counter, err := meter.Int64Counter("pepa_otel_diagnostic_test")
+		if err == nil {
+			counter.Add(c.Request.Context(), 1)
+			results["metric"] = gin.H{
+				"sent":  true,
+				"name":  "pepa_otel_diagnostic_test",
+				"value": 1,
+			}
+		} else {
+			results["metric"] = gin.H{"sent": false, "error": err.Error()}
+		}
+
+		slog.Info("OTel diagnostic test telemetry sent",
+			"trace_id", traceID,
+			"endpoint", deps.Config.Observability.OTLPEndpoint,
+		)
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"message": fmt.Sprintf("Test telemetry sent to %s. Check SigNoz in 5-10 seconds.", deps.Config.Observability.OTLPEndpoint),
+			"trace_id": traceID,
+			"results": results,
+		})
 	}
 }

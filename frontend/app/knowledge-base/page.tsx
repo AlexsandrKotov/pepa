@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { rag } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface RAGStats {
   stats: Record<string, number>;
@@ -55,6 +56,8 @@ export default function KnowledgeBasePage() {
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ title: '', source: 'custom', content: '' });
   const [createLoading, setCreateLoading] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -101,13 +104,20 @@ export default function KnowledgeBasePage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this document and its chunks?')) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await rag.deleteDocument(id);
-      setDocuments(prev => prev.filter(d => d.id !== id));
+      await rag.deleteDocument(deleteConfirm);
+      setDocuments(prev => prev.filter(d => d.id !== deleteConfirm));
     } catch (err) {
       console.error('Delete failed:', err);
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleEditOpen = async (doc: RAGDocument) => {
@@ -484,6 +494,18 @@ export default function KnowledgeBasePage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this document?"
+        description="This document and all its chunks will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
     </div>
   );
 }

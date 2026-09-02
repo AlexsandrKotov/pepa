@@ -425,6 +425,8 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			}
 		case repository.ConnectionProxmox:
 			status, message = testProxmoxConnection(deps, c, conn.Config)
+		case repository.ConnectionVMware:
+			status, message = testVMwareConnection(deps, c, conn.Config)
 		case repository.ConnectionDocker:
 			host, _ := conn.Config["host"].(string)
 			result := deps.Services.Connection.TestDockerConnection(ctx, host)

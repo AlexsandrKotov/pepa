@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { listMyCredentials, createMyCredential, updateMyCredential, deleteMyCredential, verifyMyCredential, fetchUserInfoForCredential, listSharedCredentials, shareCredential, listCredentialShares, revokeCredentialShare, listUsers, listTeams, type UserCredential, type SharedCredential, type CredentialShareEntry, type User, type Team } from '@/lib/api';
 import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/VaultInput';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const PROVIDERS = [
   { value: 'gitlab', label: 'GitLab' },
@@ -23,6 +24,8 @@ export default function CredentialsPage() {
   const [sharedCreds, setSharedCreds] = useState<SharedCredential[]>([]);
   const [shareModalCred, setShareModalCred] = useState<UserCredential | null>(null);
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { loadCreds(); loadSharedCreds(); }, []);
 
@@ -46,14 +49,21 @@ export default function CredentialsPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this credential?')) return;
+    setDeleteConfirm(id);
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await deleteMyCredential(id);
+      await deleteMyCredential(deleteConfirm);
       loadCreds();
       setFeedback({ ok: true, text: 'Credential deleted' });
     } catch (err) {
       setFeedback({ ok: false, text: err instanceof Error ? err.message : 'Failed' });
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   }
 
   async function handleVerify(id: string) {
@@ -187,6 +197,18 @@ export default function CredentialsPage() {
       {shareModalCred && <ShareCredentialModal cred={shareModalCred} onClose={() => setShareModalCred(null)} />}
       {showAdd && <AddCredentialModal onClose={() => { setShowAdd(false); setVaultRefs({}); }} onAdded={loadCreds} vaultRefs={vaultRefs} onOpenVaultPicker={onOpenVaultPicker} removeVaultRef={removeVaultRef} />}
       {VaultPicker}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this credential?"
+        description="This credential will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
       </div>
     </div>
   );

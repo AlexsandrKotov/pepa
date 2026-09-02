@@ -69,6 +69,8 @@ type Components struct {
 	OrganizationRepo    *repository.OrganizationRepository
 	RAGRepo             *repository.RAGRepository
 	SSHHostRepo         *repository.SSHHostRepository
+	SSHHostGroupRepo    *repository.SSHHostGroupRepository
+	PluginActivityRepo  *repository.PluginActivityRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -126,26 +128,7 @@ func Bootstrap() (*Components, error) {
 		slog.Debug("encryption key validation passed")
 	}
 
-	// Initialize OpenTelemetry tracing (if enabled)
-	ctx := context.Background()
-	var tracingShutdown func(context.Context) error
-	if cfg.Observability.Enabled && cfg.Observability.OTLPEndpoint != "" {
-		shutdown, err := observability.InitTracing(ctx, observability.TracingConfig{
-			Enabled:      cfg.Observability.Enabled,
-			OTLPEndpoint: cfg.Observability.OTLPEndpoint,
-			ServiceName:  cfg.Observability.ServiceName,
-			SamplingRate: cfg.Observability.SamplingRate,
-			Insecure:     cfg.Observability.Insecure,
-		})
-		if err != nil {
-			slog.Warn("failed to initialize OpenTelemetry tracing", "error", err)
-		} else {
-			tracingShutdown = shutdown
-			slog.Info("OpenTelemetry tracing initialized")
-		}
-	}
-
-	// Initialize PostgreSQL
+	// Initialize PostgreSQL (needed before loading observability settings from DB)
 	db, err := database.New(cfg.Database.ConnectionString())
 	if err != nil {
 		return nil, err
@@ -158,6 +141,70 @@ func Bootstrap() (*Components, error) {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 	slog.Info("database migrations up to date")
+
+	// Load persisted observability settings from database BEFORE initializing OTel.
+	// This ensures the user-configured endpoint/service/sampling are applied at startup.
+	settingsRepo := repository.NewSettingsRepository(db)
+	if obsSettings, err := settingsRepo.Get(context.Background(), "observability"); err == nil {
+		var obsCfg struct {
+			OtelEnabled      bool    `json:"otel_enabled"`
+			OtelEndpoint     string  `json:"otel_endpoint"`
+			OtelServiceName  string  `json:"otel_service_name"`
+			OtelSamplingRate float64 `json:"otel_sampling_rate"`
+			OtelInsecure     bool    `json:"otel_insecure"`
+			SyslogEnabled    bool    `json:"syslog_enabled"`
+			SyslogNetwork    string  `json:"syslog_network"`
+			SyslogAddress    string  `json:"syslog_address"`
+			SyslogTag        string  `json:"syslog_tag"`
+			SyslogFacility   string  `json:"syslog_facility"`
+		}
+		if json.Unmarshal(obsSettings, &obsCfg) == nil {
+			cfg.Observability.Enabled = obsCfg.OtelEnabled
+			cfg.Observability.OTLPEndpoint = obsCfg.OtelEndpoint
+			if obsCfg.OtelServiceName != "" {
+				cfg.Observability.ServiceName = obsCfg.OtelServiceName
+			}
+			if obsCfg.OtelSamplingRate > 0 {
+				cfg.Observability.SamplingRate = obsCfg.OtelSamplingRate
+			}
+			cfg.Observability.Insecure = obsCfg.OtelInsecure
+			cfg.Observability.Syslog.Enabled = obsCfg.SyslogEnabled
+			if obsCfg.SyslogNetwork != "" {
+				cfg.Observability.Syslog.Network = obsCfg.SyslogNetwork
+			}
+			cfg.Observability.Syslog.Address = obsCfg.SyslogAddress
+			if obsCfg.SyslogTag != "" {
+				cfg.Observability.Syslog.Tag = obsCfg.SyslogTag
+			}
+			if obsCfg.SyslogFacility != "" {
+				cfg.Observability.Syslog.Facility = obsCfg.SyslogFacility
+			}
+			slog.Info("observability settings loaded from database",
+				"otel_enabled", obsCfg.OtelEnabled,
+				"otel_endpoint", obsCfg.OtelEndpoint,
+				"syslog_enabled", obsCfg.SyslogEnabled,
+			)
+		}
+	}
+
+	// Initialize OpenTelemetry (traces + metrics + logs) after DB settings are loaded.
+	ctx := context.Background()
+	var otelShutdown func(context.Context) error
+	if cfg.Observability.Enabled && cfg.Observability.OTLPEndpoint != "" {
+		shutdown, err := observability.InitOTel(ctx, observability.TracingConfig{
+			Enabled:      cfg.Observability.Enabled,
+			OTLPEndpoint: cfg.Observability.OTLPEndpoint,
+			ServiceName:  cfg.Observability.ServiceName,
+			SamplingRate: cfg.Observability.SamplingRate,
+			Insecure:     cfg.Observability.Insecure,
+		})
+		if err != nil {
+			slog.Warn("failed to initialize OpenTelemetry", "error", err)
+		} else {
+			otelShutdown = shutdown
+			slog.Info("OpenTelemetry initialized (traces + metrics + logs)")
+		}
+	}
 
 	// Initialize Redis
 	redis, err := database.NewRedis(cfg.Redis.Addr(), cfg.Redis.Password, cfg.Redis.DB)
@@ -216,7 +263,7 @@ func Bootstrap() (*Components, error) {
 		ProviderRegistry:    providerRegistry,
 		EventBus:            eventBus,
 		JobQueue:            jobQueue,
-		TracingShutdown:     tracingShutdown,
+		TracingShutdown:     otelShutdown,
 		EntityRepo:          repository.NewEntityRepository(db),
 		WorkflowRepo:        repository.NewWorkflowRepository(db),
 		PluginRepo:          repository.NewPluginRepository(db),
@@ -227,7 +274,7 @@ func Bootstrap() (*Components, error) {
 		JiraRepo:            repository.NewJiraRepository(db),
 		ConnectionRepo:      repository.NewConnectionRepository(db),
 		ServiceRepo:         repository.NewServiceRepository(db),
-		SettingsRepo:        repository.NewSettingsRepository(db),
+		SettingsRepo:        settingsRepo,
 		EnvironmentRepo:     repository.NewEnvironmentRepository(db),
 		EnvVariableRepo:     repository.NewEnvironmentVariableRepository(db),
 		DockerHostRepo:      repository.NewDockerHostRepository(db),
@@ -245,6 +292,8 @@ func Bootstrap() (*Components, error) {
 		OrganizationRepo:    repository.NewOrganizationRepository(db.Pool),
 		RAGRepo:             repository.NewRAGRepository(db),
 		SSHHostRepo:         repository.NewSSHHostRepository(db.Pool),
+		SSHHostGroupRepo:    repository.NewSSHHostGroupRepository(db.Pool),
+		PluginActivityRepo:  repository.NewPluginActivityRepository(db),
 	}
 
 	// Initialize pipeline provider registry

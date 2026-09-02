@@ -19,8 +19,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// validPluginID matches safe plugin identifiers (alphanumeric + underscore, 1-64 chars).
-var validPluginID = regexp.MustCompile(`^[a-zA-Z0-9_]{1,64}$`)
+// validPluginID matches safe plugin identifiers (alphanumeric, underscore, hyphen, 1-64 chars).
+var validPluginID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // MarketplacePlugin represents a plugin available in the marketplace
 type MarketplacePlugin struct {
@@ -36,6 +36,7 @@ type MarketplacePlugin struct {
 	Installed       bool           `json:"installed"`
 	Running         bool           `json:"running"`
 	BinaryAvailable bool           `json:"binary_available"`
+	Embedded        bool           `json:"embedded"`
 	Actions         []ActionDef    `json:"actions"`
 	ConfigSchema    map[string]any `json:"config_schema,omitempty"`
 	RequiresConfig  []string       `json:"requires_config,omitempty"`
@@ -138,6 +139,17 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 				binaryAvailable = true
 			}
 
+			// Detect embedded plugins: logic runs inside the API server,
+			// no separate gRPC binary needed. These have a plugin.yaml in
+			// plugins/builtin/ but no Go source in plugins/<name>/.
+			srcDir := filepath.Join(pluginDir, def.Name)
+			embedded := false
+			if entries, err := os.ReadDir(srcDir); err != nil || len(entries) == 0 {
+				// No source directory or empty — plugin is embedded in the API server
+				embedded = true
+				binaryAvailable = true // API server is the "binary"
+			}
+
 			// Extract required config fields
 			var requiresConfig []string
 			if def.ConfigSchema.Required != nil {
@@ -172,6 +184,7 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 				Installed:       false,
 				Running:         false,
 				BinaryAvailable: binaryAvailable,
+				Embedded:        embedded,
 				Actions:         actions,
 				ConfigSchema:    configSchemaMap,
 				RequiresConfig:  requiresConfig,
@@ -435,8 +448,13 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 
 		// Load (or re-activate) the plugin binary. Binaries discovered at startup
 		// stay unloaded until explicitly installed, so this is what activates it.
+		// Embedded plugins have no separate binary — their logic runs inside the
+		// API server, so they are always "running" once registered.
 		binaryLoaded := false
-		if found.BinaryAvailable {
+		if found.Embedded {
+			binaryLoaded = true // embedded plugins are always active
+			slog.Info("embedded plugin installed", "id", id)
+		} else if found.BinaryAvailable {
 			if err := loadPluginBinary(deps, found.ID); err != nil {
 				slog.Info("plugin registered but failed to load binary", "id", id, "error", err)
 			} else {

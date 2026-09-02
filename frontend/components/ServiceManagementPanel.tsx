@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { discovery, type DiscoveredService, type DeploymentInfo } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface ServiceManagementPanelProps {
   service: DiscoveredService;
@@ -20,6 +21,8 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Edit state
   const [editImage, setEditImage] = useState('');
@@ -124,7 +127,11 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete deployment ${service.namespace}/${service.name}?`)) return;
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
     setActionLoading('delete');
     try {
       const result = await discovery.k8sDelete(service.cluster, service.namespace, service.name);
@@ -135,6 +142,8 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
       showMessage('error', `Delete failed: ${err}`);
     } finally {
       setActionLoading(null);
+      setDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -493,6 +502,18 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
           ) : null}
         </div>
       </div>
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={showDeleteConfirm}
+        title={`Delete deployment ${service.namespace}/${service.name}?`}
+        description="This deployment will be permanently removed from the cluster. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </>
   );
 }

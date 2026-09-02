@@ -13,6 +13,7 @@ const PLUGIN_CONN_MAP: Record<string, string> = {
   bitbucket: 'git',
   gitea: 'git',
   proxmox: 'proxmox',
+  vmware: 'vmware',
   s3: 'storage',
   email: 'notification',
   webhook: 'notification',

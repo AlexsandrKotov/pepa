@@ -11,7 +11,7 @@ interface EditRoleModalProps {
   onUpdated: () => void;
 }
 
-const resources = ['entities', 'workflows', 'plugins', 'scorecards', 'audit', 'roles', 'services', 'deployments', 'clusters', 'connections', 'environments', 'pipelines', 'vault', 'gitops', 'settings', 'policies', 'docker', 'helm', 'discovery', 'import', 'ai', 'jira', 'credentials', 'virtualization'];
+const resources = ['entities', 'workflows', 'plugins', 'scorecards', 'audit', 'plugin_activity', 'roles', 'services', 'deployments', 'clusters', 'connections', 'environments', 'pipelines', 'vault', 'gitops', 'settings', 'policies', 'docker', 'helm', 'discovery', 'import', 'ai', 'jira', 'credentials', 'virtualization'];
 const actions = ['read', 'create', 'update', 'delete'];
 
 export default function EditRoleModal({ open, role, onClose, onUpdated }: EditRoleModalProps) {

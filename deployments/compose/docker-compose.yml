@@ -140,6 +140,12 @@ services:
       IAC_BINARY: ${IAC_BINARY:-}
       # Ansible needs a writable temp directory; root filesystem is read-only.
       ANSIBLE_LOCAL_TEMP: /tmp/ansible
+      # OpenTelemetry — set these to enable traces/metrics/logs export to SigNoz
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+      OTEL_ENDPOINT: ${OTEL_ENDPOINT:-otel-collector:4317}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-pepa}
+      OTEL_SAMPLING_RATE: ${OTEL_SAMPLING_RATE:-1.0}
+      OTEL_INSECURE: ${OTEL_INSECURE:-true}
     ports:
       - "${API_PORT:-8088}:8080"
     healthcheck:

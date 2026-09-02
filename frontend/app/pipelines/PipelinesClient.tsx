@@ -15,6 +15,7 @@ import AnsiOutput from '@/components/AnsiOutput';
 import PipelineGraph from '@/components/pipeline/PipelineGraph';
 import ToastContainer from '@/components/ToastContainer';
 import { useToast } from '@/hooks/useToast';
+import ConfirmModal from '@/components/ConfirmModal';
 
 // ── Constants ──────────────────────────────────────────────
 
@@ -215,6 +216,9 @@ function PipelinesClientContent({
   const [engineCIVariables, setEngineCIVariables] = useState<CIVariable[]>([]);
   const [loadingEngineCIVars, setLoadingEngineCIVariables] = useState(false);
   const [engineWorkflows, setEngineWorkflows] = useState<WorkflowInfo[]>([]);
+  const [cancelConfirm, setCancelConfirm] = useState<string | null>(null);
+  const [deleteSourceConfirm, setDeleteSourceConfirm] = useState<PipelineSource | null>(null);
+  const [actionLoading, setActionLoadingState] = useState(false);
 
   // Engine runs: sync + expandable jobs/steps
   const [syncing, setSyncing] = useState(false);
@@ -409,12 +413,19 @@ function PipelinesClientContent({
 
   const handleCancel = async (runId: string) => {
     if (!selectedSource) return;
-    if (!confirm('Cancel this pipeline run?')) return;
+    setCancelConfirm(runId);
+  };
+
+  const confirmCancel = async () => {
+    if (!cancelConfirm || !selectedSource) return;
+    setActionLoadingState(true);
     try {
-      await pipelineRuns.cancel(selectedSource.id, runId);
+      await pipelineRuns.cancel(selectedSource.id, cancelConfirm);
       await loadRuns(selectedSource.id);
       addToast('Pipeline run cancelled', 'success');
     } catch (err) { addToast(friendlyError(err).message, 'error'); }
+    setActionLoadingState(false);
+    setCancelConfirm(null);
   };
 
   // Open trigger modal for Engines tab - dynamically load CI variables if connection available
@@ -490,13 +501,20 @@ function PipelinesClientContent({
   };
 
   const handleDeleteSource = async (source: PipelineSource) => {
-    if (!confirm(`Delete engine "${source.name}"?`)) return;
+    setDeleteSourceConfirm(source);
+  };
+
+  const confirmDeleteSource = async () => {
+    if (!deleteSourceConfirm) return;
+    setActionLoadingState(true);
     try {
-      await pipelineSources.delete(source.id);
-      if (selectedSource?.id === source.id) setSelectedSource(null);
+      await pipelineSources.delete(deleteSourceConfirm.id);
+      if (selectedSource?.id === deleteSourceConfirm.id) setSelectedSource(null);
       await loadSources();
       addToast('Engine deleted', 'success');
     } catch (err) { addToast(friendlyError(err).message, 'error'); }
+    setActionLoadingState(false);
+    setDeleteSourceConfirm(null);
   };
 
   const handleSyncRuns = async () => {
@@ -2092,6 +2110,30 @@ function PipelinesClientContent({
           </div>
         </div>
       )}
+
+      {/* Cancel Pipeline Confirmation */}
+      <ConfirmModal
+        open={!!cancelConfirm}
+        title="Cancel this pipeline run?"
+        description="The running pipeline will be cancelled. This action cannot be undone."
+        confirmLabel="Cancel Run"
+        variant="danger"
+        loading={actionLoading}
+        onConfirm={confirmCancel}
+        onCancel={() => setCancelConfirm(null)}
+      />
+
+      {/* Delete Engine Confirmation */}
+      <ConfirmModal
+        open={!!deleteSourceConfirm}
+        title={`Delete engine "${deleteSourceConfirm?.name || ''}"?`}
+        description="This engine and its configuration will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={actionLoading}
+        onConfirm={confirmDeleteSource}
+        onCancel={() => setDeleteSourceConfirm(null)}
+      />
 
     </div>
   );

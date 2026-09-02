@@ -27,6 +27,7 @@ const (
 	ConnectionAI           ConnectionType = "ai"
 	ConnectionStorage      ConnectionType = "storage"
 	ConnectionProxmox      ConnectionType = "proxmox"
+	ConnectionVMware       ConnectionType = "vmware"
 	ConnectionDocker       ConnectionType = "docker"
 	ConnectionSecret       ConnectionType = "secret"
 	ConnectionNotification ConnectionType = "notification"

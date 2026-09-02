@@ -1,5 +1,6 @@
 # OpenTelemetry Collector Configuration for PEPA
 # Receives traces, metrics, and logs from PEPA and exports to backends.
+# Supports SigNoz, Jaeger, Loki, and Prometheus as backends.
 
 receivers:
   otlp:
@@ -29,7 +30,14 @@ processors:
         action: upsert
 
 exporters:
-  # Jaeger for distributed tracing
+  # SigNoz (OTLP-native — recommended backend)
+  # Set SIGNOZ_ENDPOINT env var or change the endpoint below.
+  otlp/signoz:
+    endpoint: ${SIGNOZ_ENDPOINT:-signoz:4317}
+    tls:
+      insecure: true
+
+  # Jaeger for distributed tracing (legacy fallback)
   otlp/jaeger:
     endpoint: jaeger:4317
     tls:
@@ -68,23 +76,23 @@ service:
   extensions: [health_check, zpages]
   
   pipelines:
-    # Distributed traces pipeline
+    # Distributed traces pipeline — sends to SigNoz and Jaeger
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch, attributes]
-      exporters: [otlp/jaeger, debug]
+      exporters: [otlp/signoz, otlp/jaeger, debug]
     
-    # Metrics pipeline
+    # Metrics pipeline — sends to SigNoz (via Prometheus exporter) and Prometheus
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [prometheus]
     
-    # Logs pipeline
+    # Logs pipeline — sends to SigNoz and Loki
     logs:
       receivers: [otlp]
       processors: [memory_limiter, batch, attributes]
-      exporters: [loki, debug]
+      exporters: [otlp/signoz, loki, debug]
   
   telemetry:
     logs:

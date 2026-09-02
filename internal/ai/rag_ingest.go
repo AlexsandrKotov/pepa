@@ -3,13 +3,15 @@ package ai
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pepa/pepa/internal/logging"
 	"github.com/pepa/pepa/internal/repository"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // IngestionEngine handles document ingestion into the RAG knowledge base.
@@ -49,6 +51,12 @@ func (e *IngestionEngine) sourceLock(source string) *sync.Mutex {
 
 // IngestDocument chunks, embeds, and stores a document.
 func (e *IngestionEngine) IngestDocument(ctx context.Context, doc *Document, tenantID uuid.UUID) error {
+	// Create a span for this operation so logs are correlated in SigNoz
+	tracer := otel.Tracer("pepa-api")
+	ctx, span := tracer.Start(ctx, "rag.ingest_document")
+	defer span.End()
+	log := logging.LogFromContext(ctx)
+
 	// Lock per source type to avoid serializing unrelated ingestions.
 	l := e.sourceLock(doc.Source)
 	l.Lock()
@@ -104,7 +112,7 @@ func (e *IngestionEngine) IngestDocument(ctx context.Context, doc *Document, ten
 
 			embedResp, err := e.provider.Embed(ctx, texts, &EmbedOptions{})
 			if err != nil {
-				slog.Warn("embedding failed for batch, storing without embeddings", "error", err, "batch_start", i)
+				log.Warn("embedding failed for batch, storing without embeddings", "error", err, "batch_start", i)
 				continue
 			}
 
@@ -127,20 +135,26 @@ func (e *IngestionEngine) IngestDocument(ctx context.Context, doc *Document, ten
 			Metadata:   stringMapToInterface(doc.Metadata),
 		}
 		if err := e.ragRepo.InsertChunk(ctx, ragChunk); err != nil {
-			slog.Warn("failed to store chunk", "error", err, "document_id", docUUID, "index", ch.Index)
+			log.Warn("failed to store chunk", "error", err, "document_id", docUUID, "index", ch.Index)
 		}
 	}
 
-	slog.Info("document ingested", "source", doc.Source, "type", doc.Type, "chunks", len(chunks), "doc_id", docUUID)
+	log.Info("document ingested", "source", doc.Source, "type", doc.Type, "chunks", len(chunks), "doc_id", docUUID)
+	span.SetAttributes(
+		attribute.String("source", doc.Source),
+		attribute.String("type", doc.Type),
+		attribute.Int("chunks", len(chunks)),
+	)
 	return nil
 }
 
 // IngestBatch ingests multiple documents.
 func (e *IngestionEngine) IngestBatch(ctx context.Context, docs []*Document, tenantID uuid.UUID) (int, error) {
+	log := logging.LogFromContext(ctx)
 	ingested := 0
 	for _, doc := range docs {
 		if err := e.IngestDocument(ctx, doc, tenantID); err != nil {
-			slog.Warn("failed to ingest document in batch", "error", err, "doc_id", doc.ID)
+			log.Warn("failed to ingest document in batch", "error", err, "doc_id", doc.ID)
 			continue
 		}
 		ingested++

@@ -42,7 +42,7 @@ func (r *SSHHostRepository) List(ctx context.Context, tenantID uuid.UUID) ([]*SS
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, name, hostname, port, username, auth_method,
 		       COALESCE(ssh_key_enc,''), COALESCE(password_enc,''),
-		       COALESCE(tags,'{}'), COALESCE(description,''),
+		       COALESCE(tags,'{}'::text[]), COALESCE(description,''),
 		       created_by, created_at, updated_at
 		FROM ssh_hosts
 		WHERE tenant_id = $1
@@ -72,7 +72,7 @@ func (r *SSHHostRepository) GetByID(ctx context.Context, id uuid.UUID) (*SSHHost
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, name, hostname, port, username, auth_method,
 		       COALESCE(ssh_key_enc,''), COALESCE(password_enc,''),
-		       COALESCE(tags,'{}'), COALESCE(description,''),
+		       COALESCE(tags,'{}'::text[]), COALESCE(description,''),
 		       created_by, created_at, updated_at
 		FROM ssh_hosts
 		WHERE id = $1

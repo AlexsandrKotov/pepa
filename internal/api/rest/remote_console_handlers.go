@@ -1,11 +1,14 @@
 package rest
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +33,17 @@ func registerRemoteConsoleRoutes(r *gin.RouterGroup, deps Dependencies) {
 		hosts.PUT("/:id", updateSSHHost(deps))
 		hosts.DELETE("/:id", deleteSSHHost(deps))
 		hosts.POST("/:id/test", testSSHConnection(deps))
+		hosts.PUT("/:id/groups", setHostGroups(deps))
+	}
+
+	// SSH host groups
+	groups := r.Group("/ssh-host-groups")
+	{
+		groups.GET("", listSSHHostGroups(deps))
+		groups.POST("", createSSHHostGroup(deps))
+		groups.GET("/:id", getSSHHostGroup(deps))
+		groups.PUT("/:id", updateSSHHostGroup(deps))
+		groups.DELETE("/:id", deleteSSHHostGroup(deps))
 	}
 
 	// WebSocket terminal endpoint — uses a separate upgrader
@@ -54,9 +68,26 @@ func listSSHHosts(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Batch fetch all group memberships in a single query (fixes N+1 problem)
+		hostGroupMap := make(map[uuid.UUID][]uuid.UUID)
+		if deps.Repos.SSHHostGroup != nil && len(hosts) > 0 {
+			hostIDs := make([]uuid.UUID, len(hosts))
+			for i, h := range hosts {
+				hostIDs[i] = h.ID
+			}
+			batchMap, err := deps.Repos.SSHHostGroup.GetHostGroupIDsBatch(ctx, hostIDs)
+			if err == nil {
+				hostGroupMap = batchMap
+			}
+		}
+
 		// Mask sensitive fields for the response
 		result := make([]gin.H, len(hosts))
 		for i, h := range hosts {
+			groupIDs := hostGroupMap[h.ID]
+			if groupIDs == nil {
+				groupIDs = []uuid.UUID{}
+			}
 			result[i] = gin.H{
 				"id":           h.ID,
 				"name":         h.Name,
@@ -68,6 +99,7 @@ func listSSHHosts(deps Dependencies) gin.HandlerFunc {
 				"has_password": h.PasswordEnc != "",
 				"tags":         h.Tags,
 				"description":  h.Description,
+				"group_ids":    groupIDs,
 				"created_by":   h.CreatedBy,
 				"created_at":   h.CreatedAt,
 				"updated_at":   h.UpdatedAt,
@@ -339,6 +371,281 @@ func deleteSSHHost(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// ─── Host Groups ──────────────────────────────────────────────────────────────
+
+func setHostGroups(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		hostID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid host ID"})
+			return
+		}
+
+		var req struct {
+			GroupIDs []uuid.UUID `json:"group_ids"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "group_ids array required"})
+			return
+		}
+
+		if deps.Repos.SSHHostGroup == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host group repository not available"})
+			return
+		}
+
+		// CRITICAL FIX: Verify host belongs to current tenant
+		ctx := c.Request.Context()
+		if deps.Repos.SSHHost == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host repository not available"})
+			return
+		}
+		host, err := deps.Repos.SSHHost.GetByID(ctx, hostID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "host not found"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		if host.TenantID != tenantID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+			return
+		}
+
+		// Repository validates that all groups exist and belong to the same tenant
+		if err := deps.Repos.SSHHostGroup.SetHostGroups(ctx, hostID, req.GroupIDs, tenantID); err != nil {
+			if strings.Contains(err.Error(), "do not exist or belong to a different tenant") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "update", "ssh_host_groups", hostID.String(), nil, gin.H{"group_ids": req.GroupIDs})
+		c.JSON(http.StatusOK, gin.H{"message": "host groups updated"})
+	}
+}
+
+func listSSHHostGroups(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID := auth.GetTenantID(c)
+		ctx := c.Request.Context()
+
+		if deps.Repos.SSHHostGroup == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host group repository not available"})
+			return
+		}
+
+		groups, err := deps.Repos.SSHHostGroup.List(ctx, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"groups": groups, "total": len(groups)})
+	}
+}
+
+func createSSHHostGroup(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := auth.GetUserID(c)
+		tenantID := auth.GetTenantID(c)
+		ctx := c.Request.Context()
+
+		var req struct {
+			Name        string `json:"name" binding:"required"`
+			Description string `json:"description"`
+			Color       string `json:"color"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+			return
+		}
+
+		// Validate color format (hex color)
+		if req.Color == "" {
+			req.Color = "#7aa2f7"
+		} else if len(req.Color) != 7 || req.Color[0] != '#' {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid color format, use #RRGGBB"})
+			return
+		} else {
+			// Validate hex characters
+			for i := 1; i < 7; i++ {
+				ch := req.Color[i]
+				if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid color format, use #RRGGBB"})
+					return
+				}
+			}
+		}
+
+		if deps.Repos.SSHHostGroup == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host group repository not available"})
+			return
+		}
+
+		group := &repository.SSHHostGroup{
+			ID:          uuid.New(),
+			TenantID:    tenantID,
+			Name:        req.Name,
+			Description: req.Description,
+			Color:       req.Color,
+			CreatedBy:   userID,
+		}
+
+		if err := deps.Repos.SSHHostGroup.Create(ctx, group); err != nil {
+			if strings.Contains(err.Error(), "unique index") || strings.Contains(err.Error(), "duplicate") {
+				c.JSON(http.StatusConflict, gin.H{"error": "a group with this name already exists"})
+				return
+			}
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "create", "ssh_host_group", group.ID.String(), nil, gin.H{"name": group.Name})
+		c.JSON(http.StatusCreated, gin.H{"id": group.ID, "message": "group created"})
+	}
+}
+
+func getSSHHostGroup(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+			return
+		}
+
+		if deps.Repos.SSHHostGroup == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host group repository not available"})
+			return
+		}
+
+		// Use tenant-scoped query
+		tenantID := auth.GetTenantID(c)
+		group, err := deps.Repos.SSHHostGroup.GetByIDAndTenant(c.Request.Context(), id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+			return
+		}
+
+		// Include host IDs in this group
+		hostIDs, _ := deps.Repos.SSHHostGroup.GetGroupHostIDs(c.Request.Context(), id)
+		if hostIDs == nil {
+			hostIDs = []uuid.UUID{}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"id":          group.ID,
+			"name":        group.Name,
+			"description": group.Description,
+			"color":       group.Color,
+			"host_count":  group.HostCount,
+			"host_ids":    hostIDs,
+			"created_by":  group.CreatedBy,
+			"created_at":  group.CreatedAt,
+			"updated_at":  group.UpdatedAt,
+		})
+	}
+}
+
+func updateSSHHostGroup(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+			return
+		}
+
+		if deps.Repos.SSHHostGroup == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host group repository not available"})
+			return
+		}
+
+		// Use tenant-scoped query
+		tenantID := auth.GetTenantID(c)
+		group, err := deps.Repos.SSHHostGroup.GetByIDAndTenant(c.Request.Context(), id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+			return
+		}
+
+		var req struct {
+			Name        string  `json:"name"`
+			Description *string `json:"description"` // pointer to allow clearing
+			Color       string  `json:"color"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if req.Name != "" {
+			group.Name = req.Name
+		}
+		if req.Description != nil {
+			group.Description = *req.Description
+		}
+		// Validate color format if provided
+		if req.Color != "" {
+			if len(req.Color) != 7 || req.Color[0] != '#' {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid color format, use #RRGGBB"})
+				return
+			}
+			for i := 1; i < 7; i++ {
+				ch := req.Color[i]
+				if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "invalid color format, use #RRGGBB"})
+					return
+				}
+			}
+			group.Color = req.Color
+		}
+
+		if err := deps.Repos.SSHHostGroup.Update(c.Request.Context(), group); err != nil {
+			if strings.Contains(err.Error(), "unique index") || strings.Contains(err.Error(), "duplicate") {
+				c.JSON(http.StatusConflict, gin.H{"error": "a group with this name already exists"})
+				return
+			}
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "update", "ssh_host_group", id.String(), nil, nil)
+		c.JSON(http.StatusOK, gin.H{"message": "group updated"})
+	}
+}
+
+func deleteSSHHostGroup(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid group ID"})
+			return
+		}
+
+		if deps.Repos.SSHHostGroup == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "SSH host group repository not available"})
+			return
+		}
+
+		// Explicit tenant check before deletion
+		tenantID := auth.GetTenantID(c)
+		_, err = deps.Repos.SSHHostGroup.GetByIDAndTenant(c.Request.Context(), id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "group not found"})
+			return
+		}
+
+		if err := deps.Repos.SSHHostGroup.Delete(c.Request.Context(), id); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "delete", "ssh_host_group", id.String(), nil, nil)
+		c.JSON(http.StatusOK, gin.H{"message": "group deleted"})
+	}
+}
+
 // ─── Test Connection ──────────────────────────────────────────────────────────
 
 func testSSHConnection(deps Dependencies) gin.HandlerFunc {
@@ -395,9 +702,21 @@ var wsUpgrader = websocket.Upgrader{
 		if origin == "" {
 			return true // non-browser clients
 		}
-		host := r.Host
-		// Allow same-origin connections
-		return strings.HasSuffix(origin, "://"+host) || strings.HasSuffix(origin, "://"+strings.Split(host, ":")[0])
+		// Parse the Origin URL and compare hostnames (works behind reverse proxies
+		// where Host may be rewritten by nginx).
+		originURL, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		originHost, _, _ := net.SplitHostPort(originURL.Host)
+		if originHost == "" {
+			originHost = originURL.Host // no port in Origin
+		}
+		reqHost, _, _ := net.SplitHostPort(r.Host)
+		if reqHost == "" {
+			reqHost = r.Host // no port in Host
+		}
+		return originHost == reqHost
 	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -426,7 +745,7 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Authenticate via httpOnly cookie (browser sends it automatically with WebSocket)
-		userID, tenantID, err := authenticateWebSocket(c, deps)
+		userID, tenantID, userEmail, err := authenticateWebSocket(c, deps)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 			return
@@ -599,7 +918,33 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Read from WebSocket and write to SSH stdin
+		// Also intercept commands for logging
 		go func() {
+			var cmdBuf bytes.Buffer
+			var expectingPassword bool // Flag to skip logging password input
+
+			// Commands that typically trigger a password prompt
+			isPasswordTrigger := func(cmd string) bool {
+				cmd = strings.TrimSpace(cmd)
+				// sudo (without -S which reads from stdin)
+				if strings.HasPrefix(cmd, "sudo ") && !strings.Contains(cmd, " -S") {
+					return true
+				}
+				// su (switch user)
+				if cmd == "su" || strings.HasPrefix(cmd, "su ") {
+					return true
+				}
+				// passwd
+				if cmd == "passwd" || strings.HasPrefix(cmd, "passwd ") {
+					return true
+				}
+				// ssh to a new host (might prompt for password on first connect)
+				if strings.HasPrefix(cmd, "ssh ") && !strings.Contains(cmd, "-i ") {
+					return true
+				}
+				return false
+			}
+
 			for {
 				_, msg, err := ws.ReadMessage()
 				if err != nil {
@@ -613,6 +958,51 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 							_ = sshSession.WindowChange(resizeMsg.Rows, resizeMsg.Cols)
 						}
 						continue
+					}
+				}
+				// Intercept keystrokes for command logging
+				for _, b := range msg {
+					switch b {
+					case 0x0d: // Enter (CR)
+						cmd := strings.TrimSpace(cmdBuf.String())
+						cmdBuf.Reset()
+						// Skip logging if we're expecting a password
+						if expectingPassword {
+							expectingPassword = false
+							continue
+						}
+						if cmd != "" && deps.Repos.PluginActivity != nil {
+							// Check if this command will trigger a password prompt
+							if isPasswordTrigger(cmd) {
+								expectingPassword = true
+							}
+							entry := &repository.SSHCommandLog{
+								TenantID: *tenantID,
+								UserID:   userID,
+								HostID:   hostID,
+								HostName: host.Hostname,
+								Username: host.Username,
+								Command:  cmd,
+							}
+							go func(e *repository.SSHCommandLog) {
+								logCtx, logCancel := context.WithTimeout(context.Background(), 5*time.Second)
+								defer logCancel()
+								if logErr := deps.Repos.PluginActivity.LogSSHCommand(logCtx, e); logErr != nil {
+									slog.Debug("failed to log SSH command", "error", logErr)
+								}
+							}(entry)
+						}
+					case 0x7f: // Backspace
+						if cmdBuf.Len() > 0 {
+							cmdBuf.Truncate(cmdBuf.Len() - 1)
+						}
+					case 0x03: // Ctrl+C — clear buffer and reset password expectation
+						cmdBuf.Reset()
+						expectingPassword = false
+					default:
+						if b >= 0x20 && b < 0x7f { // printable ASCII
+							cmdBuf.WriteByte(b)
+						}
 					}
 				}
 				if _, err := stdin.Write(msg); err != nil {
@@ -633,7 +1023,7 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 		case <-c.Request.Context().Done():
 		}
 
-		slog.Info("SSH session ended", "host", host.Hostname, "user_id", userID)
+		slog.Info("SSH session ended", "host", host.Hostname, "user_id", userID, "user_email", userEmail)
 	}
 }
 
@@ -692,22 +1082,22 @@ func buildSSHConfig(host *repository.SSHHost, deps Dependencies, c *gin.Context)
 
 // authenticateWebSocket validates JWT from the httpOnly cookie.
 // The browser sends the cookie automatically with the WebSocket request.
-func authenticateWebSocket(c *gin.Context, deps Dependencies) (userID *uuid.UUID, tenantID *uuid.UUID, err error) {
+func authenticateWebSocket(c *gin.Context, deps Dependencies) (userID *uuid.UUID, tenantID *uuid.UUID, email string, err error) {
 	cookie, cookieErr := c.Request.Cookie("pepa_token")
 	if cookieErr != nil {
-		return nil, nil, fmt.Errorf("no authentication token")
+		return nil, nil, "", fmt.Errorf("no authentication token")
 	}
 
 	tokenStr := cookie.Value
 	if tokenStr == "" {
-		return nil, nil, fmt.Errorf("no authentication token")
+		return nil, nil, "", fmt.Errorf("no authentication token")
 	}
 
 	// Validate JWT
 	claims, validateErr := auth.ValidateJWT(tokenStr, deps.Config.Auth.JWTSecret)
 	if validateErr != nil {
-		return nil, nil, validateErr
+		return nil, nil, "", validateErr
 	}
 
-	return &claims.UserID, &claims.TenantID, nil
+	return &claims.UserID, &claims.TenantID, claims.Email, nil
 }

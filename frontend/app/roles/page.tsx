@@ -6,6 +6,7 @@ import CreateRoleModal from '@/components/CreateRoleModal';
 import EditRoleModal from '@/components/EditRoleModal';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
+import ConfirmModal from '@/components/ConfirmModal';
 
 interface RoleWithPerms extends Role {
   permissions: Array<{ id: string; resource: string; action: string; effect: string }>;
@@ -54,6 +55,8 @@ function RolesPageContent() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignRoleId, setAssignRoleId] = useState<string>('');
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [revokeConfirm, setRevokeConfirm] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -88,14 +91,21 @@ function RolesPageContent() {
   };
 
   const handleRevoke = async (assignmentId: string) => {
-    if (!confirm('Revoke this assignment?')) return;
+    setRevokeConfirm(assignmentId);
+  };
+
+  const confirmRevoke = async () => {
+    if (!revokeConfirm) return;
+    setRevoking(true);
     try {
-      await rbac.revokeAssignment(assignmentId);
+      await rbac.revokeAssignment(revokeConfirm);
       loadData();
       setFeedback({ ok: true, text: 'Assignment revoked' });
     } catch (e: unknown) {
       setFeedback({ ok: false, text: e instanceof Error ? e.message : 'Failed' });
     }
+    setRevoking(false);
+    setRevokeConfirm(null);
   };
 
   if (loading) {
@@ -283,6 +293,18 @@ function RolesPageContent() {
       <CreateRoleModal open={createOpen} onClose={() => setCreateOpen(false)} onCreated={loadData} />
       <EditRoleModal open={!!editRole} role={editRole} onClose={() => setEditRole(null)} onUpdated={loadData} />
       <AssignRoleModal open={assignOpen} roleId={assignRoleId} roles={roles} onClose={() => setAssignOpen(false)} onAssigned={loadData} />
+
+      {/* Revoke Confirmation */}
+      <ConfirmModal
+        open={!!revokeConfirm}
+        title="Revoke this assignment?"
+        description="This role assignment will be revoked immediately. This action cannot be undone."
+        confirmLabel="Revoke"
+        variant="danger"
+        loading={revoking}
+        onConfirm={confirmRevoke}
+        onCancel={() => setRevokeConfirm(null)}
+      />
       </div>
     </div>
   );

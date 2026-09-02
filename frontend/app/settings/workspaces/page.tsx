@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { workspaces, organization, setToken, type Workspace, type Organization, type WorkspaceMember } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
+import ConfirmModal from '@/components/ConfirmModal';
 
 export default function WorkspacesPage() {
   const router = useRouter();
@@ -21,6 +22,9 @@ export default function WorkspacesPage() {
   const [managingMembersWs, setManagingMembersWs] = useState<Workspace | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteWsConfirm, setDeleteWsConfirm] = useState<string | null>(null);
+  const [revokeConfirm, setRevokeConfirm] = useState<{ wsId: string; userId: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -76,15 +80,22 @@ export default function WorkspacesPage() {
   };
 
   async function handleDeleteWs(id: string) {
-    if (!confirm('Delete this workspace? All data in it will be lost.')) return;
+    setDeleteWsConfirm(id);
+  }
+
+  async function confirmDeleteWs() {
+    if (!deleteWsConfirm) return;
+    setDeleting(true);
     try {
-      await workspaces.delete(id);
+      await workspaces.delete(deleteWsConfirm);
       showToast('Workspace deleted', 'success');
       loadData();
       notifyWorkspacesChanged();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed', 'error');
     }
+    setDeleting(false);
+    setDeleteWsConfirm(null);
   }
 
   if (loading) {
@@ -365,8 +376,44 @@ export default function WorkspacesPage() {
           ws={managingMembersWs}
           onClose={() => setManagingMembersWs(null)}
           showToast={showToast}
+          onRevokeConfirm={(wsId, userId) => setRevokeConfirm({ wsId, userId })}
         />
       )}
+
+      {/* Delete Workspace Confirmation */}
+      <ConfirmModal
+        open={!!deleteWsConfirm}
+        title="Delete this workspace?"
+        description="All data in this workspace will be lost. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDeleteWs}
+        onCancel={() => setDeleteWsConfirm(null)}
+      />
+
+      {/* Revoke Access Confirmation */}
+      <ConfirmModal
+        open={!!revokeConfirm}
+        title="Revoke access?"
+        description="This user's access to the workspace will be revoked. This action cannot be undone."
+        confirmLabel="Revoke"
+        variant="danger"
+        loading={deleting}
+        onConfirm={async () => {
+          if (!revokeConfirm) return;
+          setDeleting(true);
+          try {
+            await workspaces.removeMember(revokeConfirm.wsId, revokeConfirm.userId);
+            showToast('Access revoked', 'success');
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : 'Failed', 'error');
+          }
+          setDeleting(false);
+          setRevokeConfirm(null);
+        }}
+        onCancel={() => setRevokeConfirm(null)}
+      />
     </div>
   );
 }
@@ -492,10 +539,11 @@ function ModalFooter({ onClose, onSave, saving, saveLabel }: { onClose: () => vo
   );
 }
 
-function ManageMembersModal({ ws, onClose, showToast }: {
+function ManageMembersModal({ ws, onClose, showToast, onRevokeConfirm }: {
   ws: Workspace;
   onClose: () => void;
   showToast: (msg: string, type: 'success' | 'error') => void;
+  onRevokeConfirm?: (wsId: string, userId: string) => void;
 }) {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -544,7 +592,10 @@ function ManageMembersModal({ ws, onClose, showToast }: {
   }
 
   async function handleRemove(userId: string) {
-    if (!confirm('Revoke this user\'s access to this workspace?')) return;
+    if (onRevokeConfirm) {
+      onRevokeConfirm(ws.id, userId);
+      return;
+    }
     try {
       await workspaces.removeMember(ws.id, userId);
       showToast('Access revoked', 'success');

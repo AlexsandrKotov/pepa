@@ -4,6 +4,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { environments, type Environment } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
+import ConfirmModal from '@/components/ConfirmModal';
 
 export default function EnvironmentsClient({ initialEnvironments }: { initialEnvironments?: Environment[] }) {
   return (
@@ -18,6 +19,8 @@ function EnvironmentsClientContent({ initialEnvironments }: { initialEnvironment
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Environment | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<Environment | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -37,14 +40,21 @@ function EnvironmentsClientContent({ initialEnvironments }: { initialEnvironment
   }, [refresh]);
 
   const handleDelete = async (env: Environment) => {
-    if (!confirm(`Delete environment "${env.name}"?`)) return;
+    setDeleteConfirm(env);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await environments.delete(env.id);
+      await environments.delete(deleteConfirm.id);
       showToast('Environment deleted', 'success');
       await refresh();
     } catch (err) {
       showToast(`Failed: ${err}`, 'error');
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleSave = async (data: { name: string; slug?: string; type?: string; cluster?: string; namespace?: string; description?: string; color?: string; is_default?: boolean }) => {
@@ -165,6 +175,18 @@ function EnvironmentsClientContent({ initialEnvironments }: { initialEnvironment
           onClose={() => { setShowCreate(false); setEditing(null); }}
         />
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title={`Delete environment "${deleteConfirm?.name || ''}"?`}
+        description="This environment will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
       </div>
     </div>
   );

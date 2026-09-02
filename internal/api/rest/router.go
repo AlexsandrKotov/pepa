@@ -19,6 +19,7 @@ import (
 	"github.com/pepa/pepa/internal/database"
 	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/gitops"
+	"github.com/pepa/pepa/internal/logging"
 	"github.com/pepa/pepa/internal/observability"
 	"github.com/pepa/pepa/internal/pipeline"
 	"github.com/pepa/pepa/internal/plugin/engine"
@@ -28,6 +29,7 @@ import (
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/internal/storage"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // Repositories groups all repository instances.
@@ -60,6 +62,8 @@ type Repositories struct {
 	Organization    *repository.OrganizationRepository
 	RAG             *repository.RAGRepository
 	SSHHost         *repository.SSHHostRepository
+	SSHHostGroup    *repository.SSHHostGroupRepository
+	PluginActivity  *repository.PluginActivityRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -122,6 +126,11 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(requestIDMiddleware())
+	// OpenTelemetry Gin middleware: creates a span for every HTTP request,
+	// enabling full distributed tracing in SigNoz/Jaeger/Tempo.
+	if deps.Config.Observability.Enabled && deps.Config.Observability.OTLPEndpoint != "" {
+		r.Use(otelgin.Middleware(deps.Config.Observability.ServiceName))
+	}
 	r.Use(correlationMiddleware()) // Add trace ID to all requests
 	r.Use(requestLogger())
 	r.Use(metrics.GinMiddleware())
@@ -251,8 +260,10 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerBlueprintDeployRoutes(v1, deps)
 		registerOrganizationRoutes(v1, deps)
 		registerProxmoxRoutes(v1, deps)
+		registerVMwareRoutes(v1, deps)
 		registerObservabilityRoutes(v1, deps)
 		registerRemoteConsoleRoutes(v1, deps)
+		registerPluginActivityRoutes(v1, deps)
 
 		// System info
 		v1.GET("/system/info", func(c *gin.Context) {
@@ -432,11 +443,16 @@ func requestLogger() gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 		reqID, _ := c.Get("request_id")
-		slog.Info("http request",
+		// Use LogFromContext so the slog handler receives the request context
+		// which contains the OTel span (from otelgin). This ensures trace_id
+		// and span_id are included in every log record sent to SigNoz.
+		log := logging.LogFromContext(c.Request.Context())
+		status := c.Writer.Status()
+		log.Info(fmt.Sprintf("%s %s → %d", c.Request.Method, c.Request.URL.Path, status),
 			"request_id", reqID,
 			"method", c.Request.Method,
 			"path", c.Request.URL.Path,
-			"status", c.Writer.Status(),
+			"status", status,
 			"duration", time.Since(start),
 		)
 	}

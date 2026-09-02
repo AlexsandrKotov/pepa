@@ -100,15 +100,7 @@ function ObservabilitySettingsContent() {
               <span className="text-[13px] font-medium text-[var(--text-primary)]">OTLP / SigNoz</span>
               <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Send traces and metrics to OpenTelemetry-compatible backends (SigNoz, Jaeger, Grafana Tempo)</p>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.otel_enabled}
-                onChange={e => setForm({ ...form, otel_enabled: e.target.checked })}
-                className="rounded border-[var(--border)]"
-              />
-              <span className="text-[12px] text-[var(--text-secondary)]">Enabled</span>
-            </label>
+            <ToggleSwitch enabled={form.otel_enabled} onChange={() => setForm({ ...form, otel_enabled: !form.otel_enabled })} />
           </div>
           <div className="card-body space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -148,13 +140,13 @@ function ObservabilitySettingsContent() {
               </div>
               <div className="flex items-end pb-1">
                 <label className="flex items-center gap-2 cursor-pointer">
+                  <span className="text-[12px] text-[var(--text-secondary)]">Insecure (no TLS)</span>
                   <input
                     type="checkbox"
                     checked={form.otel_insecure}
                     onChange={e => setForm({ ...form, otel_insecure: e.target.checked })}
                     className="rounded border-[var(--border)]"
                   />
-                  <span className="text-[12px] text-[var(--text-secondary)]">Insecure (no TLS)</span>
                 </label>
               </div>
             </div>
@@ -177,15 +169,7 @@ function ObservabilitySettingsContent() {
               <span className="text-[13px] font-medium text-[var(--text-primary)]">Syslog Forwarding</span>
               <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">Forward all PEPA logs and audit events to a remote syslog server</p>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={form.syslog_enabled}
-                onChange={e => setForm({ ...form, syslog_enabled: e.target.checked })}
-                className="rounded border-[var(--border)]"
-              />
-              <span className="text-[12px] text-[var(--text-secondary)]">Enabled</span>
-            </label>
+            <ToggleSwitch enabled={form.syslog_enabled} onChange={() => setForm({ ...form, syslog_enabled: !form.syslog_enabled })} />
           </div>
           <div className="card-body space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -288,6 +272,23 @@ function ObservabilitySettingsContent() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ToggleSwitch({ enabled, onChange }: { enabled: boolean; onChange: () => void }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[11px] text-[var(--text-tertiary)]">{enabled ? 'Enabled' : 'Disabled'}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        onClick={onChange}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 ${enabled ? 'bg-[var(--accent)]' : 'bg-[var(--border-light)]'}`}
+      >
+        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${enabled ? 'translate-x-4' : 'translate-x-0'}`} />
+      </button>
     </div>
   );
 }

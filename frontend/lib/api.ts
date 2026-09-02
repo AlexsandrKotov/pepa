@@ -1776,7 +1776,7 @@ export const jira = {
 
 // ── Connections ─────────────────────────────────────────────
 
-export type ConnectionType = 'kubernetes' | 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'notification';
+export type ConnectionType = 'kubernetes' | 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification';
 
 export interface Connection {
   id: string;
@@ -3949,7 +3949,135 @@ export const virtualization = {
     taskLog: (node: string, upid: string) =>
       fetchAPI<{ data: ProxmoxSyslogLine[] | null }>(`/api/v1/virtualization/proxmox/nodes/${encodeURIComponent(node)}/tasks/${encodeURIComponent(upid)}/log`),
   },
+  vmware: {
+    testConnection: () =>
+      fetchAPI<{ data: { status?: string; version?: unknown } }>('/api/v1/virtualization/vmware/test', { method: 'POST' }),
+    listDatacenters: () =>
+      fetchAPI<{ data: VMwareDatacenter[] }>('/api/v1/virtualization/vmware/datacenters'),
+    listClusters: () =>
+      fetchAPI<{ data: VMwareCluster[] }>('/api/v1/virtualization/vmware/clusters'),
+    listHosts: () =>
+      fetchAPI<{ data: VMwareHost[] }>('/api/v1/virtualization/vmware/hosts'),
+    listVMs: () =>
+      fetchAPI<{ data: VMwareVM[] }>('/api/v1/virtualization/vmware/vms'),
+    getVM: (id: string) =>
+      fetchAPI<{ data: VMwareVMDetail }>(`/api/v1/virtualization/vmware/vms/${id}`),
+    createVM: (data: VMwareCreateVMRequest) =>
+      fetchAPI<{ data: unknown }>('/api/v1/virtualization/vmware/vms', { method: 'POST', body: JSON.stringify(data) }),
+    deleteVM: (id: string) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}`, { method: 'DELETE' }),
+    vmAction: (id: string, action: 'start' | 'stop' | 'shutdown' | 'reboot' | 'suspend') =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}/${action}`, { method: 'POST' }),
+    listDatastores: () =>
+      fetchAPI<{ data: VMwareDatastore[] }>('/api/v1/virtualization/vmware/datastores'),
+    listNetworks: () =>
+      fetchAPI<{ data: VMwareNetwork[] }>('/api/v1/virtualization/vmware/networks'),
+    listResourcePools: () =>
+      fetchAPI<{ data: VMwareResourcePool[] }>('/api/v1/virtualization/vmware/resource-pools'),
+    listSnapshots: (id: string) =>
+      fetchAPI<{ data: VMwareSnapshot[] }>(`/api/v1/virtualization/vmware/vms/${id}/snapshots`),
+    createSnapshot: (id: string, name: string, description?: string) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}/snapshots`, { method: 'POST', body: JSON.stringify({ name, description }) }),
+    deleteSnapshot: (id: string, snapId: string) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}/snapshots/${snapId}`, { method: 'DELETE' }),
+    revertSnapshot: (id: string, snapId: string) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}/snapshots/${snapId}/revert`, { method: 'POST' }),
+    cloneVM: (id: string, data: { name: string; host?: string; datastore?: string; resource_pool?: string; power_on?: boolean }) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}/clone`, { method: 'POST', body: JSON.stringify(data) }),
+    reconfigureVM: (id: string, data: { cores?: number; memory_mib?: number }) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+    migrateVM: (id: string, targetHost: string) =>
+      fetchAPI<{ data: unknown }>(`/api/v1/virtualization/vmware/vms/${id}/migrate`, { method: 'POST', body: JSON.stringify({ target_host: targetHost }) }),
+    getConnectionInfo: () =>
+      fetchAPI<{ data: { url?: string } }>('/api/v1/virtualization/vmware/connection-info'),
+  },
 };
+
+// ── Virtualization (VMware vCenter) ──────────────────────────
+
+export interface VMwareVM {
+  vm: string;
+  name: string;
+  power_state: string;
+  cpu_count: number;
+  memory_size_mib: number;
+  host?: string;
+  cluster?: string;
+  guest_OS?: string;
+  ip_address?: string;
+  guest_host_name?: string;
+}
+
+export interface VMwareVMDetail {
+  name: string;
+  power_state: string;
+  cpu: { count: number; cores_per_socket: number };
+  memory: { size_MiB: number };
+  guest: { os: string; name: string; ip_address: string; host_name: string };
+  host: string;
+  cluster: string;
+}
+
+export interface VMwareHost {
+  host: string;
+  name: string;
+  connection_state: string;
+  hardware?: {
+    cpu_cores: number;
+    memory_size_mib: number;
+  };
+  memory_usage_mib?: number;
+  memory_utilization?: number;
+}
+
+export interface VMwareDatacenter {
+  datacenter: string;
+  name: string;
+}
+
+export interface VMwareCluster {
+  cluster: string;
+  name: string;
+}
+
+export interface VMwareDatastore {
+  datastore: string;
+  name: string;
+  type: string;
+  free_space: number;
+  capacity: number;
+}
+
+export interface VMwareNetwork {
+  network: string;
+  name: string;
+  type: string;
+}
+
+export interface VMwareResourcePool {
+  resource_pool: string;
+  name: string;
+}
+
+export interface VMwareSnapshot {
+  snapshot: string;
+  display_name: string;
+  description?: string;
+  create_time?: string;
+  state?: string;
+}
+
+export interface VMwareCreateVMRequest {
+  name: string;
+  host?: string;
+  cluster?: string;
+  datastore?: string;
+  resource_pool?: string;
+  cores?: number;
+  memory_mib?: number;
+  guest_os?: string;
+  network?: string;
+}
 
 // ── S3 Browser ────────────────────────────────────────────────
 export interface S3Bucket {
@@ -4081,5 +4209,46 @@ export const s3Browser = {
 
   getCredentialStatus: (connectionId: string) =>
     fetchAPI<S3CredentialStatus>(`/api/v1/s3-browser/${connectionId}/credential-status`),
+};
+
+// ── Plugin Activity ──────────────────────────────────────────
+
+export interface SSHCommandEntry {
+  id: string;
+  tenant_id: string;
+  user_id?: string;
+  host_id: string;
+  host_name: string;
+  username: string;
+  command: string;
+  exit_code?: number;
+  created_at: string;
+}
+
+export interface PluginActionEntry {
+  id: string;
+  tenant_id: string;
+  user_id?: string;
+  plugin_name: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  params?: string;
+  status: string;
+  error_message?: string;
+  ip_address?: string;
+  created_at: string;
+}
+
+export const pluginActivity = {
+  listSSHCommands: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ items: SSHCommandEntry[]; total: number }>(`/api/v1/plugin-activity/ssh-commands${qs}`);
+  },
+  listPluginActions: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ items: PluginActionEntry[]; total: number }>(`/api/v1/plugin-activity/plugin-actions${qs}`);
+  },
 };
 

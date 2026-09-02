@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { dockerHosts, dockerServices, type DockerHost, type DockerService, type DiscoveredDockerContainer } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 export default function DockerServicesPage() {
   const [services, setServices] = useState<DockerService[]>([]);
@@ -17,6 +18,8 @@ export default function DockerServicesPage() {
   const [logs, setLogs] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Discovered containers from Docker hosts
   const [discoveredContainers, setDiscoveredContainers] = useState<{ hostName: string; containers: DiscoveredDockerContainer[] }[]>([]);
@@ -67,7 +70,8 @@ export default function DockerServicesPage() {
 
   const handleAction = async (id: string, action: 'start' | 'stop' | 'restart' | 'refresh' | 'delete') => {
     if (action === 'delete') {
-      if (!confirm('Stop and remove this service?')) return;
+      setDeleteConfirm(id);
+      return;
     }
     setActionLoading(id);
     try {
@@ -76,11 +80,23 @@ export default function DockerServicesPage() {
         case 'stop': await dockerServices.stop(id); break;
         case 'restart': await dockerServices.restart(id); break;
         case 'refresh': await dockerServices.refresh(id); break;
-        case 'delete': await dockerServices.delete(id); break;
       }
       load();
     } catch { /* ignore */ }
     setActionLoading(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
+    setActionLoading(deleteConfirm);
+    try {
+      await dockerServices.delete(deleteConfirm);
+      load();
+    } catch { /* ignore */ }
+    setActionLoading(null);
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleShowLogs = async (id: string) => {
@@ -357,6 +373,18 @@ export default function DockerServicesPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Stop and remove this service?"
+        description="This Docker service will be stopped and permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
 
       </div>
     </div>

@@ -759,6 +759,7 @@ export default function TopBar() {
                 { href: '/ai', label: 'AI Assistant', icon: '🤖' },
                 { href: '/knowledge-base', label: 'Knowledge Base', icon: '📚' },
                 { href: '/audit', label: 'Audit Log', icon: '📝', adminOnly: true, permission: 'audit' },
+                { href: '/plugin-activity', label: 'Plugin Activity', icon: '🔌', adminOnly: true, permission: 'plugin_activity' },
                 { href: '/roles', label: 'Roles', icon: '👥', adminOnly: true, permission: 'roles' },
                 { href: '/settings', label: 'Settings', icon: <GearIcon className="w-4 h-4" />, adminOnly: true, permission: 'settings' },
               ].filter(item => !item.adminOnly || isAdmin || (item.permission && hasPermission(item.permission, 'read'))).map(item => (

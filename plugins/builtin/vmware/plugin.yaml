@@ -1,0 +1,74 @@
+name: vmware
+version: "0.1.0"
+display_name: "VMware vCenter"
+description: "VMware vCenter virtualization — manage ESXi hosts, virtual machines, datastores, networks, and snapshots via the vSphere REST API."
+category: virtualization
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+
+config_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: "vCenter URL (e.g., https://vcenter.example.com)"
+    username:
+      type: string
+      description: "vCenter username (e.g., administrator@vsphere.local)"
+    password:
+      type: string
+      description: "vCenter password"
+    insecure_tls:
+      type: string
+      description: "Skip TLS certificate verification for self-signed certs (true/false)"
+  required:
+    - url
+    - username
+    - password
+
+actions:
+  - name: test_connection
+    description: "Check connectivity to the vCenter server"
+  - name: list_datacenters
+    description: "List all vSphere datacenters"
+  - name: list_clusters
+    description: "List all vSphere clusters"
+  - name: list_hosts
+    description: "List all ESXi hosts with resource usage"
+  - name: list_vms
+    description: "List all virtual machines"
+  - name: get_vm
+    description: "Get detailed info about a virtual machine"
+  - name: start_vm
+    description: "Power on a virtual machine"
+  - name: stop_vm
+    description: "Force power off a virtual machine"
+  - name: shutdown_vm
+    description: "Gracefully shut down a virtual machine (requires VMware Tools)"
+  - name: reboot_vm
+    description: "Reset (reboot) a virtual machine"
+  - name: suspend_vm
+    description: "Suspend a virtual machine"
+  - name: create_vm
+    description: "Create a new virtual machine"
+  - name: delete_vm
+    description: "Delete a virtual machine"
+  - name: list_datastores
+    description: "List all datastores with capacity"
+  - name: list_networks
+    description: "List all networks"
+  - name: list_resource_pools
+    description: "List all resource pools"
+  - name: list_snapshots
+    description: "List snapshots of a virtual machine"
+  - name: create_snapshot
+    description: "Create a snapshot of a virtual machine"
+  - name: delete_snapshot
+    description: "Delete a snapshot from a virtual machine"
+  - name: revert_snapshot
+    description: "Revert a virtual machine to a snapshot"
+
+health_check:
+  endpoint: /health
+  interval: 30s

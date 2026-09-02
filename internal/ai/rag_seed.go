@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/docs"
+	"github.com/pepa/pepa/internal/logging"
 	"github.com/pepa/pepa/internal/repository"
+	"go.opentelemetry.io/otel"
 )
 
 // SeedDocuments reads embedded documentation and ingests it into the RAG
@@ -17,6 +18,12 @@ import (
 // idempotent — documents with the same source identity are upserted.
 // Orphaned documents from previous seed versions are cleaned up automatically.
 func SeedDocuments(ctx context.Context, engine *IngestionEngine, tenantID uuid.UUID) error {
+	// Create a root span for the seed operation
+	tracer := otel.Tracer("pepa-api")
+	ctx, span := tracer.Start(ctx, "rag.seed_documents")
+	defer span.End()
+	log := logging.LogFromContext(ctx)
+
 	ingested := 0
 	var seededIDs []string
 
@@ -25,24 +32,24 @@ func SeedDocuments(ctx context.Context, engine *IngestionEngine, tenantID uuid.U
 	// the knowledge base focused and avoid diluting search relevance.
 	seededIDs, err := collectSeedIDs(docs.SeedDocs, "rag-seed")
 	if err != nil {
-		slog.Warn("RAG: failed to collect seed IDs", "error", err)
+		log.Warn("RAG: failed to collect seed IDs", "error", err)
 	}
 
 	if err := seedFromFS(ctx, engine, docs.SeedDocs, "rag-seed", "documentation", tenantID, &ingested); err != nil {
-		slog.Warn("RAG: failed to seed focused docs", "error", err)
+		log.Warn("RAG: failed to seed focused docs", "error", err)
 	}
 
 	if ingested > 0 {
-		slog.Info("RAG: documentation seeded into knowledge base", "documents", ingested)
+		log.Info("RAG: documentation seeded into knowledge base", "documents", ingested)
 	}
 
 	// Clean up orphaned seed documents (from previous versions).
 	if len(seededIDs) > 0 {
 		removed, err := engine.ragRepo.DeleteOrphanedSeedDocs(ctx, tenantID, "pepa-docs", seededIDs)
 		if err != nil {
-			slog.Warn("RAG: failed to clean orphaned seed docs", "error", err)
+			log.Warn("RAG: failed to clean orphaned seed docs", "error", err)
 		} else if removed > 0 {
-			slog.Info("RAG: removed orphaned seed documents", "count", removed)
+			log.Info("RAG: removed orphaned seed documents", "count", removed)
 		}
 	}
 
@@ -51,6 +58,7 @@ func SeedDocuments(ctx context.Context, engine *IngestionEngine, tenantID uuid.U
 
 // seedFromFS reads markdown files from an embedded filesystem and ingests them.
 func seedFromFS(ctx context.Context, engine *IngestionEngine, fsys fs.FS, subdir string, sourceType string, tenantID uuid.UUID, ingested *int) error {
+	log := logging.LogFromContext(ctx)
 	root := subdir
 	if root == "" {
 		root = "."
@@ -73,7 +81,7 @@ func seedFromFS(ctx context.Context, engine *IngestionEngine, fsys fs.FS, subdir
 
 		content, err := fs.ReadFile(fsys, path)
 		if err != nil {
-			slog.Warn("RAG: failed to read seed doc", "path", path, "error", err)
+			log.Warn("RAG: failed to read seed doc", "path", path, "error", err)
 			continue
 		}
 
@@ -96,7 +104,7 @@ func seedFromFS(ctx context.Context, engine *IngestionEngine, fsys fs.FS, subdir
 		}
 
 		if err := engine.IngestDocument(ctx, doc, tenantID); err != nil {
-			slog.Warn("RAG: failed to ingest seed doc", "path", path, "error", err)
+			log.Warn("RAG: failed to ingest seed doc", "path", path, "error", err)
 			continue
 		}
 		*ingested++

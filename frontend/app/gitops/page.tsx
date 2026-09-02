@@ -5,6 +5,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { useRouter } from 'next/navigation';
 import { gitops, connections as connectionsAPI, type GitopsRepo, type GitopsResource, type Connection } from '@/lib/api';
 import GitRepoPicker, { type GitRepoPickerValue } from '@/components/GitRepoPicker';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const defaultForm = {
   name: '',
@@ -120,6 +121,8 @@ export default function GitOpsPage() {
   const [scanning, setScanning] = useState<string | null>(null);
   const [gitInputMode, setGitInputMode] = useState<'picker' | 'manual'>('picker');
   const [gitConnections, setGitConnections] = useState<Connection[]>([]);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEscapeKey(() => {
     if (showForm) setShowForm(false);
@@ -223,16 +226,23 @@ export default function GitOpsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Remove this GitOps repository?')) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await gitops.deleteRepo(id);
-      if (selectedRepo?.id === id) {
+      await gitops.deleteRepo(deleteConfirm);
+      if (selectedRepo?.id === deleteConfirm) {
         setSelectedRepo(null);
         setResources([]);
         setSelectedResource(null);
       }
       load();
     } catch { /* ignore */ }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleScan = async (repo: GitopsRepo) => {
@@ -978,6 +988,18 @@ export default function GitOpsPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Remove this GitOps repository?"
+        description="This GitOps repository will be permanently removed. This action cannot be undone."
+        confirmLabel="Remove"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
       </div>
     </div>
   );

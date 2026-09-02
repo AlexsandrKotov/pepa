@@ -7,6 +7,7 @@ import { deployments, clusters, helmRepositories, type Deployment, type Deployme
 import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
 import DeploymentDetailClient from './DeploymentDetailClient';
+import ConfirmModal from '@/components/ConfirmModal';
 
 function DeploymentsPageContent() {
   const searchParams = useSearchParams();
@@ -131,6 +132,8 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   const [selectedHelmRepoChart, setSelectedHelmRepoChart] = useState(''); // "repoId:chartName"
   const [loadingHelmCharts, setLoadingHelmCharts] = useState(false);
   const [helmInputMode, setHelmInputMode] = useState<'picker' | 'manual'>('picker');
+  const [actionConfirm, setActionConfirm] = useState<{ type: 'rollback' | 'cancel' | 'delete'; id: string } | null>(null);
+  const [actionProcessing, setActionProcessing] = useState(false);
 
   const loadHelmRepos = async () => {
     try {
@@ -288,18 +291,32 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   };
 
   const handleRollback = async (id: string) => {
-    if (!confirm('Rollback this deployment?')) return;
-    try { await deployments.rollback(id); await refresh(); } catch { /* ignore */ }
+    setActionConfirm({ type: 'rollback', id });
   };
 
   const handleCancel = async (id: string) => {
-    if (!confirm('Cancel this deployment?')) return;
-    try { await deployments.cancel(id); await refresh(); } catch { /* ignore */ }
+    setActionConfirm({ type: 'cancel', id });
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this deployment record? This cannot be undone.')) return;
-    try { await deployments.delete(id); await refresh(); } catch { /* ignore */ }
+    setActionConfirm({ type: 'delete', id });
+  };
+
+  const confirmAction = async () => {
+    if (!actionConfirm) return;
+    setActionProcessing(true);
+    try {
+      if (actionConfirm.type === 'rollback') {
+        await deployments.rollback(actionConfirm.id);
+      } else if (actionConfirm.type === 'cancel') {
+        await deployments.cancel(actionConfirm.id);
+      } else if (actionConfirm.type === 'delete') {
+        await deployments.delete(actionConfirm.id);
+      }
+      await refresh();
+    } catch { /* ignore */ }
+    setActionProcessing(false);
+    setActionConfirm(null);
   };
 
   const handleShowLogs = async (id: string) => {
@@ -1051,6 +1068,18 @@ resources:
           </div>
         </div>
       )}
+
+      {/* Action Confirmation */}
+      <ConfirmModal
+        open={!!actionConfirm}
+        title={actionConfirm?.type === 'rollback' ? 'Rollback this deployment?' : actionConfirm?.type === 'cancel' ? 'Cancel this deployment?' : 'Delete this deployment record?'}
+        description={actionConfirm?.type === 'delete' ? 'This deployment record will be permanently deleted. This cannot be undone.' : 'This action will be executed immediately.'}
+        confirmLabel={actionConfirm?.type === 'rollback' ? 'Rollback' : actionConfirm?.type === 'cancel' ? 'Cancel' : 'Delete'}
+        variant={actionConfirm?.type === 'delete' ? 'danger' : 'warning'}
+        loading={actionProcessing}
+        onConfirm={confirmAction}
+        onCancel={() => setActionConfirm(null)}
+      />
       </div>
     </div>
   );

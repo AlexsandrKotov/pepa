@@ -8,6 +8,7 @@ import ConceptHelp from '@/components/ConceptHelp';
 import GearIcon from '@/components/GearIcon';
 import GitRepoPicker from '@/components/GitRepoPicker';
 import { helmRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup } from '@/lib/api';
+import ConfirmModal from '@/components/ConfirmModal';
 
 const categoryIcons: Record<string, React.ReactNode> = {
   backend: <GearIcon className="w-4 h-4" />, frontend: '🌐', database: '🗄️', messaging: '📨',
@@ -38,6 +39,8 @@ export default function PipelineBlueprintsPage() {
     compose_yaml: '',
   });
   const [gitInputMode, setGitInputMode] = useState<'picker' | 'manual'>('picker');
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEscapeKey(() => {
     if (showForm) { setShowForm(false); setEditing(null); }
@@ -157,14 +160,21 @@ export default function PipelineBlueprintsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this blueprint?')) return;
+    setDeleteConfirm(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    setDeleting(true);
     try {
-      await blueprintsAPI.delete(id);
-      setBlueprints(blueprints.filter(b => b.id !== id));
+      await blueprintsAPI.delete(deleteConfirm);
+      setBlueprints(blueprints.filter(b => b.id !== deleteConfirm));
     } catch (err) {
       console.error('Failed to delete blueprint:', err);
       alert(err instanceof Error ? err.message : 'Failed to delete blueprint');
     }
+    setDeleting(false);
+    setDeleteConfirm(null);
   };
 
   const handleDuplicate = async (bp: ServiceBlueprint) => {
@@ -945,6 +955,18 @@ export default function PipelineBlueprintsPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation */}
+      <ConfirmModal
+        open={!!deleteConfirm}
+        title="Delete this blueprint?"
+        description="This blueprint will be permanently removed. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="danger"
+        loading={deleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteConfirm(null)}
+      />
       </div>
     </div>
   );
