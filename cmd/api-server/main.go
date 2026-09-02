@@ -150,6 +150,7 @@ func main() {
 			SSHHostGroup:     comp.SSHHostGroupRepo,
 			PluginActivity:   comp.PluginActivityRepo,
 			SecurityScan:     comp.SecurityScanRepo,
+			DevOps:           comp.DevOpsRepo,
 		},
 		Services: &rest.Services{
 			Deployment: service.NewDeploymentService(

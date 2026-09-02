@@ -1039,6 +1039,12 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 	complianceResult := &models.ComplianceCheckResult{Passed: true}
 	for _, policy := range policies {
 		evaluation := h.evaluatePolicy(policy, req.Config)
+		evaluation.ServiceID = &req.ServiceID
+		evaluation.TenantID = tenantID
+
+		// Persist evaluation to DB for audit history
+		_ = h.repo.CreateComplianceEvaluation(c.Request.Context(), evaluation)
+
 		if evaluation.Result == "fail" {
 			complianceResult.Passed = false
 			if policy.Blocking {
@@ -1070,7 +1076,7 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 		}
 		if secResult.CriticalCount > 0 || secResult.HighCount > 0 {
 			result.Allowed = false
-			result.BlockedReasons = append(result.BlockedReasons, "Security gate: "+string(rune(len(secResult.BlockingIssues)))+" blocking findings")
+			result.BlockedReasons = append(result.BlockedReasons, fmt.Sprintf("Security gate: %d blocking findings", len(secResult.BlockingIssues)))
 		}
 		result.SecurityCheck = secResult
 	} else {
@@ -1087,13 +1093,13 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 		ActorID:             userID,
 		Environment:         req.Environment,
 		ImageTag:            req.ImageTag,
-		ComplianceResults:   mustJSON(complianceResult),
-		SecurityGateResults: mustJSON(result.SecurityCheck),
+		ComplianceResults:   mustJSONRaw(complianceResult),
+		SecurityGateResults: mustJSONRaw(result.SecurityCheck),
 		Status:              "success",
 	}
 	if !result.Allowed {
 		auditLog.Status = "blocked"
-		auditLog.Metadata = mustJSON(gin.H{"blocked_reasons": result.BlockedReasons})
+		auditLog.Metadata = mustJSONRaw(gin.H{"blocked_reasons": result.BlockedReasons})
 	}
 	_ = h.repo.CreateDeploymentAuditLog(c.Request.Context(), auditLog)
 
@@ -1112,7 +1118,7 @@ func (h *DevOpsHandlers) evaluatePolicy(policy models.CompliancePolicy, config j
 	var spec map[string]interface{}
 	if err := json.Unmarshal(policy.PolicySpec, &spec); err != nil {
 		evaluation.Result = "skip"
-		evaluation.Violations = mustJSON([]models.ComplianceViolation{{
+		evaluation.Violations = mustJSONRaw([]models.ComplianceViolation{{
 			Field:    "policy_spec",
 			Message:  "Invalid policy specification",
 			Severity: "info",
@@ -1156,7 +1162,7 @@ func (h *DevOpsHandlers) evaluatePolicy(policy models.CompliancePolicy, config j
 
 		if len(violations) > 0 {
 			evaluation.Result = "fail"
-			evaluation.Violations = mustJSON(violations)
+			evaluation.Violations = mustJSONRaw(violations)
 		}
 	}
 
@@ -1172,8 +1178,8 @@ func (h *DevOpsHandlers) evaluatePolicy(policy models.CompliancePolicy, config j
 	return evaluation
 }
 
-// mustJSON marshals to JSON, returning empty object on error.
-func mustJSON(v interface{}) json.RawMessage {
+// mustJSONRaw marshals to JSON as json.RawMessage, returning empty object on error.
+func mustJSONRaw(v interface{}) json.RawMessage {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return json.RawMessage("{}")

@@ -2,8 +2,9 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -131,6 +132,9 @@ func (r *DevOpsRepository) DeleteDeploymentWindow(ctx context.Context, id, tenan
 }
 
 // GetActiveWindows returns windows that are currently active (for checking if deployment is allowed).
+// It fetches all enabled windows matching environment/service, then filters in Go:
+//   - Date-range windows: active if start_at <= now <= end_at
+//   - Cron windows: active if the cron expression matches the current time
 func (r *DevOpsRepository) GetActiveWindows(ctx context.Context, tenantID uuid.UUID, environment string, serviceID *uuid.UUID) ([]models.DeploymentWindow, error) {
 	query := `
 		SELECT id, tenant_id, name, COALESCE(description,''), window_type,
@@ -144,22 +148,16 @@ func (r *DevOpsRepository) GetActiveWindows(ctx context.Context, tenantID uuid.U
 	argIdx := 2
 
 	// Filter by environment if specified
-	query += fmt.Sprintf(` AND (array_length(environments, 1) IS NULL OR environments @> $%d)`, argIdx)
+	query += fmt.Sprintf(` AND (COALESCE(array_length(environments, 1), 0) = 0 OR environments @> $%d)`, argIdx)
 	args = append(args, []string{environment})
 	argIdx++
 
 	// Filter by service if specified
 	if serviceID != nil {
-		query += fmt.Sprintf(` AND (array_length(service_ids, 1) IS NULL OR service_ids @> $%d)`, argIdx)
+		query += fmt.Sprintf(` AND (COALESCE(array_length(service_ids, 1), 0) = 0 OR service_ids @> $%d)`, argIdx)
 		args = append(args, []uuid.UUID{*serviceID})
 		argIdx++
 	}
-
-	// Check for active date-range windows
-	query += ` AND (
-		(start_at IS NOT NULL AND end_at IS NOT NULL AND start_at <= now() AND end_at >= now())
-		OR (start_at IS NULL AND end_at IS NULL) -- recurring windows always "active" for cron check
-	)`
 
 	query += ` ORDER BY priority DESC`
 
@@ -169,7 +167,7 @@ func (r *DevOpsRepository) GetActiveWindows(ctx context.Context, tenantID uuid.U
 	}
 	defer rows.Close()
 
-	var windows []models.DeploymentWindow
+	var allWindows []models.DeploymentWindow
 	for rows.Next() {
 		var w models.DeploymentWindow
 		if err := rows.Scan(
@@ -180,9 +178,34 @@ func (r *DevOpsRepository) GetActiveWindows(ctx context.Context, tenantID uuid.U
 		); err != nil {
 			return nil, fmt.Errorf("scan deployment window: %w", err)
 		}
-		windows = append(windows, w)
+		allWindows = append(allWindows, w)
 	}
-	return windows, nil
+
+	// Filter windows by time in Go
+	now := time.Now()
+	var active []models.DeploymentWindow
+	for _, w := range allWindows {
+		if w.StartAt != nil && w.EndAt != nil {
+			// Date-range window: active if now is within [start_at, end_at]
+			if !now.Before(*w.StartAt) && !now.After(*w.EndAt) {
+				active = append(active, w)
+			}
+		} else if w.CronExpression != "" {
+			// Recurring cron window: evaluate against current time
+			loc := time.UTC
+			if w.Timezone != "" {
+				if l, err := time.LoadLocation(w.Timezone); err == nil {
+					loc = l
+				}
+			}
+			if cronMatches(w.CronExpression, now.In(loc)) {
+				active = append(active, w)
+			}
+		}
+		// Windows with neither date range nor cron are ignored (misconfigured)
+	}
+
+	return active, nil
 }
 
 // ============================================================
@@ -422,13 +445,13 @@ func (r *DevOpsRepository) GetApplicablePolicies(ctx context.Context, tenantID u
 	argIdx := 2
 
 	// Filter by environment
-	query += fmt.Sprintf(` AND (array_length(environments, 1) IS NULL OR environments @> $%d)`, argIdx)
+	query += fmt.Sprintf(` AND (COALESCE(array_length(environments, 1), 0) = 0 OR environments @> $%d)`, argIdx)
 	args = append(args, []string{environment})
 	argIdx++
 
 	// Filter by service
 	if serviceID != nil {
-		query += fmt.Sprintf(` AND (array_length(service_ids, 1) IS NULL OR service_ids @> $%d)`, argIdx)
+		query += fmt.Sprintf(` AND (COALESCE(array_length(service_ids, 1), 0) = 0 OR service_ids @> $%d)`, argIdx)
 		args = append(args, []uuid.UUID{*serviceID})
 	}
 
@@ -1250,5 +1273,83 @@ func (r *DevOpsRepository) CheckDeploymentAllowed(ctx context.Context, tenantID 
 	return result, nil
 }
 
-// Ensure json import is used
-var _ = json.RawMessage{}
+// cronMatches checks if a standard 5-field cron expression matches the given time.
+// Supported format: "minute hour day_of_month month day_of_week"
+// Field values: numbers, ranges (1-5), lists (1,3,5), step (*/5), and wildcard (*).
+// Day-of-week: 0=Sunday, 1=Monday, ..., 6=Saturday (7 also = Sunday).
+func cronMatches(expr string, t time.Time) bool {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return false
+	}
+
+	values := []int{
+		t.Minute(),
+		t.Hour(),
+		t.Day(),
+		int(t.Month()),
+		int(t.Weekday()), // 0=Sun
+	}
+
+	// Bounds: [min, max] for each of the 5 cron fields:
+	// minute(0-59), hour(0-23), day_of_month(1-31), month(1-12), day_of_week(0-6)
+	bounds := []int{0, 59, 0, 23, 1, 31, 1, 12, 0, 6}
+	for i, field := range fields {
+		if !cronFieldMatches(field, values[i], bounds[i*2], bounds[i*2+1]) {
+			return false
+		}
+	}
+	return true
+}
+
+// cronFieldMatches checks if a single cron field matches the given value.
+func cronFieldMatches(field string, value, minVal, maxVal int) bool {
+	// Handle comma-separated lists: "1,3,5"
+	for _, part := range strings.Split(field, ",") {
+		if cronPartMatches(part, value, minVal, maxVal) {
+			return true
+		}
+	}
+	return false
+}
+
+// cronPartMatches checks a single part of a cron field (no commas).
+func cronPartMatches(part string, value, minVal, maxVal int) bool {
+	// Handle step: "*/5" or "1-10/2"
+	stepParts := strings.SplitN(part, "/", 2)
+	rangePart := stepParts[0]
+	step := 1
+	if len(stepParts) == 2 {
+		s, err := strconv.Atoi(stepParts[1])
+		if err != nil || s <= 0 {
+			return false
+		}
+		step = s
+	}
+
+	// Wildcard
+	if rangePart == "*" {
+		return (value-minVal)%step == 0
+	}
+
+	// Range: "1-5"
+	if strings.Contains(rangePart, "-") {
+		bounds := strings.SplitN(rangePart, "-", 2)
+		lo, err1 := strconv.Atoi(bounds[0])
+		hi, err2 := strconv.Atoi(bounds[1])
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		if value < lo || value > hi {
+			return false
+		}
+		return (value-lo)%step == 0
+	}
+
+	// Single value: "5"
+	n, err := strconv.Atoi(rangePart)
+	if err != nil {
+		return false
+	}
+	return value == n
+}

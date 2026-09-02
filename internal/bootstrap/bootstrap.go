@@ -73,6 +73,7 @@ type Components struct {
 	SSHHostGroupRepo    *repository.SSHHostGroupRepository
 	PluginActivityRepo  *repository.PluginActivityRepository
 	SecurityScanRepo    *repository.SecurityScanRepository
+	DevOpsRepo          *repository.DevOpsRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -327,6 +328,7 @@ func Bootstrap() (*Components, error) {
 		SSHHostGroupRepo:    repository.NewSSHHostGroupRepository(db.Pool),
 		PluginActivityRepo:  repository.NewPluginActivityRepository(db),
 		SecurityScanRepo:    repository.NewSecurityScanRepository(db),
+		DevOpsRepo:          repository.NewDevOpsRepository(db),
 	}
 
 	// Initialize pipeline provider registry
