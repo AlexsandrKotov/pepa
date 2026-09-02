@@ -5,6 +5,68 @@ All notable changes to PEPA are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Remote Console** — SSH terminal access to hosts with session logging and host groups
+- **Authentication Providers** — LDAP, Azure AD, OIDC, GitHub OAuth, Google OAuth
+- **Plugin Activity Logging** — Track SSH commands and plugin actions with detailed audit trail
+- **Knowledge Base** — RAG document management and search interface
+- **Blueprint Groups** — Organize blueprints into groups with many-to-many relationships
+- **Jira Integration Expansion** — Sprints, components, worklogs, issue links, create issue modal
+- **Docker Services Local** — Deploy to local Docker socket or remote hosts
+- **Automation Page** — Centralized automation hub
+- **Export Page** — Export platform data
+- **Quickstart Page** — Interactive setup wizard
+- **Get Started Page** — Onboarding guide
+- **Plugin: VMware** — vSphere VM management (community plugin)
+- **Plugin: Syslog** — Syslog notification channel
+- **Plugin: AI Bot** — AI-powered bot integration
+- **Plugin: Remote Console** — SSH terminal with command logging
+- **Plugin: Trivy** — Vulnerability scanning for images, filesystem, repos, IaC
+- Unified plugin distribution system (all plugins free and open-source)
+- Plugin build system with builtin and community targets
+- Enhanced documentation for plugin installation
+- Production-ready deployment package with build-production.sh
+
+### Changed
+- Restructured plugin directory structure
+- Updated Makefile with plugin tier support
+- Improved build-production.sh for new plugin structure
+- Enhanced README with plugin distribution documentation
+- Merged service templates into unified blueprints concept
+- Updated Go version to 1.26
+- Enhanced Jira integration with sprints, worklogs, and issue links
+- Improved Docker services with local socket support
+
+### Security
+- Implemented multi-tenant isolation across all resources
+- Added RBAC with fine-grained permissions
+- Implemented plugin signature verification
+- Added rate limiting middleware
+- Implemented audit logging for all actions
+- Added LDAP and Azure AD authentication with secure token handling
+- Implemented SSH host isolation with RLS policies
+- Added plugin activity logging for compliance
+
+### Database
+- 19 new migrations (029-047) for auth, SSH hosts, plugin activity, blueprint groups, Jira expansion
+- Total migrations: 47
+
+### Documentation
+- Added observability guide
+- Added Vault integration guide
+- Updated implementation status with new features
+- Updated user guides with authentication providers
+
+---
+
+**Release Date:** 2026-09-02
+**Version:** 0.1.1 (Unreleased)
+**Status:** Development
+
+---
+
 ## [0.1.0] — 2026-08-27
 
 ### 🎉 Initial Public Release
@@ -150,7 +212,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 ### 📦 Plugin Ecosystem
 
-**All 15 plugins are free and open-source:**
+**All 20 plugins are free and open-source:**
 - GitHub — Git provider integration
 - GitLab — Git provider integration
 - Bitbucket — Git provider integration
@@ -162,10 +224,15 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 - Microsoft Teams — Enterprise notifications
 - Email — Notification channel
 - Webhook — Generic webhook integration
+- Syslog — Syslog notification channel
 - Proxmox — Virtualization management
+- VMware — vSphere VM management (community)
 - Prometheus — Monitoring integration
 - S3 — Object storage (MinIO/AWS)
 - Jira — Task tracker integration
+- Trivy — Vulnerability scanning
+- AI Bot — AI-powered bot integration
+- Remote Console — SSH terminal with command logging
 
 ### 🎯 Key Achievements
 
@@ -179,13 +246,13 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 ### 📈 Statistics
 
-- **Backend:** ~62,000 lines of Go code
-- **Frontend:** ~45,000 lines of TypeScript
-- **Plugins:** 15 free, open-source plugins
-- **Database:** 32 migrations
-- **API Endpoints:** 30+ REST endpoints
-- **Frontend Pages:** 52 pages
-- **Documentation:** 18+ comprehensive guides
+- **Backend:** ~85,600 lines of Go code
+- **Frontend:** ~54,700 lines of TypeScript
+- **Plugins:** 20 free, open-source plugins
+- **Database:** 47 migrations
+- **API Endpoints:** 40+ REST endpoints
+- **Frontend Pages:** 60 pages
+- **Documentation:** 20+ comprehensive guides
 
 ### 🔮 Future Roadmap
 

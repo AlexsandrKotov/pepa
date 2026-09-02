@@ -17,12 +17,13 @@
 9. [GitOps Workflows](#gitops-workflows)
 10. [Workflow Engine](#workflow-engine)
 11. [Scorecards](#scorecards)
-12. [RBAC — Roles & Permissions](#rbac--roles--permissions)
-13. [Settings](#settings)
-14. [AI Assistant](#ai-assistant)
-15. [Plugin System](#plugin-system)
-16. [Troubleshooting](#troubleshooting)
-17. [FAQ](#faq)
+12. [Remote Console](#remote-console)
+13. [RBAC — Roles & Permissions](#rbac--roles--permissions)
+14. [Settings](#settings)
+15. [AI Assistant](#ai-assistant)
+16. [Plugin System](#plugin-system)
+17. [Troubleshooting](#troubleshooting)
+18. [FAQ](#faq)
 
 ---
 
@@ -106,6 +107,72 @@ On first login, you'll be prompted to set up the admin account:
 3. After login, you are redirected to the Dashboard
 
 ![Login Page](screenshots/screenshot-login.png)
+
+### Authentication Providers
+
+PEPA supports multiple authentication providers out of the box:
+
+#### Local Authentication
+- Built-in email/password authentication
+- Secure password hashing with bcrypt
+- JWT-based session management
+
+#### LDAP / Active Directory
+- Connect to existing LDAP/AD infrastructure
+- Automatic user provisioning on first login
+- Group-to-role mapping
+- Support for StartTLS and custom CA certificates
+
+Configuration:
+1. Go to **Settings → Authentication → LDAP**
+2. Enter LDAP server URL, bind DN, and base DN
+3. Configure user and group filters
+4. Map LDAP groups to PEPA roles
+5. Test connection and save
+
+#### Azure AD (Entra ID)
+- OAuth 2.0 / OIDC integration with Azure AD
+- Automatic user provisioning
+- Group membership sync
+
+Configuration:
+1. Register PEPA as an app in Azure AD
+2. Go to **Settings → Authentication → Azure AD**
+3. Enter Tenant ID, Client ID, and Client Secret
+4. Configure redirect URI in Azure AD
+5. Save and test
+
+#### OIDC (Generic)
+- Connect to any OIDC-compliant identity provider
+- Supports Keycloak, Auth0, Okta, etc.
+
+Configuration:
+1. Go to **Settings → Authentication → SSO / OIDC**
+2. Enter issuer URL, client credentials, and scopes
+3. Configure redirect URI in your IdP
+4. Save and test
+
+#### GitHub OAuth
+- Allow users to log in with their GitHub account
+- Automatic user provisioning
+
+Configuration:
+1. Create a GitHub OAuth App in GitHub Settings
+2. Go to **Settings → Authentication → GitHub**
+3. Enter Client ID and Client Secret
+4. Configure callback URL in GitHub
+5. Save and test
+
+#### Google OAuth
+- Allow users to log in with their Google account
+- Automatic user provisioning
+
+Configuration:
+1. Create OAuth credentials in Google Cloud Console
+2. Go to **Settings → Authentication → Google**
+3. Enter Client ID and Client Secret
+4. Configure authorized redirect URI
+5. Save and test
 
 ### Admin User Management
 
@@ -612,6 +679,70 @@ Navigate to **Scorecards** to:
 
 ---
 
+## Remote Console
+
+The Remote Console provides SSH terminal access to your infrastructure hosts directly from the PEPA interface.
+
+### SSH Host Management
+
+Navigate to **Remote Console** to:
+- Add and manage SSH hosts
+- Organize hosts into groups
+- Connect to hosts via web-based terminal
+- View command history and audit logs
+
+### Adding an SSH Host
+
+1. Click **Add Host**
+2. Enter host details:
+   - **Name**: Display name for the host
+   - **Hostname**: IP address or DNS name
+   - **Port**: SSH port (default: 22)
+   - **Username**: SSH username (default: root)
+   - **Authentication Method**: Password, SSH Key, or LDAP Passthrough
+3. Enter credentials (password or SSH private key)
+4. Add tags for organization
+5. Click **Save**
+
+### Host Groups
+
+Organize hosts into logical groups:
+
+1. Click **Groups** tab
+2. Click **Create Group**
+3. Enter group name, description, and color
+4. Assign hosts to groups
+
+Use groups to:
+- Filter hosts in the console
+- Organize by environment (dev, staging, prod)
+- Group by team or application
+
+### Connecting to a Host
+
+1. Click on a host from the list
+2. If using password auth, enter the password when prompted
+3. Terminal session opens in a new view
+4. All commands are logged for audit purposes
+
+### Session Features
+
+- **Full terminal emulation** — xterm-compatible terminal
+- **Command logging** — all commands are recorded
+- **Session history** — view past sessions and commands
+- **Multi-session** — open multiple terminals simultaneously
+
+> 📸 **Screenshot suggestion**: Remote console terminal session
+
+### Security & Compliance
+
+- All SSH sessions are logged with user, host, timestamp, and command
+- Hosts are scoped by tenant (multi-tenant isolation)
+- Access is controlled via RBAC permissions
+- Credentials are encrypted at rest
+
+---
+
 ## RBAC — Roles & Permissions
 
 ### Managing Roles
@@ -721,20 +852,64 @@ Built-in tools:
 
 ## Plugin System
 
+PEPA includes 20 free, open-source plugins across 7 categories.
+
 ### Built-in Plugins
+
+**Git Providers:**
 
 | Plugin | Purpose |
 |--------|---------|
-| Slack | Notifications and alerts |
-| ArgoCD | GitOps deployment sync |
-| GitHub | Repository integration |
-| GitLab | Repository + CI/CD integration |
-| Jira | Issue tracking integration |
-| Bitbucket | Repository integration |
-| Gitea | Repository integration |
-| FluxCD | GitOps deployment sync |
-| Prometheus | Monitoring and metrics |
-| Proxmox | Virtualization management |
+| GitHub | Repository, PR, webhook, commit integration |
+| GitLab | Repository, CI/CD, merge request, pipeline integration |
+| Bitbucket | Repository, PR, branch, webhook integration |
+| Gitea | Self-hosted Git service integration |
+
+**CD Engines:**
+
+| Plugin | Purpose |
+|--------|---------|
+| ArgoCD | GitOps deployment sync, rollback, resource management |
+| FluxCD | GitOps reconcile, suspend, resume, drift detection |
+
+**Notifications:**
+
+| Plugin | Purpose |
+|--------|---------|
+| Slack | Channel messages, alerts, deployment notifications |
+| Telegram | Notification channel |
+| Microsoft Teams | Enterprise notifications |
+| Email | Email notification channel |
+| Webhook | Generic webhook integration |
+| Syslog | Syslog notification channel |
+
+**Infrastructure:**
+
+| Plugin | Purpose |
+|--------|---------|
+| Proxmox | VMs, containers, storage, node management |
+| VMware | vSphere VM management (community plugin) |
+| Prometheus | Metrics queries, alerts, service health |
+| S3 | Object storage (MinIO/AWS) |
+
+**Task Trackers:**
+
+| Plugin | Purpose |
+|--------|---------|
+| Jira | Issues, projects, transitions, sprints, worklogs |
+
+**Security:**
+
+| Plugin | Purpose |
+|--------|---------|
+| Trivy | Vulnerability scanning for images, filesystem, repos, IaC |
+
+**Automation:**
+
+| Plugin | Purpose |
+|--------|---------|
+| AI Bot | AI-powered bot integration |
+| Remote Console | SSH terminal with command logging |
 
 ![Marketplace](screenshots/screenshot-marketplace.png)
 
