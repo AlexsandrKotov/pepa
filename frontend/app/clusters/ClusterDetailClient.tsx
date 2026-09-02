@@ -44,6 +44,7 @@ export default function ClusterDetailPage() {
 
   useEffect(() => {
     loadCluster();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clusterId]);
 
   // Auto-refresh interval
@@ -56,7 +57,7 @@ export default function ClusterDetailPage() {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [autoRefresh, tab, cluster?.has_kubeconfig]);
+  }, [autoRefresh, tab, cluster?.has_kubeconfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshCurrentTab = useCallback(async () => {
     if (!cluster?.has_kubeconfig) return;
@@ -72,7 +73,7 @@ export default function ClusterDetailPage() {
     } finally {
       setTabLoading(false);
     }
-  }, [tab, clusterId, cluster?.has_kubeconfig]);
+  }, [tab, clusterId, cluster?.has_kubeconfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadCluster = async () => {
     try {
@@ -128,7 +129,7 @@ export default function ClusterDetailPage() {
         setTabLoading(false);
       }
     })();
-  }, [tab, cluster?.has_kubeconfig, loading]);
+  }, [tab, cluster?.has_kubeconfig, loading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadNodes = async () => {
     try {

@@ -175,6 +175,7 @@ export default function PluginsClient({ initialPlugins }: { initialPlugins?: Plu
     if (initialPlugins === undefined) {
       plugins.list().then(d => setPluginList(d.plugins || [])).catch(() => {});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Show all plugins that are installed or running (built-in plugins have status 'running').

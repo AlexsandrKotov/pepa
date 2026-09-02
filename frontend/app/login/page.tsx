@@ -116,6 +116,7 @@ export default function LoginPage() {
           await ldapLogin(actualEmail, actualPassword);
           // LDAP login succeeded
           window.dispatchEvent(new Event('pepa:auth-changed'));
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
           window.location.href = '/';
           return;
         } catch {
@@ -135,6 +136,7 @@ export default function LoginPage() {
       // Use window.location for a clean full-page navigation after login.
       // This avoids race conditions between router.push() and router.refresh()
       // that can cause the dashboard to load before the auth cookie is ready.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -170,6 +172,7 @@ export default function LoginPage() {
         setStoredUser({ id: user.id, email: user.email, name: user.name, roles });
       } catch { /* non-critical — bootstrapActivate already updated stored user */ }
       window.dispatchEvent(new Event('pepa:auth-changed'));
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Activation failed');
@@ -202,6 +205,7 @@ export default function LoginPage() {
         setStoredUser({ id: user.id, email: user.email, name: user.name, roles });
       } catch { /* non-critical — resetMyPassword already updated stored user */ }
       window.dispatchEvent(new Event('pepa:auth-changed'));
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to change password');

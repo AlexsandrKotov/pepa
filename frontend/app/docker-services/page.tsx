@@ -61,6 +61,7 @@ export default function DockerServicesPage() {
       // Auto-discover containers after loading hosts
       setTimeout(() => discoverContainers(), 500);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hostName = (id: string | null) => {

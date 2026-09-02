@@ -336,7 +336,7 @@ func cloneGitRepo(ctx context.Context, gitURL string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, tmpDir) //nolint:gosec // G204: git clone with validated args
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return "", fmt.Errorf("git clone failed: %s: %w", string(output), err)
 	}
 	return tmpDir, nil

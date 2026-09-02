@@ -52,13 +52,13 @@ const pages: PaletteItem[] = [
 
 // Quick actions
 const actions: PaletteItem[] = [
-  { id: 'new-service', label: 'Create New Service', description: 'Register a new service', action: () => window.location.href = '/services/new', icon: 'argocd', category: 'Actions' },
-  { id: 'quick-deploy', label: 'Quick Deploy', description: 'Deploy a service wizard', action: () => window.location.href = '/deploy', icon: 'argocd', category: 'Actions' },
-  { id: 'new-deploy', label: 'Trigger Deployment', description: 'GitOps deployment', action: () => window.location.href = '/deployments', icon: 'argocd', category: 'Actions' },
-  { id: 'new-connection', label: 'Add Connection', description: 'Connect external tool', action: () => window.location.href = '/connections', icon: 'plugin', category: 'Actions' },
-  { id: 'run-scan', label: 'Run Security Scan', description: 'Scan for vulnerabilities', action: () => window.location.href = '/security', icon: 'vault', category: 'Actions' },
-  { id: 'ask-ai', label: 'Ask AI Assistant', description: 'Get AI help', action: () => window.location.href = '/ai', icon: 'ai', category: 'Actions' },
-  { id: 'import-service', label: 'Import Service', description: 'Import from GitLab/GitHub', action: () => window.location.href = '/import', icon: 'gitlab', category: 'Actions' },
+  { id: 'new-service', label: 'Create New Service', description: 'Register a new service', href: '/services/new', icon: 'argocd', category: 'Actions' },
+  { id: 'quick-deploy', label: 'Quick Deploy', description: 'Deploy a service wizard', href: '/deploy', icon: 'argocd', category: 'Actions' },
+  { id: 'new-deploy', label: 'Trigger Deployment', description: 'GitOps deployment', href: '/deployments', icon: 'argocd', category: 'Actions' },
+  { id: 'new-connection', label: 'Add Connection', description: 'Connect external tool', href: '/connections', icon: 'plugin', category: 'Actions' },
+  { id: 'run-scan', label: 'Run Security Scan', description: 'Scan for vulnerabilities', href: '/security', icon: 'vault', category: 'Actions' },
+  { id: 'ask-ai', label: 'Ask AI Assistant', description: 'Get AI help', href: '/ai', icon: 'ai', category: 'Actions' },
+  { id: 'import-service', label: 'Import Service', description: 'Import from GitLab/GitHub', href: '/import', icon: 'gitlab', category: 'Actions' },
 ];
 
 const RECENT_KEY = 'pepa-command-recent';

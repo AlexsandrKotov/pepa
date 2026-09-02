@@ -23,7 +23,6 @@ export default function MarketplacePage() {
 
   useEffect(() => {
     if (canReadPlugins) loadPlugins();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canReadPlugins]);
 
   const loadPlugins = async () => {

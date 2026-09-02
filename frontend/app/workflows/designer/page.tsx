@@ -445,6 +445,7 @@ function DesignerCanvas() {
       initialized.current = true;
       handleNewWorkflow();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedNode = nodes.find(n => n.id === selectedId) || null;
@@ -580,7 +581,7 @@ trigger:
 steps:
 ${steps.map(s => `  - ${JSON.stringify(s, null, 4).replace(/\n/g, '\n    ')}`).join('\n\n')}
 `;
-  }, [nodes, edges, wfName, wfDescription]);
+  }, [nodes, edges, wfName, wfDescription]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Validation
   const validationErrors = useMemo(() => {

@@ -89,7 +89,7 @@ export default function GetStartedPage() {
     if (allDone && !completed) {
       markCompleted();
     }
-  }, [allDone, completed]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allDone, completed]);
 
   const markCompleted = async () => {
     setCompleted(true);

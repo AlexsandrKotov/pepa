@@ -189,6 +189,7 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
       if (!alive) {
         removeToken();
         if (window.location.pathname !== '/login') {
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
           window.location.href = '/login';
         }
         throw new Error('Session expired');
@@ -233,6 +234,7 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
           if (!alive) {
             removeToken();
             if (window.location.pathname !== '/login') {
+              // eslint-disable-next-line @next/next/no-location-assign-relative-destination
               window.location.href = '/login';
             }
             throw new Error('Session expired');

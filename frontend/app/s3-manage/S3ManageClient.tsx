@@ -856,6 +856,7 @@ export default function S3ManageClient({
                   </div>
                 ) : previewType(previewKey) === 'image' && previewBlobUrl ? (
                   <div className="flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={previewBlobUrl}
                       alt={previewKey.split('/').pop()}

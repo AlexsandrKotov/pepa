@@ -108,7 +108,7 @@ func (r *PluginActivityRepository) ListSSHCommands(ctx context.Context, filter m
 	perPage := 50
 	page := 1
 	if v := filter["page"]; v != "" {
-		fmt.Sscanf(v, "%d", &page)
+		_, _ = fmt.Sscanf(v, "%d", &page)
 	}
 	if page < 1 {
 		page = 1
@@ -197,7 +197,7 @@ func (r *PluginActivityRepository) ListPluginActions(ctx context.Context, filter
 	perPage := 50
 	page := 1
 	if v := filter["page"]; v != "" {
-		fmt.Sscanf(v, "%d", &page)
+		_, _ = fmt.Sscanf(v, "%d", &page)
 	}
 	if page < 1 {
 		page = 1

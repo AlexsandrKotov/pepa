@@ -352,7 +352,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
       } catch { /* ignore */ }
     }, 3000);
     return () => clearInterval(interval);
-  }, [showLogs, logsData?.status]);
+  }, [showLogs, logsData?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = statusFilter
     ? deployList.filter(d => d.status === statusFilter)

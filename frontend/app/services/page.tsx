@@ -57,7 +57,7 @@ function ServicesList() {
 
   useEffect(() => {
     loadData();
-  }, [debouncedSearch, statusFilter]);
+  }, [debouncedSearch, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = useCallback(async () => {
     try {

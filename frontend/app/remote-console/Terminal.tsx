@@ -171,7 +171,7 @@ export function Terminal({ host, password, onDisconnect, onReconnect }: Terminal
       ws.close();
       xterm.dispose();
     };
-  }, [host.id, host.hostname, password]);
+  }, [host.id, host.hostname, password, host.auth_method]);
 
   const handleReconnect = () => {
     onReconnect();

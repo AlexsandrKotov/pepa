@@ -50,9 +50,10 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
 
   // Cleanup timers on unmount
   useEffect(() => {
+    const revealTimers = revealTimersRef.current;
     return () => {
       if (clipboardTimerRef.current) clearTimeout(clipboardTimerRef.current);
-      revealTimersRef.current.forEach(t => clearTimeout(t));
+      revealTimers.forEach(t => clearTimeout(t));
     };
   }, []);
 
@@ -64,6 +65,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
     if (initialEngines === undefined) {
       vault.engines().then(res => setEngines(res.engines || [])).catch(() => {});
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleReveal = (key: string) => {

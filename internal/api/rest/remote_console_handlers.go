@@ -848,7 +848,7 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 			slog.Error("WebSocket upgrade failed", "error", err)
 			return
 		}
-		defer ws.Close()
+		defer func() { _ = ws.Close() }() //nolint:errcheck // cleanup
 
 		// Write mutex to prevent concurrent WebSocket writes (gorilla/websocket requirement)
 		var writeMu sync.Mutex
@@ -860,9 +860,9 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 
 		// For LDAP passthrough, wait for password via first WebSocket message
 		if host.AuthMethod == "ldap_passthrough" {
-			ws.SetReadDeadline(time.Now().Add(30 * time.Second))
+			_ = ws.SetReadDeadline(time.Now().Add(30 * time.Second)) //nolint:errcheck // timeout setup
 			_, msg, readErr := ws.ReadMessage()
-			ws.SetReadDeadline(time.Time{}) // clear deadline
+			_ = ws.SetReadDeadline(time.Time{}) //nolint:errcheck // clear deadline
 			if readErr != nil {
 				slog.Warn("WebSocket read timeout waiting for auth", "host", host.Hostname)
 				return
@@ -882,14 +882,14 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 			_ = wsWrite(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31mConnection failed: %v\x1b[0m\r\n", err)))
 			return
 		}
-		defer sshClient.Close()
+		defer func() { _ = sshClient.Close() }() //nolint:errcheck // cleanup
 
 		sshSession, err := sshClient.NewSession()
 		if err != nil {
 			_ = wsWrite(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31mFailed to create session: %v\x1b[0m\r\n", err)))
 			return
 		}
-		defer sshSession.Close()
+		defer func() { _ = sshSession.Close() }() //nolint:errcheck // cleanup
 
 		// Request PTY
 		modes := ssh.TerminalModes{
@@ -914,8 +914,8 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Pipe SSH stdout/stderr to WebSocket
-		stdout, _ := sshSession.StdoutPipe()
-		stderr, _ := sshSession.StderrPipe()
+		stdout, _ := sshSession.StdoutPipe() //nolint:errcheck // pipe setup
+		stderr, _ := sshSession.StderrPipe() //nolint:errcheck // pipe setup
 
 		// Track both stdout and stderr goroutines with WaitGroup
 		var ioWg sync.WaitGroup
@@ -954,11 +954,11 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 		}()
 
 		// Pipe WebSocket input to SSH stdin
-		stdin, _ := sshSession.StdinPipe()
+		stdin, _ := sshSession.StdinPipe() //nolint:errcheck // pipe setup
 
 		// Start shell
 		if err := sshSession.Shell(); err != nil {
-			_ = wsWrite(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31mShell failed: %v\x1b[0m\r\n", err)))
+			_ = wsWrite(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31mShell failed: %v\x1b[0m\r\n", err))) //nolint:errcheck // error notification
 			return
 		}
 
@@ -992,23 +992,23 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 
 			for {
 				// Set read deadline for idle timeout (30 minutes)
-				ws.SetReadDeadline(time.Now().Add(30 * time.Minute))
+				_ = ws.SetReadDeadline(time.Now().Add(30 * time.Minute)) //nolint:errcheck // idle timeout
 				_, msg, err := ws.ReadMessage()
 				if err != nil {
 					// Check if it's a timeout error
 					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-						_ = wsWrite(websocket.TextMessage, []byte("\r\n\x1b[33mSession idle timeout (30 minutes). Disconnecting.\x1b[0m\r\n"))
+						_ = wsWrite(websocket.TextMessage, []byte("\r\n\x1b[33mSession idle timeout (30 minutes). Disconnecting.\x1b[0m\r\n")) //nolint:errcheck // timeout notification
 					}
 					return
 				}
 				// Reset read deadline on activity
-				ws.SetReadDeadline(time.Time{})
+				_ = ws.SetReadDeadline(time.Time{}) //nolint:errcheck // clear deadline
 				// Handle window resize messages (JSON format)
 				if len(msg) > 0 && msg[0] == '{' {
 					var resizeMsg wsMessage
 					if json.Unmarshal(msg, &resizeMsg) == nil && resizeMsg.Type == "resize" {
 						if resizeMsg.Cols > 0 && resizeMsg.Rows > 0 {
-							_ = sshSession.WindowChange(resizeMsg.Rows, resizeMsg.Cols)
+							_ = sshSession.WindowChange(resizeMsg.Rows, resizeMsg.Cols) //nolint:errcheck // resize
 						}
 						continue
 					}

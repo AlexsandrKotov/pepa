@@ -715,6 +715,7 @@ export default function TopBar() {
                   onClick={async () => {
                     setProfileOpen(false);
                     await doLogout();
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
                     window.location.href = '/login';
                   }}
                   className="flex items-center gap-2.5 px-4 py-2 text-[13px] text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors w-full text-left"

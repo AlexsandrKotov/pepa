@@ -845,6 +845,7 @@ function AddClusterModal({ onClose, onCreated }: { onClose: () => void; onCreate
         setEnvironment(envs[0].slug || envs[0].name);
       }
     }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleKubeconfigChange = useCallback((content: string) => {

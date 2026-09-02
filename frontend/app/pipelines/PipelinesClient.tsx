@@ -271,6 +271,7 @@ function PipelinesClientContent({
       loadSources();
     }
     loadStats();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-select first engine when sources are loaded and nothing is selected
@@ -320,7 +321,7 @@ function PipelinesClientContent({
     } finally {
       setLoadingState(false);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadPlan = useCallback(async (sourceId: string) => {
     setLoadingPlan(true);
@@ -337,7 +338,7 @@ function PipelinesClientContent({
     } finally {
       setLoadingPlan(false);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAnsibleDryRun = useCallback(async (source: PipelineSource) => {
     setDetailTab('state');

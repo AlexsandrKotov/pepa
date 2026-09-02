@@ -1017,6 +1017,7 @@ function BlockRenderer({ block, lang }: { block: DocBlock; lang: Lang }) {
     case 'image':
       return (
         <figure className="mb-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={block.src}
             alt={block.alt?.[lang] ?? ''}

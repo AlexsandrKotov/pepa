@@ -105,7 +105,7 @@ export default function VirtualMachinesPage() {
     if (availableProviders.length === 0) { setLoading(false); return; }
     if (provider === 'proxmox') loadProxmoxVMs();
     else loadVmwareVMs();
-  }, [provider, availableProviders]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [provider, availableProviders]);
 
   const loadProxmoxVMs = async () => {
     setLoading(true); setError('');

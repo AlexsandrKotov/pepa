@@ -224,7 +224,7 @@ export default function RemoteConsolePage() {
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 page-animate-up">
         <p className="text-sm text-blue-500">
           <strong>LDAP Passthrough:</strong> When enabled, use your PEPA login credentials to authenticate SSH sessions.
-          Your password is never stored — it's used only for the active session.
+          Your password is never stored — it&apos;s used only for the active session.
         </p>
       </div>
 

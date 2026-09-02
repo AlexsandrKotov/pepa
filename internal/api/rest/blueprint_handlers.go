@@ -146,7 +146,6 @@ func listServiceBlueprints(deps Dependencies) gin.HandlerFunc {
 		if searchFilter != "" {
 			query += ` AND (name ILIKE $` + strconv.Itoa(argIdx) + ` OR description ILIKE $` + strconv.Itoa(argIdx) + ` OR slug ILIKE $` + strconv.Itoa(argIdx) + `)`
 			args = append(args, "%"+searchFilter+"%")
-			argIdx++
 		}
 		query += ` ORDER BY is_system DESC, created_at DESC`
 

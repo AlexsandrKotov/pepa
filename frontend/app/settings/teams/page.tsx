@@ -185,7 +185,7 @@ function TeamDetail({ team, onRefresh, canWrite }: { team: Team; onRefresh: () =
   const [showAddMember, setShowAddMember] = useState(false);
   const [memberFeedback, setMemberFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
-  useEffect(() => { loadMembers(); }, [team.id]);
+  useEffect(() => { loadMembers(); }, [team.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadMembers() {
     setLoading(true);

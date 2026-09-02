@@ -236,6 +236,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
         else setSelectedRoles([data.roles[0].slug]);
       }
     }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function toggleRole(slug: string) {

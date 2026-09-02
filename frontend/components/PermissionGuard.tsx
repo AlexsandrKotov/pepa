@@ -2,6 +2,7 @@
 
 import { usePermission } from '@/hooks/usePermission';
 import { type ReactNode } from 'react';
+import Link from 'next/link';
 
 interface PermissionGuardProps {
   resource: string;
@@ -44,7 +45,7 @@ export function ForbiddenPage({ resource }: { resource?: string }) {
             ? `You don't have permission to access "${resource}". Contact your administrator to request access.`
             : 'You don\'t have permission to access this page. Contact your administrator to request access.'}
         </p>
-        <a
+        <Link
           href="/"
           className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-[var(--surface)] border border-[var(--border)] text-[13px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
         >
@@ -52,7 +53,7 @@ export function ForbiddenPage({ resource }: { resource?: string }) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
           </svg>
           Back to Dashboard
-        </a>
+        </Link>
       </div>
     </div>
   );

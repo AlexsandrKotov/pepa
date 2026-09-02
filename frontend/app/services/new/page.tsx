@@ -118,6 +118,7 @@ function NewServiceForm() {
     loadAll();
     loadHelmRepos();
     loadGitlabIntegrations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadAll = async () => {
@@ -1424,7 +1425,7 @@ env:
                   placeholder="default"
                 />
                 <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                  The Kubernetes namespace to deploy into. Will be created if it doesn't exist.
+                  The Kubernetes namespace to deploy into. Will be created if it doesn&apos;t exist.
                 </p>
               </div>
             </div>

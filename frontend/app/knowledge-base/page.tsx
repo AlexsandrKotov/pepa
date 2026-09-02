@@ -66,8 +66,7 @@ export default function KnowledgeBasePage() {
         rag.documents(),
       ]);
       setStats(s);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setDocuments((d.documents || []) as any as RAGDocument[]);
+      setDocuments((d.documents || []) as unknown as RAGDocument[]);
     } catch (err) {
       console.error('Failed to load knowledge base data:', err);
     } finally {
@@ -82,8 +81,7 @@ export default function KnowledgeBasePage() {
     setSearching(true);
     try {
       const res = await rag.search({ query: searchQuery, top_k: 10, mode: 'hybrid' });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setSearchResults((res.results || []) as any as SearchResult[]);
+      setSearchResults((res.results || []) as unknown as SearchResult[]);
     } catch (err) {
       console.error('Search failed:', err);
     } finally {

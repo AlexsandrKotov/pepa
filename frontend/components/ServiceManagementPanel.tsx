@@ -31,6 +31,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
 
   useEffect(() => {
     loadDeployInfo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadDeployInfo = async () => {
@@ -84,7 +85,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   useEffect(() => {
     if (tab === 'logs') loadLogs();
     if (tab === 'events') loadEvents();
-  }, [tab]);
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
