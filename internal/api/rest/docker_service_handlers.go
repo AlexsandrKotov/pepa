@@ -333,7 +333,7 @@ func cloneGitRepo(ctx context.Context, gitURL string) (string, error) {
 		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, tmpDir) // #nosec // G204: git clone with validated args
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, tmpDir) // #nosec //nolint:gosec // G204: git clone with validated args
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)

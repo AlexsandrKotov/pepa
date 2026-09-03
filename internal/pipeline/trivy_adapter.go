@@ -158,7 +158,7 @@ func (a *TrivyAdapter) Trigger(ctx context.Context, raw json.RawMessage, params 
 	}
 	args = append(args, target)
 
-	cmd := exec.CommandContext(runCtx, "trivy", args...) // #nosec // G204: trivy is an admin-configured binary
+	cmd := exec.CommandContext(runCtx, "trivy", args...) // #nosec //nolint:gosec // G204: trivy is an admin-configured binary
 	cmd.Stdout = logBuf
 	cmd.Stderr = logBuf
 	cmdErr := cmd.Run()

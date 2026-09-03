@@ -361,10 +361,10 @@ func testProxmoxConnection(deps Dependencies, c *gin.Context, connConfig map[str
 	// Build HTTP client
 	transport := &http.Transport{}
 	if insecure, _ := connConfig["insecure_tls"].(string); insecure == "true" || insecure == "1" {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec //nolint:gosec
 	}
 	if insecure, _ := connConfig["insecure"].(string); insecure == "true" || insecure == "1" {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec //nolint:gosec
 	}
 	client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
 

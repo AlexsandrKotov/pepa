@@ -155,7 +155,7 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 
 // runHelm executes a helm CLI command.
 func (c *Client) runHelm(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "helm", args...) // #nosec // G204: helm is an admin-configured binary
+	cmd := exec.CommandContext(ctx, "helm", args...) // #nosec //nolint:gosec // G204: helm is an admin-configured binary
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

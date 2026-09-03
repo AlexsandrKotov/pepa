@@ -59,7 +59,7 @@ func NewArgoCDPlugin(config map[string]string) (*ArgoCDPlugin, error) {
 	transport := &http.Transport{}
 	if insecure {
 		// Dev/self-signed certs only — never enable in production
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec //nolint:gosec
 	}
 
 	return &ArgoCDPlugin{

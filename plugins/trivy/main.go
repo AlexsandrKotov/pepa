@@ -266,7 +266,7 @@ func (p *TrivyPlugin) exportSARIF(ctx context.Context, params map[string]interfa
 	}
 	args = append(args, target)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec // G204: trivy CLI is an expected subprocess
+	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec //nolint:gosec // G204: trivy CLI is an expected subprocess
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
@@ -292,7 +292,7 @@ func (p *TrivyPlugin) executeTrivy(ctx context.Context, target, scanType, severi
 	}
 	args = append(args, target)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec // G204: trivy CLI is an expected subprocess
+	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec //nolint:gosec // G204: trivy CLI is an expected subprocess
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
