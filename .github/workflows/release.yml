@@ -139,6 +139,11 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
 
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v1
+        with:
+          version: v0.57.1
+
       - name: Scan image for vulnerabilities
         env:
           TRIVY_IMAGE_TAG: ${{ github.ref_name }}
