@@ -140,9 +140,9 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
 
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v1
-        with:
-          version: v0.57.1
+        run: |
+          TRIVY_VERSION="0.57.1"
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | tar -xz -C /usr/local/bin trivy
 
       - name: Scan image for vulnerabilities
         env:
