@@ -10,7 +10,7 @@ permissions:
   packages: write
   id-token: write
   attestations: write
-  security-events: read
+  security-events: write
 
 env:
   REGISTRY: ghcr.io
