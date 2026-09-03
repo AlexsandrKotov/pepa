@@ -59,6 +59,30 @@ rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/images"
 ok "Created $PACKAGE_DIR"
 
+# ── Detect target architecture ────────────────────────────────
+step "Detecting target architecture"
+
+# Detect host architecture so plugin binaries match the Docker images.
+HOST_ARCH="$(uname -m)"
+case "$HOST_ARCH" in
+  x86_64|amd64)  PLUGIN_ARCH="amd64" ;;
+  aarch64|arm64)  PLUGIN_ARCH="arm64" ;;
+  *)              PLUGIN_ARCH="amd64"; warn "Unknown arch $HOST_ARCH, defaulting to amd64" ;;
+esac
+ok "Host architecture: $HOST_ARCH → plugin arch: $PLUGIN_ARCH"
+
+# ── Build plugins for target architecture ─────────────────────
+step "Building plugins (linux/$PLUGIN_ARCH)"
+
+make -C "$PROJECT_DIR" plugins PLUGIN_GOARCH="$PLUGIN_ARCH"
+ok "Plugins built for linux/$PLUGIN_ARCH"
+
+# ── Sign plugins ──────────────────────────────────────────────
+step "Signing plugins"
+
+make -C "$PROJECT_DIR" sign-plugins
+ok "Plugins signed"
+
 # ── Build Docker images ───────────────────────────────────────
 step "Building Docker images"
 
