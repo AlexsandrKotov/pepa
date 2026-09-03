@@ -464,12 +464,14 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		// Embedded plugins have no separate binary — their logic runs inside the
 		// API server, so they are always "running" once registered.
 		binaryLoaded := false
+		var loadErr error
 		if found.Embedded {
 			binaryLoaded = true // embedded plugins are always active
 			slog.Info("embedded plugin installed", "id", id)
 		} else if found.BinaryAvailable {
 			if err := loadPluginBinary(deps, found.ID); err != nil {
-				slog.Info("plugin registered but failed to load binary", "id", id, "error", err)
+				slog.Warn("plugin registered but failed to load binary", "id", id, "error", err)
+				loadErr = err
 			} else {
 				binaryLoaded = true
 			}
@@ -494,7 +496,7 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		if binaryLoaded {
 			plugin.Status = "running"
 			if err := deps.Repos.Plugin.Register(c.Request.Context(), plugin); err != nil {
-				slog.Info("plugin loaded but failed to persist status", "id", id, "error", err)
+				slog.Warn("plugin loaded but failed to persist status", "id", id, "error", err)
 			}
 		}
 
@@ -502,6 +504,17 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		reloadMarketplaceCache()
 
 		logAudit(deps, c, "install", "marketplace_plugin", id, nil, gin.H{"plugin": found.ID, "version": found.Version})
+
+		// If binary failed to load, return error so admin knows immediately
+		if loadErr != nil {
+			c.JSON(http.StatusPartialContent, gin.H{
+				"message":          "plugin registered but binary failed to load",
+				"error":            loadErr.Error(),
+				"plugin":           plugin,
+				"hint":             "try enabling the plugin again or check container logs",
+			})
+			return
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":          "plugin installed successfully",

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -416,10 +417,78 @@ func getMeHandler(deps Dependencies) gin.HandlerFunc {
 			permissions = []string{}
 		}
 
+		// ── Sidebar initialisation data ──────────────────────────────
+		// Bundled into /me so the frontend gets everything in ONE request
+		// instead of 3-4 separate API calls that delay sidebar rendering.
+
+		// Enabled plugin names (source of truth: ProviderRegistry → plugin repo)
+		enabledPlugins := []string{}
+		if deps.ProviderRegistry != nil {
+			for _, entry := range deps.ProviderRegistry.List() {
+				if entry.Enabled {
+					enabledPlugins = append(enabledPlugins, entry.Name)
+				}
+			}
+		} else if deps.Repos.Plugin != nil {
+			if plugins, pErr := deps.Repos.Plugin.List(ctx); pErr == nil {
+				for _, p := range plugins {
+					if p.Enabled {
+						enabledPlugins = append(enabledPlugins, p.Name)
+					}
+				}
+			}
+		}
+
+		// Distinct connection types (for connection-driven sidebar sections)
+		connectionTypes := []string{}
+		if deps.Repos.Connection != nil {
+			tenantID := auth.GetTenantID(c)
+			if rows, cErr := deps.Repos.Connection.List(ctx, tenantID, ""); cErr == nil {
+				seen := map[string]bool{}
+				for _, conn := range rows {
+					ct := string(conn.Type)
+					if !seen[ct] {
+						seen[ct] = true
+						connectionTypes = append(connectionTypes, ct)
+					}
+				}
+			}
+		}
+
+		// Platform name from general settings
+		platformName := ""
+		if deps.Repos.Settings != nil {
+			if raw, sErr := deps.Repos.Settings.Get(ctx, "general"); sErr == nil {
+				var s struct {
+					PlatformName string `json:"platform_name"`
+				}
+				if json.Unmarshal(raw, &s) == nil {
+					platformName = s.PlatformName
+				}
+			}
+		}
+
+		// Get-started tour completion status
+		getStartedCompleted := false
+		if deps.Repos.Settings != nil {
+			if raw, sErr := deps.Repos.Settings.Get(ctx, "get_started"); sErr == nil {
+				var s struct {
+					Completed bool `json:"completed"`
+				}
+				if json.Unmarshal(raw, &s) == nil {
+					getStartedCompleted = s.Completed
+				}
+			}
+		}
+
 		c.JSON(http.StatusOK, gin.H{
-			"user":        user,
-			"roles":       roles,
-			"permissions": permissions,
+			"user":                  user,
+			"roles":                 roles,
+			"permissions":           permissions,
+			"enabled_plugins":       enabledPlugins,
+			"connection_types":      connectionTypes,
+			"platform_name":         platformName,
+			"get_started_completed": getStartedCompleted,
 		})
 	}
 }

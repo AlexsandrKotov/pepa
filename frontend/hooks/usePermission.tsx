@@ -10,6 +10,11 @@ interface PermissionContextValue {
   hasPermission: (resource: string, action: string) => boolean;
   hasAnyPermission: (resource: string, actions: string[]) => boolean;
   isAdmin: boolean;
+  // Sidebar init data — returned by /me in a single request
+  enabledPlugins: string[];
+  connectionTypes: string[];
+  platformName: string;
+  getStartedCompleted: boolean;
 }
 
 const PermissionContext = createContext<PermissionContextValue>({
@@ -21,11 +26,19 @@ const PermissionContext = createContext<PermissionContextValue>({
   hasPermission: () => false,
   hasAnyPermission: () => false,
   isAdmin: false,
+  enabledPlugins: [],
+  connectionTypes: [],
+  platformName: 'PEPA',
+  getStartedCompleted: false,
 });
 
 // Module-level cache so subsequent mounts don't re-fetch
 let cachedPermissions: string[] | null = null;
 let cachedRoles: string[] | null = null;
+let cachedEnabledPlugins: string[] | null = null;
+let cachedConnectionTypes: string[] | null = null;
+let cachedPlatformName = '';
+let cachedGetStartedCompleted = false;
 
 // Listen for auth-changed events to reset the module-level cache.
 // The PermissionProvider component subscribes to the same event to re-fetch.
@@ -33,6 +46,10 @@ if (typeof window !== 'undefined') {
   window.addEventListener('pepa:auth-changed', () => {
     cachedPermissions = null;
     cachedRoles = null;
+    cachedEnabledPlugins = null;
+    cachedConnectionTypes = null;
+    cachedPlatformName = '';
+    cachedGetStartedCompleted = false;
   });
 }
 
@@ -40,12 +57,20 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>(cachedPermissions || []);
   const [roles, setRoles] = useState<string[]>(cachedRoles || []);
   const [loading, setLoading] = useState(!cachedPermissions);
+  const [enabledPlugins, setEnabledPlugins] = useState<string[]>(cachedEnabledPlugins || []);
+  const [connectionTypes, setConnectionTypes] = useState<string[]>(cachedConnectionTypes || []);
+  const [platformName, setPlatformName] = useState(cachedPlatformName || 'PEPA');
+  const [getStartedCompleted, setGetStartedCompleted] = useState(cachedGetStartedCompleted);
 
   const fetchPermissions = useCallback(() => {
     // If cache is fresh, use it
     if (cachedPermissions) {
       setPermissions(cachedPermissions);
       setRoles(cachedRoles || []);
+      setEnabledPlugins(cachedEnabledPlugins || []);
+      setConnectionTypes(cachedConnectionTypes || []);
+      if (cachedPlatformName) setPlatformName(cachedPlatformName);
+      setGetStartedCompleted(cachedGetStartedCompleted);
       setLoading(false);
       return;
     }
@@ -56,15 +81,31 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
         const perms = data.permissions || [];
         cachedPermissions = perms;
         cachedRoles = data.roles || [];
+        cachedEnabledPlugins = data.enabled_plugins || [];
+        cachedConnectionTypes = data.connection_types || [];
+        cachedPlatformName = data.platform_name || '';
+        cachedGetStartedCompleted = !!data.get_started_completed;
         setPermissions(perms);
         setRoles(data.roles || []);
+        setEnabledPlugins(data.enabled_plugins || []);
+        setConnectionTypes(data.connection_types || []);
+        if (data.platform_name) setPlatformName(data.platform_name);
+        setGetStartedCompleted(!!data.get_started_completed);
       })
       .catch(() => {
         // Don't cache failures — reset to null so next call retries
         cachedPermissions = null;
         cachedRoles = null;
+        cachedEnabledPlugins = null;
+        cachedConnectionTypes = null;
+        cachedPlatformName = '';
+        cachedGetStartedCompleted = false;
         setPermissions([]);
         setRoles([]);
+        setEnabledPlugins([]);
+        setConnectionTypes([]);
+        setPlatformName('PEPA');
+        setGetStartedCompleted(false);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -109,7 +150,7 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <PermissionContext.Provider value={{ permissions, roles, loading, hasPermission, hasAnyPermission, isAdmin }}>
+    <PermissionContext.Provider value={{ permissions, roles, loading, hasPermission, hasAnyPermission, isAdmin, enabledPlugins, connectionTypes, platformName, getStartedCompleted }}>
       {children}
     </PermissionContext.Provider>
   );

@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { platformSettings, plugins, connections as connectionsAPI } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
 
 // Main navigation — pinned items (daily golden path), always visible
@@ -339,12 +338,13 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-  const [platformName, setPlatformName] = useState('PEPA');
-  // 'unknown' until fetched — avoids hiding Get Started before the check completes
-  const [tourStatus, setTourStatus] = useState<'unknown' | 'incomplete' | 'done'>('unknown');
-  const [enabledPlugins, setEnabledPlugins] = useState<Set<string>>(new Set());
-  const [connectionTypes, setConnectionTypes] = useState<Set<string>>(new Set());
-  const { hasPermission, isAdmin } = usePermission();
+  // All sidebar init data comes from usePermission() which gets it from
+  // the /me endpoint in a single request — no separate API calls needed.
+  const { hasPermission, isAdmin, enabledPlugins, connectionTypes, platformName, getStartedCompleted } = usePermission();
+  // 'unknown' until deferred check — avoids hiding Get Started before the check completes
+  const [tourStatus, setTourStatus] = useState<'unknown' | 'incomplete' | 'done'>(
+    getStartedCompleted ? 'done' : 'unknown'
+  );
 
   // Helper: check if user can see a nav item (permission: null = always visible)
   // adminOnly items require admin role OR explicit write permission (not just read)
@@ -363,62 +363,46 @@ export default function Sidebar() {
     [hasPermission],
   );
 
-  // Fetch plugin states to conditionally show plugin tabs
-  useEffect(() => {
-    plugins.list().then(res => {
-      const enabled = new Set<string>();
-      for (const p of res.plugins || []) {
-        if (p.enabled) enabled.add(p.name);
-      }
-      setEnabledPlugins(enabled);
-    }).catch(() => {});
-  }, []);
+  // Convert array from /me to Set for O(1) lookups in dynamic section computation
+  const enabledPluginSet = useMemo(() => new Set(enabledPlugins), [enabledPlugins]);
+  const connectionTypeSet = useMemo(() => new Set(connectionTypes), [connectionTypes]);
 
-  // Fetch connection types to conditionally show connection-driven sections (e.g. Virtualization)
-  useEffect(() => {
-    connectionsAPI.list().then(res => {
-      const types = new Set<string>();
-      for (const c of res.connections || []) {
-        types.add(c.type);
-      }
-      setConnectionTypes(types);
-    }).catch(() => {});
-  }, []);
-
-  // Fetch platform name from settings to display in sidebar
-  useEffect(() => {
-    platformSettings.get('general')
-      .then(res => {
-        if (res.value && typeof res.value === 'object') {
-          const settings = res.value as { platform_name?: string };
-          if (settings.platform_name) {
-            setPlatformName(settings.platform_name);
-          }
-        }
-      })
-      .catch(() => {});
+  // Deferred tour status check (lazy-loaded to avoid importing platformSettings at top)
+  const checkTourStatus = useCallback(() => {
+    import('@/lib/api').then(({ platformSettings }) => {
+      platformSettings.get('get_started')
+        .then(res => {
+          const v = res.value as { completed?: boolean } | undefined;
+          setTourStatus(v?.completed ? 'done' : 'incomplete');
+        })
+        .catch(() => setTourStatus('incomplete'));
+    });
   }, []);
 
   // Get Started hides itself once the guided tour is completed.
-  // Deferred: only checked after initial paint to avoid blocking sidebar render
-  const checkTourStatus = useCallback(() => {
-    platformSettings.get('get_started')
-      .then(res => {
-        const v = res.value as { completed?: boolean } | undefined;
-        setTourStatus(v?.completed ? 'done' : 'incomplete');
-      })
-      .catch(() => setTourStatus('incomplete'));
-  }, []);
-
+  // Use the value from /me as initial; deferred re-check catches edge cases.
   useEffect(() => {
-    const timer = setTimeout(checkTourStatus, 1500);
+    if (getStartedCompleted) {
+      setTourStatus('done');
+      return;
+    }
+    const timer = setTimeout(() => {
+      import('@/lib/api').then(({ platformSettings }) => {
+        platformSettings.get('get_started')
+          .then(res => {
+            const v = res.value as { completed?: boolean } | undefined;
+            setTourStatus(v?.completed ? 'done' : 'incomplete');
+          })
+          .catch(() => setTourStatus('incomplete'));
+      });
+    }, 1500);
     // Listen for custom event dispatched from the get-started page
     window.addEventListener('pepa-tour-completed', checkTourStatus);
     return () => {
       clearTimeout(timer);
       window.removeEventListener('pepa-tour-completed', checkTourStatus);
     };
-  }, [checkTourStatus]);
+  }, [getStartedCompleted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-check on navigation — hides the tab as soon as the user leaves the get-started page
   useEffect(() => {
@@ -484,7 +468,7 @@ export default function Sidebar() {
 
         const extraItems: { href: string; label: string; permission: string | null; adminOnly?: boolean }[] = [];
         for (const [pluginName, navEntry] of Object.entries(pluginNavItems)) {
-          if (navEntry.section === section.title && enabledPlugins.has(pluginName)) {
+          if (navEntry.section === section.title && enabledPluginSet.has(pluginName)) {
             extraItems.push(navEntry.item);
           }
         }
@@ -521,7 +505,7 @@ export default function Sidebar() {
     // Add plugin-dependent sections (e.g., Object Storage for s3, Jira)
     const extraSections: typeof collapsibleSections = [];
     for (const [pluginName, section] of Object.entries(pluginSections)) {
-      if (enabledPlugins.has(pluginName)) {
+      if (enabledPluginSet.has(pluginName)) {
         // Filter items by permission
         if (section.subGroups) {
           const filteredSubGroups = section.subGroups
@@ -543,7 +527,7 @@ export default function Sidebar() {
     for (const [, cfg] of Object.entries(connectionDrivenSections)) {
       const activeSubGroups: NavSubGroup[] = [];
       for (const connType of cfg.connectionTypes) {
-        if (connectionTypes.has(connType) && cfg.subGroups[connType]) {
+        if (connectionTypeSet.has(connType) && cfg.subGroups[connType]) {
           const sg = cfg.subGroups[connType];
           const filtered = sg.items.filter(i => canSee(i.permission, i.adminOnly));
           if (filtered.length > 0) {
@@ -570,7 +554,7 @@ export default function Sidebar() {
     }
 
     return sections;
-  }, [enabledPlugins, connectionTypes, hasPermission, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabledPluginSet, connectionTypeSet, hasPermission, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <aside className={`flex flex-col h-full bg-[#1e2128] text-white transition-all duration-300 ease-in-out ${collapsed ? 'w-[56px]' : 'w-[190px]'}`}>

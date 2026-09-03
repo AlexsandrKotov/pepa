@@ -535,7 +535,7 @@ export async function testLDAPConnection(config: {
   });
 }
 
-export async function getMe(): Promise<{ user: { id: string; email: string; name: string; is_active: boolean }; roles: string[]; permissions: string[] }> {
+export async function getMe(): Promise<{ user: { id: string; email: string; name: string; is_active: boolean }; roles: string[]; permissions: string[]; enabled_plugins?: string[]; connection_types?: string[]; platform_name?: string; get_started_completed?: boolean }> {
   // Use raw fetch instead of fetchAPI to avoid the global 401→redirect behavior.
   // getMe() is called on page load to check session validity — a 401 here
   // means "not authenticated" and should be handled gracefully by the caller.
