@@ -156,7 +156,6 @@ func (r *DevOpsRepository) GetActiveWindows(ctx context.Context, tenantID uuid.U
 	if serviceID != nil {
 		query += fmt.Sprintf(` AND (COALESCE(array_length(service_ids, 1), 0) = 0 OR service_ids @> $%d)`, argIdx)
 		args = append(args, []uuid.UUID{*serviceID})
-		argIdx++
 	}
 
 	query += ` ORDER BY priority DESC`

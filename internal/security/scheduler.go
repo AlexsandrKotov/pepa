@@ -127,7 +127,7 @@ func (s *Scheduler) processDueSchedules(ctx context.Context) {
 
 		// Run scan in background with detached context
 		go func(sched repository.ScanSchedule) {
-			scanCtx := context.Background()
+			scanCtx := context.WithoutCancel(ctx)
 			_, err := s.scanner.RunScan(scanCtx, sched.TargetID, sched.TenantID, "schedule")
 			if err != nil {
 				slog.Error("scheduled scan failed", "schedule_id", sched.ID, "error", err)

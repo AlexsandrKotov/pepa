@@ -175,7 +175,7 @@ export default function RemoteConsolePage() {
 
   if (view === 'terminal' && activeHost) {
     return (
-      <div className="-mx-6 -my-6 h-[calc(100vh-52px)]">
+      <div className="-mx-6 -my-6 h-[calc(100vh-52px)] overflow-hidden">
         <Terminal
           key={terminalKey}
           host={activeHost}

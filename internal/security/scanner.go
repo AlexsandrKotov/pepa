@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,7 +26,6 @@ type Scanner struct {
 	repo         *repository.SecurityScanRepository
 	connectionRepo *repository.ConnectionRepository
 	sem          chan struct{} // concurrency limiter
-	wg           sync.WaitGroup
 }
 
 // NewScanner creates a new Scanner.

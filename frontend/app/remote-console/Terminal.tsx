@@ -37,6 +37,7 @@ export function Terminal({ host, password, onDisconnect, onReconnect }: Terminal
       cursorBlink: true,
       fontSize: 14,
       fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Monaco, monospace',
+      scrollback: 10000,
       theme: {
         background: '#1a1b26',
         foreground: '#a9b1d6',
@@ -134,16 +135,30 @@ export function Terminal({ host, password, onDisconnect, onReconnect }: Terminal
       }
     });
 
-    // Handle resize via ResizeObserver for accurate container tracking
+    // Handle resize via ResizeObserver with debounce to prevent feedback loop
+    // (fitAddon.fit() changes dimensions -> triggers ResizeObserver -> loop)
+    let resizeRafId: number | null = null;
+    let lastCols = xterm.cols;
+    let lastRows = xterm.rows;
+
     const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'resize',
-          cols: xterm.cols,
-          rows: xterm.rows,
-        }));
-      }
+      if (resizeRafId !== null) return;
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        fitAddon.fit();
+        // Only send resize if dimensions actually changed
+        if (xterm.cols !== lastCols || xterm.rows !== lastRows) {
+          lastCols = xterm.cols;
+          lastRows = xterm.rows;
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'resize',
+              cols: xterm.cols,
+              rows: xterm.rows,
+            }));
+          }
+        }
+      });
     });
     if (termRef.current) {
       resizeObserver.observe(termRef.current);
@@ -152,12 +167,16 @@ export function Terminal({ host, password, onDisconnect, onReconnect }: Terminal
     // Also handle window resize as fallback
     const handleWindowResize = () => {
       fitAddon.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'resize',
-          cols: xterm.cols,
-          rows: xterm.rows,
-        }));
+      if (xterm.cols !== lastCols || xterm.rows !== lastRows) {
+        lastCols = xterm.cols;
+        lastRows = xterm.rows;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: xterm.cols,
+            rows: xterm.rows,
+          }));
+        }
       }
     };
     window.addEventListener('resize', handleWindowResize);
@@ -168,6 +187,7 @@ export function Terminal({ host, password, onDisconnect, onReconnect }: Terminal
     return () => {
       window.removeEventListener('resize', handleWindowResize);
       resizeObserver.disconnect();
+      if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
       ws.close();
       xterm.dispose();
     };
@@ -214,7 +234,7 @@ export function Terminal({ host, password, onDisconnect, onReconnect }: Terminal
       )}
 
       {/* Terminal */}
-      <div ref={termRef} className="flex-1 p-2" />
+      <div ref={termRef} className="flex-1 p-2 overflow-hidden" />
 
       {/* Status Bar */}
       <div className="flex items-center justify-between px-4 py-1 bg-[#16161e] border-t border-[#2a2b3d] text-xs text-[#565f89]">
