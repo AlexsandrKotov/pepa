@@ -104,7 +104,7 @@ func (s *LocalStorage) UploadPlugin(_ context.Context, name, version string, rea
 		return fmt.Errorf("create plugin dir: %w", err)
 	}
 
-	f, err := os.Create(dest) //nolint:gosec // G304: dest is a validated plugin storage path
+	f, err := os.Create(dest) // #nosec // G304: dest is a validated plugin storage path
 	if err != nil {
 		return fmt.Errorf("create plugin file: %w", err)
 	}
@@ -122,7 +122,7 @@ func (s *LocalStorage) DownloadPlugin(_ context.Context, name, version string) (
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path) //nolint:gosec // G304: path is a validated plugin storage path
+	f, err := os.Open(path) // #nosec // G304: path is a validated plugin storage path
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("plugin %s/%s not found", name, version)

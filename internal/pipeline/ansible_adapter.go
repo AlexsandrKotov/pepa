@@ -115,7 +115,7 @@ func (a *AnsibleAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 	if !strings.HasPrefix(absPlaybook, absWorkDir) {
 		return nil, fmt.Errorf("invalid playbook path")
 	}
-	data, err := os.ReadFile(absPlaybook) //nolint:gosec // G304: absPlaybook is validated to be within workDir
+	data, err := os.ReadFile(absPlaybook) // #nosec // G304: absPlaybook is validated to be within workDir
 	if err != nil {
 		// Fallback: just provide basic params
 		props["inventory"] = PropertyDef{Type: "string", Description: "Inventory file/host list", Default: cfg.Inventory}
@@ -266,7 +266,7 @@ func (a *AnsibleAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		args = append(args, "-e", fmt.Sprintf("%s=%v", k, v))
 	}
 
-	cmd := exec.CommandContext(runCtx, "ansible-playbook", args...) //nolint:gosec // G204: ansible-playbook is an admin-configured binary
+	cmd := exec.CommandContext(runCtx, "ansible-playbook", args...) // #nosec // G204: ansible-playbook is an admin-configured binary
 	cmd.Dir = workDir
 	cmd.Stdout = logBuf
 	cmd.Stderr = logBuf
@@ -341,7 +341,7 @@ func (a *AnsibleAdapter) Plan(ctx context.Context, raw json.RawMessage, params m
 		args = append(args, "-e", fmt.Sprintf("%s=%v", k, v))
 	}
 
-	cmd := exec.CommandContext(ctx, "ansible-playbook", args...) //nolint:gosec // G204: ansible-playbook is an admin-configured binary
+	cmd := exec.CommandContext(ctx, "ansible-playbook", args...) // #nosec // G204: ansible-playbook is an admin-configured binary
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(),
 		"ANSIBLE_NOCOLOR=false",
@@ -434,7 +434,7 @@ func (a *AnsibleAdapter) State(ctx context.Context, raw json.RawMessage, _ map[s
 
 // parseInventoryFile reads an Ansible inventory file (INI or YAML) and returns host resources.
 func parseInventoryFile(path string) []StateResource {
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is within validated workDir
+	data, err := os.ReadFile(path) // #nosec // G304: path is within validated workDir
 	if err != nil {
 		return nil
 	}
@@ -679,7 +679,7 @@ func (a *AnsibleAdapter) Inspect(ctx context.Context, raw json.RawMessage) (json
 			return nil
 		}
 
-		data, readErr := os.ReadFile(path) //nolint:gosec // G304: path is within validated workDir
+		data, readErr := os.ReadFile(path) // #nosec // G304: path is within validated workDir
 		if readErr != nil {
 			return nil
 		}
@@ -765,7 +765,7 @@ func (a *AnsibleAdapter) Inspect(ctx context.Context, raw json.RawMessage) (json
 			if taskEntries, err := os.ReadDir(tasksDir); err == nil {
 				for _, te := range taskEntries {
 					if !te.IsDir() && (filepath.Ext(te.Name()) == ".yml" || filepath.Ext(te.Name()) == ".yaml") {
-						data, readErr := os.ReadFile(filepath.Join(tasksDir, te.Name())) //nolint:gosec // G304: validated path
+						data, readErr := os.ReadFile(filepath.Join(tasksDir, te.Name())) // #nosec // G304: validated path
 						if readErr == nil {
 							var tasks []interface{}
 							if yaml.Unmarshal(data, &tasks) == nil {
@@ -777,7 +777,7 @@ func (a *AnsibleAdapter) Inspect(ctx context.Context, raw json.RawMessage) (json
 			}
 			// Try to read meta/main.yml for description
 			metaPath := filepath.Join(rolesDir, entry.Name(), "meta", "main.yml")
-			if metaData, err := os.ReadFile(metaPath); err == nil { //nolint:gosec // G304: validated path
+			if metaData, err := os.ReadFile(metaPath); err == nil { // #nosec // G304: validated path
 				var meta map[string]interface{}
 				if yaml.Unmarshal(metaData, &meta) == nil {
 					if galaxyInfo, ok := meta["galaxy_info"].(map[string]interface{}); ok {
@@ -899,7 +899,7 @@ func gitClone(ctx context.Context, repoURL, token, destDir string) error {
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, destDir) //nolint:gosec // G204: git clone with validated args
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", cloneURL, destDir) // #nosec // G204: git clone with validated args
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(output), err)

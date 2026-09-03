@@ -27,7 +27,7 @@ const (
 	CtxOrgID        = "auth_org_id"
 	CtxEmail        = "auth_email"
 	CtxRoles        = "auth_roles"
-	CtxTokenVersion = "auth_token_version" //nolint:gosec // G101: not a credential, just a context key name
+	CtxTokenVersion = "auth_token_version" // #nosec // G101: not a credential, just a context key name
 )
 
 // CookieTokenName is the name of the httpOnly cookie that carries the JWT.

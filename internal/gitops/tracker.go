@@ -231,7 +231,7 @@ func (t *DeployTracker) checkCIStatus(ctx context.Context, repo *Repo, commitSHA
 		repoURL = injectToken(repoURL, token)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, commitSHA) //nolint:gosec // G204: git ls-remote with validated args
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", repoURL, commitSHA) // #nosec // G204: git ls-remote with validated args
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -435,7 +435,7 @@ func (t *DeployTracker) checkFluxStatus(ctx context.Context, repo *Repo, commitS
 	var events []DeployEvent
 
 	// Try to get FluxCD HelmRelease status via kubectl
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "helmreleases", "--all-namespaces", //nolint:gosec // G204: kubectl with static args
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "helmreleases", "--all-namespaces", // #nosec // G204: kubectl with static args
 		"-o", "json", "-l", fmt.Sprintf("meta.helm.sh/release-name"))
 	out, err := cmd.Output()
 	if err != nil {

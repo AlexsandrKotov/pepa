@@ -50,7 +50,7 @@ func TestDatabaseConfig_ConnectionString(t *testing.T) {
 		SSLMode:  "require",
 	}
 	got := d.ConnectionString()
-	want := "postgres://admin:secret@db.example.com:5432/mydb?sslmode=require" //nolint:gosec // G101: test connection string
+	want := "postgres://admin:secret@db.example.com:5432/mydb?sslmode=require" // #nosec // G101: test connection string
 	if got != want {
 		t.Errorf("ConnectionString() = %q, want %q", got, want)
 	}
@@ -66,7 +66,7 @@ func TestDatabaseConfig_ConnectionString_Disable(t *testing.T) {
 		SSLMode:  "disable",
 	}
 	got := d.ConnectionString()
-	if got != "postgres://user:pass@localhost:5432/test?sslmode=disable" { //nolint:gosec // G101: test connection string
+	if got != "postgres://user:pass@localhost:5432/test?sslmode=disable" { // #nosec // G101: test connection string
 		t.Errorf("unexpected connection string: %s", got)
 	}
 }

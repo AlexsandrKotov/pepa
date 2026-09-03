@@ -539,7 +539,7 @@ func (s *ConnectionService) TestVaultConnection(ctx context.Context, address, to
 	vaultClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: self-signed certs common in Vault
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec // G402: self-signed certs common in Vault
 		},
 	}
 
@@ -629,7 +629,7 @@ func (s *ConnectionService) TestKubernetesServerConnection(ctx context.Context, 
 	k8sClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: self-signed certs common in K8s API
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec // G402: self-signed certs common in K8s API
 		},
 	}
 
@@ -652,7 +652,7 @@ func (s *ConnectionService) TestGitBasicAuthConnection(ctx context.Context, rawU
 	gitClient := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: self-signed certs common in git servers
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // #nosec // G402: self-signed certs common in git servers
 		},
 	}
 

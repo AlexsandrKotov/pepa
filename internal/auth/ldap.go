@@ -150,7 +150,7 @@ func (p *LDAPProvider) Authenticate(ctx context.Context, email, password string)
 // connect establishes a connection to the LDAP server.
 func (p *LDAPProvider) connect() (*ldap.Conn, error) {
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: p.config.InsecureSkipVerify, //nolint:gosec // configurable for self-signed certs
+		InsecureSkipVerify: p.config.InsecureSkipVerify, // #nosec // configurable for self-signed certs
 	}
 
 	// If a CA certificate is provided, parse it and add to the TLS config.

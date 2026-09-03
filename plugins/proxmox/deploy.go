@@ -236,7 +236,7 @@ func dialSSH(ip, user string, signer ssh.Signer, timeout time.Duration) (*ssh.Cl
 	cfg := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // freshly created container with a PEPA-injected key
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // #nosec // freshly created container with a PEPA-injected key
 		Timeout:         10 * time.Second,
 	}
 	deadline := time.Now().Add(timeout)
@@ -275,7 +275,7 @@ func runSSH(client *ssh.Client, cmd string, timeout time.Duration) (string, erro
 // streamDockerImage saves an image from the local docker daemon and streams
 // it into the container via `docker load`.
 func streamDockerImage(client *ssh.Client, image string) error {
-	saveCmd := exec.Command("docker", "save", image) //nolint:gosec // image name validated by caller context
+	saveCmd := exec.Command("docker", "save", image) // #nosec // image name validated by caller context
 	saveOut, err := saveCmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -321,7 +321,7 @@ func streamFolder(client *ssh.Client, folderPath, remoteDir string) error {
 	if err != nil {
 		return err
 	}
-	tarCmd := exec.Command("tar", "-czf", "-", "-C", abs, ".") //nolint:gosec // path validated by caller
+	tarCmd := exec.Command("tar", "-czf", "-", "-C", abs, ".") // #nosec // path validated by caller
 	tarOut, err := tarCmd.StdoutPipe()
 	if err != nil {
 		return err

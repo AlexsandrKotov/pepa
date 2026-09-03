@@ -437,7 +437,7 @@ func getOIDCAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(oidc.ClientSecret) > 4 {
 				maskedSecret = oidc.ClientSecret[:4] + "••••••••"
 			} else {
-				maskedSecret = "••••••••" //nolint:gosec // G101: mask string, not a credential
+				maskedSecret = "••••••••" // #nosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -501,7 +501,7 @@ func getAzureADAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(azure.ClientSecret) > 4 {
 				maskedSecret = azure.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 			} else {
-				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // #nosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -562,7 +562,7 @@ func getGoogleAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(google.ClientSecret) > 4 {
 				maskedSecret = google.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 			} else {
-				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // #nosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -622,7 +622,7 @@ func getGitHubAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(github.ClientSecret) > 4 {
 				maskedSecret = github.ClientSecret[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 			} else {
-				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+				maskedSecret = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // #nosec // G101: mask string, not a credential
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -754,12 +754,12 @@ func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
 			if len(ldap.BindPassword) > 4 {
 				maskedPassword = ldap.BindPassword[:4] + "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 			} else {
-				maskedPassword = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+				maskedPassword = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // #nosec // G101: mask string, not a credential
 			}
 		}
 		maskedCACert := ""
 		if ldap.CACertificate != "" {
-			maskedCACert = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // G101: mask string, not a credential
+			maskedCACert = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" // #nosec // G101: mask string, not a credential
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"enabled":             ldap.Enabled,

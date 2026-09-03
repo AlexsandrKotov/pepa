@@ -24,7 +24,7 @@ type Client struct {
 func NewClient(baseURL, tokenID, tokenSecret string, insecureTLS bool) *Client {
 	transport := &http.Transport{}
 	if insecureTLS {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // G402: user-configured per-connection setting
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec // G402: user-configured per-connection setting
 	}
 	return &Client{
 		baseURL:     strings.TrimRight(baseURL, "/"),
