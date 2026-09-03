@@ -154,14 +154,11 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 
 			// Detect embedded plugins: logic runs inside the API server,
 			// no separate gRPC binary needed. These have a plugin.yaml in
-			// plugins/builtin/ but no Go source in plugins/<name>/.
-			srcDir := filepath.Join(pluginDir, def.Name)
-			embedded := false
-			if entries, err := os.ReadDir(srcDir); err != nil || len(entries) == 0 {
-				// No source directory or empty — plugin is embedded in the API server
-				embedded = true
-				binaryAvailable = true // API server is the "binary"
-			}
+			// plugins/builtin/ but no compiled binary in plugins/bin/.
+			// If a binary IS available, the plugin runs as a separate gRPC
+			// subprocess — it is NOT embedded, even if source is missing
+			// (as in production archives where only bin/ and builtin/ exist).
+			embedded := !binaryAvailable
 
 			// Extract required config fields
 			var requiresConfig []string

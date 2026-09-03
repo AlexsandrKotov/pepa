@@ -482,14 +482,33 @@ func Bootstrap() (*Components, error) {
 	})
 	slog.Info("AI manager initialized", "tools", len(aiManager.ToolRegistry().List()))
 
-	// Initialize RAG components (requires an AI provider for embeddings)
-	if provider, err := aiManager.DefaultProvider(); err == nil {
-		tenantID := uuid.MustParse(database.DefaultTenantID)
-
-		// Ingestion engine
-		ingestionEngine := ai.NewIngestionEngine(db.Pool, c.RAGRepo, provider)
-		c.IngestionEngine = ingestionEngine
-
+	// Initialize RAG components
+	// The ingestion engine and document seeding always run (even without an AI provider),
+	// so the Knowledge Base has default documents available. Embeddings require a provider,
+	// but documents are still stored and keyword-searchable without one.
+	tenantID := uuid.MustParse(database.DefaultTenantID)
+	
+	// Try to get an AI provider for embeddings (optional)
+	provider, providerErr := aiManager.DefaultProvider()
+	if providerErr != nil {
+		slog.Warn("RAG: no AI provider configured, documents will be stored without embeddings")
+	}
+	
+	// Always create ingestion engine (provider may be nil)
+	ingestionEngine := ai.NewIngestionEngine(db.Pool, c.RAGRepo, provider)
+	c.IngestionEngine = ingestionEngine
+	
+	// Always seed knowledge base with built-in documentation (runs in background)
+	go func() {
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer seedCancel()
+		if err := ai.SeedDocuments(seedCtx, ingestionEngine, tenantID); err != nil {
+			slog.Warn("RAG: documentation seeding failed", "error", err)
+		}
+	}()
+	
+	// RAG pipeline, watcher, and proactive AI components require an AI provider
+	if provider != nil {
 		// RAG query pipeline
 		ragPipeline := ai.NewRAGPipeline(provider, provider, aiManager.ToolRegistry(), c.RAGRepo, tenantID)
 		c.RAGPipeline = ragPipeline
@@ -513,19 +532,6 @@ func Bootstrap() (*Components, error) {
 		c.Coordinator = ai.NewAgentCoordinator(c.Specialists, provider)
 
 		slog.Info("RAG pipeline and proactive AI components initialized")
-
-		// Seed knowledge base with built-in documentation (runs in background).
-		// This ingests PEPA's own docs so the AI assistant can answer questions
-		// about the platform from the start.
-		go func() {
-			seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer seedCancel()
-			if err := ai.SeedDocuments(seedCtx, ingestionEngine, tenantID); err != nil {
-				slog.Warn("RAG: documentation seeding failed", "error", err)
-			}
-		}()
-	} else {
-		slog.Warn("RAG pipeline not initialized: no AI provider configured")
 	}
 
 	return c, nil

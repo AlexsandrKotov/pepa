@@ -43,6 +43,8 @@ export default function MarketplacePage() {
       const hint = (res as { hint?: string })?.hint || 'Plugin installed successfully!';
       setToast({ message: hint, type: 'success' });
       await loadPlugins();
+      // Notify sidebar to refresh enabled plugins list
+      window.dispatchEvent(new CustomEvent('pepa:plugins-changed'));
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Failed to install plugin', type: 'error' });
     } finally {
@@ -56,6 +58,8 @@ export default function MarketplacePage() {
       await marketplace.uninstall(pluginId);
       setToast({ message: 'Plugin uninstalled successfully!', type: 'success' });
       await loadPlugins();
+      // Notify sidebar to refresh enabled plugins list
+      window.dispatchEvent(new CustomEvent('pepa:plugins-changed'));
     } catch (err) {
       setToast({ message: err instanceof Error ? err.message : 'Failed to uninstall plugin', type: 'error' });
     } finally {

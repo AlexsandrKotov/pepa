@@ -386,11 +386,11 @@ func (c *Config) LoadFromEnv() {
 	if v := getenv("CUSTOM_PLUGIN_DIR"); v != "" {
 		c.Plugin.CustomDir = v
 	}
-	if v := getenv("PLUGIN_SIGNATURE_VERIFY"); v == "true" {
-		c.Plugin.SignatureVerify = true
+	if v := getenv("PLUGIN_SIGNATURE_VERIFY"); v != "" {
+		c.Plugin.SignatureVerify = (v == "true")
 	}
-	if v := getenv("PLUGIN_SIGNATURE_ENFORCE"); v == "true" {
-		c.Plugin.SignatureEnforce = true
+	if v := getenv("PLUGIN_SIGNATURE_ENFORCE"); v != "" {
+		c.Plugin.SignatureEnforce = (v == "true")
 	}
 
 	// AI

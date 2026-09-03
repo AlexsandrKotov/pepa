@@ -212,6 +212,8 @@ export default function PluginsClient({ initialPlugins }: { initialPlugins?: Plu
       }
       setPluginList(prev => prev.map(p => p.name === name ? { ...p, enabled: !currentlyEnabled } : p));
       showToast(`Plugin ${currentlyEnabled ? 'disabled' : 'enabled'}`, 'success');
+      // Notify sidebar to refresh enabled plugins list
+      window.dispatchEvent(new CustomEvent('pepa:plugins-changed'));
     } catch (err) {
       showToast(`Failed: ${err}`, 'error');
     } finally {

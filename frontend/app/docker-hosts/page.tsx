@@ -303,6 +303,24 @@ export default function DockerHostsPage() {
                     'ssh://user@192.168.1.100'
                   }
                 />
+                {form.host_type === 'local' && (
+                  <div className="mt-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 space-y-1.5">
+                    <p className="font-medium flex items-center gap-1">
+                      <span>⚙</span> Docker Compose setup required
+                    </p>
+                    <p className="text-[var(--text-secondary)] leading-relaxed">
+                      By default the Docker socket is <strong>not</strong> mounted into the API container for security.
+                      To use a local Docker host, add this to your <code className="px-1 py-0.5 rounded bg-amber-500/10 font-mono text-[10px]">.env</code> file:
+                    </p>
+                    <code className="block p-2 rounded bg-black/20 font-mono text-[10px] text-[var(--text-primary)]">
+                      MOUNT_DOCK_SOCKET=/var/run/docker.sock
+                    </code>
+                    <p className="text-[var(--text-tertiary)]">
+                      Then recreate the API container:<br />
+                      <code className="font-mono text-[10px]">docker compose up -d api-server</code>
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* TLS fields for TCP */}
