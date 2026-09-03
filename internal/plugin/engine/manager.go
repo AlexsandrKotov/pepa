@@ -98,7 +98,7 @@ func (m *Manager) LoadPlugin(name string, binaryPath string) error {
 			"pepa-plugin": &GRPCPlugin{},
 		},
 		AllowedProtocols: []hcplugin.Protocol{hcplugin.ProtocolGRPC},
-		Cmd:              exec.Command(absPath), // #nosec //nolint:gosec // G204: absPath is a validated plugin binary path
+		Cmd:              exec.Command(absPath), //nolint:gosec // #nosec // G204: absPath is a validated plugin binary path
 		Logger: hclog.New(&hclog.LoggerOptions{
 			Name:   fmt.Sprintf("plugin:%s", name),
 			Output: os.Stderr,

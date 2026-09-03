@@ -97,7 +97,7 @@ func (c *Client) env() []string {
 
 // run executes a docker CLI command and returns stdout.
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec //nolint:gosec // G204: docker is an admin-configured binary
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // #nosec // G204: docker is an admin-configured binary
 	cmd.Env = c.env()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -185,7 +185,7 @@ func (c *Client) ComposeUp(ctx context.Context, projectName, composeYaml string,
 	}
 
 	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "-d"}
-	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec //nolint:gosec // G204: docker compose with validated args
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // #nosec // G204: docker compose with validated args
 	cmd.Env = c.env()
 	for k, v := range envVars {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -236,7 +236,7 @@ func (c *Client) ComposeUpFromFolder(ctx context.Context, projectName, folderPat
 	}
 
 	args := []string{"compose", "-f", composePath, "-p", projectName, "up", "-d"}
-	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec //nolint:gosec // G204: docker compose with validated args
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // #nosec // G204: docker compose with validated args
 	cmd.Dir = workDir                                  // set working directory for relative paths
 	cmd.Env = c.env()
 	for k, v := range envVars {
@@ -283,7 +283,7 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 
 	// --progress is a global flag on `docker compose`, must go before the subcommand
 	args := []string{"compose", "--progress", "plain", "-f", composePath, "-p", projectName, "up", "-d"}
-	cmd := exec.CommandContext(ctx, "docker", args...) // #nosec //nolint:gosec // G204: docker compose with validated args
+	cmd := exec.CommandContext(ctx, "docker", args...) //nolint:gosec // #nosec // G204: docker compose with validated args
 	cmd.Dir = workDir
 	cmd.Env = c.env()
 	for k, v := range envVars {

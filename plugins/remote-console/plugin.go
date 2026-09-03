@@ -94,7 +94,7 @@ func (p *RemoteConsolePlugin) testConnection(ctx context.Context, params []byte,
 
 	sshConfig := &ssh.ClientConfig{
 		User:            req.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // #nosec //nolint:gosec // G302: user-configured target host
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // #nosec // G302: user-configured target host
 		Timeout:         time.Duration(req.Timeout) * time.Second,
 	}
 

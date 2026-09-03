@@ -1086,7 +1086,7 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 func buildSSHConfig(host *repository.SSHHost, deps Dependencies, c *gin.Context) (*ssh.ClientConfig, error) {
 	config := &ssh.ClientConfig{
 		User:            host.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // #nosec //nolint:gosec // G302: user-configured hosts with explicit trust
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // #nosec // G302: user-configured hosts with explicit trust
 		Timeout:         30 * time.Second,
 	}
 

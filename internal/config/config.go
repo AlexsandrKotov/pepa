@@ -207,8 +207,8 @@ func DefaultConfig() *Config {
 			UseSSL:        false,
 			BucketPlugins: "pepa-plugins",
 		},
-		Auth: AuthConfig{ // #nosec //nolint:gosec // G101: struct contains dev default JWT secret; Validate() warns if not overridden
-			JWTSecret:       "dev-jwt-secret-change-in-production", // #nosec //nolint:gosec // G101: dev default; Validate() warns if not overridden
+		Auth: AuthConfig{ //nolint:gosec // #nosec // G101: struct contains dev default JWT secret; Validate() warns if not overridden
+			JWTSecret:       "dev-jwt-secret-change-in-production", //nolint:gosec // #nosec // G101: dev default; Validate() warns if not overridden
 			SessionDuration: 24 * time.Hour,     // 24 hours
 			TokenExpiry:     24 * time.Hour,     // 24 hours
 			RefreshExpiry:   7 * 24 * time.Hour, // 7 days
@@ -456,7 +456,7 @@ func getenv(key string) string {
 // knownInsecureDefaults maps config paths to their insecure default values.
 // Used by Validate() to warn operators who forgot to override them.
 //
-// #nosec //nolint:gosec // G101: these are sentinel values for dev-mode warnings, not real credentials
+//nolint:gosec // #nosec // G101: these are sentinel values for dev-mode warnings, not real credentials
 var knownInsecureDefaults = map[string]string{
 	"auth.jwt_secret":   "dev-jwt-secret-change-in-production",
 	"database.password": "pepa_dev",

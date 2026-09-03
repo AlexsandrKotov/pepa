@@ -390,10 +390,10 @@ func testVMwareConnection(deps Dependencies, c *gin.Context, connConfig map[stri
 	// Build HTTP client
 	transport := &http.Transport{}
 	if insecure, _ := connConfig["insecure_tls"].(string); insecure == "true" || insecure == "1" {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec //nolint:gosec
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // #nosec
 	}
 	if insecure, _ := connConfig["insecure"].(string); insecure == "true" || insecure == "1" {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec //nolint:gosec
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // #nosec
 	}
 	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
 
