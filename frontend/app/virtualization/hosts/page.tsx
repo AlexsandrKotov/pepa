@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { connections as connectionsAPI, virtualization, type Connection } from '@/lib/api';
+import { connections as connectionsAPI, type Connection } from '@/lib/api';
 import Link from 'next/link';
 
 export default function HostsPage() {
@@ -23,22 +23,13 @@ export default function HostsPage() {
   const handleTest = async (conn: Connection) => {
     setTesting(conn.id);
     try {
-      if (conn.type === 'proxmox') {
-        const result = await virtualization.proxmox.testConnection();
-        const warning = result.data?.warning;
-        setTestResult(prev => ({
-          ...prev,
-          [conn.id]: warning
-            ? { status: 'error', message: warning }
-            : { status: 'connected', message: 'Connection successful' },
-        }));
-      } else {
-        const result = await virtualization.vmware.testConnection();
-        setTestResult(prev => ({
-          ...prev,
-          [conn.id]: { status: 'connected', message: 'Connected to vCenter successfully' },
-        }));
-      }
+      // Use the connection test endpoint — it performs a direct HTTP check
+      // and does not require the plugin binary to be loaded.
+      const result = await connectionsAPI.test(conn.id);
+      setTestResult(prev => ({
+        ...prev,
+        [conn.id]: { status: result.status, message: result.message },
+      }));
     } catch (err) {
       setTestResult(prev => ({ ...prev, [conn.id]: { status: 'error', message: err instanceof Error ? err.message : 'Test failed' } }));
     }

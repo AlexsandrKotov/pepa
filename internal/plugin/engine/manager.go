@@ -317,6 +317,18 @@ func (m *Manager) DiscoverAndLoad() error {
 		} else {
 			loaded += binLoaded
 		}
+
+		// Also scan bin/builtin/ — pre-built binaries shipped with the
+		// repository live one level deeper at bin/builtin/<name>/<name>.
+		builtinSubdir := filepath.Join(binSubdir, "builtin")
+		if info, err := os.Stat(builtinSubdir); err == nil && info.IsDir() {
+			builtinLoaded, err := m.scanDir(builtinSubdir)
+			if err != nil {
+				slog.Warn("bin/builtin/ scan failed", "error", err)
+			} else {
+				loaded += builtinLoaded
+			}
+		}
 	}
 
 	// Also scan custom plugin directory if configured

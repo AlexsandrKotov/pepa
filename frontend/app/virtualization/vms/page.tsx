@@ -114,7 +114,7 @@ export default function VirtualMachinesPage() {
       setPxVMs(Array.isArray(res.data) ? res.data : []);
       virtualization.proxmox.getConnectionInfo()
         .then(r => setProxmoxUrl(r.data?.url || '')).catch(() => {});
-    } catch { setError('Failed to load Proxmox VMs'); }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to load Proxmox VMs'); }
     setLoading(false);
   };
 
@@ -129,7 +129,7 @@ export default function VirtualMachinesPage() {
       setVmwareVMs(Array.isArray(res.data) ? res.data : []);
       if (connRes?.data?.url) setVcenterUrl(connRes.data.url);
       if (hostsRes?.data) setVmwareHosts(Array.isArray(hostsRes.data) ? hostsRes.data : []);
-    } catch { setError('Failed to load VMware VMs'); }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to load VMware VMs'); }
     setLoading(false);
   };
 

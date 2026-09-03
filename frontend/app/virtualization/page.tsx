@@ -49,7 +49,10 @@ export default function VirtualizationDashboard() {
         if (nodesRes.status === 'fulfilled') setNodes(Array.isArray(nodesRes.value.data) ? nodesRes.value.data : []);
         if (vmsRes.status === 'fulfilled') setVMs(Array.isArray(vmsRes.value.data) ? vmsRes.value.data : []);
         if (containersRes.status === 'fulfilled') setContainers(Array.isArray(containersRes.value.data) ? containersRes.value.data : []);
-        if (nodesRes.status === 'rejected') setError('Failed to connect to Proxmox. Check your connection settings.');
+        if (nodesRes.status === 'rejected') {
+          const msg = nodesRes.reason instanceof Error ? nodesRes.reason.message : 'Unknown error';
+          setError(`Failed to connect to Proxmox: ${msg}`);
+        }
       } else {
         const [hostsRes, vmsRes] = await Promise.allSettled([
           virtualization.vmware.listHosts(),
@@ -57,7 +60,10 @@ export default function VirtualizationDashboard() {
         ]);
         if (hostsRes.status === 'fulfilled') setVmwareHosts(Array.isArray(hostsRes.value.data) ? hostsRes.value.data : []);
         if (vmsRes.status === 'fulfilled') setVmwareVMs(Array.isArray(vmsRes.value.data) ? vmsRes.value.data : []);
-        if (hostsRes.status === 'rejected') setError('Failed to connect to VMware vCenter. Check your connection settings.');
+        if (hostsRes.status === 'rejected') {
+          const msg = hostsRes.reason instanceof Error ? hostsRes.reason.message : 'Unknown error';
+          setError(`Failed to connect to VMware vCenter: ${msg}`);
+        }
       }
     } catch {
       setError('Failed to load virtualization data');

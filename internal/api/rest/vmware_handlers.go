@@ -50,7 +50,7 @@ func registerVMwareRoutes(r *gin.RouterGroup, deps Dependencies) {
 // vmwareExec is a helper that executes a vmware plugin action with merged config.
 func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.RawMessage) {
 	if deps.ProviderRegistry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available — VMware plugin may not be loaded yet"})
 		return
 	}
 
@@ -59,7 +59,7 @@ func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.Ra
 	resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "vmware", action, params, mergedConfig)
 	if err != nil {
 		slog.Error("vmware plugin action failed", "action", action, "error", err)
-		respondInternalError(c, err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		if entityType, isStateChange := stateChangingVMwareActions[action]; isStateChange {
 			logPluginActionAsync(deps, c, "vmware", action, entityType, params, false, err.Error())
 		}

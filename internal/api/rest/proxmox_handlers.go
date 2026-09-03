@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -64,7 +65,7 @@ func registerProxmoxRoutes(r *gin.RouterGroup, deps Dependencies) {
 // It unwraps the plugin output so the frontend receives {"data": <action output>}.
 func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.RawMessage) {
 	if deps.ProviderRegistry == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available — Proxmox plugin may not be loaded yet"})
 		return
 	}
 
@@ -73,7 +74,8 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 
 	resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "proxmox", action, params, mergedConfig)
 	if err != nil {
-		respondInternalError(c, err)
+		slog.Error("proxmox plugin action failed", "action", action, "error", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		// Log the failed action
 		if entityType, isStateChange := stateChangingProxmoxActions[action]; isStateChange {
 			logPluginActionAsync(deps, c, "proxmox", action, entityType, params, false, err.Error())

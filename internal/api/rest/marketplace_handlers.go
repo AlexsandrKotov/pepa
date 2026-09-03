@@ -80,6 +80,23 @@ var (
 	marketplaceMu    sync.RWMutex
 )
 
+// resolvePluginBinary locates a plugin binary, checking both the flat layout
+// (plugins/bin/<name>/<name>) produced by `make plugins` and the nested layout
+// (plugins/bin/builtin/<name>/<name>) used by pre-built binaries shipped in
+// the repository.  Returns the resolved path and true, or ("", false).
+func resolvePluginBinary(pluginDir, name string) (string, bool) {
+	candidates := []string{
+		filepath.Join(pluginDir, "bin", name, name),
+		filepath.Join(pluginDir, "bin", "builtin", name, name),
+	}
+	for _, p := range candidates {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p, true
+		}
+	}
+	return "", false
+}
+
 // loadMarketplacePlugins reads real plugin definitions from plugins/builtin/*/plugin.yaml
 func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 	marketplaceMu.RLock()
@@ -132,12 +149,8 @@ func loadMarketplacePlugins(pluginDir string) []MarketplacePlugin {
 				continue
 			}
 
-			// Check if binary exists (built by `make plugins` into bin/<name>/<name>)
-			binPath := filepath.Join(pluginDir, "bin", def.Name, def.Name)
-			binaryAvailable := false
-			if info, err := os.Stat(binPath); err == nil && !info.IsDir() {
-				binaryAvailable = true
-			}
+			// Check if binary exists (built by `make plugins` or shipped pre-built)
+			_, binaryAvailable := resolvePluginBinary(pluginDir, def.Name)
 
 			// Detect embedded plugins: logic runs inside the API server,
 			// no separate gRPC binary needed. These have a plugin.yaml in
@@ -355,8 +368,8 @@ func loadPluginBinary(deps Dependencies, id string) error {
 		pluginDir = deps.Config.Plugin.Dir
 	}
 
-	binPath := filepath.Join(pluginDir, "bin", id, id)
-	if _, err := os.Stat(binPath); err != nil {
+	binPath, binFound := resolvePluginBinary(pluginDir, id)
+	if !binFound {
 		return fmt.Errorf("plugin binary not found: build it with `make plugins` and place it in plugins/bin/%s", id)
 	}
 
