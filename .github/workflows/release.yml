@@ -242,6 +242,8 @@ jobs:
     name: Plugins Image
     runs-on: ubuntu-latest
     needs: [plugins]
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -283,6 +285,30 @@ jobs:
           # Copy manifests (shared across architectures, from separate artifact)
           cp -r staging/manifests/* plugins/builtin/ 2>/dev/null || true
 
+      - name: Write signing key
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
+        run: |
+          PEPA_KEY_FILE="$(mktemp)"
+          chmod 600 "$PEPA_KEY_FILE"
+          echo "$PEPA_SIGNING_KEY" > "$PEPA_KEY_FILE"
+          echo "PEPA_KEY_FILE=$PEPA_KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Sign plugins
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          PEPA_PLUGINS_PRIVATE_KEY: ${{ env.PEPA_KEY_FILE }}
+        run: |
+          for arch in amd64 arm64; do
+            echo "--- Signing plugins for ${arch} ---"
+            PLUGIN_BIN_DIR="$(pwd)/plugins/bin-${arch}" bash scripts/sign-plugin.sh
+          done
+
+      - name: Cleanup signing key
+        if: always() && env.HAS_SIGNING_KEY == 'true' && env.PEPA_KEY_FILE
+        run: rm -f "$PEPA_KEY_FILE"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -323,7 +349,11 @@ jobs:
     name: Plugin Archives
     runs-on: ubuntu-latest
     needs: [plugins]
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY != '' }}
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download amd64 plugins
         uses: actions/download-artifact@v5
         with:
@@ -341,6 +371,26 @@ jobs:
         with:
           name: plugins-manifests
           path: staging/manifests
+
+      - name: Write signing key
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          PEPA_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY }}
+        run: |
+          PEPA_KEY_FILE="$(mktemp)"
+          chmod 600 "$PEPA_KEY_FILE"
+          echo "$PEPA_SIGNING_KEY" > "$PEPA_KEY_FILE"
+          echo "PEPA_KEY_FILE=$PEPA_KEY_FILE" >> "$GITHUB_ENV"
+
+      - name: Sign plugins
+        if: env.HAS_SIGNING_KEY == 'true'
+        env:
+          PEPA_PLUGINS_PRIVATE_KEY: ${{ env.PEPA_KEY_FILE }}
+        run: |
+          for arch in amd64 arm64; do
+            echo "--- Signing plugins for ${arch} ---"
+            PLUGIN_BIN_DIR="$(pwd)/staging/${arch}" bash scripts/sign-plugin.sh
+          done
 
       - name: Create per-arch tarballs
         env:
@@ -389,6 +439,10 @@ jobs:
           path: pepa-plugins-*-linux-arm64.tar.gz
           retention-days: 7
 
+      - name: Cleanup signing key
+        if: always() && env.HAS_SIGNING_KEY == 'true' && env.PEPA_KEY_FILE
+        run: rm -f "$PEPA_KEY_FILE"
+
   # -- 4. Generate Checksums --
   checksums:
     name: Generate Checksums
@@ -427,6 +481,8 @@ jobs:
     name: Production Archive
     runs-on: ubuntu-latest
     needs: [docker]
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.PEPA_PLUGINS_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -448,6 +504,15 @@ jobs:
           POSTGRES_PASSWORD="$(openssl rand -hex 16)"
           REDIS_PASSWORD="$(openssl rand -hex 16)"
 
+          # Determine signature enforcement based on key availability
+          if [ "${HAS_SIGNING_KEY}" = "true" ]; then
+            SIG_VERIFY="true"
+            SIG_ENFORCE="true"
+          else
+            SIG_VERIFY="true"
+            SIG_ENFORCE="false"
+          fi
+
           # Generate .env
           cat << ENVEOF | sed 's/^          //' > "${PKG}/.env"
           # PEPA Production Environment — ${RELEASE_TAG}
@@ -466,8 +531,8 @@ jobs:
           CORS_ORIGINS=https://localhost,https://127.0.0.1
           VAULT_ALLOW_PRIVATE_IPS=false
           MOUNT_DOCK_SOCKET=/dev/null
-          PLUGIN_SIGNATURE_VERIFY=true
-          PLUGIN_SIGNATURE_ENFORCE=true
+          PLUGIN_SIGNATURE_VERIFY=${SIG_VERIFY}
+          PLUGIN_SIGNATURE_ENFORCE=${SIG_ENFORCE}
           # OTEL_ENABLED=false
           # OTEL_ENDPOINT=
           # OTEL_SERVICE_NAME=pepa

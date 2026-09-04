@@ -15,8 +15,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PLUGIN_BIN_DIR="${PROJECT_DIR}/plugins/bin"
-PLUGIN_BUILTIN_DIR="${PROJECT_DIR}/plugins/builtin"
+PLUGIN_BIN_DIR="${PLUGIN_BIN_DIR:-${PROJECT_DIR}/plugins/bin}"
+PLUGIN_BUILTIN_DIR="${PLUGIN_BUILTIN_DIR:-${PROJECT_DIR}/plugins/builtin}"
 PUBLIC_KEY="${PROJECT_DIR}/internal/plugin/signature/pepa-plugins-public.pem"
 
 # ── Functions ────────────────────────────────────────────────────
