@@ -352,7 +352,7 @@ func getAuthChallenge(repo *repository.RegistryRepo) (*authChallenge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("registry ping failed: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
 		return nil, nil // No token needed
@@ -448,7 +448,7 @@ func getScopedToken(challenge *authChallenge, repo *repository.RegistryRepo, sco
 	if err != nil {
 		return "", fmt.Errorf("token request failed: %w", err)
 	}
-	defer tokenResp.Body.Close()
+	defer func() { _ = tokenResp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(tokenResp.Body, maxBodyRead))
 	if tokenResp.StatusCode != http.StatusOK {
@@ -466,19 +466,6 @@ func getScopedToken(challenge *authChallenge, repo *repository.RegistryRepo, sco
 		return tokenData.Token, nil
 	}
 	return tokenData.AccessToken, nil
-}
-
-// getRegistryToken performs Docker Registry v2 authentication.
-// Returns a JWT token for accessing the registry, or empty string if no token needed.
-func getRegistryToken(repo *repository.RegistryRepo) (string, error) {
-	challenge, err := getAuthChallenge(repo)
-	if err != nil {
-		return "", err
-	}
-	if challenge == nil {
-		return "", nil // No token needed
-	}
-	return getScopedToken(challenge, repo, "")
 }
 
 // gitlabAPIBaseURL extracts the GitLab API base URL from the JWT realm.
@@ -526,7 +513,7 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyRead))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("gitlab projects returned %d: %s", resp.StatusCode, string(body)[:min(len(body), 200)])
 		}
 
@@ -534,11 +521,11 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 			ID int `json:"id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("parse projects: %w", err)
 		}
-		resp.Body.Close()
-
+		_ = resp.Body.Close()
+		
 		if len(projects) == 0 {
 			break
 		}
@@ -555,7 +542,7 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 				continue
 			}
 			if resp.StatusCode != http.StatusOK {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				continue
 			}
 
@@ -569,9 +556,9 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 					}
 				}
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
-
+		
 		if len(projects) < 100 {
 			break
 		}
@@ -651,7 +638,7 @@ func listRegistryImages(deps Dependencies) gin.HandlerFunc {
 							catalogOK = true
 						}
 					}
-					resp.Body.Close()
+					_ = resp.Body.Close()
 				}
 			}
 		} else if challengeErr == nil {
@@ -666,7 +653,7 @@ func listRegistryImages(deps Dependencies) gin.HandlerFunc {
 					repositories = catalog.Repositories
 					catalogOK = true
 				}
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 
@@ -758,7 +745,7 @@ func listRegistryImageTags(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("registry request failed: %v", err)})
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyRead))

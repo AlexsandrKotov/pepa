@@ -120,7 +120,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 				respondInternalError(c, cloneErr)
 				return
 			}
-			defer os.RemoveAll(clonedPath)
+			defer func() { _ = os.RemoveAll(clonedPath) }()
 			bp.ComposeFolderPath = clonedPath
 		}
 
@@ -217,7 +217,7 @@ func deployBlueprintToLocal(deps Dependencies) gin.HandlerFunc {
 				respondInternalError(c, fmt.Errorf("git clone failed: %w", cloneErr))
 				return
 			}
-			defer os.RemoveAll(clonedPath)
+			defer func() { _ = os.RemoveAll(clonedPath) }()
 			bp.ComposeFolderPath = clonedPath
 		}
 
@@ -376,7 +376,7 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 			}
 			// Clean up cloned temp directory immediately after use
 			if clonedDir != "" {
-				os.RemoveAll(clonedDir)
+				_ = os.RemoveAll(clonedDir)
 			}
 			if deployErr != nil {
 				svcCancel()
