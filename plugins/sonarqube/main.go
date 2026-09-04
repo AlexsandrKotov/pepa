@@ -109,18 +109,21 @@ func validateSonarQubeURL(rawURL string) error {
 	}
 
 	// Block cloud metadata IP explicitly (169.254.169.254)
-	ips, err := net.LookupIP(host)
+	// Use a timeout to prevent slow DNS lookups from blocking plugin operations
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resolver := net.Resolver{}
+	ips, err := resolver.LookupIPAddr(ctx, host)
 	if err == nil {
 		for _, ip := range ips {
-			if ip == nil {
-				continue
-			}
 			// Block link-local metadata endpoint (AWS/GCP/Azure metadata)
-			if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			if ip.IP.IsLinkLocalUnicast() || ip.IP.IsLinkLocalMulticast() {
 				return fmt.Errorf("URL must not target link-local or metadata endpoints")
 			}
 		}
 	}
+	// DNS lookup failure is not fatal — the URL may still work if the hostname
+	// resolves at request time. Only block if we positively detect a metadata IP.
 	return nil
 }
 

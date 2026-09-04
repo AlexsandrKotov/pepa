@@ -386,7 +386,7 @@ type DeploymentAuditListResponse struct {
 // ============================================================
 
 type PreDeployGateRequest struct {
-	ServiceID   uuid.UUID       `json:"service_id" binding:"required"`
+	ServiceID   *uuid.UUID      `json:"service_id,omitempty"`
 	Environment string          `json:"environment" binding:"required"`
 	ImageTag    string          `json:"image_tag,omitempty"`
 	ClusterID   *uuid.UUID      `json:"cluster_id,omitempty"`

@@ -1,8 +1,10 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -1018,7 +1020,7 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 	result := models.PreDeployGateResult{Allowed: true}
 
 	// 1. Check deployment windows
-	windowResult, err := h.repo.CheckDeploymentAllowed(c.Request.Context(), tenantID, req.Environment, &req.ServiceID, userRoles)
+	windowResult, err := h.repo.CheckDeploymentAllowed(c.Request.Context(), tenantID, req.Environment, req.ServiceID, userRoles)
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -1030,7 +1032,7 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 	}
 
 	// 2. Check compliance policies
-	policies, err := h.repo.GetApplicablePolicies(c.Request.Context(), tenantID, req.Environment, &req.ServiceID)
+	policies, err := h.repo.GetApplicablePolicies(c.Request.Context(), tenantID, req.Environment, req.ServiceID)
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -1038,8 +1040,8 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 
 	complianceResult := &models.ComplianceCheckResult{Passed: true}
 	for _, policy := range policies {
-		evaluation := h.evaluatePolicy(policy, req.Config)
-		evaluation.ServiceID = &req.ServiceID
+		evaluation := h.evaluatePolicy(c.Request.Context(), policy, req.Config, req.ImageTag)
+		evaluation.ServiceID = req.ServiceID
 		evaluation.TenantID = tenantID
 
 		// Persist evaluation to DB for audit history
@@ -1087,7 +1089,7 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 	userID := auth.GetUserID(c)
 	auditLog := &models.DeploymentAuditLog{
 		TenantID:            tenantID,
-		ServiceID:           &req.ServiceID,
+		ServiceID:           req.ServiceID,
 		Action:              "pre_deploy_gate",
 		ActorType:           "user",
 		ActorID:             userID,
@@ -1107,7 +1109,7 @@ func (h *DevOpsHandlers) PreDeployGate(c *gin.Context) {
 }
 
 // evaluatePolicy evaluates a single compliance policy against config.
-func (h *DevOpsHandlers) evaluatePolicy(policy models.CompliancePolicy, config json.RawMessage) *models.ComplianceEvaluation {
+func (h *DevOpsHandlers) evaluatePolicy(ctx context.Context, policy models.CompliancePolicy, config json.RawMessage, imageTag string) *models.ComplianceEvaluation {
 	evaluation := &models.ComplianceEvaluation{
 		PolicyID: policy.ID,
 		TenantID: policy.TenantID,
@@ -1166,12 +1168,63 @@ func (h *DevOpsHandlers) evaluatePolicy(policy models.CompliancePolicy, config j
 		}
 	}
 
-	// Security scan policy
-	if policy.PolicyType == "security_scan" {
-		// Check if a scan has been run recently
-		if required, ok := spec["require_recent_scan"].(bool); ok && required {
-			// This would check scan_runs table — simplified for now
-			evaluation.Result = "pass" // Placeholder
+	// Security scan policy — check for blocking findings.
+	// Fetch findings once and reuse for both require_recent_scan and max_critical checks.
+	if policy.PolicyType == "security_scan" && imageTag != "" {
+		requireRecentScan, _ := spec["require_recent_scan"].(bool)
+		maxCriticalRaw, hasMaxCritical := spec["max_critical"].(float64)
+
+		if requireRecentScan || hasMaxCritical {
+			findings, err := h.repo.GetBlockingSecurityFindings(ctx, policy.TenantID, imageTag)
+			if err != nil {
+				slog.Warn("failed to fetch blocking security findings, skipping policy check",
+					"policy_id", policy.ID, "image_tag", imageTag, "error", err)
+				// Mark as skip so the gate doesn't silently pass
+				evaluation.Result = "skip"
+				evaluation.Violations = mustJSONRaw([]models.ComplianceViolation{{
+					Field:    "security_scan",
+					Message:  "Unable to verify security scan results",
+					Severity: "warning",
+				}})
+				return evaluation
+			}
+
+			var violations []models.ComplianceViolation
+
+			// Count critical findings once
+			criticalCount := 0
+			for _, f := range findings {
+				if f.Severity == "critical" {
+					criticalCount++
+				}
+			}
+
+			// Check require_recent_scan: block if any critical findings exist
+			if requireRecentScan && criticalCount > 0 {
+				violations = append(violations, models.ComplianceViolation{
+					Field:    "security_scan",
+					Message:  fmt.Sprintf("%d open critical vulnerabilities found for %s", criticalCount, imageTag),
+					Expected: "No critical vulnerabilities",
+					Actual:   fmt.Sprintf("%d critical findings", criticalCount),
+					Severity: policy.Severity,
+				})
+			}
+
+			// Check max_critical threshold
+			if hasMaxCritical && float64(criticalCount) > maxCriticalRaw {
+				violations = append(violations, models.ComplianceViolation{
+					Field:    "security_scan.max_critical",
+					Message:  fmt.Sprintf("Too many critical vulnerabilities (%d > %.0f)", criticalCount, maxCriticalRaw),
+					Expected: fmt.Sprintf("At most %.0f critical", maxCriticalRaw),
+					Actual:   fmt.Sprintf("%d critical findings", criticalCount),
+					Severity: policy.Severity,
+				})
+			}
+
+			if len(violations) > 0 {
+				evaluation.Result = "fail"
+				evaluation.Violations = mustJSONRaw(violations)
+			}
 		}
 	}
 

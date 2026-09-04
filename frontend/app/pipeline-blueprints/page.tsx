@@ -7,7 +7,7 @@ import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
 import GearIcon from '@/components/GearIcon';
 import GitRepoPicker from '@/components/GitRepoPicker';
-import { helmRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup } from '@/lib/api';
+import { helmRepositories, registryRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup, type RegistryRepository } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
 
 const categoryIcons: Record<string, React.ReactNode> = {
@@ -20,6 +20,9 @@ export default function PipelineBlueprintsPage() {
   const [blueprints, setBlueprints] = useState<ServiceBlueprint[]>([]);
   const [groups, setGroups] = useState<BlueprintGroup[]>([]);
   const [helmRepos, setHelmRepos] = useState<HelmRepository[]>([]);
+  const [registryRepos, setRegistryRepos] = useState<RegistryRepository[]>([]);
+  const [registryImages, setRegistryImages] = useState<Record<string, string[]>>({});
+  const [loadingRegistryImages, setLoadingRegistryImages] = useState<Record<string, boolean>>({});
   const [repoCharts, setRepoCharts] = useState<HelmChart[]>([]);
   const [chartVersions, setChartVersions] = useState<HelmChartVersion[]>([]);
   const [loadingCharts, setLoadingCharts] = useState(false);
@@ -37,7 +40,10 @@ export default function PipelineBlueprintsPage() {
     ports: '8080', category: 'general',
     group_ids: [] as string[],
     compose_yaml: '',
+    compose_folder_path: '',
+    compose_git_url: '',
   });
+  const [composeSource, setComposeSource] = useState<'yaml' | 'folder' | 'git'>('yaml');
   const [gitInputMode, setGitInputMode] = useState<'picker' | 'manual'>('picker');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -49,6 +55,7 @@ export default function PipelineBlueprintsPage() {
   useEffect(() => {
     blueprintsAPI.list({ type: 'user' }).then(res => setBlueprints(res.blueprints || [])).catch(() => {});
     helmRepositories.list().then(res => setHelmRepos(res.helm_repositories || [])).catch(() => {});
+        registryRepositories.list().then(res => setRegistryRepos(res.registry_repositories || [])).catch(() => {});
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
   }, []);
 
@@ -71,8 +78,9 @@ export default function PipelineBlueprintsPage() {
       name: '', description: '', source_type: 'container',
       helm_repo_id: '', image: '', chart_url: '', chart_name: '', chart_version: '', chart_path: '',
       namespace: 'default', values_yaml: '', cpu: '100m', memory: '128Mi', replicas: 1, ports: '8080', category: 'general',
-      group_ids: [], compose_yaml: '',
+      group_ids: [], compose_yaml: '', compose_folder_path: '', compose_git_url: '',
     });
+    setComposeSource('yaml');
     setRepoCharts([]);
     setChartVersions([]);
     setShowForm(true);
@@ -88,7 +96,10 @@ export default function PipelineBlueprintsPage() {
       ports: bp.ports.join(', '), category: bp.category,
       group_ids: bp.group_ids || [],
       compose_yaml: bp.compose_yaml || '',
+      compose_folder_path: bp.compose_folder_path || '',
+      compose_git_url: bp.compose_git_url || '',
     });
+    setComposeSource(bp.compose_git_url ? 'git' : bp.compose_folder_path ? 'folder' : 'yaml');
     setRepoCharts([]);
     setChartVersions([]);
     // Load charts if editing a blueprint with a helm repo
@@ -117,7 +128,9 @@ export default function PipelineBlueprintsPage() {
     // Validate: container needs image, helm needs chart_url or helm_repo_id, docker_compose needs compose_yaml
     if (form.source_type === 'container' && !form.image.trim()) return;
     if (form.source_type !== 'container' && form.source_type !== 'docker_compose' && !form.chart_url.trim() && !form.helm_repo_id) return;
-    if (form.source_type === 'docker_compose' && !form.compose_yaml.trim()) return;
+    if (form.source_type === 'docker_compose' && composeSource === 'yaml' && !form.compose_yaml.trim()) return;
+    if (form.source_type === 'docker_compose' && composeSource === 'folder' && !form.compose_folder_path.trim()) return;
+    if (form.source_type === 'docker_compose' && composeSource === 'git' && !form.compose_git_url.trim()) return;
     const ports = form.ports.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
 
     // If helm_repo_id is set, resolve the chart_url from the repo
@@ -142,7 +155,9 @@ export default function PipelineBlueprintsPage() {
       cpu: form.cpu, memory: form.memory, replicas: form.replicas,
       ports, category: form.category,
       group_ids: form.group_ids,
-      compose_yaml: form.compose_yaml,
+      compose_yaml: composeSource === 'yaml' ? form.compose_yaml : '',
+      compose_folder_path: composeSource === 'folder' ? form.compose_folder_path.trim() : '',
+      compose_git_url: composeSource === 'git' ? form.compose_git_url.trim() : '',
     };
 
     try {
@@ -300,7 +315,13 @@ export default function PipelineBlueprintsPage() {
                 {bp.source_type === 'docker_compose' ? (
                   <div className="flex items-center gap-2 text-[11px]">
                     <span className="text-[var(--text-tertiary)] w-16">Compose:</span>
-                    <span className="text-cyan-500 font-medium">{bp.compose_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
+                    {bp.compose_git_url ? (
+                      <span className="font-mono text-cyan-500 truncate" title={bp.compose_git_url}>🔀 {bp.compose_git_url}</span>
+                    ) : bp.compose_folder_path ? (
+                      <span className="font-mono text-cyan-500 truncate" title={bp.compose_folder_path}>📂 {bp.compose_folder_path}</span>
+                    ) : (
+                      <span className="text-cyan-500 font-medium">{bp.compose_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
+                    )}
                   </div>
                 ) : bp.source_type === 'container' ? (
                   <div className="flex items-center gap-2 text-[11px]">
@@ -448,9 +469,59 @@ export default function PipelineBlueprintsPage() {
 
               {/* === Container: Docker image === */}
               {form.source_type === 'container' && (
-                <div>
-                  <label className="label">Docker Image *</label>
-                  <input value={form.image} onChange={e => setForm({ ...form, image: e.target.value })} className="input font-mono text-[12px]" placeholder="registry.example.com/nginx:1.25" />
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">
+                      Docker Image *
+                      {registryRepos.length > 0 && (
+                        <span className="text-[var(--text-tertiary)] font-normal ml-2">
+                          (or pick from <Link href="/registry-repositories" className="text-[var(--accent)] hover:underline">Registry Repos</Link>)
+                        </span>
+                      )}
+                    </label>
+                    <input value={form.image} onChange={e => setForm({ ...form, image: e.target.value })} className="input font-mono text-[12px]" placeholder="registry.example.com/nginx:1.25" />
+                  </div>
+                  {registryRepos.length > 0 && (
+                    <div className="space-y-2">
+                      <label className="label text-[11px]">Quick-pick from registry</label>
+                      {registryRepos.map(repo => (
+                        <div key={repo.id} className="space-y-1">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (registryImages[repo.id]) return; // already loaded
+                              setLoadingRegistryImages(prev => ({ ...prev, [repo.id]: true }));
+                              try {
+                                const data = await registryRepositories.listImages(repo.id);
+                                setRegistryImages(prev => ({ ...prev, [repo.id]: data.images || [] }));
+                              } catch { /* ignore */ }
+                              setLoadingRegistryImages(prev => ({ ...prev, [repo.id]: false }));
+                            }}
+                            className="text-[11px] text-[var(--accent)] hover:underline"
+                          >
+                            {loadingRegistryImages[repo.id] ? 'Loading...' : registryImages[repo.id] ? `${repo.name} (${registryImages[repo.id].length} images)` : `Load images from ${repo.name}`}
+                          </button>
+                          {registryImages[repo.id] && registryImages[repo.id].length > 0 && (
+                            <select
+                              onChange={(e) => {
+                                if (!e.target.value) return;
+                                const prefix = repo.url.replace(/^https?:\/\//, '');
+                                setForm({ ...form, image: `${prefix}/${e.target.value}` });
+                                e.target.value = '';
+                              }}
+                              className="input text-[12px]"
+                              defaultValue=""
+                            >
+                              <option value="" disabled>Select image...</option>
+                              {registryImages[repo.id].map(img => (
+                                <option key={img} value={img}>{img}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -809,37 +880,119 @@ export default function PipelineBlueprintsPage() {
                 </div>
               )}
 
-              {/* === Docker Compose: compose YAML === */}
+              {/* === Docker Compose: compose YAML, Local Folder, or Git Repo === */}
               {form.source_type === 'docker_compose' && (
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="label mb-0">docker-compose.yml *</label>
-                    <label className="text-[11px] text-[var(--accent)] hover:underline cursor-pointer inline-flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                      Upload .yaml
-                      <input
-                        type="file"
-                        accept=".yaml,.yml"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          const text = await file.text();
-                          setForm({ ...form, compose_yaml: text });
-                        }}
-                      />
-                    </label>
+                <div className="space-y-3">
+                  {/* Compose Source selector */}
+                  <div>
+                    <label className="label">Compose Source</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setComposeSource('yaml')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeSource === 'yaml'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">📝</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Paste YAML</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">docker-compose.yml</p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setComposeSource('folder')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeSource === 'folder'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">📂</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Local Folder</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Server path</p>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setComposeSource('git')}
+                        className={`flex items-center gap-2.5 px-4 py-3 rounded-lg border text-left transition-all ${
+                          composeSource === 'git'
+                            ? 'border-[var(--accent)] bg-[var(--accent-subtle)] ring-1 ring-[var(--accent)]'
+                            : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                        }`}
+                      >
+                        <span className="text-lg">🔀</span>
+                        <div>
+                          <p className="text-[12px] font-medium text-[var(--text-primary)]">Git Repo</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">Clone & deploy</p>
+                        </div>
+                      </button>
+                    </div>
                   </div>
-                  <textarea
-                    value={form.compose_yaml}
-                    onChange={e => setForm({ ...form, compose_yaml: e.target.value })}
-                    className="input font-mono text-[12px] w-full"
-                    rows={10}
-                    spellCheck={false}
-                    placeholder={`version: '3.8'\nservices:\n  web:\n    image: nginx:latest\n    ports:\n      - "80:80"\n    environment:\n      - ENV=production`}
-                  />
+
+                  {composeSource === 'folder' ? (
+                    <div>
+                      <label className="label">Folder Path on Server *</label>
+                      <input
+                        value={form.compose_folder_path}
+                        onChange={e => setForm({ ...form, compose_folder_path: e.target.value })}
+                        className="input font-mono text-[12px]"
+                        placeholder="/data/compose-projects/my-app"
+                      />
+                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                        Folder containing docker-compose.yml. Must be accessible from the PEPA api-server container.
+                      </p>
+                    </div>
+                  ) : composeSource === 'git' ? (
+                    <div>
+                      <label className="label">Git Repository URL *</label>
+                      <input
+                        value={form.compose_git_url}
+                        onChange={e => setForm({ ...form, compose_git_url: e.target.value })}
+                        className="input font-mono text-[12px]"
+                        placeholder="https://github.com/org/repo.git"
+                      />
+                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                        The repo will be cloned and deployed. Must contain a docker-compose.yml in the root.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="label mb-0">docker-compose.yml *</label>
+                        <label className="text-[11px] text-[var(--accent)] hover:underline cursor-pointer inline-flex items-center gap-1">
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                          </svg>
+                          Upload .yaml
+                          <input
+                            type="file"
+                            accept=".yaml,.yml"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const text = await file.text();
+                              setForm({ ...form, compose_yaml: text });
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <textarea
+                        value={form.compose_yaml}
+                        onChange={e => setForm({ ...form, compose_yaml: e.target.value })}
+                        className="input font-mono text-[12px] w-full"
+                        rows={10}
+                        spellCheck={false}
+                        placeholder={`version: '3.8'\nservices:\n  web:\n    image: nginx:latest\n    ports:\n      - "80:80"\n    environment:\n      - ENV=production`}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -946,7 +1099,7 @@ export default function PipelineBlueprintsPage() {
               <button onClick={() => setShowForm(false)} className="btn btn-secondary">Cancel</button>
               <button
                 onClick={handleSave}
-                disabled={!form.name.trim() || (form.source_type === 'container' ? !form.image.trim() : form.source_type === 'docker_compose' ? !form.compose_yaml.trim() : (!form.chart_url.trim() && !form.helm_repo_id))}
+                disabled={!form.name.trim() || (form.source_type === 'container' ? !form.image.trim() : form.source_type === 'docker_compose' ? (composeSource === 'yaml' ? !form.compose_yaml.trim() : composeSource === 'folder' ? !form.compose_folder_path.trim() : !form.compose_git_url.trim()) : (!form.chart_url.trim() && !form.helm_repo_id))}
                 className="btn btn-primary"
               >
                 {editing ? 'Save Changes' : 'Create Blueprint'}

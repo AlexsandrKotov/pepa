@@ -326,6 +326,26 @@ func (r *Registry) List() []string {
 	return types
 }
 
+// Stoppable is an optional interface that providers with background
+// goroutines can implement to support graceful shutdown.
+type Stoppable interface {
+	Stop()
+}
+
+// Close stops all registered providers that implement the Stoppable interface.
+// This ensures background goroutines are terminated during graceful shutdown.
+func (r *Registry) Close() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	seen := make(map[Stoppable]bool)
+	for _, p := range r.providers {
+		if s, ok := p.(Stoppable); ok && !seen[s] {
+			s.Stop()
+			seen[s] = true
+		}
+	}
+}
+
 // randomRunID generates a short unique identifier for tracking pipeline runs.
 func randomRunID() string {
 	b := make([]byte, 6)

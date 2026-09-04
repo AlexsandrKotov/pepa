@@ -92,7 +92,7 @@ func createScanTarget(deps Dependencies) gin.HandlerFunc {
 		// Validate target_type
 		validTargetTypes := map[string]bool{
 			"image": true, "git_repo": true, "filesystem": true,
-			"container": true, "service": true, "sonarqube_project": true,
+			"container": true, "service": true, "sonarqube_project": true, "registry": true,
 		}
 		if !validTargetTypes[input.TargetType] {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target_type"})
@@ -187,9 +187,24 @@ func updateScanTarget(deps Dependencies) gin.HandlerFunc {
 			existing.Name = input.Name
 		}
 		if input.ScannerType != "" {
+			// Validate scanner_type (same validation as create)
+			validScanners := map[string]bool{"trivy": true, "sonarqube": true, "both": true}
+			if !validScanners[input.ScannerType] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "scanner_type must be 'trivy', 'sonarqube', or 'both'"})
+				return
+			}
 			existing.ScannerType = input.ScannerType
 		}
 		if input.TargetType != "" {
+			// Validate target_type (same validation as create)
+			validTargetTypes := map[string]bool{
+				"image": true, "git_repo": true, "filesystem": true,
+				"container": true, "service": true, "sonarqube_project": true, "registry": true,
+			}
+			if !validTargetTypes[input.TargetType] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target_type"})
+				return
+			}
 			existing.TargetType = input.TargetType
 		}
 		if input.TargetRef != "" {
@@ -248,7 +263,8 @@ func triggerScan(deps Dependencies) gin.HandlerFunc {
 
 		// Detach from request context — the request context is cancelled
 		// when the response is sent, which would kill the scan immediately.
-		bgCtx := context.Background()
+		// Use WithoutCancel (not Background) to preserve tracing/tenant metadata.
+		bgCtx := context.WithoutCancel(c.Request.Context())
 		go func() {
 			_, err := deps.Scanner.RunScan(bgCtx, id, tenantID, "manual")
 			if err != nil {
@@ -527,7 +543,8 @@ func scanAllTargets(deps Dependencies) gin.HandlerFunc {
 		tenantID := auth.GetTenantID(c)
 
 		// Detach from request context to avoid cancellation when response is sent.
-		bgCtx := context.Background()
+		// Use WithoutCancel (not Background) to preserve tracing/tenant metadata.
+		bgCtx := context.WithoutCancel(c.Request.Context())
 		go func() {
 			_, err := deps.Scanner.ScanAllEnabled(bgCtx, tenantID, "manual")
 			if err != nil {

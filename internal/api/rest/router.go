@@ -50,6 +50,7 @@ type Repositories struct {
 	EnvVariable     *repository.EnvironmentVariableRepository
 	DockerHost      *repository.DockerHostRepository
 	Helm            *repository.HelmRepository
+	Registry        *repository.RegistryRepository
 	PipelineSource  *repository.PipelineSourceRepository
 	PipelinePreset  *repository.PipelinePresetRepository
 	PipelineRun     *repository.PipelineRunRepository
@@ -251,6 +252,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerDockerHostRoutes(v1, deps)
 		registerDockerServiceRoutes(v1, deps)
 		registerHelmRepoRoutes(v1, deps)
+		registerRegistryRepoRoutes(v1, deps)
 		registerPipelineSourceRoutes(v1, deps)
 		registerPipelineRunRoutes(v1, deps)
 		registerPipelinePresetRoutes(v1, deps)

@@ -57,6 +57,7 @@ type Components struct {
 	EnvVariableRepo     *repository.EnvironmentVariableRepository
 	DockerHostRepo      *repository.DockerHostRepository
 	HelmRepo            *repository.HelmRepository
+	RegistryRepo        *repository.RegistryRepository
 	PipelineSourceRepo  *repository.PipelineSourceRepository
 	PipelinePresetRepo  *repository.PipelinePresetRepository
 	PipelineRunRepo     *repository.PipelineRunRepository
@@ -312,6 +313,7 @@ func Bootstrap() (*Components, error) {
 		EnvVariableRepo:     repository.NewEnvironmentVariableRepository(db),
 		DockerHostRepo:      repository.NewDockerHostRepository(db),
 		HelmRepo:            repository.NewHelmRepository(db),
+		RegistryRepo:        repository.NewRegistryRepository(db),
 		PipelineSourceRepo:  repository.NewPipelineSourceRepository(db),
 		PipelinePresetRepo:  repository.NewPipelinePresetRepository(db),
 		PipelineRunRepo:     repository.NewPipelineRunRepository(db),
@@ -662,6 +664,9 @@ func (c *Components) Shutdown(ctx context.Context) {
 
 	if c.RAGWatcher != nil {
 		c.RAGWatcher.Stop()
+	}
+	if c.PipelineRegistry != nil {
+		c.PipelineRegistry.Close()
 	}
 	c.EventBus.Stop()
 	c.PluginMgr.Shutdown(ctx)

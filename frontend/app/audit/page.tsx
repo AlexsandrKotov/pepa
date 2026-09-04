@@ -43,6 +43,10 @@ const ACTION_COLORS: Record<string, { bg: string; text: string; icon: string }> 
   api_update: { bg: 'bg-blue-500/10', text: 'text-blue-500', icon: '~' },
   api_delete: { bg: 'bg-red-500/10', text: 'text-red-500', icon: '-' },
   api_patch: { bg: 'bg-blue-500/10', text: 'text-blue-500', icon: '~' },
+  // DevOps/DevSecOps actions
+  check: { bg: 'bg-blue-500/10', text: 'text-blue-500', icon: '>' },
+  block: { bg: 'bg-red-500/10', text: 'text-red-500', icon: 'x' },
+  allow: { bg: 'bg-emerald-500/10', text: 'text-emerald-600', icon: '>' },
 };
 
 function getActionStyle(action: string) {
@@ -61,8 +65,8 @@ function formatTime(dateStr: string) {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
-const ALL_ACTIONS = ['view', 'create', 'update', 'delete', 'login', 'startup', 'shutdown', 'deploy', 'trigger', 'install', 'uninstall', 'enable', 'disable', 'sync', 'write', 'execute', 'promote', 'rollback', 'cancel', 'restart', 'scale', 'suspend', 'resume', 'reconcile', 'grant', 'assign', 'revoke', 'configure', 'evaluate', 'api_create', 'api_update', 'api_delete', 'api_patch'];
-const ALL_RESOURCES = ['entity', 'workflow', 'plugin', 'scorecard', 'cluster', 'deployment', 'connection', 'service', 'setting', 'environment', 'docker_host', 'docker_service', 'helm_repository', 'pipeline_source', 'pipeline_run', 'vault', 'team', 'role', 'user', 'credential', 'system', 'discovery', 'marketplace', 'gitops', 'jira', 'k8s_deployment', 'fluxcd_helmrelease', 'workspace', 'blueprint', 'blueprint_group', 'organization', 's3', 'virtualization', 'rbac', 'auth', 'audit', 'observability', 'storage', 'ai'];
+const ALL_ACTIONS = ['view', 'create', 'update', 'delete', 'login', 'startup', 'shutdown', 'deploy', 'trigger', 'install', 'uninstall', 'enable', 'disable', 'sync', 'write', 'execute', 'promote', 'rollback', 'cancel', 'restart', 'scale', 'suspend', 'resume', 'reconcile', 'grant', 'assign', 'revoke', 'configure', 'evaluate', 'rotate', 'check', 'block', 'allow', 'api_create', 'api_update', 'api_delete', 'api_patch'];
+const ALL_RESOURCES = ['entity', 'workflow', 'plugin', 'scorecard', 'cluster', 'deployment', 'connection', 'service', 'setting', 'environment', 'docker_host', 'docker_service', 'helm_repository', 'pipeline_source', 'pipeline_run', 'vault', 'team', 'role', 'user', 'credential', 'system', 'discovery', 'marketplace', 'gitops', 'jira', 'k8s_deployment', 'fluxcd_helmrelease', 'workspace', 'blueprint', 'blueprint_group', 'organization', 's3', 'virtualization', 'rbac', 'auth', 'audit', 'observability', 'storage', 'ai', 'deployment_window', 'compliance_policy', 'security_finding', 'secret_rotation', 'batch_operation', 'pre_deploy_gate'];
 
 // Map API paths to human-readable descriptions
 function describePath(method: string, path: string, entityType: string): string {
@@ -91,6 +95,10 @@ function describePath(method: string, path: string, entityType: string): string 
     'rbac': 'RBAC', 'ai': 'AI', 'ssh-hosts': 'SSH Hosts',
     'ssh-terminal': 'SSH Terminal', 'storage': 'Storage',
     'catalog': 'Service Catalog', 'organization': 'Organization',
+    'deployment-windows': 'Deployment Windows', 'compliance-policies': 'Compliance Policies',
+    'security-findings': 'Security Findings', 'secret-rotations': 'Secret Rotations',
+    'batch-operations': 'Batch Operations', 'pre-deploy-gate': 'Pre-Deploy Gate',
+    'deployment-audit': 'Deployment Audit',
   };
 
   const friendly = friendlyNames[resource] || resource.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());

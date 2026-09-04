@@ -336,6 +336,7 @@ func pathSegmentToType(segment string) string {
 		"docker-hosts":      "docker_host",
 		"docker-services":   "docker_service",
 		"helm-repositories": "helm_repository",
+		"registry-repositories": "registry_repository",
 		"pipeline-sources":  "pipeline_source",
 		"pipeline-runs":     "pipeline_run",
 		"vault":             "vault",

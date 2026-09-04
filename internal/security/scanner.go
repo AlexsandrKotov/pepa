@@ -20,6 +20,18 @@ import (
 // to prevent resource exhaustion on the host.
 const maxConcurrentScans = 3
 
+// validSeverities is the whitelist of allowed Trivy severity values.
+var validSeverities = map[string]bool{
+	"UNKNOWN": true, "LOW": true, "MEDIUM": true, "HIGH": true, "CRITICAL": true,
+}
+
+// validScanConfigKeys is the whitelist of allowed scan_config keys per scanner type.
+var validScanConfigKeys = map[string]map[string]bool{
+	"trivy":     {"scan_type": true, "severity": true, "ignore_unfixed": true},
+	"sonarqube": {"url": true, "token": true, "project_key": true, "branch": true},
+	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "url": true, "token": true, "project_key": true, "branch": true},
+}
+
 // Scanner orchestrates security scans via Trivy and SonarQube.
 type Scanner struct {
 	pluginMgr    *engine.Manager
@@ -53,6 +65,15 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 	target, err := s.repo.GetScanTarget(ctx, targetID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("load target: %w", err)
+	}
+
+	// Validate scan_config keys against the whitelist for this scanner type
+	if allowedKeys, ok := validScanConfigKeys[target.ScannerType]; ok {
+		for key := range target.ScanConfig {
+			if !allowedKeys[key] {
+				return nil, fmt.Errorf("unknown scan_config key %q for scanner type %q", key, target.ScannerType)
+			}
+		}
 	}
 
 	// Create scan run record
@@ -164,6 +185,14 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 
 	severity := "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
 	if sev, ok := target.ScanConfig["severity"].(string); ok && sev != "" {
+		// Validate each severity value against the whitelist
+		parts := strings.Split(sev, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(strings.ToUpper(p))
+			if !validSeverities[p] {
+				return nil, nil, fmt.Errorf("invalid severity %q (must be one of: UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL)", p)
+			}
+		}
 		severity = sev
 	}
 

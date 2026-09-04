@@ -122,6 +122,12 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
           { href: '/gitops/drift', label: 'Drift Detection', permission: 'gitops' },
         ],
       },
+      {
+        label: 'Security',
+        items: [
+          { href: '/security', label: 'Security Scanning', permission: 'security' },
+        ],
+      },
     ],
   },
   {
@@ -132,6 +138,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/docker-hosts', label: 'Docker Hosts', permission: 'docker', adminOnly: true },
       { href: '/docker-services', label: 'Containers', permission: 'docker' },
       { href: '/helm-repositories', label: 'Helm Repos', permission: 'helm', adminOnly: true },
+      { href: '/registry-repositories', label: 'Registry Repos', permission: 'registry', adminOnly: true },
     ],
   },
   {

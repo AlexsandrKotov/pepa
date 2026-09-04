@@ -44,6 +44,8 @@ type serviceBlueprintRow struct {
 	Category         string            `json:"category"`
 	GroupIDs         []string          `json:"group_ids"`
 	ComposeYAML      string            `json:"compose_yaml"`
+	ComposeFolderPath string           `json:"compose_folder_path"`
+	ComposeGitURL    string            `json:"compose_git_url"`
 	CreatedAt        time.Time         `json:"created_at"`
 	// Template metadata (system blueprints)
 	Slug             string            `json:"slug,omitempty"`
@@ -76,7 +78,7 @@ func selectBlueprintCols(alias ...string) string {
 	       COALESCE(` + p + `values_yaml,''), COALESCE(` + p + `cpu,'100m'),
 	       COALESCE(` + p + `memory,'128Mi'), COALESCE(` + p + `replicas,1),
 	       COALESCE(` + p + `ports,'{}'), COALESCE(` + p + `category,'general'),
-	       COALESCE(` + p + `compose_yaml,''),
+	       COALESCE(` + p + `compose_yaml,''), COALESCE(` + p + `compose_folder_path,''), COALESCE(` + p + `compose_git_url,''),
 	       ` + p + `created_at,
 	       COALESCE(` + p + `slug,''), COALESCE(` + p + `tenant_id::text,''),
 	       COALESCE(` + p + `icon,''), COALESCE(` + p + `language,''),
@@ -97,7 +99,7 @@ func scanBlueprintRow(rows interface{ Scan(...interface{}) error }) (*serviceBlu
 		&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 		&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 		&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-		&bp.ComposeYAML,
+		&bp.ComposeYAML, &bp.ComposeFolderPath, &bp.ComposeGitURL,
 		&bp.CreatedAt,
 		&bp.Slug, &bp.TenantID,
 		&bp.Icon, &bp.Language, &bp.Framework, &bp.Tags,
@@ -217,7 +219,9 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			Ports         []int    `json:"ports"`
 			Category      string   `json:"category"`
 			GroupIDs      []string `json:"group_ids"`
-			ComposeYAML   string   `json:"compose_yaml"`
+			ComposeYAML      string   `json:"compose_yaml"`
+			ComposeFolderPath string  `json:"compose_folder_path"`
+			ComposeGitURL    string   `json:"compose_git_url"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -247,14 +251,14 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			INSERT INTO service_blueprints
 				(name, description, source_type, helm_repo_id, image, chart_url,
 				 chart_name, chart_version, chart_path, namespace, values_yaml,
-				 cpu, memory, replicas, ports, category, compose_yaml, created_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+				 cpu, memory, replicas, ports, category, compose_yaml, compose_folder_path, compose_git_url, created_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 			RETURNING `+selectBlueprintCols(),
 			req.Name, req.Description, req.SourceType, req.HelmRepoID,
 			req.Image, req.ChartURL, req.ChartName, req.ChartVersion,
 			req.ChartPath, req.Namespace, req.ValuesYAML,
 			req.CPU, req.Memory, req.Replicas, req.Ports,
-			req.Category, req.ComposeYAML, userID,
+			req.Category, req.ComposeYAML, req.ComposeFolderPath, req.ComposeGitURL, userID,
 		)
 		bp, err := scanBlueprintRow(row)
 		if err != nil {
@@ -342,7 +346,9 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			Ports         []int    `json:"ports"`
 			Category      string   `json:"category"`
 			GroupIDs      []string `json:"group_ids"`
-			ComposeYAML   string   `json:"compose_yaml"`
+			ComposeYAML      string   `json:"compose_yaml"`
+			ComposeFolderPath string  `json:"compose_folder_path"`
+			ComposeGitURL    string   `json:"compose_git_url"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -383,14 +389,14 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 				image=$6, chart_url=$7, chart_name=$8, chart_version=$9,
 				chart_path=$10, namespace=$11, values_yaml=$12,
 				cpu=$13, memory=$14, replicas=$15, ports=$16,
-				category=$17, compose_yaml=$18, updated_at=NOW()
+				category=$17, compose_yaml=$18, compose_folder_path=$19, compose_git_url=$20, updated_at=NOW()
 			WHERE id=$1
 			RETURNING `+selectBlueprintCols(),
 			id, req.Name, req.Description, req.SourceType, req.HelmRepoID,
 			req.Image, req.ChartURL, req.ChartName, req.ChartVersion,
 			req.ChartPath, req.Namespace, req.ValuesYAML,
 			req.CPU, req.Memory, req.Replicas, req.Ports,
-			req.Category, req.ComposeYAML,
+			req.Category, req.ComposeYAML, req.ComposeFolderPath, req.ComposeGitURL,
 		)
 		bp, scanErr := scanBlueprintRow(row)
 		if scanErr != nil {
@@ -480,17 +486,17 @@ func forkServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			INSERT INTO service_blueprints
 				(name, description, source_type, helm_repo_id, image, chart_url,
 				 chart_name, chart_version, chart_path, namespace, values_yaml,
-				 cpu, memory, replicas, ports, category, compose_yaml,
+				 cpu, memory, replicas, ports, category, compose_yaml, compose_folder_path, compose_git_url,
 				 slug, icon, language, framework, tags, is_system,
 				 helm_chart, default_values, resource_defaults, created_by)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-				 $18,$19,$20,$21,$22,FALSE,$23,$24,$25,$26)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
+				 $20,$21,$22,$23,$24,FALSE,$25,$26,$27,$28)
 			RETURNING `+selectBlueprintCols(),
 			forkName, src.Description, src.SourceType, src.HelmRepoID,
 			src.Image, src.ChartURL, src.ChartName, src.ChartVersion,
 			src.ChartPath, src.Namespace, src.ValuesYAML,
 			src.CPU, src.Memory, src.Replicas, src.Ports,
-			src.Category, src.ComposeYAML,
+			src.Category, src.ComposeYAML, src.ComposeFolderPath, src.ComposeGitURL,
 			"", src.Icon, src.Language, src.Framework, src.Tags,
 			src.HelmChart, src.DefaultValues, src.ResourceDefaults,
 			userID,

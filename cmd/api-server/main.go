@@ -134,6 +134,7 @@ func main() {
 			EnvVariable:      comp.EnvVariableRepo,
 			DockerHost:       comp.DockerHostRepo,
 			Helm:             comp.HelmRepo,
+			Registry:         comp.RegistryRepo,
 			PipelineSource:   comp.PipelineSourceRepo,
 			PipelinePreset:   comp.PipelinePresetRepo,
 			PipelineRun:      comp.PipelineRunRepo,

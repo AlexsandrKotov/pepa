@@ -148,6 +148,7 @@ func (s *Scheduler) processDueSchedules(ctx context.Context) {
 // NextCronRun calculates the next run time from a cron expression.
 // Supports basic cron format: minute hour day month weekday
 // Examples: "0 2 * * *" (daily at 2am), "0 */6 * * *" (every 6 hours)
+// Searches up to 366 days ahead to support monthly and yearly schedules.
 func NextCronRun(cronExpr string) time.Time {
 	parts := strings.Fields(cronExpr)
 	if len(parts) < 5 {
@@ -159,8 +160,9 @@ func NextCronRun(cronExpr string) time.Time {
 	next := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), 0, 0, now.Location())
 	next = next.Add(time.Minute) // Start from next minute
 
-	// Try up to 7 days ahead
-	for i := 0; i < 7*24*60; i++ {
+	// Try up to 366 days ahead to support yearly schedules
+	maxIterations := 366 * 24 * 60
+	for i := 0; i < maxIterations; i++ {
 		if matchesCron(parts, next) {
 			return next
 		}

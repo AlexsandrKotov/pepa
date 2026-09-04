@@ -36,6 +36,7 @@ const pages: PaletteItem[] = [
   { id: 'docker-hosts', label: 'Docker Hosts', description: 'Docker host management', href: '/docker-hosts', icon: 'docker', category: 'Infrastructure' },
   { id: 'docker-services', label: 'Containers', description: 'Running containers', href: '/docker-services', icon: 'docker', category: 'Infrastructure' },
   { id: 'helm-repositories', label: 'Helm Repos', description: 'Helm chart repositories', href: '/helm-repositories', icon: 'helm', category: 'Infrastructure' },
+  { id: 'registry-repositories', label: 'Registry Repos', description: 'Container image registries', href: '/registry-repositories', icon: 'docker', category: 'Infrastructure' },
   { id: 'workflows', label: 'Workflows', description: 'Workflow automation board', href: '/workflows', icon: 'fluxcd', category: 'Automation' },
   { id: 'automation', label: 'Automation Tasks', description: 'Automated tasks and executions', href: '/automation', icon: 'ai', category: 'Automation' },
   { id: 'jira', label: 'Jira', description: 'Jira integration', href: '/jira', icon: 'jira', category: 'Automation' },

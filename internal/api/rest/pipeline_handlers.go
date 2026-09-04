@@ -347,6 +347,11 @@ func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
 			isTerminal := run.Status == models.PipelineRunSuccess || run.Status == models.PipelineRunFailed ||
 				run.Status == models.PipelineRunCancelled || run.Status == models.PipelineRunTimeout
 			if existing != nil && existing.Status == run.Status && isTerminal {
+				// Backfill jobs for runs synced before job sync was implemented.
+				existingJobs, _ := deps.Repos.PipelineRun.ListJobs(c.Request.Context(), existing.ID)
+				if len(existingJobs) == 0 {
+					syncRunJobs(deps, c, provider, config, existing.ID, rs.ExternalRunID)
+				}
 				skipped++
 				continue
 			}
@@ -356,32 +361,38 @@ func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
 			}
 			synced++
 
-			// Sync jobs: delete old, insert new.
-			// run.ID is now populated by UpsertByExternalRunID (deterministic UUID v5).
-			if len(rs.Jobs) > 0 {
-				_ = deps.Repos.PipelineRun.DeleteJobsByRunID(c.Request.Context(), run.ID)
-				for _, j := range rs.Jobs {
-					stepsJSON, _ := json.Marshal(j.Steps)
-					if stepsJSON == nil {
-						stepsJSON = json.RawMessage("[]")
-					}
-					job := &models.PipelineRunJob{
-						RunID:         run.ID,
-						ExternalJobID: j.ExternalJobID,
-						Name:          j.Name,
-						Stage:         j.Stage,
-						Status:        j.Status,
-						LogURL:        j.LogURL,
-						RunnerName:    j.RunnerName,
-						Steps:         stepsJSON,
-					}
-					_ = deps.Repos.PipelineRun.CreateJob(c.Request.Context(), job)
-				}
-			}
+			syncRunJobs(deps, c, provider, config, run.ID, rs.ExternalRunID)
 		}
 
 		logAudit(deps, c, "sync", "pipeline_runs", sourceID.String(), nil, gin.H{"synced": synced, "skipped": skipped})
 		c.JSON(http.StatusOK, gin.H{"synced": synced, "skipped": skipped, "total_remote": len(remoteRuns)})
+	}
+}
+
+// syncRunJobs fetches jobs from the remote provider and upserts them into the DB.
+func syncRunJobs(deps Dependencies, c *gin.Context, provider pipeline.Provider, config json.RawMessage, runID uuid.UUID, externalRunID string) {
+	ctx := c.Request.Context()
+	remoteJobs, err := provider.Jobs(ctx, config, externalRunID)
+	if err != nil || len(remoteJobs) == 0 {
+		return
+	}
+	_ = deps.Repos.PipelineRun.DeleteJobsByRunID(ctx, runID)
+	for _, j := range remoteJobs {
+		stepsJSON, _ := json.Marshal(j.Steps)
+		if stepsJSON == nil {
+			stepsJSON = json.RawMessage("[]")
+		}
+		job := &models.PipelineRunJob{
+			RunID:         runID,
+			ExternalJobID: j.ExternalJobID,
+			Name:          j.Name,
+			Stage:         j.Stage,
+			Status:        j.Status,
+			LogURL:        j.LogURL,
+			RunnerName:    j.RunnerName,
+			Steps:         stepsJSON,
+		}
+		_ = deps.Repos.PipelineRun.UpsertJob(ctx, job)
 	}
 }
 

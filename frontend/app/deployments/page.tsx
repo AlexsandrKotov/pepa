@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { deployments, clusters, helmRepositories, type Deployment, type DeploymentContainer, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion } from '@/lib/api';
+import { deployments, clusters, helmRepositories, devops, type Deployment, type DeploymentContainer, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type WindowCheckResult, type PreDeployGateResult } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
 import DeploymentDetailClient from './DeploymentDetailClient';
@@ -135,6 +135,15 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   const [actionConfirm, setActionConfirm] = useState<{ type: 'rollback' | 'cancel' | 'delete'; id: string } | null>(null);
   const [actionProcessing, setActionProcessing] = useState(false);
 
+  // Deployment windows check
+  const [windowCheck, setWindowCheck] = useState<WindowCheckResult | null>(null);
+  const [windowCheckEnv, setWindowCheckEnv] = useState('production');
+
+  // Pre-deploy gate
+  const [gateResult, setGateResult] = useState<PreDeployGateResult | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
+  const [gateChecking, setGateChecking] = useState(false);
+
   const loadHelmRepos = async () => {
     try {
       const data = await helmRepositories.list().catch(() => ({ helm_repositories: [], total: 0 }));
@@ -183,6 +192,11 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   };
 
   useEffect(() => { refresh(); }, []);
+
+  // Check deployment windows on load
+  useEffect(() => {
+    devops.checkWindow({ environment: windowCheckEnv }).then(setWindowCheck).catch(() => {});
+  }, [windowCheckEnv]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Lazy-load Helm repos only when user selects Helm deploy type
   const helmReposLoaded = useRef(false);
@@ -434,6 +448,26 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
           <option value="rolled_back">Rolled Back</option>
           <option value="failed">Failed</option>
         </select>
+        {/* Deployment Window Status */}
+        {windowCheck && (
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border ${
+            windowCheck.allowed
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
+              : 'bg-red-500/10 border-red-500/20 text-red-500'
+          }`}>
+            <span>{windowCheck.allowed ? '\u2713' : '\u2717'}</span>
+            <span>Deploy {windowCheck.allowed ? 'allowed' : 'blocked'}: {windowCheck.reason}</span>
+            <select
+              value={windowCheckEnv}
+              onChange={e => setWindowCheckEnv(e.target.value)}
+              className="bg-transparent border-none text-xs p-0 ml-1 cursor-pointer"
+            >
+              <option value="production">production</option>
+              <option value="staging">staging</option>
+              <option value="development">development</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -991,7 +1025,34 @@ resources:
                 {valuesYaml.trim() ? ' \u00B7 values.yaml' : ''}
                 {' \u00B7 '}{replicas} replica(s)
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {/* Pre-Deploy Gate */}
+                {gateError && (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] border bg-red-500/10 border-red-500/20 text-red-500">
+                    <span>\u2717</span>
+                    <span>{gateError}</span>
+                  </div>
+                )}
+                {gateResult && (
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] border ${
+                    gateResult.allowed
+                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
+                      : 'bg-red-500/10 border-red-500/20 text-red-500'
+                  }`}>
+                    <span>{gateResult.allowed ? '\u2713' : '\u2717'}</span>
+                    <span>Gate: {gateResult.allowed ? 'passed' : 'blocked'}</span>
+                    {gateResult.window_check && !gateResult.window_check.allowed && <span title={gateResult.window_check.reason}>(window)</span>}
+                    {gateResult.compliance_check && !gateResult.compliance_check.passed && <span>(compliance)</span>}
+                    {gateResult.security_check && !gateResult.security_check.passed && <span>(security)</span>}
+                  </div>
+                )}
+                <button
+                  onClick={async () => { setGateChecking(true); setGateError(null); setGateResult(null); try { const r = await devops.preDeployGate({ environment: selectedClusterId ? 'production' : 'staging' }); setGateResult(r); } catch (e) { setGateError(e instanceof Error ? e.message : 'Gate check failed'); } setGateChecking(false); }}
+                  disabled={gateChecking}
+                  className="btn btn-secondary text-[12px] px-3 py-1.5"
+                >
+                  {gateChecking ? 'Checking...' : 'Security Gate'}
+                </button>
                 <button onClick={() => switchTab('all')} className="btn btn-secondary text-[12px]">Cancel</button>
                 <button onClick={handleCreate} disabled={creating} className="btn btn-primary text-[12px]">
                   {creating ? 'Creating...' : 'Create Deployment'}

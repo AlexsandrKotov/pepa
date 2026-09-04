@@ -44,6 +44,7 @@ var rbacResourceMap = map[string]string{
 	"docker-hosts":        "docker",
 	"docker-services":     "docker",
 	"helm-repositories":   "helm",
+	"registry-repositories": "registry",
 	"pipeline-sources":    "pipelines",
 	"vault":               "vault",
 	"ai":                  "ai",
@@ -57,6 +58,16 @@ var rbacResourceMap = map[string]string{
 	"observability":       "observability",
 	"plugin-activity":    "audit",
 	"ssh-hosts":          "audit",
+	"ssh-host-groups":    "audit",
+	"ssh-terminal":       "audit",
+	"security":           "security",
+	"deployment-windows": "deployments",
+	"batch-operations":   "deployments",
+	"compliance-policies": "deployments",
+	"security-findings":  "security",
+	"secret-rotations":   "vault",
+	"deployment-audit":   "audit",
+	"pre-deploy-gate":    "deployments",
 }
 
 // rbacSkipPrefixes are paths that only require authentication, not a

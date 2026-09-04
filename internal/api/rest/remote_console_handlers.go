@@ -1080,13 +1080,59 @@ func sshTerminalHandler(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// ─── TOFU Host Key Verification ──────────────────────────────────────────────
+
+// knownHostKeys caches the first-seen SSH host key fingerprint per host:port.
+// Trust On First Use (TOFU): the first connection stores the key, subsequent
+// connections verify the key hasn't changed (MITM protection).
+const maxKnownHostKeys = 1000 // cap to prevent unbounded memory growth
+
+var (
+	knownHostKeys   = make(map[string]string) // "host:port" -> key fingerprint
+	knownHostKeysMu sync.Mutex
+)
+
+// tofuHostKeyCallback implements a Trust-On-First-Use host key verification.
+// On first connection to a host, the key fingerprint is stored. On subsequent
+// connections, the presented key is compared against the stored fingerprint.
+func tofuHostKeyCallback(addr string) ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		fingerprint := ssh.FingerprintSHA256(key)
+		knownHostKeysMu.Lock()
+		defer knownHostKeysMu.Unlock()
+
+		known, exists := knownHostKeys[addr]
+		if !exists {
+			// Enforce capacity limit before storing a new key
+			if len(knownHostKeys) >= maxKnownHostKeys {
+				slog.Warn("TOFU host key store is full, rejecting new host",
+					"addr", addr, "limit", maxKnownHostKeys)
+				return fmt.Errorf("known host key store is full (%d entries), cannot trust new host %s",
+					maxKnownHostKeys, addr)
+			}
+			// First connection — trust and store
+			knownHostKeys[addr] = fingerprint
+			slog.Info("SSH host key stored (TOFU)", "addr", addr, "fingerprint", fingerprint)
+			return nil
+		}
+		if known != fingerprint {
+			slog.Error("SSH host key MISMATCH — possible MITM attack",
+				"addr", addr, "expected", known, "got", fingerprint)
+			return fmt.Errorf("host key mismatch for %s: expected %s, got %s — possible MITM attack",
+				addr, known, fingerprint)
+		}
+		return nil
+	}
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // buildSSHConfig creates an ssh.ClientConfig based on the host's auth method.
 func buildSSHConfig(host *repository.SSHHost, deps Dependencies, c *gin.Context) (*ssh.ClientConfig, error) {
+	addr := net.JoinHostPort(host.Hostname, strconv.Itoa(host.Port))
 	config := &ssh.ClientConfig{
 		User:            host.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // #nosec // G302: user-configured hosts with explicit trust
+		HostKeyCallback: tofuHostKeyCallback(addr),
 		Timeout:         30 * time.Second,
 	}
 

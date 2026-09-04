@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/repository"
@@ -17,24 +18,62 @@ type SecurityScanAdapter struct {
 	scanner *security.Scanner
 	repo    *repository.SecurityScanRepository
 
-	mu   sync.RWMutex
-	runs map[string]*securityRun
+	mu     sync.RWMutex
+	runs   map[string]*securityRun
+	stopCh chan struct{} // signals the cleanup goroutine to exit
 }
 
 type securityRun struct {
-	targetID uuid.UUID
-	tenantID uuid.UUID
-	runID    uuid.UUID
-	status   string
-	result   map[string]any
+	targetID  uuid.UUID
+	tenantID  uuid.UUID
+	runID     uuid.UUID
+	status    string
+	result    map[string]any
+	createdAt time.Time
 }
 
+// securityRunTTL is the maximum time a completed/failed run entry stays in memory.
+const securityRunTTL = 2 * time.Hour
+
 // NewSecurityScanAdapter creates a new security scan adapter.
+// A background goroutine periodically evicts stale entries to prevent unbounded memory growth.
 func NewSecurityScanAdapter(scanner *security.Scanner, repo *repository.SecurityScanRepository) *SecurityScanAdapter {
-	return &SecurityScanAdapter{
+	a := &SecurityScanAdapter{
 		scanner: scanner,
 		repo:    repo,
 		runs:    make(map[string]*securityRun),
+		stopCh:  make(chan struct{}),
+	}
+	// Periodic cleanup of stale run entries
+	go func() {
+		ticker := time.NewTicker(15 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-a.stopCh:
+				return
+			case <-ticker.C:
+				a.mu.Lock()
+				cutoff := time.Now().Add(-securityRunTTL)
+				for id, run := range a.runs {
+					if run.createdAt.Before(cutoff) {
+						delete(a.runs, id)
+					}
+				}
+				a.mu.Unlock()
+			}
+		}
+	}()
+	return a
+}
+
+// Stop terminates the background cleanup goroutine.
+func (a *SecurityScanAdapter) Stop() {
+	select {
+	case <-a.stopCh:
+		// Already closed
+	default:
+		close(a.stopCh)
 	}
 }
 
@@ -108,11 +147,12 @@ func (a *SecurityScanAdapter) Trigger(ctx context.Context, config json.RawMessag
 	runID := run.ID.String()
 	a.mu.Lock()
 	a.runs[runID] = &securityRun{
-		targetID: targetID,
-		tenantID: tenantID,
-		runID:    run.ID,
-		status:   run.Status,
-		result:   run.ResultSummary,
+		targetID:  targetID,
+		tenantID:  tenantID,
+		runID:     run.ID,
+		status:    run.Status,
+		result:    run.ResultSummary,
+		createdAt: time.Now(),
 	}
 	a.mu.Unlock()
 

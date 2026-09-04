@@ -3362,6 +3362,42 @@ export interface HelmChartVersion {
   urls: string[];
 }
 
+// ── Registry Repositories ─────────────────────────────────────
+
+export interface RegistryRepository {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string;
+  registry_type: 'docker' | 'ghcr' | 'harbor' | 'ecr' | 'gcr' | 'acr' | 'other';
+  url: string;
+  username: string;
+  status: string;
+  is_default: boolean;
+  last_checked_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const registryRepositories = {
+  list: () =>
+    fetchAPI<{ registry_repositories: RegistryRepository[]; total: number }>('/api/v1/registry-repositories'),
+  get: (id: string) =>
+    fetchAPI<RegistryRepository>(`/api/v1/registry-repositories/${id}`),
+  create: (data: { name: string; description?: string; registry_type: string; url: string; username?: string; password?: string; token?: string; is_default?: boolean }) =>
+    fetchAPI<RegistryRepository>('/api/v1/registry-repositories', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<RegistryRepository & { password?: string; token?: string }>) =>
+    fetchAPI<RegistryRepository>(`/api/v1/registry-repositories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    fetchAPI<{ status: string }>(`/api/v1/registry-repositories/${id}`, { method: 'DELETE' }),
+  // List images (repositories) in a registry
+  listImages: (repoId: string) =>
+    fetchAPI<{ images: string[]; total: number }>(`/api/v1/registry-repositories/${repoId}/images`),
+  // List tags for a specific image
+  listTags: (repoId: string, imageName: string) =>
+    fetchAPI<{ name: string; tags: string[]; total: number }>(`/api/v1/registry-repositories/${repoId}/images/${encodeURIComponent(imageName)}`),
+};
+
 // ── Pipeline Sources ────────────────────────────────────────
 
 export interface PipelineSource {
@@ -3764,6 +3800,8 @@ export interface ServiceBlueprint {
   category: string;
   group_ids: string[];
   compose_yaml: string;
+  compose_folder_path: string;
+  compose_git_url: string;
   created_at: string;
   // Template metadata (system blueprints)
   slug?: string;
@@ -4338,7 +4376,7 @@ export const pluginActivity = {
 // ── Security Scanning ──────────────────────────────────────────
 
 export type ScannerType = 'trivy' | 'sonarqube' | 'both';
-export type TargetType = 'image' | 'git_repo' | 'filesystem' | 'container' | 'service' | 'sonarqube_project';
+export type TargetType = 'image' | 'git_repo' | 'filesystem' | 'container' | 'service' | 'sonarqube_project' | 'registry';
 export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type TriggerType = 'manual' | 'schedule' | 'pipeline' | 'webhook';
 
@@ -4447,5 +4485,285 @@ export const securityScan = {
   getDashboard: () => fetchAPI<SecurityDashboard>('/api/v1/security/dashboard-v2'),
   
   scanAll: () => fetchAPI<{ message: string }>('/api/v1/security/scan-all', { method: 'POST' }),
+};
+
+// ── DevOps & DevSecOps Types ──────────────────────────────────
+
+export interface DeploymentWindow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  window_type: 'allowed' | 'blocked' | 'freeze';
+  environment: string;
+  service_ids: string[] | null;
+  cron_expression: string;
+  duration_minutes: number;
+  timezone: string;
+  start_at: string | null;
+  end_at: string | null;
+  priority: number;
+  override_roles: string[];
+  description: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WindowCheckResult {
+  allowed: boolean;
+  active_windows: DeploymentWindow[];
+  reason: string;
+}
+
+export interface BatchOperation {
+  id: string;
+  tenant_id: string;
+  name: string;
+  operation_type: 'restart' | 'rollback' | 'scale' | 'custom';
+  service_ids: string[];
+  environment: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  config: Record<string, unknown>;
+  progress: { total: number; completed: number; failed: number };
+  created_by: string;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface CompliancePolicy {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string;
+  policy_type: 'resource_limits' | 'security_scan' | 'required_labels' | 'custom';
+  environment: string;
+  service_ids: string[] | null;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  blocking: boolean;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceEvaluation {
+  id: string;
+  tenant_id: string;
+  policy_id: string;
+  service_id: string;
+  environment: string;
+  deployment_id: string | null;
+  passed: boolean;
+  details: Record<string, unknown>;
+  evaluated_at: string;
+}
+
+export interface SecurityFinding {
+  id: string;
+  tenant_id: string;
+  title: string;
+  description: string;
+  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
+  finding_type: 'vulnerability' | 'secret' | 'misconfiguration' | 'iac';
+  resource_type: string;
+  resource_id: string;
+  service_id: string | null;
+  environment: string;
+  status: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+  scanner: string;
+  external_id: string | null;
+  metadata: Record<string, unknown>;
+  discovered_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecurityFindingSummary {
+  total: number;
+  by_severity: { critical: number; high: number; medium: number; low: number; info: number };
+  by_status: { open: number; acknowledged: number; resolved: number; false_positive: number };
+  by_type: { vulnerability: number; secret: number; misconfiguration: number; iac: number };
+}
+
+export interface SecretRotation {
+  id: string;
+  tenant_id: string;
+  name: string;
+  secret_path: string;
+  rotation_interval_days: number;
+  last_rotated_at: string | null;
+  next_rotation_at: string;
+  status: 'active' | 'overdue' | 'rotating' | 'failed' | 'disabled';
+  auto_rotate: boolean;
+  notification_days_before: number;
+  service_id: string | null;
+  environment: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SecretRotationLog {
+  id: string;
+  rotation_id: string;
+  status: 'success' | 'failed';
+  message: string;
+  rotated_at: string;
+}
+
+export interface DeploymentAuditLog {
+  id: string;
+  tenant_id: string;
+  deployment_id: string | null;
+  service_id: string | null;
+  environment: string;
+  action: string;
+  actor_id: string;
+  actor_name: string;
+  details: Record<string, unknown>;
+  result: 'success' | 'failure' | 'blocked';
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+}
+
+export interface PreDeployGateResult {
+  allowed: boolean;
+  window_check?: WindowCheckResult;
+  compliance_check?: { passed: boolean; blocked?: boolean; evaluations: ComplianceEvaluation[] };
+  security_check?: { passed: boolean; open_findings?: number; findings?: SecurityFinding[] };
+  blocked_reasons?: string[];
+  warnings?: string[];
+}
+
+// ── DevOps API ────────────────────────────────────────────────
+
+export const devops = {
+  // Deployment Windows
+  listWindows: async () => {
+    const res = await fetchAPI<{ windows: DeploymentWindow[]; total: number }>('/api/v1/deployment-windows');
+    return res.windows || [];
+  },
+  
+  getWindow: (id: string) => fetchAPI<DeploymentWindow>(`/api/v1/deployment-windows/${id}`),
+  
+  createWindow: (data: Partial<DeploymentWindow>) =>
+    fetchAPI<DeploymentWindow>('/api/v1/deployment-windows', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updateWindow: (id: string, data: Partial<DeploymentWindow>) =>
+    fetchAPI<DeploymentWindow>(`/api/v1/deployment-windows/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  
+  deleteWindow: (id: string) =>
+    fetchAPI<void>(`/api/v1/deployment-windows/${id}`, { method: 'DELETE' }),
+  
+  checkWindow: (params: { service_id?: string; environment: string }) =>
+    fetchAPI<WindowCheckResult>('/api/v1/deployment-windows/check', { method: 'POST', body: JSON.stringify(params) }),
+
+  // Batch Operations
+  listBatchOperations: async () => {
+    const res = await fetchAPI<{ operations: BatchOperation[]; total: number }>('/api/v1/batch-operations');
+    return res.operations || [];
+  },
+  
+  getBatchOperation: (id: string) => fetchAPI<BatchOperation>(`/api/v1/batch-operations/${id}`),
+  
+  createBatchOperation: (data: Partial<BatchOperation>) =>
+    fetchAPI<BatchOperation>('/api/v1/batch-operations', { method: 'POST', body: JSON.stringify(data) }),
+  
+  cancelBatchOperation: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/batch-operations/${id}/cancel`, { method: 'POST' }),
+
+  // Compliance Policies
+  listPolicies: async () => {
+    const res = await fetchAPI<{ policies: CompliancePolicy[]; total: number }>('/api/v1/compliance-policies');
+    return res.policies || [];
+  },
+  
+  getPolicy: (id: string) => fetchAPI<CompliancePolicy>(`/api/v1/compliance-policies/${id}`),
+  
+  createPolicy: (data: Partial<CompliancePolicy>) =>
+    fetchAPI<CompliancePolicy>('/api/v1/compliance-policies', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updatePolicy: (id: string, data: Partial<CompliancePolicy>) =>
+    fetchAPI<CompliancePolicy>(`/api/v1/compliance-policies/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  
+  deletePolicy: (id: string) =>
+    fetchAPI<void>(`/api/v1/compliance-policies/${id}`, { method: 'DELETE' }),
+  
+  listEvaluations: async (params?: { service_id?: string; environment?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([_, v]) => v !== undefined).reduce((acc, [k, v]) => ({ ...acc, [k]: String(v) }), {})
+    ).toString() : '';
+    const res = await fetchAPI<{ evaluations: ComplianceEvaluation[]; total: number }>(`/api/v1/compliance-policies/evaluations${qs}`);
+    return res.evaluations || [];
+  },
+
+  // Pre-Deploy Gate
+  preDeployGate: (params: { service_id?: string; environment: string; deployment_id?: string }) =>
+    fetchAPI<PreDeployGateResult>('/api/v1/pre-deploy-gate', { method: 'POST', body: JSON.stringify(params) }),
+
+  // Security Findings
+  listFindings: async (params?: { severity?: string; status?: string; finding_type?: string; service_id?: string; environment?: string }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([_, v]) => v !== undefined).reduce((acc, [k, v]) => ({ ...acc, [k]: String(v) }), {})
+    ).toString() : '';
+    const res = await fetchAPI<{ items: SecurityFinding[]; total: number }>(`/api/v1/security-findings${qs}`);
+    return res.items || [];
+  },
+  
+  getFindingSummary: () => fetchAPI<SecurityFindingSummary>('/api/v1/security-findings/summary'),
+  
+  getFinding: (id: string) => fetchAPI<SecurityFinding>(`/api/v1/security-findings/${id}`),
+  
+  createFinding: (data: Partial<SecurityFinding>) =>
+    fetchAPI<SecurityFinding>('/api/v1/security-findings', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updateFinding: (id: string, data: Partial<SecurityFinding>) =>
+    fetchAPI<SecurityFinding>(`/api/v1/security-findings/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Secret Rotations
+  listRotations: async () => {
+    const res = await fetchAPI<{ rotations: SecretRotation[]; total: number }>('/api/v1/secret-rotations');
+    return res.rotations || [];
+  },
+  
+  getExpiringRotations: async (days?: number) => {
+    const res = await fetchAPI<{ secrets: SecretRotation[]; total: number }>(`/api/v1/secret-rotations/expiring${days ? `?days=${days}` : ''}`);
+    return res.secrets || [];
+  },
+  
+  getRotation: (id: string) => fetchAPI<SecretRotation>(`/api/v1/secret-rotations/${id}`),
+  
+  createRotation: (data: Partial<SecretRotation>) =>
+    fetchAPI<SecretRotation>('/api/v1/secret-rotations', { method: 'POST', body: JSON.stringify(data) }),
+  
+  updateRotation: (id: string, data: Partial<SecretRotation>) =>
+    fetchAPI<SecretRotation>(`/api/v1/secret-rotations/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  
+  deleteRotation: (id: string) =>
+    fetchAPI<void>(`/api/v1/secret-rotations/${id}`, { method: 'DELETE' }),
+  
+  triggerRotation: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/secret-rotations/${id}/rotate`, { method: 'POST' }),
+  
+  getRotationLogs: async (id: string) => {
+    const res = await fetchAPI<{ logs: SecretRotationLog[]; total: number }>(`/api/v1/secret-rotations/${id}/logs`);
+    return res.logs || [];
+  },
+
+  // Deployment Audit
+  listAuditLogs: async (params?: { environment?: string; service_id?: string; actor_id?: string; result?: string; limit?: number; offset?: number }) => {
+    const qs = params ? '?' + new URLSearchParams(
+      Object.entries(params).filter(([_, v]) => v !== undefined).reduce((acc, [k, v]) => ({ ...acc, [k]: String(v) }), {})
+    ).toString() : '';
+    const res = await fetchAPI<{ items: DeploymentAuditLog[]; total: number }>(`/api/v1/deployment-audit${qs}`);
+    return res.items || [];
+  },
+  
+  getDeploymentAudit: async (deploymentId: string) => {
+    const res = await fetchAPI<{ logs: DeploymentAuditLog[]; total: number }>(`/api/v1/deployment-audit/deployment/${deploymentId}`);
+    return res.logs || [];
+  },
 };
 

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
-import { vault, type VaultPath, type VaultEngine, type VaultConfig, type VaultStatus, type VaultACLEntry } from '@/lib/api';
+import { vault, devops, type VaultPath, type VaultEngine, type VaultConfig, type VaultStatus, type VaultACLEntry, type SecretRotation } from '@/lib/api';
 import { listUsers, listTeams, getMe, type User, type Team } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 import { usePermission } from '@/hooks/usePermission';
@@ -24,7 +24,7 @@ export default function VaultClient({ initialPaths, initialEngines }: Props) {
 function VaultClientContent({ initialPaths, initialEngines }: Props) {
   const { hasPermission } = usePermission();
   const canManageACL = hasPermission('vault', 'create');
-  const [tab, setTab] = useState<'secrets' | 'access'>('secrets');
+  const [tab, setTab] = useState<'secrets' | 'access' | 'rotation'>('secrets');
   const [paths, setPaths] = useState<VaultPath[]>(initialPaths ?? []);
   const [engines, setEngines] = useState<VaultEngine[]>(initialEngines ?? []);
   const [currentPrefix, setCurrentPrefix] = useState('');
@@ -38,6 +38,11 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
   const [showConfig, setShowConfig] = useState(false);
   const [mode, setMode] = useState<string>('local');
   const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
+
+  // Secret rotation state
+  const [rotations, setRotations] = useState<SecretRotation[]>([]);
+  const [showRotationForm, setShowRotationForm] = useState(false);
+  const [rotationForm, setRotationForm] = useState({ name: '', secret_path: '', rotation_interval_days: 30, environment: 'production', auto_rotate: false, notification_days_before: 7 });
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [rotating, setRotating] = useState(false);
   const [aclEntries, setAclEntries] = useState<VaultACLEntry[]>([]);
@@ -317,6 +322,15 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
             {aclEntries.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--border-light)] rounded-full">{aclEntries.length}</span>}
           </button>
         )}
+        <button
+          onClick={() => { setTab('rotation'); if (rotations.length === 0) devops.listRotations().then(setRotations).catch(() => {}); }}
+          className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
+            tab === 'rotation' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          Rotation
+          {rotations.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--border-light)] rounded-full">{rotations.length}</span>}
+        </button>
       </div>
 
       {/* Configuration panel */}
@@ -587,6 +601,72 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
             onRefresh={loadACL}
             onToast={showToast}
           />
+        </div>
+      )}
+
+      {/* ── Rotation Tab ─────────────────────────────────────── */}
+      {tab === 'rotation' && (
+        <div className="page-animate-up page-delay-2 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">Secret Rotation</h3>
+              <p className="text-xs text-[var(--text-secondary)]">Monitor and manage automatic secret rotation schedules</p>
+            </div>
+            <button onClick={() => setShowRotationForm(!showRotationForm)} className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+              {showRotationForm ? 'Cancel' : '+ Add Rotation'}
+            </button>
+          </div>
+
+          {showRotationForm && (
+            <div className="bg-[var(--bg-secondary)] rounded-lg p-4 border border-[var(--border)]">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Name</label>
+                  <input type="text" value={rotationForm.name} onChange={e => setRotationForm({ ...rotationForm, name: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" placeholder="Database credentials" />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Secret Path</label>
+                  <input type="text" value={rotationForm.secret_path} onChange={e => setRotationForm({ ...rotationForm, secret_path: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] font-mono" placeholder="secret/data/prod/db" />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Rotation Interval (days)</label>
+                  <input type="number" value={rotationForm.rotation_interval_days} onChange={e => setRotationForm({ ...rotationForm, rotation_interval_days: parseInt(e.target.value) || 30 })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)]">Environment</label>
+                  <input type="text" value={rotationForm.environment} onChange={e => setRotationForm({ ...rotationForm, environment: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
+                </div>
+              </div>
+              <div className="flex items-center gap-4 mt-3">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={rotationForm.auto_rotate} onChange={e => setRotationForm({ ...rotationForm, auto_rotate: e.target.checked })} className="rounded" /><span className="text-sm text-[var(--text-secondary)]">Auto-rotate</span></label>
+              </div>
+              <button onClick={async () => { try { await devops.createRotation(rotationForm); setShowRotationForm(false); setRotationForm({ name: '', secret_path: '', rotation_interval_days: 30, environment: 'production', auto_rotate: false, notification_days_before: 7 }); const r = await devops.listRotations(); setRotations(r); } catch {} }} className="mt-3 px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Create</button>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {rotations.length === 0 ? (
+              <div className="text-center py-8 text-[var(--text-secondary)] text-sm">No secret rotations configured. Secrets will not be automatically rotated.</div>
+            ) : (
+              rotations.map(r => (
+                <div key={r.id} className="bg-[var(--bg-secondary)] rounded-lg p-4 border border-[var(--border)] flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-[var(--text-primary)]">{r.name}</div>
+                    <div className="text-xs text-[var(--text-secondary)] font-mono">{r.secret_path}</div>
+                    <div className="text-xs text-[var(--text-tertiary)] mt-1">
+                      Every {r.rotation_interval_days}d · {r.environment}
+                      {r.last_rotated_at ? ` · Last: ${new Date(r.last_rotated_at).toLocaleDateString()}` : ' · Never rotated'}
+                      {' · Next: '}{new Date(r.next_rotation_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 text-xs rounded-full ${r.status === 'active' ? 'bg-emerald-500/10 text-emerald-600' : r.status === 'overdue' ? 'bg-red-500/10 text-red-500' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>{r.status}</span>
+                    <button onClick={async () => { try { await devops.triggerRotation(r.id); const upd = await devops.listRotations(); setRotations(upd); } catch {} }} className="px-2 py-1 text-xs text-[var(--accent)] hover:underline">Rotate Now</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 

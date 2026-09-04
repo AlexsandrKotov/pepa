@@ -404,7 +404,7 @@ export default function PipelineBuilderPage() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-[var(--text-primary)] truncate">{bp.name}</div>
                           <div className="text-[10px] text-[var(--text-tertiary)] font-mono truncate">
-                            {bp.source_type === 'docker_compose' ? `Compose (${bp.compose_yaml?.split('\n').length || 0} lines)` :
+                            {bp.source_type === 'docker_compose' ? (bp.compose_git_url ? `🔀 ${bp.compose_git_url}` : bp.compose_folder_path ? `📂 ${bp.compose_folder_path}` : `Compose (${bp.compose_yaml?.split('\n').length || 0} lines)`) :
                              bp.source_type === 'container' ? bp.image : bp.chart_url}
                           </div>
                         </div>
@@ -614,7 +614,7 @@ export default function PipelineBuilderPage() {
                             )}
                             <span className="text-[10px] font-mono text-[var(--text-tertiary)] truncate max-w-[200px]">
                               {item.blueprint.source_type === 'docker_compose'
-                                ? `Compose (${item.blueprint.compose_yaml?.split('\n').length || 0} lines)`
+                                ? (item.blueprint.compose_git_url ? `🔀 ${item.blueprint.compose_git_url}` : item.blueprint.compose_folder_path ? `📂 ${item.blueprint.compose_folder_path}` : `Compose (${item.blueprint.compose_yaml?.split('\n').length || 0} lines)`)
                                 : item.blueprint.source_type === 'container'
                                   ? item.blueprint.image
                                   : item.blueprint.chart_name

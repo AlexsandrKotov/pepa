@@ -56,7 +56,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-			&bp.ComposeYAML,
+			&bp.ComposeYAML, &bp.ComposeFolderPath, &bp.ComposeGitURL,
 			&bp.CreatedAt,
 		)
 		if err != nil {
@@ -64,8 +64,8 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if bp.SourceType != "docker_compose" || bp.ComposeYAML == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "blueprint must be of type docker_compose with compose_yaml"})
+		if bp.SourceType != "docker_compose" || (bp.ComposeYAML == "" && bp.ComposeFolderPath == "" && bp.ComposeGitURL == "") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "blueprint must be of type docker_compose with compose_yaml, compose_folder_path, or compose_git_url"})
 			return
 		}
 
@@ -88,6 +88,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 			DockerHostID: &req.DockerHostID,
 			Name:         bp.Name,
 			ComposeYaml:  bp.ComposeYAML,
+			FolderPath:   bp.ComposeFolderPath,
 			EnvVars:      envJSON,
 			Status:       "deploying",
 			Containers:   json.RawMessage("[]"),
@@ -112,11 +113,29 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 		defer cancel()
 
-		if err := client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars); err != nil {
-			svc.Status = "error"
-			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
-			respondInternalError(c, err)
-			return
+		if bp.ComposeGitURL != "" {
+			clonedPath, cloneErr := cloneGitRepo(c.Request.Context(), bp.ComposeGitURL)
+			if cloneErr != nil {
+				respondInternalError(c, cloneErr)
+				return
+			}
+			bp.ComposeFolderPath = clonedPath
+		}
+
+		if bp.ComposeFolderPath != "" {
+			if err := client.ComposeUpFromFolder(ctx, svc.Name, bp.ComposeFolderPath, envVars); err != nil {
+				svc.Status = "error"
+				_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+				respondInternalError(c, err)
+				return
+			}
+		} else {
+			if err := client.ComposeUp(ctx, svc.Name, svc.ComposeYaml, envVars); err != nil {
+				svc.Status = "error"
+				_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+				respondInternalError(c, err)
+				return
+			}
 		}
 
 		containers, err := client.ComposePs(ctx, svc.Name)
@@ -162,7 +181,7 @@ func deployBlueprintToLocal(deps Dependencies) gin.HandlerFunc {
 			&bp.ChartName, &bp.ChartVersion, &bp.ChartPath,
 			&bp.Namespace, &bp.ValuesYAML, &bp.CPU,
 			&bp.Memory, &bp.Replicas, &bp.Ports, &bp.Category,
-			&bp.ComposeYAML,
+			&bp.ComposeYAML, &bp.ComposeFolderPath, &bp.ComposeGitURL,
 			&bp.CreatedAt,
 		)
 		if err != nil {
@@ -170,8 +189,8 @@ func deployBlueprintToLocal(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if bp.SourceType != "docker_compose" || bp.ComposeYAML == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "blueprint must be of type docker_compose with compose_yaml"})
+		if bp.SourceType != "docker_compose" || (bp.ComposeYAML == "" && bp.ComposeFolderPath == "" && bp.ComposeGitURL == "") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "blueprint must be of type docker_compose with compose_yaml, compose_folder_path, or compose_git_url"})
 			return
 		}
 
@@ -190,9 +209,25 @@ func deployBlueprintToLocal(deps Dependencies) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 		defer cancel()
 
-		if err := client.ComposeUp(ctx, bp.Name, bp.ComposeYAML, envVars); err != nil {
-			respondInternalError(c, fmt.Errorf("local deploy failed: %w", err))
-			return
+		if bp.ComposeGitURL != "" {
+			clonedPath, cloneErr := cloneGitRepo(c.Request.Context(), bp.ComposeGitURL)
+			if cloneErr != nil {
+				respondInternalError(c, fmt.Errorf("git clone failed: %w", cloneErr))
+				return
+			}
+			bp.ComposeFolderPath = clonedPath
+		}
+
+		if bp.ComposeFolderPath != "" {
+			if err := client.ComposeUpFromFolder(ctx, bp.Name, bp.ComposeFolderPath, envVars); err != nil {
+				respondInternalError(c, fmt.Errorf("local deploy failed: %w", err))
+				return
+			}
+		} else {
+			if err := client.ComposeUp(ctx, bp.Name, bp.ComposeYAML, envVars); err != nil {
+				respondInternalError(c, fmt.Errorf("local deploy failed: %w", err))
+				return
+			}
 		}
 
 		containers, _ := client.ComposePs(ctx, bp.Name)
@@ -243,7 +278,7 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 			SELECT `+selectBlueprintCols("sb")+`
 			FROM service_blueprints sb
 			JOIN blueprint_group_members bgm ON bgm.blueprint_id = sb.id
-			WHERE bgm.group_id = $1 AND sb.source_type = 'docker_compose' AND sb.compose_yaml != ''
+			WHERE bgm.group_id = $1 AND sb.source_type = 'docker_compose' AND (sb.compose_yaml != '' OR sb.compose_folder_path != '' OR sb.compose_git_url != '')
 			ORDER BY bgm.position ASC
 		`, groupID)
 		if err != nil {
@@ -300,6 +335,7 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 				DockerHostID: &req.DockerHostID,
 				Name:         bp.Name,
 				ComposeYaml:  bp.ComposeYAML,
+				FolderPath:   bp.ComposeFolderPath,
 				EnvVars:      envJSON,
 				Status:       "deploying",
 				Containers:   json.RawMessage("[]"),
@@ -316,7 +352,24 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 			}
 
 			svcCtx, svcCancel := context.WithTimeout(ctx, 120*time.Second)
-			if err := client.ComposeUp(svcCtx, svc.Name, svc.ComposeYaml, envVars); err != nil {
+			var deployErr error
+			deployFolder := bp.ComposeFolderPath
+			if bp.ComposeGitURL != "" {
+				clonedPath, cloneErr := cloneGitRepo(svcCtx, bp.ComposeGitURL)
+				if cloneErr != nil {
+					deployErr = cloneErr
+				} else {
+					deployFolder = clonedPath
+				}
+			}
+			if deployErr == nil {
+				if deployFolder != "" {
+					deployErr = client.ComposeUpFromFolder(svcCtx, svc.Name, deployFolder, envVars)
+				} else {
+					deployErr = client.ComposeUp(svcCtx, svc.Name, svc.ComposeYaml, envVars)
+				}
+			}
+			if deployErr != nil {
 				svcCancel()
 				svc.Status = "error"
 				_ = deps.Repos.DockerHost.UpdateService(ctx, svc)
@@ -324,7 +377,7 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 					BlueprintID:   bp.ID,
 					BlueprintName: bp.Name,
 					Status:        "error",
-					Error:         err.Error(),
+					Error:         deployErr.Error(),
 				})
 				continue
 			}

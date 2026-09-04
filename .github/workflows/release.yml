@@ -640,6 +640,8 @@ jobs:
                 AUTH_JWT_SECRET: \${AUTH_JWT_SECRET}
                 PLUGIN_DIR: /plugins
                 CUSTOM_PLUGIN_DIR: /custom-plugins
+                PLUGIN_SIGNATURE_VERIFY: \${PLUGIN_SIGNATURE_VERIFY:-true}
+                PLUGIN_SIGNATURE_ENFORCE: \${PLUGIN_SIGNATURE_ENFORCE:-true}
                 VAULT_ALLOW_PRIVATE_IPS: false
               volumes:
                 - ./plugins:/plugins:ro
