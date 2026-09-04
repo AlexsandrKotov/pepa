@@ -673,6 +673,15 @@ func (p *SonarQubePlugin) fetchProjectSummary(ctx context.Context, params map[st
 }
 
 func (p *SonarQubePlugin) HealthCheck(ctx context.Context) (*provider.HealthStatus, error) {
+	// If the plugin was not configured (served with zero-value struct),
+	// httpClient will be nil — report unhealthy instead of panicking.
+	if p.httpClient == nil || p.url == "" {
+		return &provider.HealthStatus{
+			Status:  "unhealthy",
+			Message: "sonarqube plugin not configured — set url, token, and project_key",
+		}, nil
+	}
+
 	// Check SonarQube server connectivity
 	data, err := p.apiGet(ctx, "/api/system/status", nil)
 	if err != nil {
