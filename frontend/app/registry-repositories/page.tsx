@@ -7,15 +7,16 @@ import { VaultInput, useVaultPicker } from '@/components/VaultInput';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
 import ConfirmModal from '@/components/ConfirmModal';
+import BrandIcon from '@/components/BrandIcon';
 
 const REGISTRY_TYPES: { value: RegistryRepository['registry_type']; label: string; icon: string; desc: string }[] = [
-  { value: 'docker', label: 'Docker Hub', icon: '🐳', desc: 'Docker Hub registry' },
-  { value: 'ghcr', label: 'GHCR', icon: '📦', desc: 'GitHub Container Registry' },
-  { value: 'harbor', label: 'Harbor', icon: '🚢', desc: 'Harbor registry' },
-  { value: 'ecr', label: 'ECR', icon: '☁️', desc: 'AWS Elastic Container Registry' },
-  { value: 'gcr', label: 'GCR', icon: '🌐', desc: 'Google Container Registry' },
-  { value: 'acr', label: 'ACR', icon: '🔷', desc: 'Azure Container Registry' },
-  { value: 'other', label: 'Other', icon: '📋', desc: 'Custom registry' },
+  { value: 'docker', label: 'Docker Hub', icon: 'docker', desc: 'Docker Hub registry' },
+  { value: 'ghcr', label: 'GHCR', icon: 'github', desc: 'GitHub Container Registry' },
+  { value: 'harbor', label: 'Harbor', icon: 'services', desc: 'Harbor registry' },
+  { value: 'ecr', label: 'ECR', icon: 'storage', desc: 'AWS Elastic Container Registry' },
+  { value: 'gcr', label: 'GCR', icon: 'storage', desc: 'Google Container Registry' },
+  { value: 'acr', label: 'ACR', icon: 'storage', desc: 'Azure Container Registry' },
+  { value: 'other', label: 'Other', icon: 'default', desc: 'Custom registry' },
 ];
 
 const defaultForm = {
@@ -185,7 +186,7 @@ export default function RegistryRepositoriesPage() {
 
   const registryTypeInfo = (t: string) => {
     const found = REGISTRY_TYPES.find(rt => rt.value === t);
-    return { icon: found?.icon ?? '📋', label: found?.label ?? t };
+    return { icon: found?.icon ?? 'default', label: found?.label ?? t };
   };
 
   const registryHost = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
@@ -242,10 +243,10 @@ export default function RegistryRepositoriesPage() {
             <div key={r.id} className="card p-5 hover:border-[var(--accent)] transition-colors group modern-card-hover" style={{ borderRadius: '12px' }}>
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl">{registryTypeInfo(r.registry_type).icon}</span>
+                  <BrandIcon name={registryTypeInfo(r.registry_type).icon} size={22} />
                   <div>
                     <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">{r.name}</h3>
-                    <span className="text-[10px] text-[var(--text-tertiary)]">{registryTypeInfo(r.registry_type).icon} {registryTypeInfo(r.registry_type).label}</span>
+                    <span className="text-[10px] text-[var(--text-tertiary)] flex items-center gap-1"><BrandIcon name={registryTypeInfo(r.registry_type).icon} size={12} /> {registryTypeInfo(r.registry_type).label}</span>
                   </div>
                 </div>
                 {r.is_default && (
@@ -332,7 +333,7 @@ export default function RegistryRepositoriesPage() {
                           : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
                       }`}
                     >
-                      <div className="text-[12px] font-medium">{opt.icon} {opt.label}</div>
+                      <div className="flex items-center gap-1.5 text-[12px] font-medium"><BrandIcon name={opt.icon} size={14} /> {opt.label}</div>
                       <div className="text-[10px] text-[var(--text-tertiary)]">{opt.desc}</div>
                     </button>
                   ))}

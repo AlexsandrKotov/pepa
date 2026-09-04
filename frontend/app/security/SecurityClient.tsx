@@ -1344,6 +1344,7 @@ const FINDING_STATUS_COLORS: Record<string, string> = {
 
 function FindingsTab({ findings, summary }: { findings: SecurityFinding[]; summary: SecurityFindingSummary | null }) {
   const [statusFilter, setStatusFilter] = useState('');
+  const [visibleCount, setVisibleCount] = useState(50);
   const filtered = statusFilter ? findings.filter(f => f.status === statusFilter) : findings;
 
   return (
@@ -1366,7 +1367,7 @@ function FindingsTab({ findings, summary }: { findings: SecurityFinding[]; summa
       )}
 
       <div className="flex items-center gap-3">
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="text-xs border border-[var(--border)] rounded-lg px-3 py-1.5 bg-[var(--surface)] text-[var(--text-primary)]">
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setVisibleCount(50); }} className="text-xs border border-[var(--border)] rounded-lg px-3 py-1.5 bg-[var(--surface)] text-[var(--text-primary)]">
           <option value="">All statuses</option>
           <option value="open">Open</option>
           <option value="acknowledged">Acknowledged</option>
@@ -1380,7 +1381,8 @@ function FindingsTab({ findings, summary }: { findings: SecurityFinding[]; summa
         {filtered.length === 0 ? (
           <div className="text-center py-8 text-[var(--text-secondary)] text-sm">No security findings. All clear!</div>
         ) : (
-          filtered.slice(0, 50).map(f => (
+          <>
+          {filtered.slice(0, visibleCount).map(f => (
             <div key={f.id} className="bg-[var(--bg-secondary)] rounded-lg p-4 border border-[var(--border)] flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className={`px-2 py-0.5 text-xs rounded-full border ${FINDING_SEVERITY_COLORS[f.severity] || ''}`}>{f.severity}</span>
@@ -1391,7 +1393,13 @@ function FindingsTab({ findings, summary }: { findings: SecurityFinding[]; summa
               </div>
               <span className={`px-2 py-0.5 text-xs rounded-full ${FINDING_STATUS_COLORS[f.status] || ''}`}>{f.status}</span>
             </div>
-          ))
+          ))}
+          {visibleCount < filtered.length && (
+            <button onClick={() => setVisibleCount(c => c + 50)} className="mt-2 text-xs text-[var(--accent)] hover:underline">
+              Show more ({filtered.length - visibleCount} remaining)
+            </button>
+          )}
+          </>
         )}
       </div>
     </div>

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -119,6 +120,7 @@ func deployBlueprintToDocker(deps Dependencies) gin.HandlerFunc {
 				respondInternalError(c, cloneErr)
 				return
 			}
+			defer os.RemoveAll(clonedPath)
 			bp.ComposeFolderPath = clonedPath
 		}
 
@@ -215,6 +217,7 @@ func deployBlueprintToLocal(deps Dependencies) gin.HandlerFunc {
 				respondInternalError(c, fmt.Errorf("git clone failed: %w", cloneErr))
 				return
 			}
+			defer os.RemoveAll(clonedPath)
 			bp.ComposeFolderPath = clonedPath
 		}
 
@@ -354,12 +357,14 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 			svcCtx, svcCancel := context.WithTimeout(ctx, 120*time.Second)
 			var deployErr error
 			deployFolder := bp.ComposeFolderPath
+			var clonedDir string // track for cleanup
 			if bp.ComposeGitURL != "" {
 				clonedPath, cloneErr := cloneGitRepo(svcCtx, bp.ComposeGitURL)
 				if cloneErr != nil {
 					deployErr = cloneErr
 				} else {
 					deployFolder = clonedPath
+					clonedDir = clonedPath
 				}
 			}
 			if deployErr == nil {
@@ -368,6 +373,10 @@ func deployBlueprintGroupToDocker(deps Dependencies) gin.HandlerFunc {
 				} else {
 					deployErr = client.ComposeUp(svcCtx, svc.Name, svc.ComposeYaml, envVars)
 				}
+			}
+			// Clean up cloned temp directory immediately after use
+			if clonedDir != "" {
+				os.RemoveAll(clonedDir)
 			}
 			if deployErr != nil {
 				svcCancel()

@@ -640,7 +640,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
               <div className="flex items-center gap-4 mt-3">
                 <label className="flex items-center gap-2"><input type="checkbox" checked={rotationForm.auto_rotate} onChange={e => setRotationForm({ ...rotationForm, auto_rotate: e.target.checked })} className="rounded" /><span className="text-sm text-[var(--text-secondary)]">Auto-rotate</span></label>
               </div>
-              <button onClick={async () => { try { await devops.createRotation(rotationForm); setShowRotationForm(false); setRotationForm({ name: '', secret_path: '', rotation_interval_days: 30, environment: 'production', auto_rotate: false, notification_days_before: 7 }); const r = await devops.listRotations(); setRotations(r); } catch {} }} className="mt-3 px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Create</button>
+              <button onClick={async () => { try { await devops.createRotation(rotationForm); setShowRotationForm(false); setRotationForm({ name: '', secret_path: '', rotation_interval_days: 30, environment: 'production', auto_rotate: false, notification_days_before: 7 }); const r = await devops.listRotations(); setRotations(r); } catch (err) { showToast(`Failed to create rotation: ${err}`, 'error'); } }} className="mt-3 px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600">Create</button>
             </div>
           )}
 
@@ -661,7 +661,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`px-2 py-0.5 text-xs rounded-full ${r.status === 'active' ? 'bg-emerald-500/10 text-emerald-600' : r.status === 'overdue' ? 'bg-red-500/10 text-red-500' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>{r.status}</span>
-                    <button onClick={async () => { try { await devops.triggerRotation(r.id); const upd = await devops.listRotations(); setRotations(upd); } catch {} }} className="px-2 py-1 text-xs text-[var(--accent)] hover:underline">Rotate Now</button>
+                    <button onClick={async () => { try { await devops.triggerRotation(r.id); const upd = await devops.listRotations(); setRotations(upd); } catch (err) { showToast(`Rotation failed: ${err}`, 'error'); } }} className="px-2 py-1 text-xs text-[var(--accent)] hover:underline">Rotate Now</button>
                   </div>
                 </div>
               ))

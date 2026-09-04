@@ -377,16 +377,65 @@ func getAuthChallenge(repo *repository.RegistryRepo) (*authChallenge, error) {
 	}, nil
 }
 
+// maxBodyRead limits response body reads from external registries to prevent
+// resource exhaustion from malicious or misconfigured servers.
+const maxBodyRead = 1 << 20 // 1 MB
+
+// validateRealmURL checks that an auth realm URL is safe to request.
+// Prevents SSRF via a malicious Www-Authenticate realm pointing to internal services.
+func validateRealmURL(realm string) error {
+	u, err := url.Parse(realm)
+	if err != nil {
+		return fmt.Errorf("invalid realm URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("realm scheme must be http or https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("realm must include a hostname")
+	}
+	// In dev/docker mode, skip IP checks.
+	if os.Getenv("REGISTRY_ALLOW_PRIVATE_IPS") == "true" {
+		return nil
+	}
+	ips, lookupErr := net.LookupIP(host)
+	if lookupErr != nil {
+		// DNS failure — allow (the HTTP client will fail anyway).
+		return nil
+	}
+	for _, ip := range ips {
+		if ip == nil {
+			continue
+		}
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("realm must not target link-local or metadata endpoints")
+		}
+		if ip.IsLoopback() {
+			return fmt.Errorf("realm must not target loopback addresses")
+		}
+		if ip.IsPrivate() {
+			return fmt.Errorf("realm must not target private network addresses")
+		}
+	}
+	return nil
+}
+
 // getScopedToken requests a JWT token from the registry auth endpoint with a specific scope.
 func getScopedToken(challenge *authChallenge, repo *repository.RegistryRepo, scope string) (string, error) {
+	// Validate the realm URL to prevent SSRF via malicious Www-Authenticate headers.
+	if err := validateRealmURL(challenge.realm); err != nil {
+		return "", fmt.Errorf("unsafe auth realm: %w", err)
+	}
+
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	tokenURL := challenge.realm + "?"
 	if challenge.service != "" {
-		tokenURL += "service=" + challenge.service + "&"
+		tokenURL += "service=" + url.QueryEscape(challenge.service) + "&"
 	}
 	if scope != "" {
-		tokenURL += "scope=" + scope
+		tokenURL += "scope=" + url.QueryEscape(scope)
 	}
 
 	tokenReq, err := http.NewRequest("GET", tokenURL, nil)
@@ -401,7 +450,7 @@ func getScopedToken(challenge *authChallenge, repo *repository.RegistryRepo, sco
 	}
 	defer tokenResp.Body.Close()
 
-	body, _ := io.ReadAll(tokenResp.Body)
+	body, _ := io.ReadAll(io.LimitReader(tokenResp.Body, maxBodyRead))
 	if tokenResp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token endpoint returned %d: %s", tokenResp.StatusCode, string(body)[:min(len(body), 200)])
 	}
@@ -476,7 +525,7 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyRead))
 			resp.Body.Close()
 			return nil, fmt.Errorf("gitlab projects returned %d: %s", resp.StatusCode, string(body)[:min(len(body), 200)])
 		}
@@ -712,8 +761,8 @@ func listRegistryImageTags(deps Dependencies) gin.HandlerFunc {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("registry returned %s: %s", resp.Status, string(body))})
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyRead))
+			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("registry returned %s: %s", resp.Status, string(body)[:min(len(body), 500)])})
 			return
 		}
 

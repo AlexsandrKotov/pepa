@@ -2,7 +2,9 @@ package rest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -247,6 +249,13 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			req.Ports = []int{}
 		}
 
+		if req.ComposeGitURL != "" {
+			if err := validateComposeGitURL(req.ComposeGitURL); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("compose_git_url: %v", err)})
+				return
+			}
+		}
+
 		row := deps.DB.Pool.QueryRow(c.Request.Context(), `
 			INSERT INTO service_blueprints
 				(name, description, source_type, helm_repo_id, image, chart_url,
@@ -383,6 +392,13 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			req.Ports = []int{}
 		}
 
+		if req.ComposeGitURL != "" {
+			if err := validateComposeGitURL(req.ComposeGitURL); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("compose_git_url: %v", err)})
+				return
+			}
+		}
+
 		row := deps.DB.Pool.QueryRow(c.Request.Context(), `
 			UPDATE service_blueprints SET
 				name=$2, description=$3, source_type=$4, helm_repo_id=$5,
@@ -512,4 +528,21 @@ func forkServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 			gin.H{"source_id": src.ID, "name": bp.Name})
 		c.JSON(http.StatusCreated, bp)
 	}
+}
+
+// validateComposeGitURL performs basic safety checks on a compose Git URL.
+// Ensures it uses http/https and has a valid hostname to prevent injection
+// via malicious git URLs (e.g., git://, ssh://, or shell metacharacters).
+func validateComposeGitURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("only http and https schemes are allowed, got %q", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("URL must include a hostname")
+	}
+	return nil
 }
