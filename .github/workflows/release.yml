@@ -530,6 +530,7 @@ jobs:
           FRONTEND_PORT=3000
           CORS_ORIGINS=https://localhost,https://127.0.0.1
           VAULT_ALLOW_PRIVATE_IPS=false
+          REGISTRY_ALLOW_PRIVATE_IPS=true
           MOUNT_DOCK_SOCKET=/dev/null
           PLUGIN_SIGNATURE_VERIFY=${SIG_VERIFY}
           PLUGIN_SIGNATURE_ENFORCE=${SIG_ENFORCE}
@@ -649,6 +650,7 @@ jobs:
                 PLUGIN_SIGNATURE_VERIFY: \${PLUGIN_SIGNATURE_VERIFY:-true}
                 PLUGIN_SIGNATURE_ENFORCE: \${PLUGIN_SIGNATURE_ENFORCE:-true}
                 VAULT_ALLOW_PRIVATE_IPS: false
+                REGISTRY_ALLOW_PRIVATE_IPS: \${REGISTRY_ALLOW_PRIVATE_IPS:-true}
                 SERVER_PORT: "8080"
                 SERVER_HOST: "0.0.0.0"
                 SERVER_ENV: production
