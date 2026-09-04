@@ -21,6 +21,18 @@ RUN apk add --no-cache curl unzip && \
     chmod +x /usr/local/bin/tofu && \
     rm -rf tofu.zip /tmp/*
 
+# Stage 1c: Trivy binary (security scanner for the trivy plugin)
+FROM alpine:3.24 AS trivy
+ARG TRIVY_VERSION=0.74.0
+ARG TARGETARCH
+RUN apk add --no-cache curl && \
+    ARCH=$(if [ "$TARGETARCH" = "arm64" ]; then echo "ARM64"; else echo "64bit"; fi) && \
+    curl -fsSLo trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${ARCH}.tar.gz" && \
+    tar -xzf trivy.tar.gz -C /tmp && \
+    mv /tmp/trivy /usr/local/bin/trivy && \
+    chmod +x /usr/local/bin/trivy && \
+    rm -rf trivy.tar.gz /tmp/*
+
 # Stage 2: Go builder
 FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache git
@@ -45,6 +57,7 @@ RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash o
 
 COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
 COPY --from=opentofu /usr/local/bin/tofu /usr/local/bin/tofu
+COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=builder /out/api-server /api-server
 
 USER pepa:pepa
