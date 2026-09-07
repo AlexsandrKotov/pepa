@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,20 +36,37 @@ var validScanConfigKeys = map[string]map[string]bool{
 
 // Scanner orchestrates security scans via Trivy and SonarQube.
 type Scanner struct {
-	pluginMgr    *engine.Manager
-	repo         *repository.SecurityScanRepository
+	pluginMgr      *engine.Manager
+	repo           *repository.SecurityScanRepository
 	connectionRepo *repository.ConnectionRepository
-	sem          chan struct{} // concurrency limiter
+	registryRepo   *repository.RegistryRepository
+	sem            chan struct{} // concurrency limiter
+	mu             sync.Mutex
+	cancels        map[uuid.UUID]context.CancelFunc
 }
 
 // NewScanner creates a new Scanner.
-func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository) *Scanner {
+func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository, registryRepo *repository.RegistryRepository) *Scanner {
 	return &Scanner{
-		pluginMgr:    pluginMgr,
-		repo:         repo,
+		pluginMgr:      pluginMgr,
+		repo:           repo,
 		connectionRepo: connRepo,
-		sem:          make(chan struct{}, maxConcurrentScans),
+		registryRepo:   registryRepo,
+		sem:            make(chan struct{}, maxConcurrentScans),
+		cancels:        make(map[uuid.UUID]context.CancelFunc),
 	}
+}
+
+// CancelScan cancels a running scan by its run ID.
+func (s *Scanner) CancelScan(runID uuid.UUID) error {
+	s.mu.Lock()
+	cancel, ok := s.cancels[runID]
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("no active scan found for run %s", runID)
+	}
+	cancel()
+	return nil
 }
 
 // RunScan executes a scan for the given target and persists results.
@@ -88,6 +107,20 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 		return nil, fmt.Errorf("create scan run: %w", err)
 	}
 
+	// Create a cancellable context for this scan
+	scanCtx, scanCancel := context.WithCancel(ctx)
+
+	// Register cancel func so it can be stopped externally
+	s.mu.Lock()
+	s.cancels[run.ID] = scanCancel
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.cancels, run.ID)
+		s.mu.Unlock()
+		scanCancel()
+	}()
+
 	// Mark as running
 	now := time.Now()
 	run.StartedAt = &now
@@ -105,13 +138,13 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 
 	switch target.ScannerType {
 	case "trivy":
-		resultSummary, resultFull, scanErr = s.runTrivyScan(ctx, target)
+		resultSummary, resultFull, scanErr = s.runTrivyScan(scanCtx, target)
 	case "sonarqube":
-		resultSummary, resultFull, scanErr = s.runSonarQubeScan(ctx, target)
+		resultSummary, resultFull, scanErr = s.runSonarQubeScan(scanCtx, target)
 	case "both":
 		// Run both scanners and merge results
-		trivySummary, trivyFull, trivyErr := s.runTrivyScan(ctx, target)
-		sqSummary, sqFull, sqErr := s.runSonarQubeScan(ctx, target)
+		trivySummary, trivyFull, trivyErr := s.runTrivyScan(scanCtx, target)
+		sqSummary, sqFull, sqErr := s.runSonarQubeScan(scanCtx, target)
 
 		resultSummary = mergeMaps(trivySummary, sqSummary, "trivy", "sonarqube")
 		resultFull = mergeMaps(trivyFull, sqFull, "trivy", "sonarqube")
@@ -125,6 +158,21 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 		}
 	default:
 		scanErr = fmt.Errorf("unknown scanner type: %s", target.ScannerType)
+	}
+
+	// Check if the scan was cancelled
+	if scanCtx.Err() != nil {
+		run.Status = "cancelled"
+		cancelledMsg := "scan cancelled by user"
+		run.ErrorMessage = &cancelledMsg
+		durationMs := int(time.Since(startTime).Milliseconds())
+		completedAt := time.Now()
+		run.DurationMs = &durationMs
+		run.CompletedAt = &completedAt
+		if err := s.repo.UpdateScanRun(ctx, run); err != nil {
+			return nil, fmt.Errorf("update cancelled scan run: %w", err)
+		}
+		return run, nil
 	}
 
 	// Calculate duration
@@ -201,6 +249,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		"--format", "json",
 		"--severity", severity,
 		"--no-progress",
+		"--quiet", // suppress log messages that can corrupt JSON output
 	}
 
 	ignoreUnfixed, _ := target.ScanConfig["ignore_unfixed"].(bool)
@@ -208,12 +257,73 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		args = append(args, "--ignore-unfixed")
 	}
 
-	args = append(args, target.TargetRef)
+	// Resolve registry credentials for private image scans.
+	// When the target was created from the Registry Repo selector, connection_id
+	// holds the registry_repository UUID. We look up the stored credentials and
+	// prepend the registry hostname to the image reference if missing.
+	// Trivy uses environment variables (not CLI flags) for registry auth.
+	imageRef := target.TargetRef
+	var regUsername, regPassword, regToken string
+	if target.ConnectionID != nil && s.registryRepo != nil && scanType == "image" {
+		regRepo, regErr := s.registryRepo.GetDecrypted(ctx, *target.ConnectionID, target.TenantID)
+		if regErr == nil && regRepo != nil {
+			// Prepend registry hostname if the image ref doesn't already include it.
+			// A registry hostname contains a '.' (e.g. ghcr.io) or ':' (e.g. localhost:5000)
+			// before the first '/', OR the imageRef is just a hostname (no slash at all).
+			host := strings.TrimPrefix(strings.TrimSuffix(regRepo.URL, "/"), "https://")
+			host = strings.TrimPrefix(host, "http://")
+			needsHost := true
+			// If imageRef has no slash, check if it's already a hostname (contains '.')
+			if idx := strings.Index(imageRef, "/"); idx > 0 {
+				beforeSlash := imageRef[:idx]
+				if strings.Contains(beforeSlash, ".") || strings.Contains(beforeSlash, ":") {
+					needsHost = false
+				}
+			} else if strings.Contains(imageRef, ".") {
+				// No slash found - imageRef might be just a hostname like "registry.example.com"
+				needsHost = false
+			}
+			// Also check if imageRef equals the host (exact match)
+			if imageRef == host {
+				needsHost = false
+			}
+			if needsHost && host != "" {
+				imageRef = host + "/" + imageRef
+			}
+			// Collect credentials for env vars (set on cmd below)
+			if regRepo.Username != "" && regRepo.Password != "" {
+				regUsername = regRepo.Username
+				regPassword = regRepo.Password
+			} else if regRepo.Token != "" {
+				if regRepo.Username != "" {
+					regUsername = regRepo.Username
+					regPassword = regRepo.Token
+				} else {
+					regToken = regRepo.Token
+				}
+			}
+			slog.Info("trivy scan using registry credentials", "registry", host, "image", imageRef)
+		}
+	}
+
+	args = append(args, imageRef)
 
 	cmd := exec.CommandContext(ctx, "trivy", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// Pass registry credentials via environment variables.
+	// Trivy reads TRIVY_USERNAME/TRIVY_PASSWORD for private registry auth.
+	// Must inherit os.Environ() — setting cmd.Env replaces the entire environment.
+	if regUsername != "" || regToken != "" {
+		cmd.Env = os.Environ()
+		if regUsername != "" {
+			cmd.Env = append(cmd.Env, "TRIVY_USERNAME="+regUsername, "TRIVY_PASSWORD="+regPassword)
+		}
+		if regToken != "" {
+			cmd.Env = append(cmd.Env, "TRIVY_REGISTRY_TOKEN="+regToken)
+		}
+	}
 
 	slog.Info("running trivy scan", "target", target.TargetRef, "scan_type", scanType)
 
@@ -228,7 +338,13 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	// Parse trivy JSON output
 	var trivyResult map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &trivyResult); err != nil {
-		return nil, nil, fmt.Errorf("parse trivy output: %w", err)
+		// Include raw output preview for debugging
+		raw := stdout.String()
+		preview := raw
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		return nil, nil, fmt.Errorf("parse trivy output: %w (raw output: %s)", err, preview)
 	}
 
 	// Build summary from results

@@ -28,6 +28,7 @@ func registerSecurityScanRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 	// Scan Runs
 	scans.GET("/scans", listScanRuns(deps))
 	scans.GET("/scans/:id", getScanRun(deps))
+	scans.POST("/scans/:id/cancel", cancelScanRun(deps))
 
 	// Scan Schedules
 	scans.GET("/schedules", listScanSchedules(deps))
@@ -326,6 +327,25 @@ func getScanRun(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, run)
+	}
+}
+
+func cancelScanRun(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Scanner == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scanner not available"})
+			return
+		}
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scan ID"})
+			return
+		}
+		if err := deps.Scanner.CancelScan(id); err != nil {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "scan cancelled"})
 	}
 }
 

@@ -342,7 +342,7 @@ func Bootstrap() (*Components, error) {
 	pipelineRegistry.Register("github_actions", pipeline.NewGitHubActionsAdapter())
 	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
 	// Register security scan adapter for pipeline integration
-	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo)
+	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo, c.RegistryRepo)
 	pipelineRegistry.Register("security_scan", pipeline.NewSecurityScanAdapter(secScanner, c.SecurityScanRepo))
 	c.PipelineRegistry = pipelineRegistry
 	slog.Info("pipeline registry initialized", "adapters", pipelineRegistry.List())

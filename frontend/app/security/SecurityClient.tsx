@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { securityScan, devops, connections, registryRepositories, type ScanTarget, type ScanRun, type ScanSchedule, type SecurityDashboard, type ScannerType, type TargetType, type CompliancePolicy, type SecurityFinding, type SecurityFindingSummary, type RegistryRepository, type Connection } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
+import GitRepoPicker, { type GitRepoPickerValue } from '@/components/GitRepoPicker';
 
 type TabKey = 'overview' | 'targets' | 'scans' | 'reports' | 'schedules' | 'compliance' | 'findings';
 
@@ -41,7 +43,17 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 export default function SecurityClient() {
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<TabKey>((searchParams.get('tab') as TabKey) || 'overview');
+
+  // Persist tab in URL
+  const handleTabChange = useCallback((tab: TabKey) => {
+    setActiveTab(tab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', tab);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
   const [dashboard, setDashboard] = useState<SecurityDashboard | null>(null);
   const [targets, setTargets] = useState<ScanTarget[]>([]);
   const [scans, setScans] = useState<ScanRun[]>([]);
@@ -107,7 +119,7 @@ export default function SecurityClient() {
         {TABS.map(tab => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
+            onClick={() => handleTabChange(tab.key)}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
               activeTab === tab.key
                 ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] border-b-2 border-blue-500'
@@ -197,7 +209,7 @@ function OverviewTab({ dashboard, scans, targets }: { dashboard: SecurityDashboa
         ) : (
           <div className="space-y-2">
             {recentScans.map(scan => (
-              <div key={scan.id} className="flex items-center justify-between p-3 bg-[var(--bg-primary)] rounded-lg">
+              <div key={scan.id} className="flex items-center justify-between p-3 bg-[var(--surface)] rounded-lg">
                 <div className="flex items-center gap-3">
                   <span className={`px-2 py-1 text-xs rounded border ${STATUS_COLORS[scan.status]}`}>
                     {scan.status}
@@ -219,7 +231,7 @@ function OverviewTab({ dashboard, scans, targets }: { dashboard: SecurityDashboa
         <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Scan Coverage</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {targets.slice(0, 6).map(target => (
-            <div key={target.id} className="p-3 bg-[var(--bg-primary)] rounded-lg">
+            <div key={target.id} className="p-3 bg-[var(--surface)] rounded-lg">
               <div className="flex items-center gap-2 mb-2">
                 <BrandIcon name={target.scanner_type === 'sonarqube' ? 'sonarqube' : 'trivy'} size={16} />
                 <span className="text-sm font-medium text-[var(--text-primary)] truncate">{target.name}</span>
@@ -261,16 +273,21 @@ function StatCard({ title, value, subtitle, icon, color }: { title: string; valu
 
 function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: () => void }) {
   const [showCreate, setShowCreate] = useState(false);
+  const [editTarget, setEditTarget] = useState<ScanTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScanTarget | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
     try {
       await securityScan.deleteTarget(deleteTarget.id);
       setDeleteTarget(null);
-      onRefresh();
+      await onRefresh();
     } catch (e) {
       console.error('Failed to delete target:', e);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -313,7 +330,7 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
                     <h3 className="font-medium text-[var(--text-primary)]">{target.name}</h3>
                     <p className="text-sm text-[var(--text-secondary)]">{target.target_ref}</p>
                     <div className="flex gap-2 mt-1">
-                      <span className="text-xs px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-tertiary)]">
+                      <span className="text-xs px-2 py-0.5 rounded bg-[var(--surface)] text-[var(--text-tertiary)]">
                         {target.target_type}
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: `${SCANNER_COLORS[target.scanner_type]}20`, color: SCANNER_COLORS[target.scanner_type] }}>
@@ -346,6 +363,12 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
                   Scan Now
                 </button>
                 <button
+                  onClick={() => setEditTarget(target)}
+                  className="px-3 py-1.5 text-xs bg-[var(--surface)] text-[var(--text-secondary)] border border-[var(--border)] rounded hover:bg-[var(--bg)]"
+                >
+                  Edit
+                </button>
+                <button
                   onClick={() => setDeleteTarget(target)}
                   className="px-3 py-1.5 text-xs bg-red-500/10 text-red-500 rounded hover:bg-red-500/20"
                 >
@@ -358,6 +381,7 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
       )}
 
       {showCreate && <CreateTargetModal onClose={() => setShowCreate(false)} onCreated={onRefresh} />}
+      {editTarget && <CreateTargetModal onClose={() => setEditTarget(null)} onCreated={onRefresh} editTarget={editTarget} />}
       {deleteTarget && (
         <ConfirmModal
           open={true}
@@ -366,6 +390,7 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}
           variant="danger"
+          loading={deleting}
         />
       )}
     </div>
@@ -376,28 +401,52 @@ type ScanCategory = 'code' | 'containers';
 type CodeSource = 'local' | 'git_url' | 'connection';
 type ContainerSource = 'image' | 'registry' | 'sonarqube';
 
-function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [name, setName] = useState('');
-  const [category, setCategory] = useState<ScanCategory>('containers');
+function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => void; onCreated: () => void; editTarget?: ScanTarget }) {
+  const isEditing = !!editTarget;
+  const [name, setName] = useState(editTarget?.name || '');
+  const [category, setCategory] = useState<ScanCategory>(() => {
+    if (!editTarget) return 'containers';
+    if (editTarget.target_type === 'git_repo' || editTarget.target_type === 'filesystem') return 'code';
+    return 'containers';
+  });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
   // Code source state
-  const [codeSource, setCodeSource] = useState<CodeSource>('git_url');
-  const [localPath, setLocalPath] = useState('');
-  const [gitUrl, setGitUrl] = useState('');
+  const [codeSource, setCodeSource] = useState<CodeSource>(() => {
+    if (!editTarget) return 'git_url';
+    if (editTarget.target_type === 'filesystem') return 'local';
+    if (editTarget.connection_id) return 'connection';
+    return 'git_url';
+  });
+  const [localPath, setLocalPath] = useState(editTarget?.target_type === 'filesystem' ? editTarget.target_ref : '');
+  const [gitUrl, setGitUrl] = useState(editTarget?.target_type === 'git_repo' && !editTarget.connection_id ? editTarget.target_ref : '');
   const [gitConnections, setGitConnections] = useState<Connection[]>([]);
-  const [selectedConnectionId, setSelectedConnectionId] = useState('');
-  const [connectionRepoUrl, setConnectionRepoUrl] = useState('');
+  const [pickerValue, setPickerValue] = useState<Partial<GitRepoPickerValue>>(() => {
+    if (editTarget?.connection_id && editTarget.target_type === 'git_repo') {
+      return { connection_id: editTarget.connection_id, repo_url: editTarget.target_ref };
+    }
+    return {};
+  });
 
   // Container source state
-  const [containerSource, setContainerSource] = useState<ContainerSource>('image');
-  const [imageRef, setImageRef] = useState('');
-  const [sonarProjectKey, setSonarProjectKey] = useState('');
+  const [containerSource, setContainerSource] = useState<ContainerSource>(() => {
+    if (!editTarget) return 'image';
+    if (editTarget.target_type === 'sonarqube_project') return 'sonarqube';
+    if (editTarget.target_type === 'registry') return 'registry';
+    return 'image';
+  });
+  const [imageRef, setImageRef] = useState(editTarget?.target_type === 'image' ? editTarget.target_ref : '');
+  const [sonarProjectKey, setSonarProjectKey] = useState(editTarget?.target_type === 'sonarqube_project' ? editTarget.target_ref : '');
 
   // Registry cascading selector state
   const [registryRepos, setRegistryRepos] = useState<RegistryRepository[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState('');
+  const [selectedRepoId, setSelectedRepoId] = useState(() => {
+    if (editTarget?.target_type === 'registry' && editTarget.connection_id) {
+      return editTarget.connection_id;
+    }
+    return '';
+  });
   const [registryScope, setRegistryScope] = useState<'all' | 'specific'>('specific');
   const [registryImages, setRegistryImages] = useState<string[]>([]);
   const [loadingImages, setLoadingImages] = useState(false);
@@ -406,7 +455,8 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
   const [registryTags, setRegistryTags] = useState<string[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
   const [selectedTag, setSelectedTag] = useState('');
-  const [registryManualRef, setRegistryManualRef] = useState('');
+  const [registryManualRef, setRegistryManualRef] = useState(editTarget?.target_type === 'registry' ? editTarget.target_ref : '');
+  const [registryError, setRegistryError] = useState('');
 
   const registryHost = (url: string) => url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 
@@ -428,6 +478,7 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
     setRegistryTags([]);
     setImageSearch('');
     setRegistryManualRef('');
+    setRegistryError('');
     const repo = registryRepos.find(r => r.id === repoId);
     const host = repo ? registryHost(repo.url) : '';
     if (registryScope === 'all' && host) setRegistryManualRef(host);
@@ -436,8 +487,9 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
     try {
       const resImg = await registryRepositories.listImages(repoId);
       setRegistryImages(resImg.images || []);
-    } catch {
+    } catch (e) {
       setRegistryImages([]);
+      setRegistryError(friendlyError(e).message || 'Failed to load images from registry');
     } finally {
       setLoadingImages(false);
     }
@@ -449,6 +501,7 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
     setSelectedTag('');
     setRegistryTags([]);
     setImageSearch('');
+    setRegistryError('');
     if (scope === 'all' && selectedRepoId) {
       const repo = registryRepos.find(r => r.id === selectedRepoId);
       setRegistryManualRef(repo ? registryHost(repo.url) : '');
@@ -462,13 +515,15 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
     setSelectedTag('');
     setRegistryTags([]);
     setRegistryManualRef('');
+    setRegistryError('');
     if (!imageName || !selectedRepoId) return;
     setLoadingTags(true);
     try {
       const res = await registryRepositories.listTags(selectedRepoId, imageName);
       setRegistryTags(res.tags || []);
-    } catch {
+    } catch (e) {
       setRegistryTags([]);
+      setRegistryError(friendlyError(e).message || 'Failed to load tags');
     } finally {
       setLoadingTags(false);
     }
@@ -492,8 +547,8 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
         case 'git_url':
           return gitUrl ? { target_type: 'git_repo', target_ref: gitUrl } : null;
         case 'connection':
-          return (selectedConnectionId && connectionRepoUrl)
-            ? { target_type: 'git_repo', target_ref: connectionRepoUrl, connection_id: selectedConnectionId }
+          return (pickerValue.connection_id && pickerValue.repo_url)
+            ? { target_type: 'git_repo', target_ref: pickerValue.repo_url, connection_id: pickerValue.connection_id }
             : null;
       }
     } else {
@@ -520,15 +575,23 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
     setError('');
     setCreating(true);
     try {
-      await securityScan.createTarget({
+      // For registry sources, pass the registry repository ID as connection_id
+      // so the backend can look up credentials for private image pulls.
+      const connectionId = resolved.connection_id || (containerSource === 'registry' && selectedRepoId ? selectedRepoId : undefined);
+      const targetData = {
         name: name.trim(),
         scanner_type: resolveScanner(),
         target_type: resolved.target_type,
         target_ref: resolved.target_ref,
-        connection_id: resolved.connection_id,
-        enabled: true,
-        scan_config: {},
-      });
+        connection_id: connectionId,
+        enabled: editTarget?.enabled ?? true,
+        scan_config: editTarget?.scan_config || {},
+      };
+      if (isEditing && editTarget) {
+        await securityScan.updateTarget(editTarget.id, targetData);
+      } else {
+        await securityScan.createTarget(targetData);
+      }
       onCreated();
       onClose();
     } catch (e) {
@@ -541,17 +604,12 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
   const resolved = resolveTarget();
   const canSubmit = name.trim() && resolved;
 
-  const connectionIcon = (type: string) => {
-    if (type === 'gitlab') return '\u{1F98A}';
-    return '\u{1F517}';
-  };
-
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
       <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-xl mx-4 max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
-          <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Create Scan Target</h2>
+          <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">{isEditing ? 'Edit Scan Target' : 'Create Scan Target'}</h2>
           <button onClick={onClose} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
         </div>
 
@@ -657,36 +715,14 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
 
               {codeSource === 'connection' && (
                 <div className="space-y-3">
-                  <div>
-                    <label className="label">Connection *</label>
-                    {gitConnections.length === 0 ? (
-                      <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/10">
-                        <p className="text-[11px] text-amber-600 dark:text-amber-400">
-                          No Git connections found. <a href="/connections" className="underline font-medium">Add a connection</a> (GitLab or Git) first.
-                        </p>
-                      </div>
-                    ) : (
-                      <select
-                        value={selectedConnectionId}
-                        onChange={e => { setSelectedConnectionId(e.target.value); setConnectionRepoUrl(''); }}
-                        className="input text-[12px]"
-                        style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
-                      >
-                        <option value="" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>Select connection...</option>
-                        {gitConnections.map(c => (
-                          <option key={c.id} value={c.id} style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>
-                            {connectionIcon(c.type)} {c.name} ({c.type})
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                  {selectedConnectionId && (
-                    <div>
-                      <label className="label">Repository URL *</label>
-                      <input type="text" value={connectionRepoUrl} onChange={e => setConnectionRepoUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://gitlab.com/org/repo or group/project" />
-                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Repository path or URL from the selected connection</p>
-                    </div>
+                  <GitRepoPicker
+                    value={pickerValue}
+                    onChange={setPickerValue}
+                    gitConnections={gitConnections}
+                    label="Project"
+                  />
+                  {!pickerValue.repo_url && pickerValue.connection_id && (
+                    <p className="text-[10px] text-[var(--text-tertiary)]">Select a group and repository from the lists above</p>
                   )}
                 </div>
               )}
@@ -781,11 +817,17 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
                       )}
                       {registryScope === 'specific' && selectedRepoId && (
                         <>
+                          {registryError && (
+                            <div className="flex items-center gap-2 p-2.5 rounded-lg border border-red-500/20 bg-red-500/10">
+                              <span className="text-[11px] text-red-500 flex-1">{registryError}</span>
+                              <button type="button" onClick={() => handleRepoSelect(selectedRepoId)} className="text-[10px] px-2 py-1 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 shrink-0">Retry</button>
+                            </div>
+                          )}
                           {registryImages.length > 5 && (
                             <input type="text" value={imageSearch} onChange={e => setImageSearch(e.target.value)} className="input text-[12px]" placeholder="Filter images..." />
                           )}
                           <select value={selectedImage} onChange={e => handleImageSelect(e.target.value)} className="input font-mono text-[12px]" disabled={loadingImages} style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>
-                            <option value="" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>{loadingImages ? 'Loading images...' : 'Select image...'}</option>
+                            <option value="" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>{loadingImages ? 'Loading images...' : registryError ? 'Failed to load — retry or type manually below' : 'Select image...'}</option>
                             {registryImages.filter(img => !imageSearch || img.toLowerCase().includes(imageSearch.toLowerCase())).map(img => (
                               <option key={img} value={img} style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>{img}</option>
                             ))}
@@ -801,7 +843,7 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
                         </>
                       )}
                       {registryManualRef && (
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--surface)] border border-[var(--border)]">
                           <span className="text-[11px] text-[var(--text-secondary)]">{registryScope === 'all' ? 'Registry:' : 'Ref:'}</span>
                           <span className="text-[12px] font-mono text-[var(--text-primary)]">{registryManualRef}</span>
                         </div>
@@ -827,7 +869,7 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)]">
               <span className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Target:</span>
               <span className="text-[12px] font-mono text-[var(--text-primary)]">{resolved.target_ref}</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-tertiary)] ml-auto">{resolved.target_type}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--surface)] text-[var(--text-tertiary)] ml-auto">{resolved.target_type}</span>
             </div>
           )}
         </div>
@@ -840,7 +882,7 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
             disabled={creating || !canSubmit}
             className="btn btn-primary"
           >
-            {creating ? 'Creating...' : 'Create Target'}
+            {creating ? (isEditing ? 'Saving...' : 'Creating...') : (isEditing ? 'Save Changes' : 'Create Target')}
           </button>
         </div>
       </div>
@@ -850,8 +892,300 @@ function CreateTargetModal({ onClose, onCreated }: { onClose: () => void; onCrea
 
 // ── Scans Tab ─────────────────────────────────────────────────
 
+// Trivy result types for drill-down
+interface TrivyVulnerability {
+  VulnerabilityID: string;
+  PkgName: string;
+  InstalledVersion: string;
+  FixedVersion?: string;
+  Severity: string;
+  Title?: string;
+  Description?: string;
+}
+interface TrivyResult {
+  Target: string;
+  Class?: string;
+  Type?: string;
+  Vulnerabilities?: TrivyVulnerability[];
+}
+
+const SEVERITY_BG: Record<string, string> = {
+  CRITICAL: 'bg-red-500/10 text-red-500 border-red-500/20',
+  HIGH: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+  MEDIUM: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
+  LOW: 'bg-green-500/10 text-green-500 border-green-500/20',
+  UNKNOWN: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+};
+
+function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void }) {
+  const [fullScan, setFullScan] = useState<ScanRun | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(true);
+  const [expandedContainers, setExpandedContainers] = useState<Set<string>>(new Set());
+  const [expandedVulns, setExpandedVulns] = useState<Set<string>>(new Set());
+  const [severityFilter, setSeverityFilter] = useState<string>('');
+
+  // Close on Escape key
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  // Fetch full scan data (list endpoint omits result_full)
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingDetail(true);
+    securityScan.getScan(scan.id).then(data => {
+      if (!cancelled) { setFullScan(data); setLoadingDetail(false); }
+    }).catch(() => {
+      if (!cancelled) setLoadingDetail(false);
+    });
+    return () => { cancelled = true; };
+  }, [scan.id]);
+
+  const active = fullScan || scan;
+
+  // Extract containers (Results) from result_full
+  const containers = useMemo<TrivyResult[]>(() => {
+    if (!active.result_full) return [];
+    const results = active.result_full.Results || active.result_full.results;
+    if (Array.isArray(results)) return results as TrivyResult[];
+    return [];
+  }, [active.result_full]);
+
+  const toggleContainer = (target: string) => {
+    setExpandedContainers(prev => {
+      const next = new Set(prev);
+      if (next.has(target)) next.delete(target); else next.add(target);
+      return next;
+    });
+  };
+
+  const toggleVuln = (key: string) => {
+    setExpandedVulns(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const expandAll = () => {
+    setExpandedContainers(new Set(containers.map(c => c.Target)));
+  };
+  const collapseAll = () => {
+    setExpandedContainers(new Set());
+    setExpandedVulns(new Set());
+  };
+
+  // Count severities across all containers
+  const totalSeverities = useMemo(() => containers.reduce((acc, c) => {
+    (c.Vulnerabilities || []).forEach(v => {
+      const sev = v.Severity?.toUpperCase() || 'UNKNOWN';
+      acc[sev] = (acc[sev] || 0) + 1;
+    });
+    return acc;
+  }, {} as Record<string, number>), [containers]);
+
+  // Filter vulnerabilities by severity
+  const filterVulns = useCallback((vulns: TrivyVulnerability[]) => {
+    if (!severityFilter) return vulns;
+    return vulns.filter(v => v.Severity?.toUpperCase() === severityFilter);
+  }, [severityFilter]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl w-[95vw] max-w-5xl max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between shrink-0">
+          <div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">{active.target_name || active.target_ref || 'Unknown'}</h2>
+              <span className={`px-2 py-0.5 text-xs rounded border ${STATUS_COLORS[active.status]}`}>{active.status}</span>
+              <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: `${SCANNER_COLORS[active.scanner_type]}20`, color: SCANNER_COLORS[active.scanner_type] }}>
+                {active.scanner_type}
+              </span>
+            </div>
+            <div className="flex items-center gap-4 mt-1 text-xs text-[var(--text-secondary)]">
+              <span>Triggered: {active.trigger_type}</span>
+              <span>Duration: {active.duration_ms ? `${(active.duration_ms / 1000).toFixed(1)}s` : '-'}</span>
+              {active.completed_at && <span>Completed: {new Date(active.completed_at).toLocaleString()}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-[var(--bg-secondary)] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {loadingDetail ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <>
+          {/* Failed scan: show error */}
+          {active.status === 'failed' && (
+            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <span className="font-medium text-red-500">Scan Failed</span>
+              </div>
+              <pre className="text-sm text-red-400/80 whitespace-pre-wrap font-mono">{active.error_message || 'No error details available'}</pre>
+            </div>
+          )}
+
+          {/* Severity summary bar */}
+          {containers.length > 0 && (
+            <>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm font-medium text-[var(--text-primary)]">{containers.length} container{containers.length !== 1 ? 's' : ''}</span>
+                <span className="text-xs text-[var(--text-tertiary)]">|</span>
+                {Object.entries(totalSeverities).sort((a, b) => {
+                  const order = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
+                  return order.indexOf(a[0]) - order.indexOf(b[0]);
+                }).map(([sev, count]) => (
+                  <button
+                    key={sev}
+                    onClick={() => setSeverityFilter(severityFilter === sev ? '' : sev)}
+                    className={`px-2 py-0.5 text-xs rounded border transition-all ${severityFilter === sev ? SEVERITY_BG[sev] + ' ring-1 ring-current' : SEVERITY_BG[sev] + ' opacity-70 hover:opacity-100'}`}
+                  >
+                    {count} {sev.toLowerCase()}
+                  </button>
+                ))}
+                {severityFilter && (
+                  <button onClick={() => setSeverityFilter('')} className="text-xs text-[var(--accent)] hover:underline">Clear filter</button>
+                )}
+                <div className="ml-auto flex gap-2">
+                  <button onClick={expandAll} className="text-xs text-[var(--accent)] hover:underline">Expand all</button>
+                  <button onClick={collapseAll} className="text-xs text-[var(--text-tertiary)] hover:underline">Collapse all</button>
+                </div>
+              </div>
+
+              {/* Container list */}
+              <div className="space-y-2">
+                {containers.map((container, ci) => {
+                  const vulns = filterVulns(container.Vulnerabilities || []);
+                  const sevCounts = (container.Vulnerabilities || []).reduce((acc, v) => {
+                    const s = v.Severity?.toUpperCase() || 'UNKNOWN';
+                    acc[s] = (acc[s] || 0) + 1;
+                    return acc;
+                  }, {} as Record<string, number>);
+                  const isExpanded = expandedContainers.has(container.Target);
+                  const hasVulns = (container.Vulnerabilities || []).length > 0;
+
+                  return (
+                    <div key={`${container.Target}-${ci}`} className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] overflow-hidden">
+                      {/* Container header */}
+                      <div
+                        className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-[var(--bg-secondary)]/80"
+                        onClick={() => toggleContainer(container.Target)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <svg className={`w-4 h-4 text-[var(--text-tertiary)] transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                          <svg className="w-4 h-4 text-[var(--text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+                          <div>
+                            <span className="text-sm font-medium text-[var(--text-primary)]">{container.Target}</span>
+                            {container.Class && (
+                              <span className="ml-2 text-xs text-[var(--text-tertiary)]">{container.Class}{container.Type ? ` / ${container.Type}` : ''}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {hasVulns ? (
+                            <>
+                              {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'].map(sev =>
+                                sevCounts[sev] ? (
+                                  <span key={sev} className={`text-xs px-1.5 py-0.5 rounded border ${SEVERITY_BG[sev]}`}>
+                                    {sevCounts[sev]} {sev[0]}
+                                  </span>
+                                ) : null
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">Clean</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Vulnerability list */}
+                      {isExpanded && (
+                        <div className="border-t border-[var(--border)]">
+                          {!hasVulns ? (
+                            <div className="px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
+                              No vulnerabilities found in this container.
+                            </div>
+                          ) : vulns.length === 0 ? (
+                            <div className="px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
+                              No vulnerabilities matching the severity filter.
+                            </div>
+                          ) : (
+                            <div className="divide-y divide-[var(--border)]">
+                              {vulns.map((v, vi) => {
+                                const vulnKey = `${container.Target}-${v.VulnerabilityID}-${vi}`;
+                                const isVulnExpanded = expandedVulns.has(vulnKey);
+                                return (
+                                  <div key={vulnKey} className="px-4 py-2.5 hover:bg-[var(--surface)]/50">
+                                    <div
+                                      className="flex items-center justify-between cursor-pointer"
+                                      onClick={() => toggleVuln(vulnKey)}
+                                    >
+                                      <div className="flex items-center gap-3">
+                                        <svg className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform ${isVulnExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded border ${SEVERITY_BG[v.Severity?.toUpperCase()] || SEVERITY_BG.UNKNOWN}`}>{v.Severity}</span>
+                                        <span className="text-sm font-mono text-[var(--text-primary)]">{v.VulnerabilityID}</span>
+                                        <span className="text-sm text-[var(--text-secondary)]">{v.PkgName}</span>
+                                        <span className="text-xs text-[var(--text-tertiary)]">{v.InstalledVersion}</span>
+                                        {v.FixedVersion && (
+                                          <span className="text-xs text-emerald-600">→ {v.FixedVersion}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {isVulnExpanded && (
+                                      <div className="mt-2 ml-6 space-y-1.5 text-sm">
+                                        {v.Title && <p className="text-[var(--text-primary)] font-medium">{v.Title}</p>}
+                                        {v.Description && <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{v.Description}</p>}
+                                        <div className="flex gap-4 text-xs text-[var(--text-tertiary)]">
+                                          <span>Package: <span className="text-[var(--text-secondary)]">{v.PkgName}</span></span>
+                                          <span>Installed: <span className="text-[var(--text-secondary)]">{v.InstalledVersion}</span></span>
+                                          {v.FixedVersion && <span>Fixed in: <span className="text-emerald-600">{v.FixedVersion}</span></span>}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* No result_full but scan completed */}
+          {active.status === 'completed' && containers.length === 0 && active.result_full && (
+            <div className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+              <p className="text-sm text-[var(--text-secondary)] mb-2">Raw result data:</p>
+              <pre className="text-xs text-[var(--text-tertiary)] overflow-x-auto max-h-60">{JSON.stringify(active.result_full, null, 2)}</pre>
+            </div>
+          )}
+          {active.status === 'completed' && containers.length === 0 && !active.result_full && (
+            <div className="text-center py-8 text-[var(--text-secondary)] text-sm">No detailed results available for this scan.</div>
+          )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => void }) {
-  const [expandedScan, setExpandedScan] = useState<string | null>(null);
+  const [selectedScan, setSelectedScan] = useState<ScanRun | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
 
   const filteredScans = statusFilter ? scans.filter(s => s.status === statusFilter) : scans;
@@ -872,7 +1206,7 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
             <option value="running">Running</option>
             <option value="pending">Pending</option>
           </select>
-          <button onClick={onRefresh} className="px-3 py-1.5 text-sm bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg hover:bg-[var(--bg-primary)]">
+          <button onClick={onRefresh} className="px-3 py-1.5 text-sm bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg hover:bg-[var(--surface)]">
             Refresh
           </button>
         </div>
@@ -885,7 +1219,7 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
       ) : (
         <div className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] overflow-hidden">
           <table className="w-full">
-            <thead className="bg-[var(--bg-primary)]">
+            <thead className="bg-[var(--surface)]">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-secondary)] uppercase">Target</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-secondary)] uppercase">Scanner</th>
@@ -897,54 +1231,52 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {filteredScans.map(scan => (
-                <Fragment key={scan.id}>
-                  <tr
-                    onClick={() => setExpandedScan(expandedScan === scan.id ? null : scan.id)}
-                    className="cursor-pointer hover:bg-[var(--bg-primary)]"
-                  >
-                    <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{scan.target_name || scan.target_ref || 'Unknown'}</td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: `${SCANNER_COLORS[scan.scanner_type]}20`, color: SCANNER_COLORS[scan.scanner_type] }}>
-                        {scan.scanner_type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 text-xs rounded border ${STATUS_COLORS[scan.status]}`}>{scan.status}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {scan.result_summary && (
-                        <div className="flex gap-1">
-                          {(scan.result_summary.critical as number) > 0 && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">{scan.result_summary.critical as number}C</span>
-                          )}
-                          {(scan.result_summary.high as number) > 0 && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500">{scan.result_summary.high as number}H</span>
-                          )}
-                          {(scan.result_summary.medium as number) > 0 && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-600">{scan.result_summary.medium as number}M</span>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">
-                      {scan.duration_ms ? `${(scan.duration_ms / 1000).toFixed(1)}s` : '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">{scan.trigger_type}</td>
-                  </tr>
-                  {expandedScan === scan.id && scan.result_full && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-3 bg-[var(--bg-primary)]">
-                        <pre className="text-xs text-[var(--text-secondary)] overflow-x-auto max-h-60">
-                          {JSON.stringify(scan.result_full, null, 2)}
-                        </pre>
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
+                <tr
+                  key={scan.id}
+                  onClick={() => setSelectedScan(scan)}
+                  className="cursor-pointer hover:bg-[var(--surface)]"
+                >
+                  <td className="px-4 py-3 text-sm text-[var(--text-primary)]">{scan.target_name || scan.target_ref || 'Unknown'}</td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: `${SCANNER_COLORS[scan.scanner_type]}20`, color: SCANNER_COLORS[scan.scanner_type] }}>
+                      {scan.scanner_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-1 text-xs rounded border ${STATUS_COLORS[scan.status]}`}>{scan.status}</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {scan.result_summary && (
+                      <div className="flex gap-1">
+                        {(scan.result_summary.critical as number) > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">{scan.result_summary.critical as number}C</span>
+                        )}
+                        {(scan.result_summary.high as number) > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-500">{scan.result_summary.high as number}H</span>
+                        )}
+                        {(scan.result_summary.medium as number) > 0 && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-600">{scan.result_summary.medium as number}M</span>
+                        )}
+                      </div>
+                    )}
+                    {scan.status === 'failed' && scan.error_message && (
+                      <span className="text-xs text-red-500 truncate max-w-[200px]" title={scan.error_message}>Error</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">
+                    {scan.duration_ms ? `${(scan.duration_ms / 1000).toFixed(1)}s` : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">{scan.trigger_type}</td>
+                </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Drill-down detail modal */}
+      {selectedScan && (
+        <ScanDetailPanel scan={selectedScan} onClose={() => setSelectedScan(null)} />
       )}
     </div>
   );
@@ -952,8 +1284,178 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
 
 // ── Reports Tab ───────────────────────────────────────────────
 
+// ── Report types ──────────────────────────────────────────────
+interface TrivyResult {
+  Results?: TrivyContainerResult[];
+  ArtifactName?: string;
+}
+interface TrivyContainerResult {
+  Target: string;
+  Vulnerabilities?: TrivyVulnerability[];
+}
+interface TrivyVulnerability {
+  VulnerabilityID: string;
+  PkgName: string;
+  InstalledVersion: string;
+  FixedVersion?: string;
+  Severity: string;
+  Title?: string;
+  Description?: string;
+  PrimaryURL?: string;
+  References?: string[];
+}
+
 function ReportsTab({ scans }: { scans: ScanRun[] }) {
   const completedScans = scans.filter(s => s.status === 'completed' && s.result_summary);
+  const [expandedScan, setExpandedScan] = useState<string | null>(null);
+  const [severityFilter, setSeverityFilter] = useState<string>('');
+  const [fullScanData, setFullScanData] = useState<Record<string, ScanRun>>({});
+  const [loadingFull, setLoadingFull] = useState(false);
+
+  // Fetch full scan details when expanding
+  const handleExpand = async (scanId: string) => {
+    if (expandedScan === scanId) {
+      setExpandedScan(null);
+      return;
+    }
+    setExpandedScan(scanId);
+    // Fetch full data if not already loaded
+    if (!fullScanData[scanId]) {
+      setLoadingFull(true);
+      try {
+        const fullScan = await securityScan.getScan(scanId);
+        setFullScanData(prev => ({ ...prev, [scanId]: fullScan }));
+      } catch (e) {
+        console.error('Failed to fetch scan details:', e);
+      } finally {
+        setLoadingFull(false);
+      }
+    }
+  };
+
+  const getVulnerabilities = (scan: ScanRun): TrivyVulnerability[] => {
+    // Use full data if available, otherwise fall back to the scan prop
+    const scanWithFull = fullScanData[scan.id] || scan;
+    if (!scanWithFull.result_full) return [];
+    const result = scanWithFull.result_full as unknown as TrivyResult;
+    return (result.Results || []).flatMap(r => r.Vulnerabilities || []);
+  };
+
+  const handleDownloadPDF = (scan: ScanRun) => {
+    // Open print dialog - user can save as PDF
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const vulns = getVulnerabilities(scan);
+    const grouped = groupBySeverity(vulns);
+    const date = new Date(scan.completed_at || scan.created_at).toLocaleString();
+    const summary = scan.result_summary || {};
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Security Report - ${scan.target_name || scan.target_ref}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; color: #1a1a1a; }
+    h1 { font-size: 24px; margin-bottom: 8px; }
+    h2 { font-size: 18px; margin-top: 32px; border-bottom: 2px solid #e5e5e5; padding-bottom: 8px; }
+    h3 { font-size: 14px; margin-top: 24px; color: #525252; }
+    .meta { color: #666; font-size: 14px; margin-bottom: 24px; }
+    .summary { display: flex; gap: 16px; margin: 24px 0; }
+    .summary-item { text-align: center; padding: 12px 20px; border-radius: 8px; background: #f5f5f5; }
+    .summary-count { font-size: 24px; font-weight: bold; }
+    .summary-label { font-size: 12px; text-transform: uppercase; }
+    .critical { color: #dc2626; }
+    .high { color: #ea580c; }
+    .medium { color: #ca8a04; }
+    .low { color: #16a34a; }
+    .unknown { color: #6b7280; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+    th { background: #f5f5f5; text-align: left; padding: 10px; border: 1px solid #e5e5e5; }
+    td { padding: 10px; border: 1px solid #e5e5e5; vertical-align: top; }
+    .vuln-id { font-family: monospace; font-weight: 600; }
+    .fix { color: #16a34a; }
+    .description { font-size: 12px; color: #525252; margin-top: 4px; max-width: 600px; }
+    .page-break { page-break-after: always; }
+    @media print { body { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <h1>Security Scan Report</h1>
+  <div class="meta">
+    <strong>Target:</strong> ${scan.target_name || scan.target_ref}<br>
+    <strong>Scanner:</strong> ${scan.scanner_type}<br>
+    <strong>Date:</strong> ${date}<br>
+    <strong>Duration:</strong> ${scan.duration_ms ? (scan.duration_ms / 1000).toFixed(1) + 's' : '-'}
+  </div>
+  
+  <h2>Summary</h2>
+  <div class="summary">
+    ${['critical', 'high', 'medium', 'low', 'unknown'].map(sev => `
+      <div class="summary-item">
+        <div class="summary-count ${sev}">${(summary[sev] as number) || 0}</div>
+        <div class="summary-label">${sev}</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <div class="page-break"></div>
+  <h2>Vulnerability Details</h2>
+  
+  ${['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'].map(sev => {
+    const sevVulns = grouped[sev] || [];
+    if (sevVulns.length === 0) return '';
+    return `
+      <h3 class="${sev.toLowerCase()}">${sev} (${sevVulns.length})</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Package</th>
+            <th>Installed</th>
+            <th>Fixed In</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sevVulns.map(v => `
+            <tr>
+              <td class="vuln-id">${v.VulnerabilityID}</td>
+              <td>${v.PkgName}</td>
+              <td>${v.InstalledVersion}</td>
+              <td class="fix">${v.FixedVersion || '-'}</td>
+              <td>
+                ${v.Title || ''}
+                ${v.Description ? `<div class="description">${v.Description.substring(0, 200)}${v.Description.length > 200 ? '...' : ''}</div>` : ''}
+                ${v.PrimaryURL ? `<div class="description"><a href="${v.PrimaryURL}">${v.PrimaryURL}</a></div>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }).join('')}
+
+  <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e5e5; font-size: 12px; color: #999;">
+    Generated by PEPA Security Scanner on ${new Date().toLocaleString()}
+  </div>
+  
+  <script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
+  const groupBySeverity = (vulns: TrivyVulnerability[]): Record<string, TrivyVulnerability[]> => {
+    return vulns.reduce((acc, v) => {
+      const sev = v.Severity?.toUpperCase() || 'UNKNOWN';
+      if (!acc[sev]) acc[sev] = [];
+      acc[sev].push(v);
+      return acc;
+    }, {} as Record<string, TrivyVulnerability[]>);
+  };
 
   return (
     <div className="space-y-4">
@@ -965,32 +1467,144 @@ function ReportsTab({ scans }: { scans: ScanRun[] }) {
         </div>
       ) : (
         <div className="grid gap-4">
-          {completedScans.map(scan => (
-            <div key={scan.id} className="p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="font-medium text-[var(--text-primary)]">{scan.target_name || scan.target_ref}</h3>
-                  <p className="text-sm text-[var(--text-secondary)]">
-                    {new Date(scan.completed_at || scan.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: `${SCANNER_COLORS[scan.scanner_type]}20`, color: SCANNER_COLORS[scan.scanner_type] }}>
-                  {scan.scanner_type}
-                </span>
-              </div>
+          {completedScans.map(scan => {
+            const isExpanded = expandedScan === scan.id;
+            const vulns = isExpanded ? getVulnerabilities(scan) : [];
+            const grouped = isExpanded ? groupBySeverity(vulns) : {};
+            const filteredVulns = severityFilter 
+              ? vulns.filter(v => v.Severity?.toUpperCase() === severityFilter)
+              : vulns;
 
-              {scan.result_summary && (
-                <div className="grid grid-cols-5 gap-2">
-                  {Object.entries(scan.result_summary).filter(([k]) => ['critical', 'high', 'medium', 'low', 'unknown'].includes(k)).map(([key, value]) => (
-                    <div key={key} className="text-center p-2 rounded bg-[var(--bg-primary)]">
-                      <div className="text-lg font-bold" style={{ color: SEVERITY_COLORS[key] }}>{value as number}</div>
-                      <div className="text-xs text-[var(--text-secondary)] capitalize">{key}</div>
+            return (
+              <div key={scan.id} className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] overflow-hidden">
+                {/* Summary header */}
+                <div 
+                  className="p-4 cursor-pointer hover:bg-[var(--surface)] transition-colors"
+                  onClick={() => handleExpand(scan.id)}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <svg className={`w-4 h-4 text-[var(--text-tertiary)] transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                      <div>
+                        <h3 className="font-medium text-[var(--text-primary)]">{scan.target_name || scan.target_ref}</h3>
+                        <p className="text-sm text-[var(--text-secondary)]">
+                          {new Date(scan.completed_at || scan.created_at).toLocaleString()}
+                        </p>
+                      </div>
                     </div>
-                  ))}
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: `${SCANNER_COLORS[scan.scanner_type]}20`, color: SCANNER_COLORS[scan.scanner_type] }}>
+                        {scan.scanner_type}
+                      </span>
+                    </div>
+                  </div>
+
+                  {scan.result_summary && (
+                    <div className="grid grid-cols-5 gap-2 ml-7">
+                      {Object.entries(scan.result_summary).filter(([k]) => ['critical', 'high', 'medium', 'low', 'unknown'].includes(k)).map(([key, value]) => (
+                        <div key={key} className="text-center p-2 rounded bg-[var(--surface)]">
+                          <div className="text-lg font-bold" style={{ color: SEVERITY_COLORS[key] }}>{value as number}</div>
+                          <div className="text-xs text-[var(--text-secondary)] capitalize">{key}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Expanded details */}
+                {isExpanded && (
+                  <div className="border-t border-[var(--border)] p-4">
+                    {loadingFull && !fullScanData[scan.id] ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                        <span className="ml-3 text-sm text-[var(--text-secondary)]">Loading vulnerability details...</span>
+                      </div>
+                    ) : (
+                    <>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-[var(--text-secondary)]">{vulns.length} vulnerabilities found</span>
+                        {severityFilter && (
+                          <button onClick={() => setSeverityFilter('')} className="text-xs text-[var(--accent)] hover:underline">
+                            Clear filter
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDownloadPDF(scan); }}
+                        className="flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg hover:bg-[var(--bg)] transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        Download PDF
+                      </button>
+                    </div>
+
+                    {/* Severity filter pills */}
+                    <div className="flex items-center gap-2 mb-4 flex-wrap">
+                      {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'].map(sev => {
+                        const count = (grouped[sev] || []).length;
+                        if (count === 0) return null;
+                        return (
+                          <button
+                            key={sev}
+                            onClick={(e) => { e.stopPropagation(); setSeverityFilter(severityFilter === sev ? '' : sev); }}
+                            className={`px-2 py-0.5 text-xs rounded border transition-all ${severityFilter === sev ? SEVERITY_BG[sev] + ' ring-1 ring-current' : SEVERITY_BG[sev] + ' opacity-70 hover:opacity-100'}`}
+                          >
+                            {count} {sev.toLowerCase()}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Vulnerability table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-[var(--surface)]">
+                          <tr>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text-secondary)] uppercase">ID</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text-secondary)] uppercase">Severity</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text-secondary)] uppercase">Package</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text-secondary)] uppercase">Installed</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text-secondary)] uppercase">Fixed In</th>
+                            <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text-secondary)] uppercase">Description</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--border)]">
+                          {filteredVulns.slice(0, 50).map((v, i) => (
+                            <tr key={`${v.VulnerabilityID}-${i}`} className="hover:bg-[var(--surface)]">
+                              <td className="px-3 py-2">
+                                <a href={v.PrimaryURL || '#'} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-[var(--accent)] hover:underline">
+                                  {v.VulnerabilityID}
+                                </a>
+                              </td>
+                              <td className="px-3 py-2">
+                                <span className={`text-xs px-1.5 py-0.5 rounded border ${SEVERITY_BG[v.Severity?.toUpperCase()] || SEVERITY_BG.UNKNOWN}`}>
+                                  {v.Severity}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs text-[var(--text-primary)]">{v.PkgName}</td>
+                              <td className="px-3 py-2 text-xs text-[var(--text-secondary)]">{v.InstalledVersion}</td>
+                              <td className="px-3 py-2 text-xs text-emerald-600">{v.FixedVersion || '-'}</td>
+                              <td className="px-3 py-2 text-xs text-[var(--text-secondary)] max-w-md truncate" title={v.Description || v.Title}>
+                                {v.Title || v.Description?.substring(0, 100) || '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {filteredVulns.length > 50 && (
+                        <div className="text-center py-2 text-xs text-[var(--text-tertiary)]">
+                          Showing 50 of {filteredVulns.length} vulnerabilities. Download PDF for full report.
+                        </div>
+                      )}
+                    </div>
+                    </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1002,15 +1616,19 @@ function ReportsTab({ scans }: { scans: ScanRun[] }) {
 function SchedulesTab({ schedules, targets, onRefresh }: { schedules: ScanSchedule[]; targets: ScanTarget[]; onRefresh: () => void }) {
   const [showCreate, setShowCreate] = useState(false);
   const [deleteSchedule, setDeleteSchedule] = useState<ScanSchedule | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
-    if (!deleteSchedule) return;
+    if (!deleteSchedule || deleting) return;
+    setDeleting(true);
     try {
       await securityScan.deleteSchedule(deleteSchedule.id);
       setDeleteSchedule(null);
-      onRefresh();
+      await onRefresh();
     } catch (e) {
       console.error('Failed to delete schedule:', e);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1042,7 +1660,7 @@ function SchedulesTab({ schedules, targets, onRefresh }: { schedules: ScanSchedu
       ) : (
         <div className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] overflow-hidden">
           <table className="w-full">
-            <thead className="bg-[var(--bg-primary)]">
+            <thead className="bg-[var(--surface)]">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-secondary)] uppercase">Target</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-[var(--text-secondary)] uppercase">Cron</th>
@@ -1095,6 +1713,7 @@ function SchedulesTab({ schedules, targets, onRefresh }: { schedules: ScanSchedu
           onConfirm={handleDelete}
           onCancel={() => setDeleteSchedule(null)}
           variant="danger"
+          loading={deleting}
         />
       )}
     </div>
@@ -1256,11 +1875,11 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-[var(--text-secondary)]">Name</label>
-              <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" placeholder="Resource limits required" />
+              <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" placeholder="Resource limits required" />
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)]">Type</label>
-              <select value={form.policy_type} onChange={e => setForm({ ...form, policy_type: e.target.value as CompliancePolicy['policy_type'] })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
+              <select value={form.policy_type} onChange={e => setForm({ ...form, policy_type: e.target.value as CompliancePolicy['policy_type'] })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
                 <option value="resource_limits">Resource Limits</option>
                 <option value="security_scan">Security Scan</option>
                 <option value="required_labels">Required Labels</option>
@@ -1269,11 +1888,11 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)]">Environment</label>
-              <input type="text" value={form.environment} onChange={e => setForm({ ...form, environment: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
+              <input type="text" value={form.environment} onChange={e => setForm({ ...form, environment: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)]">Severity</label>
-              <select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value as CompliancePolicy['severity'] })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
+              <select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value as CompliancePolicy['severity'] })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
                 <option value="critical">Critical</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
@@ -1282,7 +1901,7 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
             </div>
             <div className="col-span-2">
               <label className="text-xs text-[var(--text-secondary)]">Description</label>
-              <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
+              <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
             </div>
           </div>
           <div className="flex items-center gap-4 mt-3">

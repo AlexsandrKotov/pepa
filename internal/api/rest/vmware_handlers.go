@@ -30,6 +30,7 @@ func registerVMwareRoutes(r *gin.RouterGroup, deps Dependencies) {
 		vm.GET("/hosts", vmwareListHosts(deps))
 		vm.GET("/vms", vmwareListVMs(deps))
 		vm.GET("/vms/:id", vmwareGetVM(deps))
+		vm.GET("/vms/:id/expanded", vmwareGetVMExpanded(deps))
 		vm.POST("/vms", vmwareCreateVM(deps))
 		vm.DELETE("/vms/:id", vmwareDeleteVM(deps))
 		vm.POST("/vms/:id/:action", vmwareVMAction(deps))
@@ -134,6 +135,18 @@ func vmwareGetVM(deps Dependencies) gin.HandlerFunc {
 		}
 		params, _ := json.Marshal(map[string]string{"vmid": vmID})
 		vmwareExec(deps, c, "get_vm", params)
+	}
+}
+
+func vmwareGetVMExpanded(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		vmID := c.Param("id")
+		if !validVMwareID(vmID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid VM ID format"})
+			return
+		}
+		params, _ := json.Marshal(map[string]string{"vmid": vmID})
+		vmwareExec(deps, c, "get_vm_expanded", params)
 	}
 }
 

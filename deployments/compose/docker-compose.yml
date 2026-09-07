@@ -25,6 +25,7 @@ volumes:
   pepa-token-tmpfs:  # In-memory volume for bootstrap token (never persisted)
   nginx-logs:
     driver: local
+  trivy-cache:  # Persistent cache for Trivy vulnerability DB (avoids re-downloading ~1GB on each restart)
 
 # ── Shared environment variables (api-server + worker) ──────
 # Both Go services need the same DB/Redis/S3 connection settings.
@@ -142,6 +143,8 @@ services:
       IAC_BINARY: ${IAC_BINARY:-}
       # Ansible needs a writable temp directory; root filesystem is read-only.
       ANSIBLE_LOCAL_TEMP: /tmp/ansible
+      # Trivy vulnerability scanner cache — mounted as named volume (see trivy-cache below).
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
       # OpenTelemetry — PEPA exports traces/logs/metrics via OTLP directly.
       # Point OTEL_ENDPOINT to your backend (SigNoz, Tempo, etc.).
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
@@ -180,6 +183,8 @@ services:
       # Bootstrap token is written here (in-memory tmpfs, never touches disk).
       # Read it with: docker exec pepa-api cat /var/run/pepa/bootstrap_token.txt
       - pepa-token-tmpfs:/var/run/pepa
+      # Trivy vulnerability DB cache — persisted across restarts to avoid re-downloading.
+      - trivy-cache:/tmp/trivy-cache
     depends_on:
       postgres:
         condition: service_healthy

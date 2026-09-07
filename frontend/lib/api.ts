@@ -4083,6 +4083,8 @@ export const virtualization = {
       fetchAPI<{ data: VMwareVM[] }>('/api/v1/virtualization/vmware/vms'),
     getVM: (id: string) =>
       fetchAPI<{ data: VMwareVMDetail }>(`/api/v1/virtualization/vmware/vms/${id}`),
+    getVMExpanded: (id: string) =>
+      fetchAPI<{ data: VMwareVMExpanded }>(`/api/v1/virtualization/vmware/vms/${id}/expanded`),
     createVM: (data: VMwareCreateVMRequest) =>
       fetchAPI<{ data: unknown }>('/api/v1/virtualization/vmware/vms', { method: 'POST', body: JSON.stringify(data) }),
     deleteVM: (id: string) =>
@@ -4127,6 +4129,7 @@ export interface VMwareVM {
   guest_OS?: string;
   ip_address?: string;
   guest_host_name?: string;
+  disk_capacity_bytes?: number;
 }
 
 export interface VMwareVMDetail {
@@ -4137,6 +4140,31 @@ export interface VMwareVMDetail {
   guest: { os: string; name: string; ip_address: string; host_name: string };
   host: string;
   cluster: string;
+}
+
+export interface VMwareVMDisk {
+  key: string;
+  type: string;
+  capacity: number;
+  label?: string;
+  summary?: string;
+  datastore?: string;
+}
+
+export interface VMwareVMNIC {
+  key: string;
+  type: string;
+  network: string;
+  mac_address: string;
+  connected: boolean;
+}
+
+export interface VMwareVMExpanded extends VMwareVMDetail {
+  disks: VMwareVMDisk[];
+  nics: VMwareVMNIC[];
+  snapshots: VMwareSnapshot[];
+  disk_error?: string;
+  nic_error?: string;
 }
 
 export interface VMwareHost {
@@ -4466,6 +4494,9 @@ export const securityScan = {
   },
   
   getScan: (id: string) => fetchAPI<ScanRun>(`/api/v1/security/scans/${id}`),
+  
+  cancelScan: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/security/scans/${id}/cancel`, { method: 'POST' }),
   
   // Scan Schedules
   listSchedules: () => fetchAPI<ScanSchedule[]>('/api/v1/security/schedules'),

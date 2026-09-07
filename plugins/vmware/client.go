@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -225,6 +226,7 @@ type VMwareVM struct {
 	GuestOS   string `json:"guest_OS,omitempty"`
 	IPAddress string `json:"ip_address,omitempty"`
 	GuestHost string `json:"guest_host_name,omitempty"`
+	DiskBytes int64  `json:"disk_capacity_bytes,omitempty"`
 }
 
 // VMwareVMDetail is the detailed VM response from GET /api/vcenter/vm/{id}.
@@ -310,6 +312,35 @@ type VMwareVersion struct {
 	Build      string `json:"build"`
 	Product    string `json:"product"`
 	InstanceUUID string `json:"instance_uuid"`
+}
+
+// VMwareVMDisk represents a virtual disk attached to a VM.
+type VMwareVMDisk struct {
+	Key       string `json:"key"`
+	Type      string `json:"type"`
+	Capacity  int64  `json:"capacity"`
+	Label     string `json:"label,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	Datastore string `json:"datastore,omitempty"`
+}
+
+// VMwareVMNIC represents a network adapter attached to a VM.
+type VMwareVMNIC struct {
+	Key        string `json:"key"`
+	Type       string `json:"type"`
+	Network    string `json:"network"`
+	MacAddress string `json:"mac_address"`
+	Connected  bool   `json:"connected"`
+}
+
+// VMwareVMExpanded is a comprehensive VM detail response.
+type VMwareVMExpanded struct {
+	VMwareVMDetail
+	Disks     []VMwareVMDisk   `json:"disks"`
+	NICs      []VMwareVMNIC    `json:"nics"`
+	Snapshots []VMwareSnapshot `json:"snapshots"`
+	DiskError string           `json:"disk_error,omitempty"`
+	NICError  string           `json:"nic_error,omitempty"`
 }
 
 // ── API operations ───────────────────────────────────────────
@@ -433,6 +464,9 @@ func (c *Client) ListVMs() ([]VMwareVM, error) {
 		if v, ok := raw["memory_size_MiB"].(float64); ok {
 			allVMs[i].MemoryMiB = int64(v)
 		}
+		if v, ok := raw["cluster"].(string); ok {
+			allVMs[i].Cluster = v
+		}
 		// Assign host from the mapping built in step 1.
 		if hostID, ok := vmToHost[allVMs[i].VM]; ok {
 			allVMs[i].Host = hostID
@@ -463,6 +497,8 @@ func (c *Client) ListVMs() ([]VMwareVM, error) {
 					}
 				}
 			}
+			// Fetch disk capacity for all VMs.
+			v.DiskBytes = c.getVMDiskCapacity(v.VM)
 			ch <- vmEnrich{idx: idx, vm: v}
 		}(i, vm)
 	}
@@ -482,6 +518,34 @@ type VMwareGuestIdentity struct {
 	HostName  string `json:"host_name"`
 	IPAddress string `json:"ip_address"`
 	Family    string `json:"family"`
+}
+
+// getVMDiskCapacity returns the total provisioned disk capacity (bytes) for a VM.
+// The vSphere API requires two steps: list disk IDs, then fetch each disk's details.
+func (c *Client) getVMDiskCapacity(vmID string) int64 {
+	listData, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s/hardware/disk", vmID))
+	if err != nil {
+		return 0
+	}
+	diskIDs := extractDiskIDs(listData)
+	if len(diskIDs) == 0 {
+		return 0
+	}
+	var total int64
+	for _, diskID := range diskIDs {
+		diskData, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s/hardware/disk/%s", vmID, diskID))
+		if err != nil {
+			continue
+		}
+		var raw map[string]interface{}
+		if json.Unmarshal(diskData, &raw) != nil {
+			continue
+		}
+		if cap, ok := raw["capacity"].(float64); ok {
+			total += int64(cap)
+		}
+	}
+	return total
 }
 
 // getVMGuestIdentity returns guest identity info for a VM.
@@ -508,6 +572,234 @@ func (c *Client) GetVM(vmID string) (*VMwareVMDetail, error) {
 		return nil, fmt.Errorf("vmware: parse VM detail: %w", err)
 	}
 	return &detail, nil
+}
+
+// GetVMExpanded returns comprehensive VM info including disks, NICs, and snapshots.
+func (c *Client) GetVMExpanded(vmID string) (*VMwareVMExpanded, error) {
+	// Base detail.
+	detail, err := c.GetVM(vmID)
+	if err != nil {
+		return nil, fmt.Errorf("vmware: get VM detail: %w", err)
+	}
+
+	expanded := &VMwareVMExpanded{
+		VMwareVMDetail: *detail,
+		Disks:          make([]VMwareVMDisk, 0),
+		NICs:           make([]VMwareVMNIC, 0),
+		Snapshots:      make([]VMwareSnapshot, 0),
+	}
+
+	// Fetch guest identity (for powered-on VMs with VMware Tools).
+	if detail.Power == "POWERED_ON" {
+		if identity, err := c.getVMGuestIdentity(vmID); err == nil {
+			expanded.Guest.Name = identity.Name
+			expanded.Guest.HostName = identity.HostName
+			expanded.Guest.IPAddress = identity.IPAddress
+			expanded.Guest.OS = identity.Family
+		}
+	}
+
+	// Resolve host ID to name (the detail response returns host as an ID like "host-123").
+	if expanded.Host != "" && strings.HasPrefix(expanded.Host, "host-") {
+		if hosts, err := c.ListHosts(); err == nil {
+			for _, h := range hosts {
+				if h.Host == expanded.Host {
+					expanded.Host = h.Name
+					break
+				}
+			}
+		}
+	}
+
+	// Resolve cluster ID to name.
+	if expanded.Cluster != "" && strings.HasPrefix(expanded.Cluster, "group-") {
+		if clusters, err := c.ListClusters(); err == nil {
+			for _, cl := range clusters {
+				if cl.Cluster == expanded.Cluster {
+					expanded.Cluster = cl.Name
+					break
+				}
+			}
+		}
+	}
+
+	// Also fetch the raw VM detail to get guest_OS (top-level field).
+	rawDetail, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s", vmID))
+	if err == nil {
+		var rawMap map[string]interface{}
+		if json.Unmarshal(rawDetail, &rawMap) == nil {
+			if gos, ok := rawMap["guest_OS"].(string); ok && gos != "" {
+				expanded.Guest.OS = gos
+			}
+		}
+	}
+
+	// Disks: first fetch list of disk IDs, then fetch each disk's details.
+	diskListData, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s/hardware/disk", vmID))
+	if err != nil {
+		slog.Warn("vmware: fetch disk list failed", "vm", vmID, "error", err)
+		expanded.DiskError = err.Error()
+	} else {
+		diskIDs := extractDiskIDs(diskListData)
+		if len(diskIDs) > 0 {
+			for _, diskID := range diskIDs {
+				diskDetail, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s/hardware/disk/%s", vmID, diskID))
+				if err != nil {
+					slog.Warn("vmware: fetch disk detail failed", "vm", vmID, "disk", diskID, "error", err)
+					continue
+				}
+				var raw map[string]interface{}
+				if json.Unmarshal(diskDetail, &raw) != nil {
+					continue
+				}
+				disk := VMwareVMDisk{Key: diskID}
+				if v, ok := raw["type"].(string); ok {
+					disk.Type = v
+				}
+				if v, ok := raw["capacity"].(float64); ok {
+					disk.Capacity = int64(v)
+				}
+				if v, ok := raw["label"].(string); ok {
+					disk.Label = v
+				}
+				if backing, ok := raw["backing"].(map[string]interface{}); ok {
+					if v, ok := backing["vmdk_file"].(string); ok {
+						disk.Summary = v
+					}
+					if v, ok := backing["datastore"].(string); ok {
+						disk.Datastore = v
+					}
+				}
+				expanded.Disks = append(expanded.Disks, disk)
+			}
+		} else {
+			// Check if the response was an error or empty.
+			slog.Warn("vmware: could not parse disk list", "vm", vmID, "response", string(diskListData))
+			expanded.DiskError = "unexpected disk list format from vCenter"
+		}
+	}
+
+	// Network adapters: try multiple endpoint patterns.
+	var nicListData json.RawMessage
+	var nicBasePath string
+	for _, path := range []string{
+		fmt.Sprintf("/api/vcenter/vm/%s/hardware/ethernet", vmID),
+		fmt.Sprintf("/api/vcenter/vm/%s/hardware/adapter/ethernet", vmID),
+	} {
+		nicListData, err = c.get(path)
+		if err == nil {
+			// Extract base path for detail requests.
+			if strings.Contains(path, "/hardware/ethernet") {
+				nicBasePath = fmt.Sprintf("/api/vcenter/vm/%s/hardware/ethernet", vmID)
+			} else {
+				nicBasePath = fmt.Sprintf("/api/vcenter/vm/%s/hardware/adapter/ethernet", vmID)
+			}
+			break
+		}
+	}
+	if err != nil {
+		slog.Warn("vmware: fetch NIC list failed", "vm", vmID, "error", err)
+		expanded.NICError = err.Error()
+	} else {
+		// Parse NIC ID list: [{"nic": "4000"}, ...] or map format
+		var nicRefs []struct {
+			NIC string `json:"nic"`
+		}
+		if json.Unmarshal(nicListData, &nicRefs) == nil && len(nicRefs) > 0 {
+			for _, ref := range nicRefs {
+				nicDetail, err := c.get(fmt.Sprintf("%s/%s", nicBasePath, ref.NIC))
+				if err != nil {
+					slog.Warn("vmware: fetch NIC detail failed", "vm", vmID, "nic", ref.NIC, "error", err)
+					continue
+				}
+				var raw map[string]interface{}
+				if json.Unmarshal(nicDetail, &raw) != nil {
+					continue
+				}
+				nic := VMwareVMNIC{Key: ref.NIC}
+				if v, ok := raw["type"].(string); ok {
+					nic.Type = v
+				}
+				if v, ok := raw["mac_address"].(string); ok {
+					nic.MacAddress = v
+				}
+				if backing, ok := raw["backing"].(map[string]interface{}); ok {
+					// Prefer network_name (human-readable) over network (ID).
+					if v, ok := backing["network_name"].(string); ok && v != "" {
+						nic.Network = v
+					} else if v, ok := backing["network"].(string); ok {
+						nic.Network = v
+					}
+				}
+				if state, ok := raw["state"].(string); ok {
+					nic.Connected = state == "CONNECTED"
+				}
+				if startConn, ok := raw["start_connected"].(bool); ok && !nic.Connected {
+					nic.Connected = startConn
+				}
+				expanded.NICs = append(expanded.NICs, nic)
+			}
+		} else {
+			// Try map format: {"4000": {...}, ...}
+			var rawNICs map[string]map[string]interface{}
+			if json.Unmarshal(nicListData, &rawNICs) == nil {
+				for key, n := range rawNICs {
+					nic := VMwareVMNIC{Key: key}
+					if v, ok := n["type"].(string); ok {
+						nic.Type = v
+					}
+					if v, ok := n["mac_address"].(string); ok {
+						nic.MacAddress = v
+					}
+					if backing, ok := n["backing"].(map[string]interface{}); ok {
+						if v, ok := backing["network"].(string); ok {
+							nic.Network = v
+						}
+					}
+					if state, ok := n["state"].(string); ok {
+						nic.Connected = state == "CONNECTED"
+					}
+					expanded.NICs = append(expanded.NICs, nic)
+				}
+			} else {
+				slog.Warn("vmware: could not parse NIC list", "vm", vmID, "response", string(nicListData))
+			}
+		}
+	}
+
+	// Snapshots.
+	snapData, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s/snapshots", vmID))
+	if err == nil {
+		_ = json.Unmarshal(snapData, &expanded.Snapshots)
+	}
+
+	return expanded, nil
+}
+
+// extractDiskIDs parses disk IDs from the vSphere disk list response.
+// It handles both array format ([{"disk":"2000"}]) and map format ({"2000":{...}}).
+func extractDiskIDs(data json.RawMessage) []string {
+	// Try array format first: [{"disk": "2000"}, ...]
+	var diskRefs []struct {
+		Disk string `json:"disk"`
+	}
+	if json.Unmarshal(data, &diskRefs) == nil && len(diskRefs) > 0 {
+		ids := make([]string, len(diskRefs))
+		for i, ref := range diskRefs {
+			ids[i] = ref.Disk
+		}
+		return ids
+	}
+	// Try map format: {"2000": {...}, ...}
+	var rawDisks map[string]json.RawMessage
+	if json.Unmarshal(data, &rawDisks) == nil && len(rawDisks) > 0 {
+		ids := make([]string, 0, len(rawDisks))
+		for k := range rawDisks {
+			ids = append(ids, k)
+		}
+		return ids
+	}
+	return nil
 }
 
 // VMAction performs a power action on a VM.

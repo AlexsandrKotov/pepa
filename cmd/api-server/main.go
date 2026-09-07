@@ -176,7 +176,7 @@ func main() {
 		RAGPipeline:      comp.RAGPipeline,
 		RBAC:             rbacEngine,
 		Storage:          comp.Storage,
-		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo),
+		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo),
 		Version:          version,
 		BuildTime:        buildTime,
 	})

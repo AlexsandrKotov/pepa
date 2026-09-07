@@ -62,6 +62,8 @@ spec:
               readOnly: true
             - name: custom-plugins
               mountPath: /custom-plugins
+            - name: trivy-cache
+              mountPath: /tmp/trivy-cache
           livenessProbe:
             httpGet:
               path: /healthz
@@ -79,6 +81,9 @@ spec:
           emptyDir: {}
         - name: custom-plugins
           emptyDir: {}
+        - name: trivy-cache
+          emptyDir:
+            sizeLimit: 2Gi
 ---
 apiVersion: apps/v1
 kind: Deployment

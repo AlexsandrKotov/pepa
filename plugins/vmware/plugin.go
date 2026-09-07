@@ -34,6 +34,7 @@ func (p *VMwarePlugin) Actions() []string {
 		"list_hosts",
 		"list_vms",
 		"get_vm",
+		"get_vm_expanded",
 		"start_vm",
 		"stop_vm",
 		"shutdown_vm",
@@ -75,6 +76,8 @@ func (p *VMwarePlugin) Execute(ctx context.Context, action string, params []byte
 		return p.listVMs(client)
 	case "get_vm":
 		return p.getVM(client, params)
+	case "get_vm_expanded":
+		return p.getVMExpanded(client, params)
 	case "start_vm":
 		return p.vmAction(client, params, "start")
 	case "stop_vm":
@@ -240,6 +243,20 @@ func (p *VMwarePlugin) getVM(client *Client, params []byte) ([]byte, error) {
 		return nil, fmt.Errorf("get_vm requires 'vmid' parameter")
 	}
 	detail, err := client.GetVM(input.VMID)
+	if err != nil {
+		return nil, err
+	}
+	return actionOutput(detail)
+}
+
+func (p *VMwarePlugin) getVMExpanded(client *Client, params []byte) ([]byte, error) {
+	var input struct {
+		VMID string `json:"vmid"`
+	}
+	if err := actionInput(params, &input); err != nil || input.VMID == "" {
+		return nil, fmt.Errorf("get_vm_expanded requires 'vmid' parameter")
+	}
+	detail, err := client.GetVMExpanded(input.VMID)
 	if err != nil {
 		return nil, err
 	}

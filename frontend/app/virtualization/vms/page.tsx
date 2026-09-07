@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   virtualization,
@@ -9,7 +9,7 @@ import {
   type ProxmoxNode,
   type ProxmoxStorage,
   type VMwareVM,
-  type VMwareVMDetail,
+  type VMwareVMExpanded,
   type VMwareHost,
   type VMwareDatastore,
 } from '@/lib/api';
@@ -64,9 +64,10 @@ export default function VirtualMachinesPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ type: Provider; name: string; key: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // VMware Details modal state
-  const [vmwareDetail, setVmwareDetail] = useState<VMwareVMDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  // VMware expandable row state
+  const [expandedVMs, setExpandedVMs] = useState<Set<string>>(new Set());
+  const [expandedData, setExpandedData] = useState<Record<string, VMwareVMExpanded>>({});
+  const [expandedLoading, setExpandedLoading] = useState<Record<string, boolean>>({});
   const detailRequestId = useRef(0);
 
   // VMware Clone modal state
@@ -148,26 +149,38 @@ export default function VirtualMachinesPage() {
     setActionLoading(`vm-${vm.vm}-${action}`);
     try {
       await virtualization.vmware.vmAction(vm.vm, action);
+      // Invalidate cached expanded data since VM state changed.
+      setExpandedData(prev => {
+        const next = { ...prev };
+        delete next[vm.vm];
+        return next;
+      });
       setTimeout(loadVmwareVMs, 2000);
     } catch (err) { setError(err instanceof Error ? err.message : 'Action failed'); }
     setActionLoading(null);
   };
 
-  // VMware Details handler
-  const openVmwareDetail = async (vm: VMwareVM) => {
-    const reqId = ++detailRequestId.current;
-    setDetailLoading(true);
-    setVmwareDetail(null);
-    try {
-      const res = await virtualization.vmware.getVM(vm.vm);
-      // Ignore stale responses if user clicked another VM meanwhile.
-      if (reqId !== detailRequestId.current) return;
-      setVmwareDetail(res.data);
-    } catch (err) {
-      if (reqId !== detailRequestId.current) return;
-      setError(err instanceof Error ? err.message : 'Failed to load VM details');
+  // VMware expand/collapse handler
+  const toggleVMExpand = async (vm: VMwareVM) => {
+    const vmId = vm.vm;
+    setExpandedVMs(prev => {
+      const next = new Set(prev);
+      if (next.has(vmId)) next.delete(vmId); else next.add(vmId);
+      return next;
+    });
+    // Fetch data if not cached.
+    if (!expandedData[vmId] && !expandedLoading[vmId]) {
+      const reqId = ++detailRequestId.current;
+      setExpandedLoading(prev => ({ ...prev, [vmId]: true }));
+      try {
+        const res = await virtualization.vmware.getVMExpanded(vmId);
+        if (reqId !== detailRequestId.current) return;
+        setExpandedData(prev => ({ ...prev, [vmId]: res.data }));
+      } catch {
+        // Silently fail - row will show "no data" state.
+      }
+      setExpandedLoading(prev => ({ ...prev, [vmId]: false }));
     }
-    setDetailLoading(false);
   };
 
   // VMware Clone handlers
@@ -599,64 +612,209 @@ export default function VirtualMachinesPage() {
                       <table className="w-full text-[12px]">
                         <thead>
                           <tr className="border-b border-[var(--border)]">
+                            <th className="w-8 px-2 py-2.5"></th>
                             <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">Name</th>
                             <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">Power State</th>
                             <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">CPUs</th>
                             <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">Memory</th>
+                            <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">Disk</th>
                             <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">Guest OS</th>
                             <th className="text-left px-4 py-2.5 font-medium text-[var(--text-tertiary)]">IP Address</th>
                             <th className="text-right px-4 py-2.5 font-medium text-[var(--text-tertiary)]">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredVMs.map(vm => (
-                            <tr key={vm.vm} className="border-b border-[var(--border-light)] hover:bg-[var(--border-light)]/30 transition-colors">
-                              <td className="px-4 py-3 font-medium text-[var(--text-primary)]">
-                                <button onClick={() => openVmwareDetail(vm)} className="text-left hover:text-[var(--accent)] transition-colors">
-                                  {vm.name}
-                                </button>
-                                {vcenterUrl && (
-                                  <a href={`${vcenterUrl}/ui/app?vm=${vm.vm}`} target="_blank" rel="noreferrer"
-                                    className="block text-[10px] text-[var(--accent)] hover:underline font-normal">Open in vCenter</a>
+                          {filteredVMs.map(vm => {
+                            const isExpanded = expandedVMs.has(vm.vm);
+                            const data = expandedData[vm.vm];
+                            const isLoading = expandedLoading[vm.vm];
+                            return (
+                              <React.Fragment key={vm.vm}>
+                                <tr
+                                  onClick={() => toggleVMExpand(vm)}
+                                  className="border-b border-[var(--border-light)] hover:bg-[var(--border-light)]/30 transition-colors cursor-pointer"
+                                >
+                                  <td className="px-2 py-3">
+                                    <svg className={`w-3.5 h-3.5 text-[var(--text-tertiary)] transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                  </td>
+                                  <td className="px-4 py-3 font-medium text-[var(--text-primary)]">
+                                    {vm.name}
+                                    {vcenterUrl && (
+                                      <a href={`${vcenterUrl}/ui/app?vm=${vm.vm}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                                        className="block text-[10px] text-[var(--accent)] hover:underline font-normal">Open in vCenter</a>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${vmwarePowerColor(vm.power_state)}`}>
+                                      {vm.power_state?.replace('POWERED_', '').toLowerCase()}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.cpu_count}</td>
+                                  <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.memory_size_mib ? `${(vm.memory_size_mib / 1024).toFixed(1)} GB` : '-'}</td>
+                                  <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.disk_capacity_bytes ? formatBytes(vm.disk_capacity_bytes) : '-'}</td>
+                                  <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.guest_OS || '-'}</td>
+                                  <td className="px-4 py-3 font-mono text-[var(--text-secondary)]">{vm.ip_address || '-'}</td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
+                                      {vm.power_state === 'POWERED_OFF' && (
+                                        <button onClick={() => handleVmwareAction(vm, 'start')}
+                                          disabled={actionLoading === `vm-${vm.vm}-start`}
+                                          className="px-2 py-1 text-[11px] text-emerald-600 hover:bg-emerald-500/10 rounded transition-colors disabled:opacity-50">Start</button>
+                                      )}
+                                      {vm.power_state === 'POWERED_ON' && (
+                                        <>
+                                          <button onClick={() => handleVmwareAction(vm, 'shutdown')} disabled={!!actionLoading}
+                                            className="px-2 py-1 text-[11px] text-yellow-600 hover:bg-yellow-500/10 rounded transition-colors disabled:opacity-50">Shutdown</button>
+                                          <button onClick={() => handleVmwareAction(vm, 'stop')} disabled={!!actionLoading}
+                                            className="px-2 py-1 text-[11px] text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50">Stop</button>
+                                          <button onClick={() => handleVmwareAction(vm, 'reboot')} disabled={!!actionLoading}
+                                            className="px-2 py-1 text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded transition-colors disabled:opacity-50">Reboot</button>
+                                        </>
+                                      )}
+                                      <button onClick={() => openCloneModal(vm)} disabled={!!actionLoading}
+                                        className="px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-500/10 rounded transition-colors disabled:opacity-50">Clone</button>
+                                      <button onClick={() => openEditModal(vm)} disabled={!!actionLoading}
+                                        className="px-2 py-1 text-[11px] text-purple-600 hover:bg-purple-500/10 rounded transition-colors disabled:opacity-50">Edit</button>
+                                      <button onClick={() => setDeleteTarget({ type: 'vmware', name: vm.name, key: vm.vm })}
+                                        disabled={!!actionLoading}
+                                        className="px-2 py-1 text-[11px] text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50">Delete</button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr>
+                                    <td colSpan={9} className="px-0 py-0">
+                                      <div className="bg-[var(--surface)] border-t border-b border-[var(--border-light)] px-6 py-4">
+                                        {isLoading ? (
+                                          <div className="flex items-center justify-center py-6">
+                                            <svg className="animate-spin w-4 h-4 text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
+                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                            </svg>
+                                            <span className="ml-2 text-[12px] text-[var(--text-tertiary)]">Loading details...</span>
+                                          </div>
+                                        ) : data ? (
+                                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-[12px]">
+                                            {/* Disks */}
+                                            <div>
+                                              <h4 className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                                                Disks ({data.disks?.length || 0})
+                                              </h4>
+                                              {data.disks && data.disks.length > 0 ? (
+                                                <table className="w-full">
+                                                  <thead>
+                                                    <tr className="border-b border-[var(--border-light)]">
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Key</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Type</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Capacity</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">File</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {data.disks.map(disk => (
+                                                      <tr key={disk.key} className="border-b border-[var(--border-light)]/50">
+                                                        <td className="py-1.5 font-mono text-[var(--text-secondary)]">{disk.key}</td>
+                                                        <td className="py-1.5 text-[var(--text-secondary)]">{disk.type || '-'}</td>
+                                                        <td className="py-1.5 text-[var(--text-secondary)]">{formatBytes(disk.capacity)}</td>
+                                                        <td className="py-1.5 font-mono text-[10px] text-[var(--text-tertiary)] truncate max-w-[200px]">{disk.summary || '-'}</td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              ) : data.disk_error ? (
+                                                <p className="text-[var(--text-tertiary)]">Failed to load disks: {data.disk_error}</p>
+                                              ) : (
+                                                <p className="text-[var(--text-tertiary)]">No disks found</p>
+                                              )}
+                                            </div>
+                                            {/* Network Adapters */}
+                                            <div>
+                                              <h4 className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
+                                                Network Adapters ({data.nics?.length || 0})
+                                              </h4>
+                                              {data.nics && data.nics.length > 0 ? (
+                                                <table className="w-full">
+                                                  <thead>
+                                                    <tr className="border-b border-[var(--border-light)]">
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Key</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Type</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Network</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">MAC</th>
+                                                      <th className="text-left py-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">Status</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {data.nics.map(nic => (
+                                                      <tr key={nic.key} className="border-b border-[var(--border-light)]/50">
+                                                        <td className="py-1.5 font-mono text-[var(--text-secondary)]">{nic.key}</td>
+                                                        <td className="py-1.5 text-[var(--text-secondary)]">{nic.type || '-'}</td>
+                                                        <td className="py-1.5 text-[var(--text-secondary)]">{nic.network || '-'}</td>
+                                                        <td className="py-1.5 font-mono text-[10px] text-[var(--text-secondary)]">{nic.mac_address || '-'}</td>
+                                                        <td className="py-1.5">
+                                                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${nic.connected ? 'bg-emerald-500/10 text-emerald-600' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>
+                                                            {nic.connected ? 'Connected' : 'Disconnected'}
+                                                          </span>
+                                                        </td>
+                                                      </tr>
+                                                    ))}
+                                                  </tbody>
+                                                </table>
+                                              ) : data.nic_error ? (
+                                                <p className="text-[var(--text-tertiary)]">Failed to load adapters: {data.nic_error}</p>
+                                              ) : (
+                                                <p className="text-[var(--text-tertiary)]">No network adapters found</p>
+                                              )}
+                                            </div>
+                                            {/* Guest & Infrastructure Info */}
+                                            <div className="lg:col-span-2">
+                                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Guest OS</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.guest?.name || data.guest?.os || '-'}</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Hostname</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.guest?.host_name || '-'}</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">IP Address</div>
+                                                  <div className="text-[var(--text-secondary)] font-mono">{data.guest?.ip_address || '-'}</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">CPU</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.cpu?.count} cores ({data.cpu?.cores_per_socket} per socket)</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Memory</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.memory?.size_MiB ? `${(data.memory.size_MiB / 1024).toFixed(1)} GB` : '-'}</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Host</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.host || '-'}</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Cluster</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.cluster || '-'}</div>
+                                                </div>
+                                                <div>
+                                                  <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Snapshots</div>
+                                                  <div className="text-[var(--text-secondary)]">{data.snapshots?.length || 0}</div>
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <p className="text-[12px] text-[var(--text-tertiary)] text-center py-4">No details available</p>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
                                 )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${vmwarePowerColor(vm.power_state)}`}>
-                                  {vm.power_state?.replace('POWERED_', '').toLowerCase()}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.cpu_count}</td>
-                              <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.memory_size_mib ? `${(vm.memory_size_mib / 1024).toFixed(1)} GB` : '-'}</td>
-                              <td className="px-4 py-3 text-[var(--text-secondary)]">{vm.guest_OS || '-'}</td>
-                              <td className="px-4 py-3 font-mono text-[var(--text-secondary)]">{vm.ip_address || '-'}</td>
-                              <td className="px-4 py-3">
-                                <div className="flex justify-end gap-1">
-                                  {vm.power_state === 'POWERED_OFF' && (
-                                    <button onClick={() => handleVmwareAction(vm, 'start')}
-                                      disabled={actionLoading === `vm-${vm.vm}-start`}
-                                      className="px-2 py-1 text-[11px] text-emerald-600 hover:bg-emerald-500/10 rounded transition-colors disabled:opacity-50">Start</button>
-                                  )}
-                                  {vm.power_state === 'POWERED_ON' && (
-                                    <>
-                                      <button onClick={() => handleVmwareAction(vm, 'shutdown')} disabled={!!actionLoading}
-                                        className="px-2 py-1 text-[11px] text-yellow-600 hover:bg-yellow-500/10 rounded transition-colors disabled:opacity-50">Shutdown</button>
-                                      <button onClick={() => handleVmwareAction(vm, 'stop')} disabled={!!actionLoading}
-                                        className="px-2 py-1 text-[11px] text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50">Stop</button>
-                                      <button onClick={() => handleVmwareAction(vm, 'reboot')} disabled={!!actionLoading}
-                                        className="px-2 py-1 text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded transition-colors disabled:opacity-50">Reboot</button>
-                                    </>
-                                  )}
-                                  <button onClick={() => openCloneModal(vm)} disabled={!!actionLoading}
-                                    className="px-2 py-1 text-[11px] text-blue-600 hover:bg-blue-500/10 rounded transition-colors disabled:opacity-50">Clone</button>
-                                  <button onClick={() => openEditModal(vm)} disabled={!!actionLoading}
-                                    className="px-2 py-1 text-[11px] text-purple-600 hover:bg-purple-500/10 rounded transition-colors disabled:opacity-50">Edit</button>
-                                  <button onClick={() => setDeleteTarget({ type: 'vmware', name: vm.name, key: vm.vm })}
-                                    disabled={!!actionLoading}
-                                    className="px-2 py-1 text-[11px] text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50">Delete</button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                              </React.Fragment>
+                            );
+                          })}
                         </tbody>
                       </table>
                     )}
@@ -682,11 +840,6 @@ export default function VirtualMachinesPage() {
         confirmLabel="Delete" variant="danger" loading={deleting}
         onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)}
       />
-
-      {/* VMware Details Modal */}
-      {provider === 'vmware' && (vmwareDetail !== null || detailLoading) && (
-        <VMDetailModal detail={vmwareDetail} loading={detailLoading} onClose={() => setVmwareDetail(null)} />
-      )}
 
       {/* VMware Clone Modal */}
       {cloneTarget && (
@@ -816,50 +969,6 @@ function CreateVMModal({ form, setForm, nodes, storages, templates, isos, creati
           <button onClick={onCreate} disabled={creating || !form.name.trim() || !form.node} className="btn btn-primary flex-1 justify-center">
             {creating ? 'Creating...' : 'Create VM'}
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── VMware VM Details Modal ── */
-
-function VMDetailModal({ detail, loading, onClose }: { detail: VMwareVMDetail | null; loading: boolean; onClose: () => void }) {
-  useEscapeKey(onClose);
-  return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-2xl border border-[#e5e5e5] w-full max-w-md mx-4 overflow-hidden glass-modal">
-        <div className="px-5 py-4 border-b border-[#f0f0f0] flex items-center justify-between">
-          <h3 className="text-[15px] font-semibold text-[#171717]">VM Details</h3>
-          <button onClick={onClose} className="text-[#999] hover:text-[#333] text-lg leading-none">&times;</button>
-        </div>
-        <div className="p-5">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <svg className="animate-spin w-5 h-5 text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          ) : detail ? (
-            <div className="space-y-3 text-[12px]">
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Name</span><span className="font-medium">{detail.name}</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Power State</span><span>{detail.power_state}</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">CPU</span><span>{detail.cpu.count} cores ({detail.cpu.cores_per_socket} per socket)</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Memory</span><span>{detail.memory.size_MiB} MB</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Guest OS</span><span>{detail.guest.name || detail.guest.os || '-'}</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Hostname</span><span>{detail.guest.host_name || '-'}</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">IP Address</span><span className="font-mono">{detail.guest.ip_address || '-'}</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Host</span><span>{detail.host || '-'}</span></div>
-              <div className="flex justify-between"><span className="text-[var(--text-tertiary)]">Cluster</span><span>{detail.cluster || '-'}</span></div>
-            </div>
-          ) : (
-            <p className="text-[12px] text-[var(--text-tertiary)] text-center py-4">No details available</p>
-          )}
-        </div>
-        <div className="flex items-center px-5 py-3 bg-[#fafafa] border-t border-[#f0f0f0]">
-          <button onClick={onClose} className="btn btn-secondary w-full justify-center">Close</button>
         </div>
       </div>
     </div>

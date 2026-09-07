@@ -153,6 +153,7 @@ func (a *TrivyAdapter) Trigger(ctx context.Context, raw json.RawMessage, params 
 	args = append(args, "--severity", severity)
 	args = append(args, "--format", "json")
 	args = append(args, "--no-color")
+	args = append(args, "--quiet") // suppress log messages that can corrupt JSON output
 	if ignoreUnfixed {
 		args = append(args, "--ignore-unfixed")
 	}

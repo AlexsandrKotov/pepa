@@ -28,6 +28,7 @@ apiServer:
   env:
     DEV_MODE: "false"
     LOG_LEVEL: "info"
+    TRIVY_CACHE_DIR: /tmp/trivy-cache
   # -- Horizontal Pod Autoscaler
   autoscaling:
     enabled: false

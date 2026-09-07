@@ -49,7 +49,7 @@ LABEL org.opencontainers.image.title="PEPA API Server" \
       org.opencontainers.image.vendor="PEPA" \
       org.opencontainers.image.source="https://github.com/AlexsandrKotov/pepa"
 
-RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git python3 py3-pip && \
+RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git python3 py3-pip su-exec && \
     pip3 install --break-system-packages --no-cache ansible-core && \
     mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa && \
     addgroup -S pepa && adduser -S pepa -G pepa && \
@@ -59,7 +59,9 @@ COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
 COPY --from=opentofu /usr/local/bin/tofu /usr/local/bin/tofu
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=builder /out/api-server /api-server
+COPY deployments/docker/entrypoint.api.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-USER pepa:pepa
 EXPOSE 8080
-ENTRYPOINT ["/api-server"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/api-server"]
