@@ -105,7 +105,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 - **Rate Limiting** — token-bucket per-IP rate limiter middleware
 
 #### Plugin System
-- **15 Open-Source Plugins** — GitHub, GitLab, Bitbucket, Gitea, ArgoCD, FluxCD, Telegram, Slack, Teams, Email, Webhook, Proxmox, Prometheus, S3, Jira
+- **14 Open-Source Plugins** — GitHub, GitLab, Bitbucket, Gitea, ArgoCD, FluxCD, Telegram, Slack, Teams, Email, Webhook, Proxmox, S3, Jira
 - **Plugin SDK** — Go SDK for custom plugin development
 - **Marketplace** — browse and install plugins from curated catalog
 - **Plugin Signing** — cryptographic signature verification for all plugins
@@ -212,7 +212,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 ### 📦 Plugin Ecosystem
 
-**All 20 plugins are free and open-source:**
+**All 19 plugins are free and open-source:**
 - GitHub — Git provider integration
 - GitLab — Git provider integration
 - Bitbucket — Git provider integration
@@ -227,7 +227,6 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 - Syslog — Syslog notification channel
 - Proxmox — Virtualization management
 - VMware — vSphere VM management (community)
-- Prometheus — Monitoring integration
 - S3 — Object storage (MinIO/AWS)
 - Jira — Task tracker integration
 - Trivy — Vulnerability scanning
@@ -248,7 +247,7 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 
 - **Backend:** ~85,600 lines of Go code
 - **Frontend:** ~54,700 lines of TypeScript
-- **Plugins:** 20 free, open-source plugins
+- **Plugins:** 19 free, open-source plugins
 - **Database:** 47 migrations
 - **API Endpoints:** 40+ REST endpoints
 - **Frontend Pages:** 60 pages
@@ -306,7 +305,6 @@ PEPA (Platform Engineering & Pipeline Automator) — open-source platform for se
 | FluxCD | CD Engine | GitOps reconcile, suspend, resume, drift detection |
 | Jira | Task Tracker | Issues, projects, transitions, sprint management |
 | Slack | Notification | Channel messages, alerts, deployment notifications |
-| Prometheus | Monitoring | Metrics queries, alerts, service health |
 | Proxmox | Infrastructure | VMs, containers, storage, node management |
 
 ### Documentation

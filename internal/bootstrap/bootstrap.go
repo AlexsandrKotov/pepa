@@ -75,6 +75,8 @@ type Components struct {
 	PluginActivityRepo  *repository.PluginActivityRepository
 	SecurityScanRepo    *repository.SecurityScanRepository
 	DevOpsRepo          *repository.DevOpsRepository
+	NotificationRuleRepo *repository.NotificationRuleRepository
+	NotificationLogRepo  *repository.NotificationLogRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -331,6 +333,8 @@ func Bootstrap() (*Components, error) {
 		PluginActivityRepo:  repository.NewPluginActivityRepository(db),
 		SecurityScanRepo:    repository.NewSecurityScanRepository(db),
 		DevOpsRepo:          repository.NewDevOpsRepository(db),
+		NotificationRuleRepo: repository.NewNotificationRuleRepository(db),
+		NotificationLogRepo:  repository.NewNotificationLogRepository(db),
 	}
 
 	// Initialize pipeline provider registry

@@ -145,6 +145,8 @@ services:
       ANSIBLE_LOCAL_TEMP: /tmp/ansible
       # Trivy vulnerability scanner cache — mounted as named volume (see trivy-cache below).
       TRIVY_CACHE_DIR: /tmp/trivy-cache
+      # Pin Trivy DB to the public GHCR registry — mirror.gcr.io requires auth and causes UNAUTHORIZED errors.
+      TRIVY_DB_REPOSITORY: ghcr.io/aquasec/trivy-db
       # OpenTelemetry — PEPA exports traces/logs/metrics via OTLP directly.
       # Point OTEL_ENDPOINT to your backend (SigNoz, Tempo, etc.).
       OTEL_ENABLED: ${OTEL_ENABLED:-false}

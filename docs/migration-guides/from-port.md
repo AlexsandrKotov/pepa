@@ -131,7 +131,7 @@ steps:
 | Slack/Teams | Notification Plugin |
 | ArgoCD/FluxCD | GitOps Engine (built-in) |
 | Kafka/RabbitMQ | Connection (webhook) |
-| Datadog/Prometheus | Prometheus Plugin |
+| Datadog/Prometheus | Connection + /metrics endpoint |
 
 ### 7. Verify Migration
 

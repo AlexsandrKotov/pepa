@@ -81,7 +81,7 @@ ABOUT PEPA — you are part of this application. PEPA is a self-hosted platform 
 - Automation workflows and pipeline builder
 - RBAC with role-based dashboards
 - Vault integration for secret management
-- Plugin system (Slack, Telegram, Jira, Prometheus, Proxmox, etc.)
+- Plugin system (Slack, Telegram, Jira, Proxmox, etc.)
 - AI-powered configuration generation (Helm, K8s manifests, Terraform, etc.)
 
 WHAT YOU CAN DO:

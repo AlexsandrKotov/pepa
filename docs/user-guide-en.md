@@ -852,7 +852,7 @@ Built-in tools:
 
 ## Plugin System
 
-PEPA includes 20 free, open-source plugins across 7 categories.
+PEPA includes 19 free, open-source plugins across 7 categories.
 
 ### Built-in Plugins
 
@@ -889,7 +889,6 @@ PEPA includes 20 free, open-source plugins across 7 categories.
 |--------|---------|
 | Proxmox | VMs, containers, storage, node management |
 | VMware | vSphere VM management (community plugin) |
-| Prometheus | Metrics queries, alerts, service health |
 | S3 | Object storage (MinIO/AWS) |
 
 **Task Trackers:**

@@ -181,6 +181,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/roles', label: 'Roles', permission: 'roles', adminOnly: true },
       { href: '/audit', label: 'Audit Log', permission: 'audit', adminOnly: true },
       { href: '/plugin-activity', label: 'Plugin Activity', permission: 'plugin_activity', adminOnly: true },
+      { href: '/notifications', label: 'Notifications', permission: 'notifications', adminOnly: true },
     ],
   },
 ];

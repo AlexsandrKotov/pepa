@@ -691,8 +691,13 @@ func listRegistryImageTags(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Gin wildcard params include the leading '/', strip it
+		// Gin wildcard params include the leading '/', strip it.
+		// PathUnescape decodes %2F back to '/' — the frontend encodes each
+		// path segment separately (e.g. delivery%2Fgo-delete-physical → delivery/go-delete-physical).
 		imageName := strings.TrimPrefix(c.Param("imageName"), "/")
+		if decoded, unescapeErr := url.PathUnescape(imageName); unescapeErr == nil && decoded != "" {
+			imageName = decoded
+		}
 		if imageName == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "image name required"})
 			return

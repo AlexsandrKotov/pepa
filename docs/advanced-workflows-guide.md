@@ -368,12 +368,14 @@ spec:
         timeout: 10m
     
     - name: verify-health
-      plugin: monitoring:prometheus
-      action: queryMetrics
+      plugin: webhook
+      action: post
       params:
-        query: "up{service='{{ inputs.service }}'}"
-        threshold: 1
-        duration: 5m
+        url: "https://monitoring.example.com/api/query"
+        body:
+          query: "up{service='{{ inputs.service }}'}"
+          threshold: 1
+          duration: 5m
     
     - name: notify-team
       plugin: notification:slack
@@ -499,12 +501,14 @@ spec:
         revision: "{{ inputs.new_version }}"
     
     - name: wait-green-healthy
-      plugin: monitoring:prometheus
-      action: queryMetrics
+      plugin: webhook
+      action: post
       params:
-        query: "up{service='{{ inputs.service }}-green'}"
-        threshold: 1
-        duration: 2m
+        url: "https://monitoring.example.com/api/query"
+        body:
+          query: "up{service='{{ inputs.service }}-green'}"
+          threshold: 1
+          duration: 2m
     
     - name: switch-traffic
       plugin: cd_engine:argocd
@@ -517,12 +521,14 @@ spec:
               version: green
     
     - name: verify-traffic
-      plugin: monitoring:prometheus
-      action: queryMetrics
+      plugin: webhook
+      action: post
       params:
-        query: "rate(http_requests_total{version='green'}[5m])"
-        threshold: 100
-        duration: 5m
+        url: "https://monitoring.example.com/api/query"
+        body:
+          query: "rate(http_requests_total{version='green'}[5m])"
+          threshold: 100
+          duration: 5m
     
     - name: delete-blue
       plugin: cd_engine:argocd
@@ -564,12 +570,14 @@ spec:
         weight: 5
     
     - name: monitor-5
-      plugin: monitoring:prometheus
-      action: queryMetrics
+      plugin: webhook
+      action: post
       params:
-        query: "rate(http_errors_total{version='canary'}[5m]) / rate(http_requests_total{version='canary'}[5m])"
-        threshold: 0.01  # 1% error rate
-        duration: 10m
+        url: "https://monitoring.example.com/api/query"
+        body:
+          query: "rate(http_errors_total{version='canary'}[5m]) / rate(http_requests_total{version='canary'}[5m])"
+          threshold: 0.01  # 1% error rate
+          duration: 10m
     
     - name: increase-to-25
       plugin: cd_engine:argocd
@@ -677,12 +685,14 @@ spec:
         revision: "{{ inputs.version }}"
     
     - name: verify-production
-      plugin: monitoring:prometheus
-      action: queryMetrics
+      plugin: webhook
+      action: post
       params:
-        query: "up{service='{{ inputs.service }}', env='production'}"
-        threshold: 1
-        duration: 5m
+        url: "https://monitoring.example.com/api/query"
+        body:
+          query: "up{service='{{ inputs.service }}', env='production'}"
+          threshold: 1
+          duration: 5m
     
     - name: notify
       plugin: notification:slack

@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/repository"
 )
 
@@ -130,6 +131,10 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		logAudit(deps, c, "create", "deployment", d.ID.String(), nil, gin.H{"deploy_type": d.DeployType, "status": d.Status})
+
+		// Publish deployment.created event
+		publishDeploymentEvent(deps, "deployment.created", d, nil)
+
 		c.JSON(http.StatusCreated, d)
 	}
 }
@@ -150,6 +155,21 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 
 	if !result.Success {
 		slog.Info("Deployment failed", "id", deploymentID, "arg2", result.Message)
+		// Publish deployment.failed event
+		if deps.EventBus != nil {
+			dep, _ := deps.Repos.Deployment.Get(context.Background(), deploymentID)
+			if dep != nil {
+				publishDeploymentEvent(deps, "deployment.failed", dep, map[string]interface{}{"error": result.Message})
+			}
+		}
+	} else {
+		// Publish deployment.succeeded event
+		if deps.EventBus != nil {
+			dep, _ := deps.Repos.Deployment.Get(context.Background(), deploymentID)
+			if dep != nil {
+				publishDeploymentEvent(deps, "deployment.succeeded", dep, nil)
+			}
+		}
 	}
 }
 
@@ -207,6 +227,7 @@ func promoteDeployment(deps Dependencies) gin.HandlerFunc {
 			}
 			d, _ = deps.Repos.Deployment.Get(ctx, id)
 			logAudit(deps, c, "promote", "deployment", id.String(), nil, nil)
+			publishDeploymentEvent(deps, "deployment.promoted", d, nil)
 			c.JSON(http.StatusOK, gin.H{"deployment": d, "awaiting_approval": false})
 			return
 		}
@@ -256,6 +277,7 @@ func rollbackDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 		d, _ := deps.Repos.Deployment.Get(c.Request.Context(), id)
 		logAudit(deps, c, "rollback", "deployment", id.String(), nil, nil)
+		publishDeploymentEvent(deps, "deployment.rolled_back", d, nil)
 		c.JSON(http.StatusOK, gin.H{"deployment": d, "message": "rollback initiated"})
 	}
 }
@@ -281,6 +303,7 @@ func cancelDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 		d, _ := deps.Repos.Deployment.Get(c.Request.Context(), id)
 		logAudit(deps, c, "cancel", "deployment", id.String(), nil, nil)
+		publishDeploymentEvent(deps, "deployment.cancelled", d, nil)
 		c.JSON(http.StatusOK, gin.H{"deployment": d, "message": "deployment cancelled"})
 	}
 }
@@ -408,4 +431,32 @@ func safeInt32(v int) int32 {
 		return math.MinInt32
 	}
 	return int32(v)
+}
+
+// publishDeploymentEvent publishes a deployment-related event to the event bus.
+func publishDeploymentEvent(deps Dependencies, eventType string, d *repository.Deployment, extra map[string]interface{}) {
+	if deps.EventBus == nil || d == nil {
+		return
+	}
+	payload := map[string]interface{}{
+		"deployment_id":   d.ID.String(),
+		"service_name":    d.GitlabProjectName,
+		"environment":     d.TargetNamespace,
+		"stage":           d.Stage,
+		"team_name":       d.TeamName,
+		"image_tag":       d.ImageTag,
+		"image_repository": d.ImageRepository,
+		"user":            d.CreatedBy,
+		"status":          d.Status,
+		"url":             "/deployments/" + d.ID.String(),
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	_ = deps.EventBus.Publish(events.Event{
+		Type:     eventType,
+		TenantID: d.TenantID.String(),
+		EntityID: d.ID.String(),
+		Payload:  payload,
+	})
 }

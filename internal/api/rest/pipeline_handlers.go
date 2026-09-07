@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/pipeline"
 	"github.com/pepa/pepa/pkg/models"
 )
@@ -543,6 +544,22 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 
 		logAudit(deps, c, "trigger", "pipeline_run", run.ID.String(), nil, run)
 
+		// Publish pipeline_run.created event
+		if deps.EventBus != nil {
+			_ = deps.EventBus.Publish(events.Event{
+				Type:     "pipeline_run.created",
+				TenantID: run.TenantID.String(),
+				EntityID: run.ID.String(),
+				Payload: map[string]interface{}{
+					"pipeline_run_id": run.ID.String(),
+					"source_id":       run.SourceID.String(),
+					"trigger_type":    run.TriggerType,
+					"status":          string(run.Status),
+					"url":             "/pipelines/runs/" + run.ID.String(),
+				},
+			})
+		}
+
 		// Run Trigger asynchronously — return immediately, update DB when done
 		runID := run.ID
 		go func() {
@@ -594,6 +611,22 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 			}
 
 			_ = deps.Repos.PipelineRun.Update(bgCtx, currentRun.ID, currentRun)
+
+			// Publish pipeline_run.completed event
+			if deps.EventBus != nil {
+				_ = deps.EventBus.Publish(events.Event{
+					Type:     "pipeline_run.completed",
+					TenantID: currentRun.TenantID.String(),
+					EntityID: currentRun.ID.String(),
+					Payload: map[string]interface{}{
+						"pipeline_run_id": currentRun.ID.String(),
+						"source_id":       currentRun.SourceID.String(),
+						"status":          string(currentRun.Status),
+						"trigger_type":    currentRun.TriggerType,
+						"url":             "/pipelines/runs/" + currentRun.ID.String(),
+					},
+				})
+			}
 		}()
 
 		c.JSON(http.StatusAccepted, run)

@@ -6,9 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -138,12 +142,12 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 
 	switch target.ScannerType {
 	case "trivy":
-		resultSummary, resultFull, scanErr = s.runTrivyScan(scanCtx, target)
+		resultSummary, resultFull, scanErr = s.runTrivyScan(scanCtx, target, run.ID)
 	case "sonarqube":
 		resultSummary, resultFull, scanErr = s.runSonarQubeScan(scanCtx, target)
 	case "both":
 		// Run both scanners and merge results
-		trivySummary, trivyFull, trivyErr := s.runTrivyScan(scanCtx, target)
+		trivySummary, trivyFull, trivyErr := s.runTrivyScan(scanCtx, target, run.ID)
 		sqSummary, sqFull, sqErr := s.runSonarQubeScan(scanCtx, target)
 
 		resultSummary = mergeMaps(trivySummary, sqSummary, "trivy", "sonarqube")
@@ -209,7 +213,8 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 }
 
 // runTrivyScan executes a Trivy scan using the trivy binary.
-func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarget) (summary, full map[string]any, err error) {
+func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarget, runID uuid.UUID) (summary, full map[string]any, err error) {
+	slog.Info("=== runTrivyScan ENTERED ===", "target_ref", target.TargetRef)
 	// Build trivy command args
 	scanType := "image"
 	if st, ok := target.ScanConfig["scan_type"].(string); ok && st != "" {
@@ -244,18 +249,9 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		severity = sev
 	}
 
-	args := []string{
-		scanType,
-		"--format", "json",
-		"--severity", severity,
-		"--no-progress",
-		"--quiet", // suppress log messages that can corrupt JSON output
-	}
-
 	ignoreUnfixed, _ := target.ScanConfig["ignore_unfixed"].(bool)
-	if ignoreUnfixed {
-		args = append(args, "--ignore-unfixed")
-	}
+
+	slog.Info("runTrivyScan starting", "target_ref", target.TargetRef, "target_type", target.TargetType, "connection_id", target.ConnectionID, "scan_type", scanType)
 
 	// Resolve registry credentials for private image scans.
 	// When the target was created from the Registry Repo selector, connection_id
@@ -264,14 +260,18 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	// Trivy uses environment variables (not CLI flags) for registry auth.
 	imageRef := target.TargetRef
 	var regUsername, regPassword, regToken string
+	var regHost string
+	var regRepoData *repository.RegistryRepo
 	if target.ConnectionID != nil && s.registryRepo != nil && scanType == "image" {
 		regRepo, regErr := s.registryRepo.GetDecrypted(ctx, *target.ConnectionID, target.TenantID)
 		if regErr == nil && regRepo != nil {
+			regRepoData = regRepo
 			// Prepend registry hostname if the image ref doesn't already include it.
 			// A registry hostname contains a '.' (e.g. ghcr.io) or ':' (e.g. localhost:5000)
 			// before the first '/', OR the imageRef is just a hostname (no slash at all).
 			host := strings.TrimPrefix(strings.TrimSuffix(regRepo.URL, "/"), "https://")
 			host = strings.TrimPrefix(host, "http://")
+			regHost = host
 			needsHost := true
 			// If imageRef has no slash, check if it's already a hostname (contains '.')
 			if idx := strings.Index(imageRef, "/"); idx > 0 {
@@ -306,6 +306,112 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		}
 	}
 
+	slog.Info("AFTER registry credential resolution", "regHost", regHost, "imageRef", imageRef, "regRepoData", regRepoData != nil)
+
+	// Detect "scan entire registry" case: target_ref is just the registry hostname
+	// with no specific image path. List all images and scan each one.
+	slog.Info("checking scan entire registry condition", "regHost", regHost, "imageRef", imageRef, "equal", imageRef == regHost)
+	if regHost != "" && imageRef == regHost {
+		slog.Info("scanning entire registry, listing images", "registry", regHost)
+		images, listErr := s.listRegistryImages(ctx, regRepoData, regHost)
+		if listErr != nil {
+			return nil, nil, fmt.Errorf("list registry images: %w", listErr)
+		}
+		if len(images) == 0 {
+			return nil, nil, fmt.Errorf("no images found in registry %s", regHost)
+		}
+		slog.Info("registry image listing complete", "registry", regHost, "count", len(images))
+
+		// Scan each image and aggregate results
+		aggregateSummary := map[string]int{
+			"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0, "total": 0,
+		}
+		aggregateFull := map[string]any{
+			"registry": regHost,
+			"images":   []any{},
+		}
+		var scanErrors []string
+		totalImages := len(images)
+		scanStartTime := time.Now()
+		for i, img := range images {
+			// Update progress in database (showing current image being scanned)
+			elapsed := time.Since(scanStartTime).Milliseconds()
+			// Use max(1, i+1) to avoid division by zero and show progress starting from 1
+			imagesProcessed := i + 1
+			avgTimePerImage := float64(elapsed) / float64(imagesProcessed)
+			remainingImages := totalImages - imagesProcessed
+			estimatedRemainingMs := int(avgTimePerImage * float64(remainingImages))
+			progressInfo := map[string]any{
+				"scanned":                imagesProcessed,
+				"total":                  totalImages,
+				"current":                img,
+				"elapsed_ms":             elapsed,
+				"estimated_remaining_ms": estimatedRemainingMs,
+			}
+			// Update scan run with progress (non-blocking, ignore errors)
+			_ = s.repo.UpdateScanRunProgress(ctx, runID, map[string]any{"progress": progressInfo})
+
+			// Get tags for this image to find the correct one to scan
+			tags, tagsErr := s.getRegistryImageTags(ctx, regRepoData, regHost, img)
+			if tagsErr != nil {
+				slog.Warn("failed to get tags for registry image", "image", img, "error", tagsErr)
+				scanErrors = append(scanErrors, fmt.Sprintf("%s: failed to get tags: %v", img, tagsErr))
+				continue
+			}
+			if len(tags) == 0 {
+				slog.Warn("no tags found for registry image", "image", img)
+				scanErrors = append(scanErrors, fmt.Sprintf("%s: no tags found", img))
+				continue
+			}
+			// Use "latest" if available, otherwise use the first tag
+			selectedTag := tags[0]
+			for _, t := range tags {
+				if t == "latest" {
+					selectedTag = t
+					break
+				}
+			}
+			fullImageRef := regHost + "/" + img + ":" + selectedTag
+			slog.Info("scanning registry image", "image", fullImageRef, "progress", fmt.Sprintf("%d/%d", i+1, totalImages))
+			imgSummary, imgFull, imgErr := s.scanSingleImage(ctx, fullImageRef, scanType, severity, ignoreUnfixed, regUsername, regPassword, regToken)
+			if imgErr != nil {
+				slog.Warn("scan failed for registry image", "image", fullImageRef, "error", imgErr)
+				scanErrors = append(scanErrors, fmt.Sprintf("%s:%s: %v", img, selectedTag, imgErr))
+				continue
+			}
+			// Aggregate counts
+			for _, key := range []string{"critical", "high", "medium", "low", "unknown", "total"} {
+				if v, ok := imgSummary[key].(int); ok {
+					aggregateSummary[key] += v
+				}
+			}
+			// Add to full results
+			imgResult := map[string]any{
+				"image":    img + ":" + selectedTag,
+				"summary":  imgSummary,
+				"details":  imgFull,
+			}
+			if existingImages, ok := aggregateFull["images"].([]any); ok {
+				aggregateFull["images"] = append(existingImages, imgResult)
+			}
+		}
+		if len(scanErrors) > 0 {
+			aggregateFull["errors"] = scanErrors
+		}
+		return mapToAny(aggregateSummary), aggregateFull, nil
+	}
+
+	// Single image scan
+	args := []string{
+		scanType,
+		"--format", "json",
+		"--severity", severity,
+		"--no-progress",
+		"--quiet", // suppress log messages that can corrupt JSON output
+	}
+	if ignoreUnfixed {
+		args = append(args, "--ignore-unfixed")
+	}
 	args = append(args, imageRef)
 
 	cmd := exec.CommandContext(ctx, "trivy", args...)
@@ -373,7 +479,377 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	return mapToAny(summaryCounts), trivyResult, nil
 }
 
-// resolveConnectionCredentials fetches URL and token from a linked connection.
+// scanSingleImage runs a Trivy scan on a single image and returns the parsed results.
+func (s *Scanner) scanSingleImage(ctx context.Context, imageRef, scanType, severity string, ignoreUnfixed bool, regUsername, regPassword, regToken string) (summary, full map[string]any, err error) {
+	args := []string{
+		scanType,
+		"--format", "json",
+		"--severity", severity,
+		"--no-progress",
+		"--quiet",
+	}
+	if ignoreUnfixed {
+		args = append(args, "--ignore-unfixed")
+	}
+	args = append(args, imageRef)
+
+	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if regUsername != "" || regToken != "" {
+		cmd.Env = os.Environ()
+		if regUsername != "" {
+			cmd.Env = append(cmd.Env, "TRIVY_USERNAME="+regUsername, "TRIVY_PASSWORD="+regPassword)
+		}
+		if regToken != "" {
+			cmd.Env = append(cmd.Env, "TRIVY_REGISTRY_TOKEN="+regToken)
+		}
+	}
+
+	if cmdErr := cmd.Run(); cmdErr != nil {
+		if stdout.Len() == 0 {
+			return nil, nil, fmt.Errorf("trivy scan failed: %w: %s", cmdErr, stderr.String())
+		}
+	}
+
+	var trivyResult map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &trivyResult); err != nil {
+		return nil, nil, fmt.Errorf("parse trivy output: %w", err)
+	}
+
+	summaryCounts := map[string]int{
+		"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0,
+	}
+	totalVulns := 0
+	if results, ok := trivyResult["Results"].([]any); ok {
+		for _, r := range results {
+			if result, ok := r.(map[string]any); ok {
+				if vulns, ok := result["Vulnerabilities"].([]any); ok {
+					for _, v := range vulns {
+						if vuln, ok := v.(map[string]any); ok {
+							sev := strings.ToLower(fmt.Sprintf("%v", vuln["Severity"]))
+							summaryCounts[sev]++
+							totalVulns++
+						}
+					}
+				}
+			}
+		}
+	}
+	summaryCounts["total"] = totalVulns
+	return mapToAny(summaryCounts), trivyResult, nil
+}
+
+// listRegistryImages discovers all images in a registry using the Docker Registry V2 API
+// with a GitLab API fallback (GitLab restricts /v2/_catalog to admin users).
+func (s *Scanner) listRegistryImages(ctx context.Context, repo *repository.RegistryRepo, host string) ([]string, error) {
+	baseURL := strings.TrimSuffix(repo.URL, "/")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Step 1: Get auth challenge
+	challenge, challengeErr := s.getRegistryAuthChallenge(ctx, client, repo)
+	if challengeErr != nil {
+		slog.Warn("registry auth challenge failed", "host", host, "error", challengeErr.Error())
+	}
+
+	// Step 2: Try /v2/_catalog with a catalog-scoped token
+	var repositories []string
+	catalogOK := false
+	if challenge != nil {
+		token, tokenErr := s.getRegistryScopedToken(ctx, client, repo, challenge, "registry:catalog:*")
+		if tokenErr == nil && token != "" {
+			req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/v2/_catalog", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			resp, err := client.Do(req)
+			if err == nil && resp.StatusCode == http.StatusOK {
+				var catalog struct {
+					Repositories []string `json:"repositories"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&catalog) == nil {
+					repositories = catalog.Repositories
+					catalogOK = true
+				}
+				_ = resp.Body.Close()
+			}
+		}
+	} else if challengeErr == nil {
+		req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/v2/_catalog", nil)
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			var catalog struct {
+				Repositories []string `json:"repositories"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&catalog) == nil {
+				repositories = catalog.Repositories
+				catalogOK = true
+			}
+			_ = resp.Body.Close()
+		}
+	}
+
+	// Step 3: GitLab API fallback
+	if !catalogOK && challenge != nil {
+		slog.Debug("catalog listing failed, trying GitLab API fallback", "host", host)
+		gitlabRepos, err := s.listGitLabContainerRepos(ctx, client, challenge.realm, repo)
+		if err != nil {
+			return nil, fmt.Errorf("GitLab API fallback failed: %w", err)
+		}
+		repositories = gitlabRepos
+	}
+
+	sort.Strings(repositories)
+	return repositories, nil
+}
+
+// registryAuthHeader sets authentication on an HTTP request for a Docker registry.
+func registryAuthHeader(req *http.Request, repo *repository.RegistryRepo) {
+	if repo.Token != "" {
+		if repo.Username != "" {
+			req.SetBasicAuth(repo.Username, repo.Token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+repo.Token)
+		}
+	} else if repo.Username != "" && repo.Password != "" {
+		req.SetBasicAuth(repo.Username, repo.Password)
+	}
+}
+
+type registryAuthChallenge struct {
+	realm   string
+	service string
+}
+
+// getRegistryAuthChallenge pings /v2/ and parses the Www-Authenticate header.
+func (s *Scanner) getRegistryAuthChallenge(ctx context.Context, client *http.Client, repo *repository.RegistryRepo) (*registryAuthChallenge, error) {
+	baseURL := strings.TrimSuffix(repo.URL, "/")
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/v2/", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create ping request: %w", err)
+	}
+	registryAuthHeader(req, repo)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("registry ping failed: %w", err)
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusUnauthorized {
+		return nil, fmt.Errorf("registry returned status %d", resp.StatusCode)
+	}
+
+	wwwAuth := resp.Header.Get("Www-Authenticate")
+	if wwwAuth == "" {
+		return nil, fmt.Errorf("no Www-Authenticate header in 401 response")
+	}
+
+	realm := extractRegistryAuthParam(wwwAuth, "realm")
+	if realm == "" {
+		return nil, fmt.Errorf("no realm in Www-Authenticate header")
+	}
+
+	return &registryAuthChallenge{
+		realm:   realm,
+		service: extractRegistryAuthParam(wwwAuth, "service"),
+	}, nil
+}
+
+// getRegistryScopedToken requests a JWT token from the registry auth endpoint.
+func (s *Scanner) getRegistryScopedToken(ctx context.Context, client *http.Client, repo *repository.RegistryRepo, challenge *registryAuthChallenge, scope string) (string, error) {
+	u, err := url.Parse(challenge.realm)
+	if err != nil {
+		return "", fmt.Errorf("invalid realm URL: %w", err)
+	}
+	q := u.Query()
+	if challenge.service != "" {
+		q.Set("service", challenge.service)
+	}
+	if scope != "" {
+		q.Set("scope", scope)
+	}
+	u.RawQuery = q.Encode()
+
+	tokenReq, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	if err != nil {
+		return "", fmt.Errorf("create token request: %w", err)
+	}
+	registryAuthHeader(tokenReq, repo)
+
+	tokenResp, err := client.Do(tokenReq)
+	if err != nil {
+		return "", fmt.Errorf("token request failed: %w", err)
+	}
+	defer func() { _ = tokenResp.Body.Close() }()
+
+	body, _ := io.ReadAll(io.LimitReader(tokenResp.Body, 1<<20))
+	if tokenResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token endpoint returned %d: %s", tokenResp.StatusCode, string(body)[:min(len(body), 200)])
+	}
+
+	var tokenData struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &tokenData); err != nil {
+		return "", fmt.Errorf("parse token response: %w", err)
+	}
+	if tokenData.Token != "" {
+		return tokenData.Token, nil
+	}
+	return tokenData.AccessToken, nil
+}
+
+// listGitLabContainerRepos uses the GitLab API to discover container repositories.
+func (s *Scanner) listGitLabContainerRepos(ctx context.Context, client *http.Client, realm string, repo *repository.RegistryRepo) ([]string, error) {
+	u, err := url.Parse(realm)
+	if err != nil {
+		return nil, fmt.Errorf("invalid realm: %w", err)
+	}
+	gitlabBase := fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+
+	var allRepos []string
+	page := 1
+	for {
+		projectsURL := fmt.Sprintf("%s/api/v4/projects?per_page=100&page=%d&simple=true&order_by=name", gitlabBase, page)
+		req, _ := http.NewRequestWithContext(ctx, "GET", projectsURL, nil)
+		if repo.Token != "" {
+			req.Header.Set("PRIVATE-TOKEN", repo.Token)
+		} else if repo.Username != "" && repo.Password != "" {
+			req.SetBasicAuth(repo.Username, repo.Password)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("gitlab projects request failed: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("gitlab projects returned %d: %s", resp.StatusCode, string(body)[:min(len(body), 200)])
+		}
+
+		var projects []struct {
+			ID int `json:"id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("parse projects: %w", err)
+		}
+		_ = resp.Body.Close()
+
+		if len(projects) == 0 {
+			break
+		}
+
+		for _, proj := range projects {
+			reposURL := fmt.Sprintf("%s/api/v4/projects/%d/registry/repositories", gitlabBase, proj.ID)
+			req, _ := http.NewRequestWithContext(ctx, "GET", reposURL, nil)
+			if repo.Token != "" {
+				req.Header.Set("PRIVATE-TOKEN", repo.Token)
+			} else if repo.Username != "" && repo.Password != "" {
+				req.SetBasicAuth(repo.Username, repo.Password)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				slog.Warn("gitlab registry repos request failed", "project_id", proj.ID, "error", err)
+				continue
+			}
+			if resp.StatusCode != http.StatusOK {
+				_ = resp.Body.Close()
+				continue
+			}
+
+			var repos []struct {
+				Path string `json:"path"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&repos) == nil {
+				for _, r := range repos {
+					if r.Path != "" {
+						allRepos = append(allRepos, r.Path)
+					}
+				}
+			}
+			_ = resp.Body.Close()
+		}
+
+		if len(projects) < 100 {
+			break
+		}
+		page++
+	}
+
+	return allRepos, nil
+}
+
+// getRegistryImageTags fetches the list of tags for a specific image from the registry.
+func (s *Scanner) getRegistryImageTags(ctx context.Context, repo *repository.RegistryRepo, host, imageName string) ([]string, error) {
+	baseURL := strings.TrimSuffix(repo.URL, "/")
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Get auth challenge and token
+	challenge, err := s.getRegistryAuthChallenge(ctx, client, repo)
+	if err != nil {
+		return nil, fmt.Errorf("auth challenge: %w", err)
+	}
+
+	var token string
+	if challenge != nil {
+		scope := fmt.Sprintf("repository:%s:pull", imageName)
+		token, err = s.getRegistryScopedToken(ctx, client, repo, challenge, scope)
+		if err != nil {
+			return nil, fmt.Errorf("get token: %w", err)
+		}
+	}
+
+	tagsURL := fmt.Sprintf("%s/v2/%s/tags/list", baseURL, imageName)
+	req, _ := http.NewRequestWithContext(ctx, "GET", tagsURL, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	} else {
+		registryAuthHeader(req, repo)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("tags request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("tags endpoint returned %d: %s", resp.StatusCode, string(body)[:min(len(body), 200)])
+	}
+
+	var tagsData struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tagsData); err != nil {
+		return nil, fmt.Errorf("parse tags response: %w", err)
+	}
+
+	return tagsData.Tags, nil
+}
+
+// extractRegistryAuthParam extracts a parameter value from a Www-Authenticate header.
+func extractRegistryAuthParam(header, param string) string {
+	search := param + `="`
+	idx := strings.Index(header, search)
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(search)
+	end := strings.Index(header[start:], `"`)
+	if end < 0 {
+		return ""
+	}
+	return header[start : start+end]
+}
+
 // Falls back to scan_config values if no connection is linked or resolution fails.
 func (s *Scanner) resolveConnectionCredentials(ctx context.Context, target *repository.ScanTarget, url, token string) (string, string) {
 	if target.ConnectionID == nil || s.connectionRepo == nil {

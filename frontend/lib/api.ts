@@ -4798,3 +4798,87 @@ export const devops = {
   },
 };
 
+// ============================================================
+// Notification Center
+// ============================================================
+
+export interface NotificationRule {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  event_types: string[];
+  connection_id: string;
+  subject_template?: string;
+  body_template: string;
+  format_config: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationLog {
+  id: string;
+  tenant_id: string;
+  rule_id?: string;
+  connection_id: string;
+  event_type: string;
+  event_payload?: Record<string, unknown>;
+  rendered_subject?: string;
+  rendered_body: string;
+  provider: string;
+  status: 'pending' | 'delivered' | 'failed';
+  response_text?: string;
+  error_text?: string;
+  sent_at: string;
+  delivered_at?: string;
+}
+
+export interface NotificationStats {
+  connection_id: string;
+  connection_name: string;
+  provider: string;
+  total_sent: number;
+  delivered: number;
+  failed: number;
+  last_sent_at?: string;
+}
+
+export interface EventCategories {
+  types: string[];
+  categories: Record<string, string[]>;
+}
+
+export const notifications = {
+  // Rules CRUD
+  listRules: () => fetchAPI<{ rules: NotificationRule[]; total: number }>('/api/v1/notifications/rules'),
+
+  createRule: (data: Partial<NotificationRule>) =>
+    fetchAPI<NotificationRule>('/api/v1/notifications/rules', { method: 'POST', body: JSON.stringify(data) }),
+
+  updateRule: (id: string, data: Partial<NotificationRule>) =>
+    fetchAPI<NotificationRule>(`/api/v1/notifications/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  deleteRule: (id: string) =>
+    fetchAPI<{ status: string }>(`/api/v1/notifications/rules/${id}`, { method: 'DELETE' }),
+
+  testRule: (id: string) =>
+    fetchAPI<{ status: string; response: string }>(`/api/v1/notifications/rules/${id}/test`, { method: 'POST' }),
+
+  // Event types
+  eventTypes: () => fetchAPI<EventCategories>('/api/v1/notifications/events'),
+
+  // Template preview
+  preview: (data: { body_template: string; event_type: string }) =>
+    fetchAPI<{ rendered: string }>('/api/v1/notifications/preview', { method: 'POST', body: JSON.stringify(data) }),
+
+  // History
+  history: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ items: NotificationLog[]; total: number }>(`/api/v1/notifications/history${qs}`);
+  },
+
+  // Stats
+  stats: () => fetchAPI<{ stats: NotificationStats[] }>('/api/v1/notifications/stats'),
+};
+

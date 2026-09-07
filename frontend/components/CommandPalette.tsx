@@ -49,6 +49,7 @@ const pages: PaletteItem[] = [
   { id: 'audit', label: 'Audit Log', description: 'Activity history', href: '/audit', icon: 'discovery', category: 'Administration' },
   { id: 'plugin-activity', label: 'Plugin Activity', description: 'SSH commands & VM operations', href: '/plugin-activity', icon: 'plugin', category: 'Administration' },
   { id: 'security', label: 'Security', description: 'Security dashboard', href: '/security', icon: 'vault', category: 'Administration' },
+  { id: 'notifications', label: 'Notifications', description: 'Notification delivery history & rules', href: '/notifications', icon: 'vault', category: 'Administration' },
 ];
 
 // Quick actions

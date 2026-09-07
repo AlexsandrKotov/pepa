@@ -33,7 +33,6 @@ This document tracks the implementation progress of PEPA against the roadmap def
 | Redis integration | ✅ Done | Events bus (`internal/events/bus.go`), Job queue (`internal/queue/queue.go`) |
 | Plugin: GitLab | ✅ Compiled | `plugins/gitlab/` — repos, CI/CD, merge requests, pipelines, branches |
 | Plugin: Jira | ✅ Compiled | `plugins/jira/` — issues, projects, transitions, sprints |
-| Plugin: Prometheus | ✅ Compiled | `plugins/prometheus/` — metrics queries, alerts, health |
 | Plugin: Slack | ✅ Compiled | `plugins/slack/` — channel messages, alerts, notifications |
 | CLI tool | ✅ Done | `cmd/cli/` — entity, workflow, role management commands |
 | Multi-tenancy | ✅ Done | Tenant-scoped data with RLS-ready schema (migrations 013, 023) |
@@ -53,7 +52,7 @@ This document tracks the implementation progress of PEPA against the roadmap def
 | AI API Endpoints | ✅ Done | 4 endpoints: chat, stream, status, tools list |
 | Dashboard Builder | 🔲 Planned | Drag-and-drop widget dashboard |
 | Plugin Registry v1 | 🔲 Planned | OCI-based plugin distribution |
-| Plugin Marketplace UI | ✅ Done | `/marketplace` — 20 plugins across 7 categories, tier badges, install/configure |
+| Plugin Marketplace UI | ✅ Done | `/marketplace` — 19 plugins across 7 categories, tier badges, install/configure |
 | SSO (OIDC/SAML) | 🔲 Planned | Enterprise authentication |
 | Scorecard engine | ✅ Done | Scorecard CRUD, rules, evaluation, entity scoring |
 
@@ -209,7 +208,6 @@ This document tracks the implementation progress of PEPA against the roadmap def
 | Email | Notification | ~200 | ✅ |
 | Webhook | Notification | ~200 | ✅ |
 | Syslog | Notification | ~150 | ✅ |
-| Prometheus | Monitoring | 248 | ✅ |
 | Proxmox | Infrastructure | 1,342 | ✅ |
 | S3 | Storage | ~300 | ✅ |
 | Trivy | Security | ~400 | ✅ |

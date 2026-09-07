@@ -88,16 +88,11 @@ const EXAMPLE_CONFIGS: Record<string, Record<string, unknown>> = {
   slack: { webhook_url: 'https://hooks.slack.com/services/T.../B.../XXX', channel: '#deployments' },
   telegram: { bot_token: '<bot token from @BotFather>', chat_id: '-1001234567890' },
   teams: { webhook_url: 'https://outlook.office.com/webhook/...' },
-  prometheus: { url: 'http://prometheus:9090', token: '' },
   bitbucket: { token: '<Bitbucket App Password or OAuth token>', url: 'https://api.bitbucket.org/2.0' },
 };
 
 // Per-field descriptions shown above the config textarea
 const CONFIG_FIELD_DESC: Record<string, Record<string, string>> = {
-  prometheus: {
-    url: 'Prometheus server URL (e.g. http://localhost:9090)',
-    token: 'Optional: Bearer token for authenticated Prometheus instances',
-  },
   slack: {
     webhook_url: 'Slack Incoming Webhook URL — create at api.slack.com/messaging/webhooks',
     channel: 'Default channel for notifications (e.g. #deployments)',
@@ -146,7 +141,6 @@ const CONFIG_FIELD_DESC: Record<string, Record<string, string>> = {
 
 // Hints shown on plugin cards to guide users on how to configure each plugin
 const PLUGIN_CONFIG_HINTS: Record<string, { message: string; via: 'connection' | 'config'; link?: string }> = {
-  prometheus: { message: 'Configure the Prometheus server URL via plugin configuration below.', via: 'config' },
   email: { message: 'Create a Notification connection (Email/SMTP) in Connections page to provide SMTP server credentials.', via: 'connection', link: '/connections' },
   webhook: { message: 'Create a Notification connection (Webhook) in Connections page to provide the target URL.', via: 'connection', link: '/connections' },
   slack: { message: 'Create a Notification connection (Slack) in Connections page to provide webhook URL or bot token.', via: 'connection', link: '/connections' },

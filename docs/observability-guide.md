@@ -130,21 +130,6 @@ Response includes:
 
 ## Plugins
 
-### Prometheus Plugin
-
-The Prometheus plugin can now:
-- Query PromQL metrics
-- List alerts, rules, and targets
-- **Remote write** — Push metrics to Prometheus
-- **Push metrics** — Send internal PEPA metrics
-
-Configuration:
-```yaml
-url: http://prometheus:9090
-token: optional-bearer-token
-remote_write_url: http://prometheus:9090/api/v1/write  # optional
-```
-
 ### Syslog Plugin
 
 Forward logs, events, and audit trail to syslog server:

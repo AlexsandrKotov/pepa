@@ -232,12 +232,14 @@ spec:
     # ── Phase 6: Post-Deploy ─────────────────────────────
     - name: production-verification
       description: "Run production verification tests"
-      plugin: monitoring:prometheus
-      action: queryMetrics
+      plugin: webhook
+      action: post
       params:
-        query: "rate(http_requests_total{service='{{.service}}',code=~'5..'}[5m])"
-        threshold: 0.01
-        comparison: "less_than"
+        url: "https://monitoring.example.com/api/query"
+        body:
+          query: "rate(http_requests_total{service='{{.service}}',code=~'5..'}[5m])"
+          threshold: 0.01
+          comparison: "less_than"
       waitFor:
         duration: 15m      # Monitor for 15 minutes
         interval: 1m        # Check every minute

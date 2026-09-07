@@ -108,7 +108,7 @@ make build && make run-api
 
 ## Plugins
 
-PEPA includes 20 free, open-source plugins:
+PEPA includes 19 free, open-source plugins:
 
 **Git Providers:** GitHub, GitLab, Bitbucket, Gitea
 
@@ -116,7 +116,7 @@ PEPA includes 20 free, open-source plugins:
 
 **Notifications:** Telegram, Slack, Microsoft Teams, Email, Webhook, Syslog
 
-**Infrastructure:** Proxmox, VMware, Prometheus, S3
+**Infrastructure:** Proxmox, VMware, S3
 
 **Task Trackers:** Jira
 

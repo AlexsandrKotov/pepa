@@ -77,7 +77,6 @@
 | GraphQL API | Full GraphQL schema for frontend | P0 |
 | Redis integration | Pub/Sub, caching, WebSocket fan-out | P0 |
 | Plugin: Jira | Task tracker plugin | P0 |
-| Plugin: Prometheus | Monitoring plugin | P1 |
 | Plugin: Slack | Notification plugin | P1 |
 | CLI tool (`pepa`) | Install, plugin management, dev tools | P1 |
 | Multi-tenancy | Organization/tenant isolation | P0 |

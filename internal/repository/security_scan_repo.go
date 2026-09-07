@@ -326,6 +326,16 @@ func (r *SecurityScanRepository) UpdateScanRun(ctx context.Context, s *ScanRun) 
 	return err
 }
 
+// UpdateScanRunProgress updates only the result_summary field with progress information.
+func (r *SecurityScanRepository) UpdateScanRunProgress(ctx context.Context, runID uuid.UUID, resultSummary map[string]any) error {
+	query := `UPDATE scan_runs SET result_summary = @result_summary WHERE id = @id`
+	_, err := r.db.Pool.Exec(ctx, query, pgx.NamedArgs{
+		"id":             runID,
+		"result_summary": resultSummary,
+	})
+	return err
+}
+
 // ── Scan Schedules ────────────────────────────────────────────
 
 // ListScanSchedules returns all schedules for a tenant.

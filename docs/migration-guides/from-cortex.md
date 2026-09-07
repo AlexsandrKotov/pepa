@@ -92,7 +92,7 @@ done
 | GitHub / GitLab / Bitbucket | Plugin (GitHub, GitLab, Bitbucket, Gitea) |
 | AWS / GCP / Azure | Connection or future plugin |
 | ArgoCD / FluxCD | GitOps Engine (built-in) |
-| Datadog / Prometheus | Prometheus Plugin |
+| Datadog / Prometheus | Connection + /metrics endpoint |
 | Slack / PagerDuty | Slack Plugin + Webhook |
 | Jenkins / CircleCI | Pipeline Builder |
 | Kubernetes | Cluster Management (built-in) |

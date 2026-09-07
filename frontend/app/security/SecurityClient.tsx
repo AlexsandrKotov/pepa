@@ -42,6 +42,18 @@ const SEVERITY_COLORS: Record<string, string> = {
   unknown: '#6b7280',
 };
 
+// Format duration in ms to human-readable format (e.g., "3m 4s", "1h 12m", "45s")
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  return `${seconds}s`;
+}
+
 export default function SecurityClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -1007,7 +1019,7 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
             </div>
             <div className="flex items-center gap-4 mt-1 text-xs text-[var(--text-secondary)]">
               <span>Triggered: {active.trigger_type}</span>
-              <span>Duration: {active.duration_ms ? `${(active.duration_ms / 1000).toFixed(1)}s` : '-'}</span>
+              <span>Duration: {active.duration_ms ? formatDuration(active.duration_ms) : '-'}</span>
               {active.completed_at && <span>Completed: {new Date(active.completed_at).toLocaleString()}</span>}
             </div>
           </div>
@@ -1244,6 +1256,41 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 text-xs rounded border ${STATUS_COLORS[scan.status]}`}>{scan.status}</span>
+                    {scan.status === 'running' && scan.result_summary?.progress ? (() => {
+                      const progress = scan.result_summary.progress as { scanned: number; total: number; current: string; estimated_remaining_ms: number };
+                      const percent = progress.total > 0 ? Math.min(100, (progress.scanned / progress.total) * 100) : 0;
+                      return (
+                        <div className="mt-1.5">
+                          <div className="flex items-center justify-between text-xs text-[var(--text-secondary)] mb-0.5">
+                            <span>{progress.scanned}/{progress.total} images</span>
+                            <span>~{formatDuration(progress.estimated_remaining_ms || 0)} left</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-blue-500 transition-all duration-300"
+                              style={{ width: `${percent}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between mt-1">
+                            <div className="text-xs text-[var(--text-secondary)] truncate flex-1 mr-2">
+                              Scanning: {progress.current}
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm('Stop this scan?')) {
+                                  securityScan.cancelScan(scan.id).then(() => onRefresh());
+                                }
+                              }}
+                              className="px-2 py-0.5 text-xs bg-red-500/10 text-red-500 rounded hover:bg-red-500/20 flex items-center gap-1 whitespace-nowrap"
+                            >
+                              <span className="material-symbols-outlined text-xs">stop</span>
+                              Stop
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })() : null}
                   </td>
                   <td className="px-4 py-3">
                     {scan.result_summary && (
@@ -1264,7 +1311,7 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">
-                    {scan.duration_ms ? `${(scan.duration_ms / 1000).toFixed(1)}s` : '-'}
+                    {scan.duration_ms ? formatDuration(scan.duration_ms) : '-'}
                   </td>
                   <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">{scan.trigger_type}</td>
                 </tr>
@@ -1386,7 +1433,7 @@ function ReportsTab({ scans }: { scans: ScanRun[] }) {
     <strong>Target:</strong> ${scan.target_name || scan.target_ref}<br>
     <strong>Scanner:</strong> ${scan.scanner_type}<br>
     <strong>Date:</strong> ${date}<br>
-    <strong>Duration:</strong> ${scan.duration_ms ? (scan.duration_ms / 1000).toFixed(1) + 's' : '-'}
+    <strong>Duration:</strong> ${scan.duration_ms ? formatDuration(scan.duration_ms) : '-'}
   </div>
   
   <h2>Summary</h2>

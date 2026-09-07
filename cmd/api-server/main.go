@@ -152,6 +152,8 @@ func main() {
 			PluginActivity:   comp.PluginActivityRepo,
 			SecurityScan:     comp.SecurityScanRepo,
 			DevOps:           comp.DevOpsRepo,
+			NotificationRule: comp.NotificationRuleRepo,
+			NotificationLog:  comp.NotificationLogRepo,
 		},
 		Services: &rest.Services{
 			Deployment: service.NewDeploymentService(
@@ -165,6 +167,18 @@ func main() {
 				comp.HelmRepo,
 			),
 			Connection: service.NewConnectionService(),
+			NotificationDispatcher: func() *service.NotificationDispatcher {
+				d := service.NewNotificationDispatcher(
+					comp.NotificationRuleRepo,
+					comp.NotificationLogRepo,
+					comp.ConnectionRepo,
+					comp.PluginMgr,
+				)
+				if comp.EventBus != nil {
+					d.RegisterHandlers(comp.EventBus)
+				}
+				return d
+			}(),
 		},
 		PluginMgr:        comp.PluginMgr,
 		ProviderRegistry: comp.ProviderRegistry,

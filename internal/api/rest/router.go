@@ -68,6 +68,8 @@ type Repositories struct {
 	PluginActivity  *repository.PluginActivityRepository
 	SecurityScan    *repository.SecurityScanRepository
 	DevOps          *repository.DevOpsRepository
+	NotificationRule *repository.NotificationRuleRepository
+	NotificationLog  *repository.NotificationLogRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -94,9 +96,10 @@ type Dependencies struct {
 
 // Services groups all service layer instances.
 type Services struct {
-	Deployment        *service.DeploymentService
-	ServiceDeployment *service.ServiceDeploymentService
-	Connection        *service.ConnectionService
+	Deployment             *service.DeploymentService
+	ServiceDeployment      *service.ServiceDeploymentService
+	Connection             *service.ConnectionService
+	NotificationDispatcher *service.NotificationDispatcher
 }
 
 // NewRouter creates and configures the Gin router with all routes.
@@ -272,6 +275,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerPluginActivityRoutes(v1, deps)
 		registerSecurityScanRoutes(v1, deps)
 		registerDevOpsRoutes(v1, deps)
+		registerNotificationRoutes(v1, deps)
 
 		// System info
 		v1.GET("/system/info", func(c *gin.Context) {

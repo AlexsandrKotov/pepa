@@ -634,7 +634,7 @@ const WIDGET_TYPES = {
     name: 'Metric Chart',
     description: 'Time-series chart from monitoring plugin',
     config: {
-      pluginName: string,      // monitoring:prometheus, etc.
+      pluginName: string,      // monitoring:custom, etc.
       query: string,           // PromQL or equivalent
       chartType: 'line' | 'area' | 'bar' | 'gauge',
       timeRange: TimeRange,
@@ -810,7 +810,7 @@ spec:
       type: metric_chart
       title: "Cluster Health"
       config:
-        pluginName: monitoring:prometheus
+        pluginName: monitoring:custom
         queries:
           - query: "sum(kube_pod_status_phase{phase='Running'})"
             label: "Running Pods"
