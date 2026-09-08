@@ -81,7 +81,7 @@ func (e *DeploymentExecutor) ExecuteDeploy(
 	client *k8s.Client,
 	deploySpec k8s.DeploySpec,
 	releaseName, namespace string,
-	replicas int32,
+	replicas int,
 	timeoutSeconds int,
 ) (*DeployResult, error) {
 	// Route to Helm deploy if chart info is present
@@ -137,7 +137,7 @@ func (e *DeploymentExecutor) ExecuteDeploy(
 }
 
 // ParseAndPrepareSpec parses a deployment spec JSON and applies defaults.
-func ParseAndPrepareSpec(specJSON json.RawMessage, releaseName, namespace string, replicas int32) (k8s.DeploySpec, error) {
+func ParseAndPrepareSpec(specJSON json.RawMessage, releaseName, namespace string, replicas int) (k8s.DeploySpec, error) {
 	if releaseName == "" {
 		releaseName = "pepa-release"
 	}
@@ -149,6 +149,6 @@ func ParseAndPrepareSpec(specJSON json.RawMessage, releaseName, namespace string
 
 // ParseDeploySpec is a convenience method on the executor that parses a
 // deployment spec JSON and applies defaults for release name and namespace.
-func (e *DeploymentExecutor) ParseDeploySpec(specJSON json.RawMessage, releaseName, namespace string, replicas int32) (k8s.DeploySpec, error) {
+func (e *DeploymentExecutor) ParseDeploySpec(specJSON json.RawMessage, releaseName, namespace string, replicas int) (k8s.DeploySpec, error) {
 	return ParseAndPrepareSpec(specJSON, releaseName, namespace, replicas)
 }

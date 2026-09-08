@@ -496,11 +496,11 @@ func (h *DevOpsHandlers) ExecuteBatchOperation(c *gin.Context) {
 					if err != nil {
 						slog.Info("Failed to enqueue batch deployment", "id", deploy.ID, "error", err)
 						go performDeployment(deploy.ID, *deploy.TargetClusterID, deploy.TargetNamespace,
-							deploy.GitlabProjectName, safeInt32(deploy.Replicas), deploy.Spec, deploy.TimeoutSeconds, h.deps)
+							deploy.GitlabProjectName, deploy.Replicas, deploy.Spec, deploy.TimeoutSeconds, h.deps)
 					}
 				} else {
 					go performDeployment(deploy.ID, *deploy.TargetClusterID, deploy.TargetNamespace,
-						deploy.GitlabProjectName, safeInt32(deploy.Replicas), deploy.Spec, deploy.TimeoutSeconds, h.deps)
+						deploy.GitlabProjectName, deploy.Replicas, deploy.Spec, deploy.TimeoutSeconds, h.deps)
 				}
 			}
 

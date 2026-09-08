@@ -311,7 +311,7 @@ func processDeploymentExecute(ctx context.Context, job *queue.Job, deploymentSvc
 	namespace, _ := job.Payload["namespace"].(string)
 	releaseName, _ := job.Payload["release_name"].(string)
 	replicasFloat, _ := job.Payload["replicas"].(float64)
-	replicas := int32(replicasFloat)
+	replicas := int(replicasFloat)
 	if replicas <= 0 {
 		replicas = 1
 	}

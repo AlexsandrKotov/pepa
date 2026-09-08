@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -151,12 +150,12 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 					slog.Info("Failed to enqueue deployment job", "id", d.ID, "error", err)
 					// Fallback to goroutine if queue fails
 					go performDeployment(d.ID, *d.TargetClusterID, d.TargetNamespace,
-						d.GitlabProjectName, safeInt32(d.Replicas), d.Spec, d.TimeoutSeconds, deps)
+						d.GitlabProjectName, d.Replicas, d.Spec, d.TimeoutSeconds, deps)
 				}
 			} else {
 				// No queue available, fallback to goroutine
 				go performDeployment(d.ID, *d.TargetClusterID, d.TargetNamespace,
-					d.GitlabProjectName, safeInt32(d.Replicas), d.Spec, d.TimeoutSeconds, deps)
+					d.GitlabProjectName, d.Replicas, d.Spec, d.TimeoutSeconds, deps)
 			}
 		}
 
@@ -170,7 +169,7 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 }
 
 // performDeployment runs the actual Kubernetes deployment in the background.
-func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName string, replicas int32, specJSON json.RawMessage, timeoutSeconds int, deps Dependencies) {
+func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName string, replicas int, specJSON json.RawMessage, timeoutSeconds int, deps Dependencies) {
 	if deps.Services == nil || deps.Services.Deployment == nil {
 		slog.Info("Deployment skipped: deployment service not available", "id", deploymentID)
 		return
@@ -538,7 +537,7 @@ func retryDeployment(deps Dependencies) gin.HandlerFunc {
 				})
 			} else if deps.Services.Deployment != nil {
 				go performDeployment(newDeploy.ID, *newDeploy.TargetClusterID, newDeploy.TargetNamespace,
-					newDeploy.GitlabProjectName, safeInt32(newDeploy.Replicas), newDeploy.Spec, newDeploy.TimeoutSeconds, deps)
+					newDeploy.GitlabProjectName, newDeploy.Replicas, newDeploy.Spec, newDeploy.TimeoutSeconds, deps)
 			}
 		}
 
@@ -726,7 +725,9 @@ func getDeploymentMetrics(deps Dependencies) gin.HandlerFunc {
 		// Parse period
 		days := 30
 		if strings.HasSuffix(period, "d") {
-			fmt.Sscanf(period, "%dd", &days)
+			if _, err := fmt.Sscanf(period, "%dd", &days); err != nil {
+				days = 30
+			}
 		}
 		cutoff := time.Now().AddDate(0, 0, -days)
 
@@ -821,17 +822,6 @@ func removeDeployment(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
-// safeInt32 converts int to int32 with overflow clamping.
-func safeInt32(v int) int32 {
-	if v > math.MaxInt32 {
-		return math.MaxInt32
-	}
-	if v < math.MinInt32 {
-		return math.MinInt32
-	}
-	return int32(v)
-}
-
 // publishDeploymentEvent publishes a deployment-related event to the event bus.
 func publishDeploymentEvent(deps Dependencies, eventType string, d *repository.Deployment, extra map[string]interface{}) {
 	if deps.EventBus == nil || d == nil {
@@ -905,7 +895,7 @@ func dryRunDeployment(deps Dependencies) gin.HandlerFunc {
 			clusterID,
 			req.TargetNamespace,
 			releaseName,
-			safeInt32(replicas),
+			replicas,
 			spec,
 			req.TimeoutSeconds,
 		)

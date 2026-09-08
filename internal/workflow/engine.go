@@ -344,14 +344,15 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 	// perform the actual Kubernetes deployment
 	if params.TargetClusterID != nil && e.deploymentService != nil {
 		slog.Info("Step : performing real deployment via DeploymentService", "name", step.Name, "id", deployment.ID)
+		deployCtx := context.WithoutCancel(ctx)
 		go func() {
 			result := e.deploymentService.PerformDeployment(
-				context.Background(),
+				deployCtx,
 				deployment.ID,
 				*params.TargetClusterID,
 				params.Namespace,
 				params.ProjectName,
-				int32(params.Replicas),
+				params.Replicas,
 				params.Spec,
 				params.TimeoutSeconds,
 			)

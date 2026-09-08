@@ -90,7 +90,7 @@ func (s *DeploymentService) PerformDeployment(
 	ctx context.Context,
 	deploymentID, clusterID uuid.UUID,
 	namespace, releaseName string,
-	replicas int32,
+	replicas int,
 	specJSON []byte,
 	timeoutSeconds int,
 ) *DeploymentResult {
@@ -398,7 +398,7 @@ func (s *DeploymentService) PerformDryRun(
 	ctx context.Context,
 	clusterID uuid.UUID,
 	namespace, releaseName string,
-	replicas int32,
+	replicas int,
 	specJSON []byte,
 	timeoutSeconds int,
 ) (*DryRunResult, error) {

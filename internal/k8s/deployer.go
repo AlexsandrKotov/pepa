@@ -28,7 +28,7 @@ type ChartSpec struct {
 type DeploySpec struct {
 	ReleaseName string            `json:"release_name"`
 	Namespace   string            `json:"namespace"`
-	Replicas    int32             `json:"replicas"`
+	Replicas    int               `json:"replicas"`
 	Containers  []ContainerSpec   `json:"containers"`
 	Service     *ServiceSpec      `json:"service,omitempty"`
 	ValuesYAML  string            `json:"values_yaml,omitempty"`
@@ -236,7 +236,7 @@ func (c *Client) buildDeployment(spec DeploySpec) *appsv1.Deployment {
 		}
 	}
 
-	replicas := spec.Replicas
+	replicas := int32(spec.Replicas) //nolint:gosec
 
 	deploy := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -327,7 +327,7 @@ func (c *Client) buildService(spec DeploySpec) *corev1.Service {
 }
 
 // ParseDeploySpec parses a deployment spec from the JSON stored in the deployments table.
-func ParseDeploySpec(specJSON json.RawMessage, releaseName, namespace string, replicas int32) (DeploySpec, error) {
+func ParseDeploySpec(specJSON json.RawMessage, releaseName, namespace string, replicas int) (DeploySpec, error) {
 	var raw struct {
 		Containers []struct {
 			Name   string `json:"name"`

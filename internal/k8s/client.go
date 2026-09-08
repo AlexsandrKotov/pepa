@@ -317,10 +317,11 @@ func (c *Client) GetClusterInfo(ctx context.Context) (nodeCount int, k8sVersion 
 // WaitForReady polls the Kubernetes Deployment identified by namespace and releaseName
 // until all desired replicas are Ready, or the timeout is reached.
 // The check interval is 5 seconds.
-func (c *Client) WaitForReady(ctx context.Context, namespace, releaseName string, expectedReplicas int32, timeoutSeconds int) error {
+func (c *Client) WaitForReady(ctx context.Context, namespace, releaseName string, expectedReplicas int, timeoutSeconds int) error {
 	if expectedReplicas <= 0 {
 		expectedReplicas = 1
 	}
+	targetReplicas := int32(expectedReplicas)
 
 	// If timeoutSeconds is 0, rely on the context deadline (set by the caller).
 	// Otherwise, create a separate deadline for the health check.
@@ -354,7 +355,7 @@ func (c *Client) WaitForReady(ctx context.Context, namespace, releaseName string
 			slog.Info("WaitForReady: checking", "ready", readyReplicas, "updated", updatedReplicas, "unavailable", unavailableReplicas, "expected", expectedReplicas)
 
 			// Check if all replicas are ready and match the desired count
-			if readyReplicas >= expectedReplicas && unavailableReplicas == 0 {
+			if readyReplicas >= targetReplicas && unavailableReplicas == 0 {
 				// Also verify all pods are Running and Ready
 				allPodsReady := c.checkPodsReady(ctx, namespace, releaseName)
 				if allPodsReady {
