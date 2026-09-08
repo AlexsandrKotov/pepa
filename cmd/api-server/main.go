@@ -151,6 +151,7 @@ func main() {
 			SSHHostGroup:     comp.SSHHostGroupRepo,
 			PluginActivity:   comp.PluginActivityRepo,
 			SecurityScan:     comp.SecurityScanRepo,
+			ScanIgnore:       comp.ScanIgnoreRepo,
 			DevOps:           comp.DevOpsRepo,
 			NotificationRule: comp.NotificationRuleRepo,
 			NotificationLog:  comp.NotificationLogRepo,
@@ -201,7 +202,7 @@ func main() {
 		RAGPipeline:      comp.RAGPipeline,
 		RBAC:             rbacEngine,
 		Storage:          comp.Storage,
-		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo),
+		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo, comp.ScanIgnoreRepo),
 		Version:          version,
 		BuildTime:        buildTime,
 	})

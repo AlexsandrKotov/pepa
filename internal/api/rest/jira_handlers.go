@@ -13,6 +13,28 @@ import (
 	"github.com/pepa/pepa/internal/repository"
 )
 
+// jiraResolvedConfig returns the merged Jira plugin config with per-user credential override.
+// Resolution order: user personal > shared > admin fallback.
+func jiraResolvedConfig(deps Dependencies, c *gin.Context) map[string]string {
+	mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, c.Request.Context())
+
+	userID := auth.GetUserID(c)
+	tenantID := auth.GetTenantID(c)
+	conn := FindConnectionByTypeDecrypted(c.Request.Context(), deps, tenantID, "jira")
+	if conn != nil {
+		resolved, err := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, "jira", "url")
+		if err == nil {
+			for k, v := range resolved.Config {
+				mergedConfig[k] = v
+			}
+			slog.Info("jira credential resolved", "source", resolved.Source)
+		} else if !conn.FallbackToAdmin {
+			slog.Warn("jira credential resolution failed and fallback disabled", "error", err)
+		}
+	}
+	return mergedConfig
+}
+
 func registerJiraRoutes(r *gin.RouterGroup, deps Dependencies) {
 	jira := r.Group("/jira")
 	{
@@ -241,7 +263,7 @@ func createInJira(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, c.Request.Context())
+		mergedConfig := jiraResolvedConfig(deps, c)
 
 		var createdKey string
 		var createdSummary string
@@ -676,8 +698,8 @@ func syncJiraIssues(deps Dependencies) gin.HandlerFunc {
 			req.MaxResults = 200
 		}
 
-		// Merge stored connection config for the Jira plugin
-		mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, c.Request.Context())
+		// Merge stored connection config for the Jira plugin with per-user credential override
+		mergedConfig := jiraResolvedConfig(deps, c)
 
 		// Build plugin params
 		pluginParams, _ := json.Marshal(map[string]interface{}{

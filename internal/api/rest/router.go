@@ -67,6 +67,7 @@ type Repositories struct {
 	SSHHostGroup    *repository.SSHHostGroupRepository
 	PluginActivity  *repository.PluginActivityRepository
 	SecurityScan    *repository.SecurityScanRepository
+	ScanIgnore      *repository.ScanIgnoreRepository
 	DevOps          *repository.DevOpsRepository
 	NotificationRule *repository.NotificationRuleRepository
 	NotificationLog  *repository.NotificationLogRepository

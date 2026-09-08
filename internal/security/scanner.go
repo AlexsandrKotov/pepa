@@ -12,9 +12,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,9 +35,9 @@ var validSeverities = map[string]bool{
 
 // validScanConfigKeys is the whitelist of allowed scan_config keys per scanner type.
 var validScanConfigKeys = map[string]map[string]bool{
-	"trivy":     {"scan_type": true, "severity": true, "ignore_unfixed": true},
+	"trivy":     {"scan_type": true, "severity": true, "ignore_unfixed": true, "vex": true},
 	"sonarqube": {"url": true, "token": true, "project_key": true, "branch": true},
-	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "url": true, "token": true, "project_key": true, "branch": true},
+	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "url": true, "token": true, "project_key": true, "branch": true, "vex": true},
 }
 
 // Scanner orchestrates security scans via Trivy and SonarQube.
@@ -44,32 +46,58 @@ type Scanner struct {
 	repo           *repository.SecurityScanRepository
 	connectionRepo *repository.ConnectionRepository
 	registryRepo   *repository.RegistryRepository
+	ignoreRepo     *repository.ScanIgnoreRepository
 	sem            chan struct{} // concurrency limiter
 	mu             sync.Mutex
 	cancels        map[uuid.UUID]context.CancelFunc
 }
 
 // NewScanner creates a new Scanner.
-func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository, registryRepo *repository.RegistryRepository) *Scanner {
+func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository, registryRepo *repository.RegistryRepository, ignoreRepo *repository.ScanIgnoreRepository) *Scanner {
 	return &Scanner{
 		pluginMgr:      pluginMgr,
 		repo:           repo,
 		connectionRepo: connRepo,
 		registryRepo:   registryRepo,
+		ignoreRepo:     ignoreRepo,
 		sem:            make(chan struct{}, maxConcurrentScans),
 		cancels:        make(map[uuid.UUID]context.CancelFunc),
 	}
 }
 
 // CancelScan cancels a running scan by its run ID.
-func (s *Scanner) CancelScan(runID uuid.UUID) error {
+// It always force-updates the database status to "cancelled" to ensure the scan
+// doesn't remain stuck in "running" if the goroutine is blocked in cmd.Run().
+func (s *Scanner) CancelScan(ctx context.Context, runID uuid.UUID, tenantID uuid.UUID) error {
 	s.mu.Lock()
 	cancel, ok := s.cancels[runID]
 	s.mu.Unlock()
-	if !ok {
-		return fmt.Errorf("no active scan found for run %s", runID)
+	if ok {
+		cancel()
 	}
-	cancel()
+
+	// Force-update DB status immediately — the goroutine may be stuck in cmd.Run()
+	// (e.g. trivy child processes holding pipes open) and never reach the DB update.
+	run, err := s.repo.GetScanRun(ctx, runID, tenantID)
+	if err != nil {
+		return fmt.Errorf("scan run not found: %w", err)
+	}
+	if run.Status != "running" && run.Status != "pending" {
+		return fmt.Errorf("scan is not active (status: %s)", run.Status)
+	}
+
+	now := time.Now()
+	cancelledMsg := "scan cancelled by user"
+	run.Status = "cancelled"
+	run.ErrorMessage = &cancelledMsg
+	run.CompletedAt = &now
+	if run.StartedAt != nil {
+		durationMs := int(time.Since(*run.StartedAt).Milliseconds())
+		run.DurationMs = &durationMs
+	}
+	if err := s.repo.UpdateScanRun(ctx, run); err != nil {
+		return fmt.Errorf("update cancelled scan run: %w", err)
+	}
 	return nil
 }
 
@@ -251,6 +279,9 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 
 	ignoreUnfixed, _ := target.ScanConfig["ignore_unfixed"].(bool)
 
+	// VEX document path for false-positive filtering
+	vexPath, _ := target.ScanConfig["vex"].(string)
+
 	slog.Info("runTrivyScan starting", "target_ref", target.TargetRef, "target_type", target.TargetType, "connection_id", target.ConnectionID, "scan_type", scanType)
 
 	// Resolve registry credentials for private image scans.
@@ -334,6 +365,11 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		totalImages := len(images)
 		scanStartTime := time.Now()
 		for i, img := range images {
+			// Check for cancellation before processing each image
+			if ctx.Err() != nil {
+				slog.Info("scan cancelled, stopping registry scan loop", "processed", i, "total", totalImages)
+				break
+			}
 			// Update progress in database (showing current image being scanned)
 			elapsed := time.Since(scanStartTime).Milliseconds()
 			// Use max(1, i+1) to avoid division by zero and show progress starting from 1
@@ -373,7 +409,10 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 			}
 			fullImageRef := regHost + "/" + img + ":" + selectedTag
 			slog.Info("scanning registry image", "image", fullImageRef, "progress", fmt.Sprintf("%d/%d", i+1, totalImages))
-			imgSummary, imgFull, imgErr := s.scanSingleImage(ctx, fullImageRef, scanType, severity, ignoreUnfixed, regUsername, regPassword, regToken)
+			// Per-image timeout prevents a single image from hanging the entire registry scan
+			imgCtx, imgCancel := context.WithTimeout(ctx, 5*time.Minute)
+			imgSummary, imgFull, imgErr := s.scanSingleImage(imgCtx, fullImageRef, scanType, severity, ignoreUnfixed, regUsername, regPassword, regToken)
+			imgCancel()
 			if imgErr != nil {
 				slog.Warn("scan failed for registry image", "image", fullImageRef, "error", imgErr)
 				scanErrors = append(scanErrors, fmt.Sprintf("%s:%s: %v", img, selectedTag, imgErr))
@@ -412,9 +451,56 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	if ignoreUnfixed {
 		args = append(args, "--ignore-unfixed")
 	}
+
+	// Generate .trivyignore file if there are ignored CVEs for this target
+	var ignoreFilePath string
+	if s.ignoreRepo != nil {
+		ignoreContent, err := s.ignoreRepo.GetIgnoreFileContent(ctx, target.ID, target.TenantID)
+		if err != nil {
+			slog.Warn("failed to get ignore file content", "target_id", target.ID, "error", err)
+		} else if ignoreContent != "" {
+			// Write to temp file
+			tmpFile, err := os.CreateTemp("", "trivyignore-*.txt")
+			if err != nil {
+				slog.Warn("failed to create temp ignore file", "error", err)
+			} else {
+				if _, err := tmpFile.WriteString(ignoreContent); err != nil {
+					slog.Warn("failed to write ignore file", "error", err)
+					tmpFile.Close()
+					os.Remove(tmpFile.Name())
+				} else {
+					tmpFile.Close()
+					ignoreFilePath = tmpFile.Name()
+					args = append(args, "--ignorefile", ignoreFilePath)
+					slog.Info("using ignore file for scan", "ignore_file", ignoreFilePath, "target_id", target.ID)
+					defer os.Remove(ignoreFilePath) // Clean up after scan
+				}
+			}
+		}
+	}
+
+	// VEX document for false-positive filtering (OpenVEX/CycloneDX format)
+	if vexPath != "" {
+		// Check if VEX file exists
+		if _, err := os.Stat(vexPath); err == nil {
+			args = append(args, "--vex", vexPath)
+			slog.Info("using VEX document for scan", "vex_path", vexPath)
+		} else {
+			slog.Warn("VEX document not found, skipping", "vex_path", vexPath)
+		}
+	}
 	args = append(args, imageRef)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...)
+	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	// Kill the entire process group on cancellation to prevent child processes
+	// (e.g. image pull helpers) from keeping pipes open and blocking cmd.Run() forever.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) //nolint:gosec // #nosec // negative PID kills process group
+		}
+		return nil
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -494,6 +580,15 @@ func (s *Scanner) scanSingleImage(ctx context.Context, imageRef, scanType, sever
 	args = append(args, imageRef)
 
 	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	// Kill the entire process group on cancellation to prevent child processes
+	// from keeping pipes open and blocking cmd.Run() forever.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) //nolint:gosec // #nosec // negative PID kills process group
+		}
+		return nil
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -995,4 +1090,56 @@ func mergeMaps(a, b map[string]any, keyA, keyB string) map[string]any {
 		result[keyB] = b
 	}
 	return result
+}
+
+// GetDatabaseStatus returns the status of Trivy databases.
+func (s *Scanner) GetDatabaseStatus(ctx context.Context) map[string]any {
+	status := map[string]any{
+		"trivy_db":      map[string]any{"available": false},
+		"java_db":       map[string]any{"available": false},
+		"trivy_version": "unknown",
+	}
+
+	// Get trivy version
+	cmd := exec.CommandContext(ctx, "trivy", "--version")
+	var versionOut bytes.Buffer
+	cmd.Stdout = &versionOut
+	if err := cmd.Run(); err == nil {
+		status["trivy_version"] = strings.TrimSpace(versionOut.String())
+	}
+
+	// Check DB cache directory
+	cacheDir := os.Getenv("TRIVY_CACHE_DIR")
+	if cacheDir == "" {
+		cacheDir = "/tmp/trivy-cache"
+	}
+
+	// Check trivy-db metadata
+	dbMetadataPath := filepath.Join(cacheDir, "db", "metadata.json")
+	if info, err := os.Stat(dbMetadataPath); err == nil {
+		dbInfo := map[string]any{
+			"available":  true,
+			"updated_at": info.ModTime(),
+		}
+		// Report the actual trivy.db size, not the tiny metadata.json
+		trivyDBPath := filepath.Join(cacheDir, "db", "trivy.db")
+		if dbFile, err := os.Stat(trivyDBPath); err == nil {
+			dbInfo["size_bytes"] = dbFile.Size()
+		} else {
+			dbInfo["size_bytes"] = info.Size()
+		}
+		status["trivy_db"] = dbInfo
+	}
+
+	// Check java-db metadata
+	javaDBPath := filepath.Join(cacheDir, "java-db", "trivy-java.db")
+	if info, err := os.Stat(javaDBPath); err == nil {
+		status["java_db"] = map[string]any{
+			"available":  true,
+			"updated_at": info.ModTime(),
+			"size_bytes": info.Size(),
+		}
+	}
+
+	return status
 }

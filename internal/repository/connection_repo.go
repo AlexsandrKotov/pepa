@@ -36,18 +36,20 @@ const (
 
 // Connection represents an external service connection.
 type Connection struct {
-	ID          uuid.UUID         `json:"id"`
-	TenantID    uuid.UUID         `json:"tenant_id"`
-	Type        ConnectionType    `json:"type"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Config      map[string]any    `json:"config"`
-	Status      string            `json:"status"`
-	LastCheckAt *time.Time        `json:"last_check_at,omitempty"`
-	Labels      map[string]string `json:"labels"`
-	Notes       string            `json:"notes"`
-	CreatedAt   time.Time         `json:"created_at"`
-	UpdatedAt   time.Time         `json:"updated_at"`
+	ID               uuid.UUID         `json:"id"`
+	TenantID         uuid.UUID         `json:"tenant_id"`
+	OwnerID          *uuid.UUID        `json:"owner_id,omitempty"`
+	Type             ConnectionType    `json:"type"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	Config           map[string]any    `json:"config"`
+	Status           string            `json:"status"`
+	LastCheckAt      *time.Time        `json:"last_check_at,omitempty"`
+	Labels           map[string]string `json:"labels"`
+	Notes            string            `json:"notes"`
+	FallbackToAdmin  bool              `json:"fallback_to_admin"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 // ConnectionRepository handles connection persistence.
@@ -67,18 +69,22 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 
 	if connType != "" {
 		rows, err = r.pool.Query(ctx, `
-			SELECT id, tenant_id, type, name, COALESCE(description,''),
+			SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+			       type, name, COALESCE(description,''),
 			       COALESCE(config,'{}'::jsonb), status, last_check_at,
 			       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+			       COALESCE(fallback_to_admin, true),
 			       created_at, updated_at
 			FROM connections WHERE tenant_id = $1 AND type = $2
 			ORDER BY created_at DESC
 		`, tenantID, connType)
 	} else {
 		rows, err = r.pool.Query(ctx, `
-			SELECT id, tenant_id, type, name, COALESCE(description,''),
+			SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+			       type, name, COALESCE(description,''),
 			       COALESCE(config,'{}'::jsonb), status, last_check_at,
 			       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+			       COALESCE(fallback_to_admin, true),
 			       created_at, updated_at
 			FROM connections WHERE tenant_id = $1
 			ORDER BY created_at DESC
@@ -93,10 +99,15 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 	for rows.Next() {
 		var c Connection
 		var configJSON, labelsJSON []byte
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.Type, &c.Name, &c.Description,
+		var ownerIDRaw string
+		if err := rows.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
+			&c.Type, &c.Name, &c.Description,
 			&configJSON, &c.Status, &c.LastCheckAt,
-			&labelsJSON, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
+		}
+		if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
+			c.OwnerID = &parsed
 		}
 		_ = json.Unmarshal(configJSON, &c.Config)
 		_ = json.Unmarshal(labelsJSON, &c.Labels)
@@ -114,22 +125,29 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 // Get returns a connection by ID, scoped to a tenant.
 func (r *ConnectionRepository) Get(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) (*Connection, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, type, name, COALESCE(description,''),
+		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+		       type, name, COALESCE(description,''),
 		       COALESCE(config,'{}'::jsonb), status, last_check_at,
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       COALESCE(fallback_to_admin, true),
 		       created_at, updated_at
 		FROM connections WHERE id = $1 AND tenant_id = $2
 	`, id, tenantID)
 
 	var c Connection
 	var configJSON, labelsJSON []byte
-	if err := row.Scan(&c.ID, &c.TenantID, &c.Type, &c.Name, &c.Description,
+	var ownerIDRaw string
+	if err := row.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
+		&c.Type, &c.Name, &c.Description,
 		&configJSON, &c.Status, &c.LastCheckAt,
-		&labelsJSON, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("connection not found: %s", id)
 		}
 		return nil, fmt.Errorf("get connection: %w", err)
+	}
+	if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
+		c.OwnerID = &parsed
 	}
 	_ = json.Unmarshal(configJSON, &c.Config)
 	_ = json.Unmarshal(labelsJSON, &c.Labels)
@@ -158,9 +176,9 @@ func (r *ConnectionRepository) Create(ctx context.Context, c *Connection) error 
 	labelsJSON, _ := json.Marshal(c.Labels)
 
 	_, err = r.pool.Exec(ctx, `
-		INSERT INTO connections (id, tenant_id, type, name, description, config, status, labels, notes, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-	`, c.ID, c.TenantID, c.Type, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.CreatedAt, c.UpdatedAt)
+		INSERT INTO connections (id, tenant_id, owner_id, type, name, description, config, status, labels, notes, fallback_to_admin, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+	`, c.ID, c.TenantID, c.OwnerID, c.Type, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.FallbackToAdmin, c.CreatedAt, c.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create connection: %w", err)
 	}
@@ -180,9 +198,10 @@ func (r *ConnectionRepository) Update(ctx context.Context, c *Connection) error 
 
 	_, err = r.pool.Exec(ctx, `
 		UPDATE connections SET name=$2, description=$3, config=$4, status=$5,
-		       labels=$6, notes=$7, last_check_at=$8, updated_at=$9
+		       labels=$6, notes=$7, last_check_at=$8, updated_at=$9,
+		       fallback_to_admin=$10
 		WHERE id=$1
-	`, c.ID, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.LastCheckAt, c.UpdatedAt)
+	`, c.ID, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.LastCheckAt, c.UpdatedAt, c.FallbackToAdmin)
 	if err != nil {
 		return fmt.Errorf("update connection: %w", err)
 	}
@@ -302,9 +321,11 @@ func (r *ConnectionRepository) CountByType(ctx context.Context, tenantID uuid.UU
 // Used by the plugin system to resolve connection credentials for plugins.
 func (r *ConnectionRepository) FindByType(ctx context.Context, connType string) ([]Connection, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, type, name, COALESCE(description,''),
+		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+		       type, name, COALESCE(description,''),
 		       COALESCE(config,'{}'::jsonb), status, last_check_at,
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       COALESCE(fallback_to_admin, true),
 		       created_at, updated_at
 		FROM connections WHERE type = $1 AND status = 'connected'
 		ORDER BY updated_at DESC
@@ -318,10 +339,15 @@ func (r *ConnectionRepository) FindByType(ctx context.Context, connType string) 
 	for rows.Next() {
 		var c Connection
 		var configJSON, labelsJSON []byte
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.Type, &c.Name, &c.Description,
+		var ownerIDRaw string
+		if err := rows.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
+			&c.Type, &c.Name, &c.Description,
 			&configJSON, &c.Status, &c.LastCheckAt,
-			&labelsJSON, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
+		}
+		if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
+			c.OwnerID = &parsed
 		}
 		_ = json.Unmarshal(configJSON, &c.Config)
 		_ = json.Unmarshal(labelsJSON, &c.Labels)

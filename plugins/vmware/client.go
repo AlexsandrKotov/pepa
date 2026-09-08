@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -216,17 +217,18 @@ func (c *Client) patch(path string, body interface{}) (json.RawMessage, error) {
 
 // VMwareVM represents a virtual machine from the vSphere REST API.
 type VMwareVM struct {
-	VM        string `json:"vm"`
-	Name      string `json:"name"`
-	Power     string `json:"power_state"`
-	CPU       int    `json:"cpu_count"`
-	MemoryMiB int64  `json:"memory_size_mib"`
-	Host      string `json:"host,omitempty"`
-	Cluster   string `json:"cluster,omitempty"`
-	GuestOS   string `json:"guest_OS,omitempty"`
-	IPAddress string `json:"ip_address,omitempty"`
-	GuestHost string `json:"guest_host_name,omitempty"`
-	DiskBytes int64  `json:"disk_capacity_bytes,omitempty"`
+	VM           string `json:"vm"`
+	Name         string `json:"name"`
+	Power        string `json:"power_state"`
+	CPU          int    `json:"cpu_count"`
+	MemoryMiB    int64  `json:"memory_size_mib"`
+	Host         string `json:"host,omitempty"`
+	Cluster      string `json:"cluster,omitempty"`
+	GuestOS      string `json:"guest_OS,omitempty"`
+	IPAddress    string `json:"ip_address,omitempty"`
+	GuestHost    string `json:"guest_host_name,omitempty"`
+	DiskBytes    int64  `json:"disk_capacity_bytes,omitempty"`
+	InstanceUUID string `json:"instance_uuid,omitempty"`
 }
 
 // VMwareVMDetail is the detailed VM response from GET /api/vcenter/vm/{id}.
@@ -467,6 +469,11 @@ func (c *Client) ListVMs() ([]VMwareVM, error) {
 		if v, ok := raw["cluster"].(string); ok {
 			allVMs[i].Cluster = v
 		}
+		if v, ok := raw["instance_uuid"].(string); ok && v != "" {
+			allVMs[i].InstanceUUID = v
+		} else if v, ok := raw["uuid"].(string); ok && v != "" {
+			allVMs[i].InstanceUUID = v
+		}
 		// Assign host from the mapping built in step 1.
 		if hostID, ok := vmToHost[allVMs[i].VM]; ok {
 			allVMs[i].Host = hostID
@@ -499,6 +506,10 @@ func (c *Client) ListVMs() ([]VMwareVM, error) {
 			}
 			// Fetch disk capacity for all VMs.
 			v.DiskBytes = c.getVMDiskCapacity(v.VM)
+			// Fetch instance UUID if not present (needed for "Open in vCenter" deep links).
+			if v.InstanceUUID == "" {
+				v.InstanceUUID = c.getVMInstanceUUID(v.VM)
+			}
 			ch <- vmEnrich{idx: idx, vm: v}
 		}(i, vm)
 	}
@@ -559,6 +570,40 @@ func (c *Client) getVMGuestIdentity(vmID string) (*VMwareGuestIdentity, error) {
 		return nil, fmt.Errorf("vmware: parse guest identity: %w", err)
 	}
 	return &identity, nil
+}
+
+// getVMInstanceUUID fetches the instance UUID (BIOS UUID) for a VM.
+// This is required for building vCenter UI deep links.
+// It tries multiple field names since different vCenter versions may use different keys.
+func (c *Client) getVMInstanceUUID(vmID string) string {
+	data, err := c.get(fmt.Sprintf("/api/vcenter/vm/%s", vmID))
+	if err != nil {
+		slog.Warn("vmware: fetch VM detail for instance_uuid failed", "vm", vmID, "error", err)
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		slog.Warn("vmware: parse VM detail for instance_uuid failed", "vm", vmID, "error", err)
+		return ""
+	}
+	// Try multiple field names used by different vCenter versions.
+	for _, key := range []string{"instance_uuid", "uuid", "bios_uuid"} {
+		if uuid, ok := raw[key].(string); ok && uuid != "" {
+			return uuid
+		}
+	}
+	slog.Warn("vmware: instance_uuid not found in VM detail response", "vm", vmID, "keys", mapKeys(raw))
+	return ""
+}
+
+// mapKeys returns the keys of a map as a sorted slice (for debugging).
+func mapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // GetVM returns detailed info about a VM.

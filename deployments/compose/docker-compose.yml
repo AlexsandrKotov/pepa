@@ -146,7 +146,15 @@ services:
       # Trivy vulnerability scanner cache — mounted as named volume (see trivy-cache below).
       TRIVY_CACHE_DIR: /tmp/trivy-cache
       # Pin Trivy DB to the public GHCR registry — mirror.gcr.io requires auth and causes UNAUTHORIZED errors.
-      TRIVY_DB_REPOSITORY: ghcr.io/aquasec/trivy-db
+      TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+      # Java DB for JVM vulnerability detection
+      TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
+      # Skip DB update checks — db-cache service keeps DB fresh every 6h
+      TRIVY_SKIP_DB_UPDATE: "false"
+      # VEX documents for false-positive filtering (OpenVEX/CycloneDX format)
+      TRIVY_VEX_DIR: /etc/trivy/vex
+      # VEX repository URI (auto-fetched VEX documents)
+      TRIVY_VEX_REPOSITORY_URI: ${TRIVY_VEX_REPOSITORY_URI:-}
       # OpenTelemetry — PEPA exports traces/logs/metrics via OTLP directly.
       # Point OTEL_ENDPOINT to your backend (SigNoz, Tempo, etc.).
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
@@ -187,6 +195,8 @@ services:
       - pepa-token-tmpfs:/var/run/pepa
       # Trivy vulnerability DB cache — persisted across restarts to avoid re-downloading.
       - trivy-cache:/tmp/trivy-cache
+      # VEX documents for vulnerability noise reduction
+      - ./trivy-vex:/etc/trivy/vex:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,12 +212,43 @@ services:
     group_add:
       - "0"  # root group — needed to write to /var/run/docker.sock
     tmpfs:
-      - /tmp:size=256m,exec
+      - /tmp:size=2g,exec
     deploy:
       resources:
         limits:
           cpus: '${API_CPUS_LIMIT:-2.0}'
           memory: ${API_MEMORY_LIMIT:-1G}
+
+  # ── Trivy DB Cache Warmer ───────────────────────────────────
+  # Keeps trivy-db and trivy-java-db fresh from multiple sources.
+  # Updates every 6 hours with fallback registries for resilience.
+  db-cache:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.db-cache
+    image: ghcr.io/alexsandrkotov/pepa/pepa-db-cache:latest
+    container_name: pepa-db-cache
+    restart: unless-stopped
+    environment:
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
+      # Primary DB sources (override in .env for custom mirrors)
+      TRIVY_DB_REPOSITORY: ${TRIVY_DB_REPOSITORY:-public.ecr.aws/aquasecurity/trivy-db}
+      TRIVY_JAVA_DB_REPOSITORY: ${TRIVY_JAVA_DB_REPOSITORY:-public.ecr.aws/aquasecurity/trivy-java-db}
+      # Fallback registries for resilience
+      TRIVY_DB_FALLBACK_1: ${TRIVY_DB_FALLBACK_1:-ghcr.io/aquasecurity/trivy-db}
+      TRIVY_DB_FALLBACK_2: ${TRIVY_DB_FALLBACK_2:-mirror.gcr.io/aquasecurity/trivy-db}
+      TRIVY_JAVA_DB_FALLBACK_1: ${TRIVY_JAVA_DB_FALLBACK_1:-ghcr.io/aquasecurity/trivy-java-db}
+      # Update interval in seconds (default: 6 hours)
+      UPDATE_INTERVAL: ${TRIVY_DB_UPDATE_INTERVAL:-21600}
+    volumes:
+      - trivy-cache:/tmp/trivy-cache
+    networks:
+      - pepa-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
   # ── PEPA Background Worker ─────────────────────────────────
   worker:

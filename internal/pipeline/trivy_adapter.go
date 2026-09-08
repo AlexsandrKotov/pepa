@@ -17,6 +17,7 @@ type TrivyConfig struct {
 	Severity      string `json:"severity"`       // UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
 	IgnoreUnfixed bool   `json:"ignore_unfixed"` // only show fixed vulnerabilities
 	Format        string `json:"format"`         // json, table, sarif (default: json)
+	VEX           string `json:"vex"`            // VEX document path for false-positive filtering
 }
 
 func parseTrivyConfig(raw json.RawMessage) (*TrivyConfig, error) {
@@ -93,6 +94,11 @@ func (a *TrivyAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage) (
 			Description: "Only show vulnerabilities with available fixes",
 			Default:     "false",
 		},
+		"vex": {
+			Type:        "string",
+			Description: "VEX document path for false-positive filtering (OpenVEX/CycloneDX format)",
+			Default:     cfg.VEX,
+		},
 	}
 
 	return &ParameterSchema{
@@ -147,6 +153,10 @@ func (a *TrivyAdapter) Trigger(ctx context.Context, raw json.RawMessage, params 
 	if iu, ok := params["ignore_unfixed"]; ok && (iu == "true" || iu == true) {
 		ignoreUnfixed = true
 	}
+	vexPath := cfg.VEX
+	if v, ok := params["vex"]; ok && v != "" {
+		vexPath = fmt.Sprintf("%v", v)
+	}
 
 	// Build trivy command
 	args := []string{scanType}
@@ -156,6 +166,10 @@ func (a *TrivyAdapter) Trigger(ctx context.Context, raw json.RawMessage, params 
 	args = append(args, "--quiet") // suppress log messages that can corrupt JSON output
 	if ignoreUnfixed {
 		args = append(args, "--ignore-unfixed")
+	}
+	// VEX document for false-positive filtering
+	if vexPath != "" {
+		args = append(args, "--vex", vexPath)
 	}
 	args = append(args, target)
 

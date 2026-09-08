@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	pepacrypto "github.com/pepa/pepa/internal/crypto"
 	"github.com/pepa/pepa/internal/gitops"
 	"github.com/pepa/pepa/internal/k8s"
 	"github.com/pepa/pepa/internal/repository"
@@ -48,6 +49,44 @@ func clusterK8sClient(cluster *repository.Cluster, kubeconfig string) (*k8s.Clie
 		return k8s.NewClientWithServerOverride(kubeconfig, cluster.APIServerURL)
 	}
 	return k8s.NewClient(kubeconfig)
+}
+
+// resolveKubeconfigForUser returns the best kubeconfig for a cluster:
+// user's personal kubeconfig > cluster's admin kubeconfig.
+// The user's credential is matched by provider="kubernetes" and provider_url=cluster.APIServerURL.
+func resolveKubeconfigForUser(ctx context.Context, deps Dependencies, cluster *repository.Cluster, userID *uuid.UUID) (kubeconfig string, source string, err error) {
+	// Try user's personal kubeconfig first.
+	if userID != nil && deps.Repos.UserCredential != nil && cluster.APIServerURL != "" {
+		cred, credErr := deps.Repos.UserCredential.GetByProvider(ctx, *userID, "kubernetes", cluster.APIServerURL)
+		if credErr == nil && cred != nil {
+			token, decErr := pepacrypto.Decrypt(cred.TokenEnc)
+			if decErr == nil && token != "" {
+				slog.Info("kubeconfig resolved: user personal",
+					"cluster", cluster.Name, "user_id", userID.String())
+				return token, "user", nil
+			}
+		}
+
+		// Try shared credential.
+		if deps.Repos.CredentialShare != nil {
+			tokenEnc, _, _, shareErr := deps.Repos.CredentialShare.GetSharedToken(ctx, *userID, cluster.TenantID, "kubernetes", cluster.APIServerURL)
+			if shareErr == nil && tokenEnc != "" {
+				token, decErr := pepacrypto.Decrypt(tokenEnc)
+				if decErr == nil && token != "" {
+					slog.Info("kubeconfig resolved: shared",
+						"cluster", cluster.Name, "user_id", userID.String())
+					return token, "shared", nil
+				}
+			}
+		}
+	}
+
+	// Fall back to admin cluster kubeconfig.
+	adminKubeconfig, adminErr := deps.Repos.Cluster.GetKubeconfig(ctx, cluster.ID, cluster.TenantID)
+	if adminErr != nil {
+		return "", "", adminErr
+	}
+	return adminKubeconfig, "admin", nil
 }
 
 func listClusters(deps Dependencies) gin.HandlerFunc {
@@ -191,9 +230,9 @@ func getCluster(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// If cluster has kubeconfig, fetch real cluster info
+		// If cluster has kubeconfig, fetch real cluster info using per-user resolution
 		if cluster.HasKubeconfig {
-			kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+			kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 			if err == nil && kubeconfig != "" {
 				client, err := clusterK8sClient(cluster, kubeconfig)
 				if err == nil {
@@ -338,8 +377,8 @@ func listFluxResources(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Get kubeconfig and create k8s client
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+		// Get kubeconfig with per-user resolution
+		kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 		if err != nil || kubeconfig == "" {
 			c.JSON(http.StatusOK, gin.H{"resources": []interface{}{}})
 			return
@@ -383,7 +422,7 @@ func listArgoResources(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+		kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 		if err != nil || kubeconfig == "" {
 			c.JSON(http.StatusOK, gin.H{"resources": []interface{}{}})
 			return
@@ -474,8 +513,8 @@ func listNamespaces(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Get kubeconfig and create k8s client
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+		// Get kubeconfig with per-user resolution
+		kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 		if err != nil || kubeconfig == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve kubeconfig"})
 			return
@@ -516,8 +555,8 @@ func listResources(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Get kubeconfig and create k8s client
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+		// Get kubeconfig with per-user resolution
+		kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 		if err != nil || kubeconfig == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve kubeconfig"})
 			return
@@ -570,7 +609,7 @@ func getClusterHealth(deps Dependencies) gin.HandlerFunc {
 
 		// If cluster has kubeconfig, try to get real metrics
 		if cluster.HasKubeconfig {
-			kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+			kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 			if err == nil && kubeconfig != "" {
 				client, err := clusterK8sClient(cluster, kubeconfig)
 				if err == nil {
@@ -946,8 +985,8 @@ func getClusterNodes(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Get kubeconfig and create k8s client
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+		// Get kubeconfig with per-user resolution
+		kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 		if err != nil || kubeconfig == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve kubeconfig"})
 			return
@@ -985,7 +1024,7 @@ func getGitOpsEngine(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"fluxcd": false, "argocd": false, "message": "no kubeconfig"})
 			return
 		}
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), id, auth.GetTenantID(c))
+		kubeconfig, _, err := resolveKubeconfigForUser(c.Request.Context(), deps, cluster, auth.GetUserID(c))
 		if err != nil || kubeconfig == "" {
 			c.JSON(http.StatusOK, gin.H{"fluxcd": false, "argocd": false, "message": "kubeconfig not available"})
 			return

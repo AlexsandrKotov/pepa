@@ -642,7 +642,8 @@ export default function VirtualMachinesPage() {
                                   <td className="px-4 py-3 font-medium text-[var(--text-primary)]">
                                     {vm.name}
                                     {vcenterUrl && (
-                                      <a href={`${vcenterUrl}/ui/app?vm=${vm.vm}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                                      <a href={vm.instance_uuid ? `${vcenterUrl}/ui/app/vm;nav=h/urn:vmomi:VirtualMachine:${vm.vm}:${vm.instance_uuid}/summary` : `${vcenterUrl}/ui/`}
+                                        target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
                                         className="block text-[10px] text-[var(--accent)] hover:underline font-normal">Open in vCenter</a>
                                     )}
                                   </td>

@@ -74,6 +74,7 @@ type Components struct {
 	SSHHostGroupRepo    *repository.SSHHostGroupRepository
 	PluginActivityRepo  *repository.PluginActivityRepository
 	SecurityScanRepo    *repository.SecurityScanRepository
+	ScanIgnoreRepo      *repository.ScanIgnoreRepository
 	DevOpsRepo          *repository.DevOpsRepository
 	NotificationRuleRepo *repository.NotificationRuleRepository
 	NotificationLogRepo  *repository.NotificationLogRepository
@@ -332,6 +333,7 @@ func Bootstrap() (*Components, error) {
 		SSHHostGroupRepo:    repository.NewSSHHostGroupRepository(db.Pool),
 		PluginActivityRepo:  repository.NewPluginActivityRepository(db),
 		SecurityScanRepo:    repository.NewSecurityScanRepository(db),
+		ScanIgnoreRepo:      repository.NewScanIgnoreRepository(db),
 		DevOpsRepo:          repository.NewDevOpsRepository(db),
 		NotificationRuleRepo: repository.NewNotificationRuleRepository(db),
 		NotificationLogRepo:  repository.NewNotificationLogRepository(db),
@@ -346,7 +348,7 @@ func Bootstrap() (*Components, error) {
 	pipelineRegistry.Register("github_actions", pipeline.NewGitHubActionsAdapter())
 	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
 	// Register security scan adapter for pipeline integration
-	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo, c.RegistryRepo)
+	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo, c.RegistryRepo, c.ScanIgnoreRepo)
 	pipelineRegistry.Register("security_scan", pipeline.NewSecurityScanAdapter(secScanner, c.SecurityScanRepo))
 	c.PipelineRegistry = pipelineRegistry
 	slog.Info("pipeline registry initialized", "adapters", pipelineRegistry.List())

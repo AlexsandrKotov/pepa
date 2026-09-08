@@ -173,11 +173,36 @@ export default function SecurityClient() {
 // ── Overview Tab ──────────────────────────────────────────────
 
 function OverviewTab({ dashboard, scans, targets }: { dashboard: SecurityDashboard | null; scans: ScanRun[]; targets: ScanTarget[] }) {
+  const [dbStatus, setDbStatus] = useState<{
+    trivy_db: { available: boolean; updated_at?: string; size_bytes?: number };
+    java_db: { available: boolean; updated_at?: string; size_bytes?: number };
+    trivy_version: string;
+  } | null>(null);
+
+  useEffect(() => {
+    securityScan.getDatabaseStatus().then(setDbStatus).catch(() => {});
+  }, []);
+
   if (!dashboard) return null;
 
   const recentScans = scans.slice(0, 10);
   const criticalCount = scans.reduce((acc, s) => acc + ((s.result_summary?.critical as number) || 0), 0);
   const highCount = scans.reduce((acc, s) => acc + ((s.result_summary?.high as number) || 0), 0);
+
+  const formatBytes = (bytes?: number) => {
+    if (!bytes) return 'N/A';
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  };
+
+  const timeSince = (dateStr?: string) => {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr);
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+    return `${Math.floor(seconds / 86400)} days ago`;
+  };
 
   return (
     <div className="space-y-6">
@@ -212,6 +237,56 @@ function OverviewTab({ dashboard, scans, targets }: { dashboard: SecurityDashboa
           color="purple"
         />
       </div>
+
+      {/* Database Status */}
+      {dbStatus && (
+        <div className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] p-4">
+          <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-3">Trivy Database Status</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-3 bg-[var(--surface)] rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-2 h-2 rounded-full ${dbStatus.trivy_db.available ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm font-medium text-[var(--text-primary)]">Vulnerability DB</span>
+              </div>
+              <div className="text-xs text-[var(--text-secondary)]">
+                {dbStatus.trivy_db.available ? (
+                  <>
+                    <div>Updated: {timeSince(dbStatus.trivy_db.updated_at)}</div>
+                    <div>Size: {formatBytes(dbStatus.trivy_db.size_bytes)}</div>
+                  </>
+                ) : (
+                  <div className="text-red-500">Not available</div>
+                )}
+              </div>
+            </div>
+            <div className="p-3 bg-[var(--surface)] rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <div className={`w-2 h-2 rounded-full ${dbStatus.java_db.available ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                <span className="text-sm font-medium text-[var(--text-primary)]">Java DB</span>
+              </div>
+              <div className="text-xs text-[var(--text-secondary)]">
+                {dbStatus.java_db.available ? (
+                  <>
+                    <div>Updated: {timeSince(dbStatus.java_db.updated_at)}</div>
+                    <div>Size: {formatBytes(dbStatus.java_db.size_bytes)}</div>
+                  </>
+                ) : (
+                  <div className="text-yellow-600">Not available</div>
+                )}
+              </div>
+            </div>
+            <div className="p-3 bg-[var(--surface)] rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <BrandIcon name="trivy" size={16} />
+                <span className="text-sm font-medium text-[var(--text-primary)]">Trivy Version</span>
+              </div>
+              <div className="text-xs text-[var(--text-secondary)] font-mono">
+                {dbStatus.trivy_version || 'Unknown'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Recent Scan Activity */}
       <div className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)] p-4">
@@ -935,6 +1010,8 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
   const [expandedContainers, setExpandedContainers] = useState<Set<string>>(new Set());
   const [expandedVulns, setExpandedVulns] = useState<Set<string>>(new Set());
   const [severityFilter, setSeverityFilter] = useState<string>('');
+  const [ignores, setIgnores] = useState<Map<string, string>>(new Map()); // cve_id -> ignore_id
+  const [ignoringCve, setIgnoringCve] = useState<string | null>(null);
 
   // Close on Escape key
   useEffect(() => {
@@ -954,6 +1031,44 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
     });
     return () => { cancelled = true; };
   }, [scan.id]);
+
+  // Load ignores for this target
+  useEffect(() => {
+    if (!scan.target_id) return;
+    securityScan.listTargetIgnores(scan.target_id).then(list => {
+      const map = new Map<string, string>();
+      list.forEach(i => map.set(i.cve_id, i.id));
+      setIgnores(map);
+    }).catch(() => {});
+  }, [scan.target_id]);
+
+  const handleIgnoreCve = async (cveId: string) => {
+    if (!scan.target_id || ignoringCve) return;
+    setIgnoringCve(cveId);
+    try {
+      const created = await securityScan.createIgnore(scan.target_id, { cve_id: cveId });
+      setIgnores(prev => new Map(prev).set(cveId, created.id));
+    } catch (e) {
+      console.error('Failed to ignore CVE:', e);
+    } finally {
+      setIgnoringCve(null);
+    }
+  };
+
+  const handleUnignoreCve = async (cveId: string) => {
+    const ignoreId = ignores.get(cveId);
+    if (!ignoreId) return;
+    try {
+      await securityScan.deleteIgnore(ignoreId);
+      setIgnores(prev => {
+        const next = new Map(prev);
+        next.delete(cveId);
+        return next;
+      });
+    } catch (e) {
+      console.error('Failed to unignore CVE:', e);
+    }
+  };
 
   const active = fullScan || scan;
 
@@ -1136,8 +1251,10 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
                               {vulns.map((v, vi) => {
                                 const vulnKey = `${container.Target}-${v.VulnerabilityID}-${vi}`;
                                 const isVulnExpanded = expandedVulns.has(vulnKey);
+                                const isIgnored = ignores.has(v.VulnerabilityID);
+                                const isIgnoring = ignoringCve === v.VulnerabilityID;
                                 return (
-                                  <div key={vulnKey} className="px-4 py-2.5 hover:bg-[var(--surface)]/50">
+                                  <div key={vulnKey} className={`px-4 py-2.5 hover:bg-[var(--surface)]/50 ${isIgnored ? 'opacity-50' : ''}`}>
                                     <div
                                       className="flex items-center justify-between cursor-pointer"
                                       onClick={() => toggleVuln(vulnKey)}
@@ -1145,13 +1262,41 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
                                       <div className="flex items-center gap-3">
                                         <svg className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform ${isVulnExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                                         <span className={`text-xs px-1.5 py-0.5 rounded border ${SEVERITY_BG[v.Severity?.toUpperCase()] || SEVERITY_BG.UNKNOWN}`}>{v.Severity}</span>
-                                        <span className="text-sm font-mono text-[var(--text-primary)]">{v.VulnerabilityID}</span>
+                                        <span className={`text-sm font-mono ${isIgnored ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>{v.VulnerabilityID}</span>
                                         <span className="text-sm text-[var(--text-secondary)]">{v.PkgName}</span>
                                         <span className="text-xs text-[var(--text-tertiary)]">{v.InstalledVersion}</span>
                                         {v.FixedVersion && (
                                           <span className="text-xs text-emerald-600">→ {v.FixedVersion}</span>
                                         )}
+                                        {isIgnored && (
+                                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-500 border border-gray-500/20">Ignored</span>
+                                        )}
                                       </div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (isIgnored) {
+                                            handleUnignoreCve(v.VulnerabilityID);
+                                          } else {
+                                            handleIgnoreCve(v.VulnerabilityID);
+                                          }
+                                        }}
+                                        disabled={isIgnoring}
+                                        className={`text-xs px-2 py-1 rounded transition-colors ${
+                                          isIgnored
+                                            ? 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)]'
+                                            : 'text-[var(--text-tertiary)] hover:text-blue-500 hover:bg-blue-500/10'
+                                        }`}
+                                        title={isIgnored ? 'Remove from ignore list' : 'Add to ignore list'}
+                                      >
+                                        {isIgnoring ? (
+                                          <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                                        ) : isIgnored ? (
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                        ) : (
+                                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                        )}
+                                      </button>
                                     </div>
                                     {isVulnExpanded && (
                                       <div className="mt-2 ml-6 space-y-1.5 text-sm">
@@ -1199,8 +1344,28 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
 function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => void }) {
   const [selectedScan, setSelectedScan] = useState<ScanRun | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [cancelScanId, setCancelScanId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const filteredScans = statusFilter ? scans.filter(s => s.status === statusFilter) : scans;
+
+  const handleCancelScan = async () => {
+    if (!cancelScanId || cancelling) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await securityScan.cancelScan(cancelScanId);
+      setCancelScanId(null);
+      onRefresh();
+    } catch (e) {
+      setCancelError(friendlyError(e).message);
+      setCancelScanId(null);
+      onRefresh();
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -1223,6 +1388,15 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
           </button>
         </div>
       </div>
+
+      {cancelError && (
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-between">
+          <span className="text-sm text-red-500">{cancelError}</span>
+          <button onClick={() => setCancelError(null)} className="text-red-500/60 hover:text-red-500">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
 
       {filteredScans.length === 0 ? (
         <div className="text-center py-12 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
@@ -1255,7 +1429,22 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 text-xs rounded border ${STATUS_COLORS[scan.status]}`}>{scan.status}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-1 text-xs rounded border ${STATUS_COLORS[scan.status]}`}>{scan.status}</span>
+                      {scan.status === 'running' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCancelScanId(scan.id);
+                          }}
+                          className="px-2 py-1 text-xs bg-red-500/10 text-red-500 rounded-md hover:bg-red-500/20 flex items-center gap-1.5 whitespace-nowrap transition-colors border border-red-500/20"
+                          title="Stop scan"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" strokeWidth="2" /></svg>
+                          Stop
+                        </button>
+                      )}
+                    </div>
                     {scan.status === 'running' && scan.result_summary?.progress ? (() => {
                       const progress = scan.result_summary.progress as { scanned: number; total: number; current: string; estimated_remaining_ms: number };
                       const percent = progress.total > 0 ? Math.min(100, (progress.scanned / progress.total) * 100) : 0;
@@ -1271,22 +1460,8 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
                               style={{ width: `${percent}%` }}
                             />
                           </div>
-                          <div className="flex items-center justify-between mt-1">
-                            <div className="text-xs text-[var(--text-secondary)] truncate flex-1 mr-2">
-                              Scanning: {progress.current}
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('Stop this scan?')) {
-                                  securityScan.cancelScan(scan.id).then(() => onRefresh());
-                                }
-                              }}
-                              className="px-2 py-0.5 text-xs bg-red-500/10 text-red-500 rounded hover:bg-red-500/20 flex items-center gap-1 whitespace-nowrap"
-                            >
-                              <span className="material-symbols-outlined text-xs">stop</span>
-                              Stop
-                            </button>
+                          <div className="text-xs text-[var(--text-secondary)] truncate mt-1">
+                            Scanning: {progress.current}
                           </div>
                         </div>
                       );
@@ -1324,6 +1499,25 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
       {/* Drill-down detail modal */}
       {selectedScan && (
         <ScanDetailPanel scan={selectedScan} onClose={() => setSelectedScan(null)} />
+      )}
+
+      {/* Cancel scan confirmation */}
+      {cancelScanId && (
+        <ConfirmModal
+          open={true}
+          title="Stop Scan"
+          description="Are you sure you want to stop this scan? Progress will be lost."
+          confirmLabel="Stop Scan"
+          variant="danger"
+          loading={cancelling}
+          onConfirm={handleCancelScan}
+          onCancel={() => setCancelScanId(null)}
+          icon={
+            <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+              <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" strokeWidth="2" /></svg>
+            </div>
+          }
+        />
       )}
     </div>
   );

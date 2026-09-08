@@ -40,6 +40,15 @@ func registerSecurityScanRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 	// Dashboard & bulk operations
 	scans.GET("/dashboard-v2", getDashboardV2(deps))
 	scans.POST("/scan-all", scanAllTargets(deps))
+
+	// Database status
+	scans.GET("/db-status", getDatabaseStatus(deps))
+
+	// Scan Ignores (CVE ignore lists)
+	scans.GET("/ignores", listScanIgnores(deps))
+	scans.GET("/targets/:id/ignores", listTargetIgnores(deps))
+	scans.POST("/targets/:id/ignores", createScanIgnore(deps))
+	scans.DELETE("/ignores/:ignoreId", deleteScanIgnore(deps))
 }
 
 // ── Scan Target Handlers ──────────────────────────────────────
@@ -341,7 +350,8 @@ func cancelScanRun(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid scan ID"})
 			return
 		}
-		if err := deps.Scanner.CancelScan(id); err != nil {
+		tenantID := auth.GetTenantID(c)
+		if err := deps.Scanner.CancelScan(c.Request.Context(), id, tenantID); err != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return
 		}
@@ -606,4 +616,125 @@ func countEnabledSchedules(schedules []repository.ScanSchedule) int {
 		}
 	}
 	return count
+}
+
+// ── Database Status Handler ───────────────────────────────────
+
+func getDatabaseStatus(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Scanner == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scanner not available"})
+			return
+		}
+		status := deps.Scanner.GetDatabaseStatus(c.Request.Context())
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+// ── Scan Ignore Handlers ──────────────────────────────────────
+
+func listScanIgnores(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ScanIgnore == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan ignore repository not available"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		ignores, err := deps.Repos.ScanIgnore.List(c.Request.Context(), tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if ignores == nil {
+			ignores = []*repository.ScanIgnore{}
+		}
+		c.JSON(http.StatusOK, ignores)
+	}
+}
+
+func listTargetIgnores(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ScanIgnore == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan ignore repository not available"})
+			return
+		}
+		targetID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		ignores, err := deps.Repos.ScanIgnore.ListByTarget(c.Request.Context(), targetID, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if ignores == nil {
+			ignores = []*repository.ScanIgnore{}
+		}
+		c.JSON(http.StatusOK, ignores)
+	}
+}
+
+func createScanIgnore(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ScanIgnore == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan ignore repository not available"})
+			return
+		}
+		targetID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid target ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+
+		var input struct {
+			CveID  string  `json:"cve_id" binding:"required"`
+			Reason *string `json:"reason"`
+		}
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		userID := auth.GetUserID(c)
+		ignore := &repository.ScanIgnore{
+			ID:        uuid.New(),
+			TenantID:  tenantID,
+			TargetID:  targetID,
+			CveID:     input.CveID,
+			Reason:    input.Reason,
+			CreatedBy: userID,
+		}
+
+		if err := deps.Repos.ScanIgnore.Create(c.Request.Context(), ignore); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusCreated, ignore)
+	}
+}
+
+func deleteScanIgnore(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ScanIgnore == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan ignore repository not available"})
+			return
+		}
+		ignoreID, err := uuid.Parse(c.Param("ignoreId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ignore ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+
+		if err := deps.Repos.ScanIgnore.Delete(c.Request.Context(), ignoreID, tenantID); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "ignore deleted"})
+	}
 }

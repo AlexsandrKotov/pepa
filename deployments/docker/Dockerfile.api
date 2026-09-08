@@ -51,9 +51,10 @@ LABEL org.opencontainers.image.title="PEPA API Server" \
 
 RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl bash openssl git python3 py3-pip su-exec && \
     pip3 install --break-system-packages --no-cache ansible-core && \
-    mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa && \
+    mkdir -p /plugins/bin /plugins/builtin /custom-plugins /var/run/pepa /tmp/trivy-cache /tmp/ansible /etc/trivy/vex && \
     addgroup -S pepa && adduser -S pepa -G pepa && \
-    chown -R pepa:pepa /plugins /custom-plugins /var/run/pepa
+    addgroup pepa root && \
+    chown -R pepa:pepa /plugins /custom-plugins /var/run/pepa /tmp/trivy-cache /tmp/ansible /etc/trivy/vex
 
 COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
 COPY --from=opentofu /usr/local/bin/tofu /usr/local/bin/tofu

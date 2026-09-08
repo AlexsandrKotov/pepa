@@ -2,6 +2,7 @@ package rest
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
 	pepacrypto "github.com/pepa/pepa/internal/crypto"
+	"github.com/pepa/pepa/internal/k8s"
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/internal/storage"
 )
@@ -404,6 +406,14 @@ func testExternalCredential(ctx context.Context, provider, providerURL, username
 		return testGiteaCredential(ctx, providerURL, token)
 	case "s3":
 		return testS3Credential(ctx, providerURL, username, token)
+	case "proxmox":
+		return testProxmoxCredential(ctx, providerURL, username, token)
+	case "vmware":
+		return testVMwareCredential(ctx, providerURL, username, token)
+	case "kubernetes":
+		return testKubernetesCredential(ctx, token)
+	case "jira":
+		return testJiraCredential(ctx, providerURL, username, token)
 	default:
 		return "unknown", fmt.Sprintf("verification not supported for provider: %s", provider)
 	}
@@ -695,4 +705,115 @@ func GetUserCredential(ctx context.Context, deps Dependencies, userID uuid.UUID,
 		return "", "", "", fmt.Errorf("decrypt credential: %w", err)
 	}
 	return token, cred.Username, cred.Email, nil
+}
+
+// testProxmoxCredential verifies a Proxmox API token.
+// username = token_id (e.g. user@pam!mytoken), token = token_secret.
+func testProxmoxCredential(ctx context.Context, baseURL, tokenID, tokenSecret string) (string, string) {
+	if baseURL == "" || tokenID == "" || tokenSecret == "" {
+		return "error", "Proxmox URL, Token ID, and Token Secret are required"
+	}
+	transport := &http.Transport{}
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // #nosec // user-configured URL
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+
+	reqURL := strings.TrimRight(baseURL, "/") + "/api2/json/version"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "error", fmt.Sprintf("invalid URL: %v", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s=%s", tokenID, tokenSecret))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "error", fmt.Sprintf("connection failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "error", "authentication failed: check Proxmox API Token ID and Secret"
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return "connected", "Proxmox connection successful"
+	}
+	return "error", fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
+}
+
+// testVMwareCredential verifies a vCenter REST API credential.
+// username = vCenter username, token = password.
+func testVMwareCredential(ctx context.Context, baseURL, username, password string) (string, string) {
+	if baseURL == "" || username == "" || password == "" {
+		return "error", "VMware URL, username, and password are required"
+	}
+	transport := &http.Transport{}
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // #nosec // user-configured URL
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second}
+
+	reqURL := strings.TrimRight(baseURL, "/") + "/api/session"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
+	if err != nil {
+		return "error", fmt.Sprintf("invalid URL: %v", err)
+	}
+	req.SetBasicAuth(username, password)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "error", fmt.Sprintf("connection failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "error", "authentication failed: check vCenter username and password"
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return "connected", "VMware vCenter connection successful"
+	}
+	return "error", fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
+}
+
+// testKubernetesCredential verifies a kubeconfig by calling the API server.
+// token = kubeconfig YAML content.
+func testKubernetesCredential(ctx context.Context, kubeconfig string) (string, string) {
+	if kubeconfig == "" {
+		return "error", "kubeconfig is required"
+	}
+	// Use the k8s client to test the connection.
+	client, err := k8s.NewClient(kubeconfig)
+	if err != nil {
+		return "error", fmt.Sprintf("invalid kubeconfig: %v", err)
+	}
+	_, k8sVersion, err := client.GetClusterInfo(ctx)
+	if err != nil {
+		return "error", fmt.Sprintf("cannot reach API server: %v", err)
+	}
+	return "connected", fmt.Sprintf("Kubernetes %s", k8sVersion)
+}
+
+// testJiraCredential verifies a Jira API credential.
+// username = Jira email/username, token = API token.
+func testJiraCredential(ctx context.Context, baseURL, username, token string) (string, string) {
+	if baseURL == "" || token == "" {
+		return "error", "Jira URL and API token are required"
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	reqURL := strings.TrimRight(baseURL, "/") + "/rest/api/3/myself"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "error", fmt.Sprintf("invalid URL: %v", err)
+	}
+	req.SetBasicAuth(username, token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "error", fmt.Sprintf("connection failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return "error", "authentication failed: check Jira username/email and API token"
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return "connected", "Jira connection successful"
+	}
+	return "error", fmt.Sprintf("unexpected HTTP status %d", resp.StatusCode)
 }

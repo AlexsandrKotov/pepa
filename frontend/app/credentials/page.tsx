@@ -13,6 +13,10 @@ const PROVIDERS = [
   { value: 'bitbucket', label: 'Bitbucket' },
   { value: 'docker_registry', label: 'Docker Registry' },
   { value: 's3', label: 'S3 / MinIO' },
+  { value: 'proxmox', label: 'Proxmox VE' },
+  { value: 'vmware', label: 'VMware vCenter' },
+  { value: 'kubernetes', label: 'Kubernetes' },
+  { value: 'jira', label: 'Jira' },
 ];
 
 export default function CredentialsPage() {
@@ -113,8 +117,7 @@ export default function CredentialsPage() {
 
       <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 page-animate-up page-delay-1">
         <p className="text-sm text-blue-500">
-          <strong>How it works:</strong> When you perform git operations (commits, pushes) or browse S3 storage, PEPA uses your personal credentials to authenticate.
-          This ensures commits are authored under your account and S3 access uses your own keys. Global connection tokens are only used as fallback.
+          <strong>How it works:</strong> PEPA uses your personal credentials when available — for git operations, S3 browsing, virtualization (Proxmox/VMware), Kubernetes, and Jira. This ensures actions are performed under your identity. Global connection tokens are only used as fallback.
         </p>
       </div>
 
@@ -347,9 +350,17 @@ function AddCredentialModal({ onClose, onAdded, vaultRefs, onOpenVaultPicker, re
     bitbucket: 'https://api.bitbucket.org',
     docker_registry: '',
     s3: '',
+    proxmox: '',
+    vmware: '',
+    kubernetes: '',
+    jira: '',
   };
 
   const isS3 = provider === 's3';
+  const isKubernetes = provider === 'kubernetes';
+  const isProxmox = provider === 'proxmox';
+  const isVMware = provider === 'vmware';
+  const isInfraProvider = isProxmox || isVMware || isKubernetes || provider === 'jira';
 
   function handleProviderChange(p: string) {
     setProvider(p);
@@ -425,9 +436,11 @@ function AddCredentialModal({ onClose, onAdded, vaultRefs, onOpenVaultPicker, re
             </div>
 
             <div>
-              <label className="label">{isS3 ? 'S3 Endpoint' : 'Instance URL'}</label>
-              <input type="url" className="input" value={providerUrl} onChange={(e) => setProviderUrl(e.target.value)} placeholder={isS3 ? 'https://minio.example.com' : (defaultUrls[provider] || 'https://...')} />
-              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">{isS3 ? 'The endpoint URL of your S3/MinIO service' : 'The URL of your self-hosted instance (leave blank for SaaS)'}</p>
+              <label className="label">{isS3 ? 'S3 Endpoint' : isKubernetes ? 'Cluster API Server URL (optional)' : 'Instance URL'}</label>
+              <input type="url" className="input" value={providerUrl} onChange={(e) => setProviderUrl(e.target.value)} placeholder={isS3 ? 'https://minio.example.com' : isKubernetes ? 'https://kubernetes.default.svc' : (defaultUrls[provider] || 'https://...')} />
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                {isS3 ? 'The endpoint URL of your S3/MinIO service' : isKubernetes ? 'Optional: match your kubeconfig cluster server URL for automatic credential resolution' : isProxmox ? 'Your Proxmox VE URL (e.g. https://proxmox:8006)' : isVMware ? 'Your vCenter URL (e.g. https://vcenter.example.com)' : provider === 'jira' ? 'Your Jira instance URL' : 'The URL of your self-hosted instance (leave blank for SaaS)'}
+              </p>
             </div>
 
             <div>
@@ -436,21 +449,35 @@ function AddCredentialModal({ onClose, onAdded, vaultRefs, onOpenVaultPicker, re
             </div>
 
             <div>
-              <label className="label">{isS3 ? 'Secret Key' : 'Personal Access Token'}</label>
-              <div className="flex gap-2 items-end">
+              <label className="label">
+                {isKubernetes ? 'Kubeconfig (YAML)' : isS3 ? 'Secret Key' : isProxmox ? 'API Token Secret' : isVMware ? 'Password' : 'Personal Access Token'}
+              </label>
+              <div className={isKubernetes ? '' : 'flex gap-2 items-end'}>
                 <div className="flex-1">
-                  <VaultInput
-                    label=""
-                    field="token"
-                    value={token}
-                    onChange={(v) => { setToken(v); setFetched(false); }}
-                    vaultRef={vaultRefs.token}
-                    onOpenVault={onOpenVaultPicker}
-                    onRemoveVault={removeVaultRef}
-                    placeholder="Paste token or pick from Vault"
-                    required
-                  />
+                  {isKubernetes ? (
+                    <textarea
+                      className="input font-mono text-xs"
+                      rows={8}
+                      value={token}
+                      onChange={(e) => { setToken(e.target.value); setFetched(false); }}
+                      placeholder="Paste your kubeconfig YAML here..."
+                      required
+                    />
+                  ) : (
+                    <VaultInput
+                      label=""
+                      field="token"
+                      value={token}
+                      onChange={(v) => { setToken(v); setFetched(false); }}
+                      vaultRef={vaultRefs.token}
+                      onOpenVault={onOpenVaultPicker}
+                      onRemoveVault={removeVaultRef}
+                      placeholder="Paste token or pick from Vault"
+                      required
+                    />
+                  )}
                 </div>
+                {!isKubernetes && (
                 <button
                   type="button"
                   onClick={handleFetchUserInfo}
@@ -459,25 +486,36 @@ function AddCredentialModal({ onClose, onAdded, vaultRefs, onOpenVaultPicker, re
                 >
                   {fetching ? (isS3 ? 'Testing...' : 'Fetching...') : fetched ? '✓ ' + (isS3 ? 'Connected' : 'Fetched') : (isS3 ? 'Test Connection' : 'Fetch User')}
                 </button>
+                )}
               </div>
-              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">{isS3 ? 'Your S3 secret access key will be encrypted and stored securely.' : 'Your PAT will be encrypted and stored securely. Click &quot;Fetch User&quot; to auto-fill username and email.'}</p>
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                {isKubernetes
+                  ? 'Your personal kubeconfig will be encrypted and used for cluster operations instead of the admin kubeconfig.'
+                  : isS3
+                  ? 'Your S3 secret access key will be encrypted and stored securely.'
+                  : isProxmox
+                  ? 'Your Proxmox API token secret will be encrypted and stored securely.'
+                  : isVMware
+                  ? 'Your vCenter password will be encrypted and stored securely.'
+                  : 'Your PAT will be encrypted and stored securely. Click &quot;Fetch User&quot; to auto-fill username and email.'}
+              </p>
             </div>
 
-            <div className={isS3 ? '' : 'grid grid-cols-2 gap-4'}>
+            <div className={isS3 || isKubernetes ? '' : 'grid grid-cols-2 gap-4'}>
               <div>
                 <label className="label">
-                  {isS3 ? 'Access Key ID' : 'Remote Username'}
+                  {isS3 ? 'Access Key ID' : isProxmox ? 'Token ID (e.g. user@pam!tokenname)' : isVMware ? 'vCenter Username' : isKubernetes ? 'Username (optional)' : 'Remote Username'}
                   {fetched && <span className="text-[11px] text-emerald-600 ml-1 font-normal">(auto-filled)</span>}
                 </label>
-                <input type="text" className="input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={isS3 ? 'Your S3 access key ID' : 'For git commits'} />
+                <input type="text" className="input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={isS3 ? 'Your S3 access key ID' : isProxmox ? 'user@pam!mytoken' : isVMware ? 'administrator@vsphere.local' : 'For git commits'} />
               </div>
-              {!isS3 && (
+              {!isS3 && !isKubernetes && (
               <div>
                 <label className="label">
                   Remote Email
                   {fetched && <span className="text-[11px] text-emerald-600 ml-1 font-normal">(auto-filled)</span>}
                 </label>
-                <input type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="For git commits" />
+                <input type="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={isInfraProvider ? 'Optional' : 'For git commits'} />
               </div>
               )}
             </div>

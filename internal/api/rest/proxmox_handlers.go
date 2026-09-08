@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pepa/pepa/internal/auth"
 )
 
 // registerProxmoxRoutes registers REST API routes for the Proxmox virtualization plugin.
@@ -63,6 +64,7 @@ func registerProxmoxRoutes(r *gin.RouterGroup, deps Dependencies) {
 
 // proxmoxExec is a helper that executes a proxmox plugin action with merged config.
 // It unwraps the plugin output so the frontend receives {"data": <action output>}.
+// It resolves per-user credentials: user personal > shared > admin fallback.
 func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.RawMessage) {
 	if deps.ProviderRegistry == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available — Proxmox plugin may not be loaded yet"})
@@ -71,6 +73,24 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 
 	// Merge stored plugin config from DB with request config
 	mergedConfig := mergeStoredPluginConfig(deps, "proxmox", nil, c.Request.Context())
+
+	// Resolve per-user credential override.
+	userID := auth.GetUserID(c)
+	tenantID := auth.GetTenantID(c)
+	conn := FindConnectionByTypeDecrypted(c.Request.Context(), deps, tenantID, "proxmox")
+	if conn != nil {
+		resolved, err := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, "proxmox", "url")
+		if err == nil {
+			// Override merged config with resolved credential.
+			for k, v := range resolved.Config {
+				mergedConfig[k] = v
+			}
+			slog.Info("proxmox credential resolved", "source", resolved.Source, "action", action)
+		} else if !conn.FallbackToAdmin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "no personal Proxmox credential configured — add one in My Credentials or ask admin to enable fallback"})
+			return
+		}
+	}
 
 	resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "proxmox", action, params, mergedConfig)
 	if err != nil {

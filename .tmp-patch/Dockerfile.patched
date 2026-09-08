@@ -1,0 +1,2 @@
+FROM ghcr.io/alexsandrkotov/pepa/pepa-api-server:0.1.0
+COPY api-server /api-server

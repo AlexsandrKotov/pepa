@@ -1,0 +1,22 @@
+# Lightweight Trivy DB Cache Warmer
+# Downloads and refreshes trivy-db and trivy-java-db every 6 hours
+# from multiple sources with automatic fallback.
+
+FROM aquasec/trivy:0.74.0
+
+# Install shell for script execution
+RUN apk add --no-cache bash
+
+# Copy cache warmer script
+COPY scripts/trivy-cache-warmer.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/trivy-cache-warmer.sh
+
+# Create cache directory
+RUN mkdir -p /tmp/trivy-cache && \
+    chown -R root:root /tmp/trivy-cache
+
+# Set cache dir
+ENV TRIVY_CACHE_DIR=/tmp/trivy-cache
+
+# Run the cache warmer script
+ENTRYPOINT ["/usr/local/bin/trivy-cache-warmer.sh"]

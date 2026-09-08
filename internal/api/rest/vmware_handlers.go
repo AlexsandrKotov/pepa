@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pepa/pepa/internal/auth"
 )
 
 // vmwareIDRe validates vSphere managed-object IDs (e.g. vm-123, host-5, group-d1).
@@ -49,6 +50,7 @@ func registerVMwareRoutes(r *gin.RouterGroup, deps Dependencies) {
 }
 
 // vmwareExec is a helper that executes a vmware plugin action with merged config.
+// It resolves per-user credentials: user personal > shared > admin fallback.
 func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.RawMessage) {
 	if deps.ProviderRegistry == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "provider registry not available — VMware plugin may not be loaded yet"})
@@ -56,6 +58,23 @@ func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.Ra
 	}
 
 	mergedConfig := mergeStoredPluginConfig(deps, "vmware", nil, c.Request.Context())
+
+	// Resolve per-user credential override.
+	userID := auth.GetUserID(c)
+	tenantID := auth.GetTenantID(c)
+	conn := FindConnectionByTypeDecrypted(c.Request.Context(), deps, tenantID, "vmware")
+	if conn != nil {
+		resolved, err := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, "vmware", "url")
+		if err == nil {
+			for k, v := range resolved.Config {
+				mergedConfig[k] = v
+			}
+			slog.Info("vmware credential resolved", "source", resolved.Source, "action", action)
+		} else if !conn.FallbackToAdmin {
+			c.JSON(http.StatusForbidden, gin.H{"error": "no personal VMware credential configured — add one in My Credentials or ask admin to enable fallback"})
+			return
+		}
+	}
 
 	resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), "vmware", action, params, mergedConfig)
 	if err != nil {

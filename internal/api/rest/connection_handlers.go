@@ -43,6 +43,7 @@ func listConnections(deps Dependencies) gin.HandlerFunc {
 		}
 		tenantID := auth.GetTenantID(c)
 		connType := c.Query("type")
+		isAdmin := auth.IsPlatformAdmin(c)
 
 		items, err := deps.Repos.Connection.List(c.Request.Context(), tenantID, connType)
 		if err != nil {
@@ -54,15 +55,21 @@ func listConnections(deps Dependencies) gin.HandlerFunc {
 		}
 		// Mask sensitive config values in list response to reduce payload and avoid leaking secrets
 		for i := range items {
-			sanitized := make(map[string]any, len(items[i].Config))
-			for k, v := range items[i].Config {
-				if isSensitiveConfigKey(k) {
-					sanitized[k] = "***"
-				} else {
-					sanitized[k] = v
+			if isAdmin {
+				// Admin sees config with only sensitive keys masked
+				sanitized := make(map[string]any, len(items[i].Config))
+				for k, v := range items[i].Config {
+					if isSensitiveConfigKey(k) {
+						sanitized[k] = "***"
+					} else {
+						sanitized[k] = v
+					}
 				}
+				items[i].Config = sanitized
+			} else {
+				// Non-admin: all config values are masked — they only see name, type, status
+				items[i].Config = map[string]any{"_masked": true}
 			}
-			items[i].Config = sanitized
 		}
 		c.JSON(http.StatusOK, gin.H{"connections": items, "total": len(items)})
 	}
@@ -86,13 +93,19 @@ func getConnection(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		// Mask sensitive config values to prevent leaking secrets
+		isAdmin := auth.IsPlatformAdmin(c)
 		sanitized := make(map[string]any, len(conn.Config))
-		for k, v := range conn.Config {
-			if isSensitiveConfigKey(k) {
-				sanitized[k] = "***"
-			} else {
-				sanitized[k] = v
+		if isAdmin {
+			for k, v := range conn.Config {
+				if isSensitiveConfigKey(k) {
+					sanitized[k] = "***"
+				} else {
+					sanitized[k] = v
+				}
 			}
+		} else {
+			// Non-admin: all config values are masked
+			sanitized["_masked"] = true
 		}
 		conn.Config = sanitized
 		c.JSON(http.StatusOK, conn)
@@ -106,12 +119,13 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			Type        repository.ConnectionType `json:"type" binding:"required"`
-			Name        string                    `json:"name" binding:"required"`
-			Description string                    `json:"description"`
-			Config      map[string]any            `json:"config"`
-			Labels      map[string]string         `json:"labels"`
-			Notes       string                    `json:"notes"`
+			Type            repository.ConnectionType `json:"type" binding:"required"`
+			Name            string                    `json:"name" binding:"required"`
+			Description     string                    `json:"description"`
+			Config          map[string]any            `json:"config"`
+			Labels          map[string]string         `json:"labels"`
+			Notes           string                    `json:"notes"`
+			FallbackToAdmin *bool                     `json:"fallback_to_admin"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -135,14 +149,23 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 		}
 
 		conn := &repository.Connection{
-			TenantID:    auth.GetTenantID(c),
-			Type:        req.Type,
-			Name:        req.Name,
-			Description: req.Description,
-			Config:      req.Config,
-			Labels:      req.Labels,
-			Notes:       req.Notes,
-			Status:      "disconnected",
+			TenantID:        auth.GetTenantID(c),
+			Type:            req.Type,
+			Name:            req.Name,
+			Description:     req.Description,
+			Config:          req.Config,
+			Labels:          req.Labels,
+			Notes:           req.Notes,
+			Status:          "disconnected",
+			FallbackToAdmin: true, // default: allow fallback to admin credentials
+		}
+		// Allow admin to disable fallback on creation
+		if req.FallbackToAdmin != nil {
+			conn.FallbackToAdmin = *req.FallbackToAdmin
+		}
+		// Set owner_id to the creating user for audit trail
+		if userID := auth.GetUserID(c); userID != nil {
+			conn.OwnerID = userID
 		}
 		if conn.Config == nil {
 			conn.Config = map[string]any{}
@@ -191,12 +214,13 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name        string            `json:"name"`
-			Description string            `json:"description"`
-			Config      map[string]any    `json:"config"`
-			Labels      map[string]string `json:"labels"`
-			Notes       string            `json:"notes"`
-			Status      string            `json:"status"`
+			Name            string            `json:"name"`
+			Description     string            `json:"description"`
+			Config          map[string]any    `json:"config"`
+			Labels          map[string]string `json:"labels"`
+			Notes           string            `json:"notes"`
+			Status          string            `json:"status"`
+			FallbackToAdmin *bool             `json:"fallback_to_admin"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -217,6 +241,9 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 			conn.Status = req.Status
 		}
 		conn.Notes = req.Notes
+		if req.FallbackToAdmin != nil {
+			conn.FallbackToAdmin = *req.FallbackToAdmin
+		}
 
 		if err := deps.Repos.Connection.Update(c.Request.Context(), conn); err != nil {
 			respondInternalError(c, err)

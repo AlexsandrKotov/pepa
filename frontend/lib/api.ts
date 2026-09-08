@@ -4153,6 +4153,7 @@ export interface VMwareVM {
   ip_address?: string;
   guest_host_name?: string;
   disk_capacity_bytes?: number;
+  instance_uuid?: string;
 }
 
 export interface VMwareVMDetail {
@@ -4485,6 +4486,18 @@ export interface SecurityDashboard {
   schedules: { total: number; enabled: number };
 }
 
+export interface ScanIgnore {
+  id: string;
+  tenant_id: string;
+  target_id: string;
+  cve_id: string;
+  reason?: string;
+  created_by?: string;
+  created_at: string;
+  target_name?: string;
+  target_ref?: string;
+}
+
 export const securityScan = {
   // Scan Targets
   listTargets: () => fetchAPI<ScanTarget[]>('/api/v1/security/targets'),
@@ -4534,6 +4547,24 @@ export const securityScan = {
   getDashboard: () => fetchAPI<SecurityDashboard>('/api/v1/security/dashboard-v2'),
   
   scanAll: () => fetchAPI<{ message: string }>('/api/v1/security/scan-all', { method: 'POST' }),
+
+  // Database Status
+  getDatabaseStatus: () => fetchAPI<{
+    trivy_db: { available: boolean; updated_at?: string; size_bytes?: number };
+    java_db: { available: boolean; updated_at?: string; size_bytes?: number };
+    trivy_version: string;
+  }>('/api/v1/security/db-status'),
+
+  // Scan Ignores (CVE ignore lists)
+  listIgnores: () => fetchAPI<ScanIgnore[]>('/api/v1/security/ignores'),
+  
+  listTargetIgnores: (targetId: string) => fetchAPI<ScanIgnore[]>(`/api/v1/security/targets/${targetId}/ignores`),
+  
+  createIgnore: (targetId: string, data: { cve_id: string; reason?: string }) =>
+    fetchAPI<ScanIgnore>(`/api/v1/security/targets/${targetId}/ignores`, { method: 'POST', body: JSON.stringify(data) }),
+  
+  deleteIgnore: (ignoreId: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/security/ignores/${ignoreId}`, { method: 'DELETE' }),
 };
 
 // ── DevOps & DevSecOps Types ──────────────────────────────────
