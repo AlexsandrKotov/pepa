@@ -466,14 +466,14 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 			} else {
 				if _, err := tmpFile.WriteString(ignoreContent); err != nil {
 					slog.Warn("failed to write ignore file", "error", err)
-					tmpFile.Close()
-					os.Remove(tmpFile.Name())
+					_ = tmpFile.Close()
+					_ = os.Remove(tmpFile.Name())
 				} else {
-					tmpFile.Close()
+					_ = tmpFile.Close()
 					ignoreFilePath = tmpFile.Name()
 					args = append(args, "--ignorefile", ignoreFilePath)
 					slog.Info("using ignore file for scan", "ignore_file", ignoreFilePath, "target_id", target.ID)
-					defer os.Remove(ignoreFilePath) // Clean up after scan
+					defer func() { _ = os.Remove(ignoreFilePath) }() // Clean up after scan
 				}
 			}
 		}
@@ -497,7 +497,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) //nolint:gosec // #nosec // negative PID kills process group
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // #nosec G104 //nolint:errcheck // negative PID kills process group
 		}
 		return nil
 	}
@@ -585,7 +585,7 @@ func (s *Scanner) scanSingleImage(ctx context.Context, imageRef, scanType, sever
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) //nolint:gosec // #nosec // negative PID kills process group
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // #nosec G104 //nolint:errcheck // negative PID kills process group
 		}
 		return nil
 	}
@@ -1113,6 +1113,8 @@ func (s *Scanner) GetDatabaseStatus(ctx context.Context) map[string]any {
 	if cacheDir == "" {
 		cacheDir = "/tmp/trivy-cache"
 	}
+	// Sanitize cache directory path to prevent path traversal
+	cacheDir = filepath.Clean(cacheDir)
 
 	// Check trivy-db metadata
 	dbMetadataPath := filepath.Join(cacheDir, "db", "metadata.json")
