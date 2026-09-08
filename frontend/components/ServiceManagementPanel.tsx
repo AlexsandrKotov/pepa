@@ -190,7 +190,8 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     };
   }, [handleKeyDown]);
 
-  const healthColor = service.health === 'healthy' ? 'bg-green-500' : service.health === 'degraded' ? 'bg-yellow-500' : service.health === 'failed' ? 'bg-red-500' : 'bg-gray-400';
+  const healthColor = service.health === 'healthy' ? 'bg-green-500' : service.health === 'degraded' ? 'bg-yellow-500' : service.health === 'failed' ? 'bg-red-500' : service.health === 'suspended' ? 'bg-orange-500' : 'bg-gray-400';
+  const isSuspended = service.health === 'suspended' || service.status === 'suspended';
 
   return (
     <>
@@ -208,9 +209,12 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
               <span className={`badge-sm ${service.source === 'pepa' ? 'badge-accent' : service.source === 'argocd' ? 'badge-warning' : 'badge-info'}`}>
                 {service.source}
               </span>
+              {isSuspended && (
+                <span className="badge-sm bg-orange-500/15 text-orange-600 border border-orange-500/20">⏸ suspended</span>
+              )}
             </div>
             <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
-              {service.cluster} / {service.namespace} &middot; {service.health}
+              {service.cluster} / {service.namespace} &middot; <span className={isSuspended ? 'text-orange-500 font-medium' : ''}>{service.health}</span>
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -376,6 +380,43 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
                   </div>
                 </div>
               )}
+            </div>
+          ) : tab === 'overview' ? (
+            <div className="space-y-5">
+              {/* Fallback: show discovery metadata when Deployment info is unavailable */}
+              <div className="grid grid-cols-2 gap-3">
+                <InfoCard label="Status" value={service.status || 'unknown'} />
+                <InfoCard label="Health" value={service.health || 'unknown'} />
+                <InfoCard label="Replicas" value={`${service.ready_replicas ?? 0}/${service.replicas ?? 0}`} />
+                <InfoCard label="Source" value={service.source} />
+              </div>
+              {service.image && (
+                <div>
+                  <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Image</h3>
+                  <div className="text-[11px] font-mono bg-[var(--border-light)] px-3 py-1.5 rounded text-[var(--text-secondary)] truncate">
+                    {service.image}
+                  </div>
+                </div>
+              )}
+              {service.labels && Object.keys(service.labels).length > 0 && (
+                <div>
+                  <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Labels</h3>
+                  <div className="bg-[var(--border-light)] rounded-lg overflow-hidden">
+                    {Object.entries(service.labels).slice(0, 20).map(([key, value]) => (
+                      <div key={key} className="flex border-b border-[var(--border)] last:border-b-0">
+                        <span className="text-[11px] font-mono font-medium text-[var(--text-primary)] px-3 py-1.5 bg-[var(--surface)] border-r border-[var(--border)] min-w-[150px]">{key}</span>
+                        <span className="text-[11px] font-mono text-[var(--text-secondary)] px-3 py-1.5 truncate">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                <span className="text-amber-600 text-[12px] shrink-0 mt-px">&#9888;</span>
+                <p className="text-[11px] text-amber-600 leading-relaxed">
+                  Detailed deployment info is not available. This {service.source === 'fluxcd' ? 'HelmRelease' : 'service'} may not have a matching Kubernetes Deployment resource, or the cluster API returned an error.
+                </p>
+              </div>
             </div>
           ) : tab === 'logs' ? (
             <div>

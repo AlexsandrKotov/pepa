@@ -547,7 +547,7 @@ function ServicesList() {
               </thead>
               <tbody>
                 {sortedServices.map((svc, idx) => {
-                  const healthDot = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'failed' ? 'bg-red-500' : 'bg-gray-400';
+                  const healthDot = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'failed' ? 'bg-red-500' : svc.health === 'suspended' ? 'bg-orange-500' : 'bg-gray-400';
                   const isPepa = svc.source === 'pepa';
                   return (
                     <tr

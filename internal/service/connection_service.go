@@ -12,9 +12,6 @@ import (
 	"time"
 
 	"github.com/pepa/pepa/internal/storage"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // ConnectionService handles connection testing business logic for various protocols.
@@ -33,105 +30,6 @@ func NewConnectionService() *ConnectionService {
 type TestResult struct {
 	Status  string
 	Message string
-}
-
-// TestKubernetesConnection tests a Kubernetes connection.
-func (s *ConnectionService) TestKubernetesConnection(ctx context.Context, kubeconfig string, connConfig map[string]any) TestResult {
-	// Detect if kubeconfig is still encrypted (decryption failed)
-	if strings.HasPrefix(kubeconfig, "enc:") {
-		return TestResult{Status: "error", Message: "Kubeconfig is still encrypted — decryption failed. The encryption key (ENCRYPTION_KEY or AUTH_JWT_SECRET) may have changed since this connection was created. Please re-enter the kubeconfig in the connection settings."}
-	}
-
-	// Parse kubeconfig using client-go
-	config, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Invalid kubeconfig: %v", err)}
-	}
-
-	// Set timeout
-	config.Timeout = 10 * time.Second
-
-	// Support insecure TLS (self-signed certs, SAN mismatch)
-	if insecure, _ := connConfig["insecure"].(string); insecure == "true" || insecure == "1" {
-		config.Insecure = true
-		config.CAFile = ""
-		config.CAData = nil
-	}
-
-	// Create clientset
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Failed to create K8s client: %v", err)}
-	}
-
-	// Test 1: Check API Server connectivity and get version
-	version, err := clientset.Discovery().ServerVersion()
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach API Server: %v. Check if cluster is accessible from PEPA network.", err)}
-	}
-
-	// Test 2: Check node status
-	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot list nodes: %v", err)}
-	}
-
-	readyNodes := 0
-	notReadyNodes := 0
-	for _, node := range nodes.Items {
-		isReady := false
-		for _, condition := range node.Status.Conditions {
-			if condition.Type == "Ready" && condition.Status == "True" {
-				isReady = true
-				break
-			}
-		}
-		if isReady {
-			readyNodes++
-		} else {
-			notReadyNodes++
-		}
-	}
-
-	// Test 3: Check system pods in kube-system namespace
-	systemPods, err := clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot list system pods: %v", err)}
-	}
-
-	runningPods := 0
-	for _, pod := range systemPods.Items {
-		if pod.Status.Phase == "Running" {
-			runningPods++
-		}
-	}
-
-	// Test 4: Check recent events
-	events, err := clientset.CoreV1().Events("").List(ctx, metav1.ListOptions{
-		Limit: 10,
-	})
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot list events: %v", err)}
-	}
-
-	// Build comprehensive status message
-	status := "connected"
-	message := fmt.Sprintf(
-		"Connected successfully. K8s %s. Nodes: %d Ready, %d NotReady. System pods: %d/%d running. Recent events: %d.",
-		version.String(),
-		readyNodes,
-		notReadyNodes,
-		runningPods,
-		len(systemPods.Items),
-		len(events.Items),
-	)
-
-	// If any nodes are NotReady, warn but still mark as connected
-	if notReadyNodes > 0 {
-		message += fmt.Sprintf(" WARNING: %d nodes are NotReady - check CNI plugin.", notReadyNodes)
-	}
-
-	return TestResult{Status: status, Message: message}
 }
 
 // TestGitConnection tests a Git connection.
@@ -614,34 +512,6 @@ func (s *ConnectionService) TestNotificationConnection(ctx context.Context, conf
 	default:
 		return TestResult{Status: "error", Message: fmt.Sprintf("Unknown notification provider: %s", provider)}
 	}
-}
-
-// TestKubernetesServerConnection tests a Kubernetes server connection.
-func (s *ConnectionService) TestKubernetesServerConnection(ctx context.Context, server string, config map[string]any) TestResult {
-	url := strings.TrimRight(server, "/")
-	req, _ := http.NewRequestWithContext(ctx, "GET", url+"/version", nil)
-	// Add Bearer token if provided
-	if token, ok := config["token"].(string); ok && token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	// Use a client with InsecureSkipVerify for K8s API (self-signed certs common)
-	k8sClient := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // #nosec // G402: self-signed certs common in K8s API
-		},
-	}
-
-	resp, err := k8sClient.Do(req)
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach API Server: %v", err)}
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == 200 {
-		return TestResult{Status: "connected", Message: "Successfully connected to Kubernetes API server"}
-	}
-	return TestResult{Status: "error", Message: fmt.Sprintf("API Server returned status %d", resp.StatusCode)}
 }
 
 // TestGitBasicAuthConnection tests a Git connection with basic auth.

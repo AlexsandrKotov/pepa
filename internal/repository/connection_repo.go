@@ -19,7 +19,6 @@ import (
 type ConnectionType string
 
 const (
-	ConnectionKubernetes   ConnectionType = "kubernetes"
 	ConnectionGitLab       ConnectionType = "gitlab"
 	ConnectionGit          ConnectionType = "git"
 	ConnectionJira         ConnectionType = "jira"

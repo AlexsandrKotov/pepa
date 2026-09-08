@@ -563,6 +563,7 @@ func discoverFromFluxCD(ctx context.Context, kubeconfig string, clusterName stri
 				LastAppliedRevision string `json:"lastAppliedRevision"`
 			} `json:"status"`
 			Spec struct {
+				Suspend bool `json:"suspend"`
 				// v2beta1/v2beta2 format: spec.chart.spec
 				Chart struct {
 					Spec struct {
@@ -600,7 +601,11 @@ func discoverFromFluxCD(ctx context.Context, kubeconfig string, clusterName stri
 		}
 
 		status := "running"
-		if health == "degraded" {
+		if item.Spec.Suspend {
+			health = "suspended"
+			status = "suspended"
+			syncStatus = "synced"
+		} else if health == "degraded" {
 			status = "failed"
 		}
 
@@ -1295,6 +1300,13 @@ func getNamespacesFromCluster(ctx context.Context, kubeconfig string) ([]string,
 	return namespaces, nil
 }
 
+// invalidateDiscoveryCache clears the discovery cache so next request fetches fresh data.
+func invalidateDiscoveryCache() {
+	discoveryCacheMu.Lock()
+	discoveryCacheTime = time.Time{}
+	discoveryCacheMu.Unlock()
+}
+
 // fluxcdSuspend suspends a FluxCD HelmRelease reconciliation
 func fluxcdSuspend(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -1317,6 +1329,7 @@ func fluxcdSuspend(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		invalidateDiscoveryCache()
 		logAudit(deps, c, "suspend", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
 
 		c.JSON(http.StatusOK, gin.H{
@@ -1350,6 +1363,7 @@ func fluxcdResume(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		invalidateDiscoveryCache()
 		logAudit(deps, c, "resume", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
 
 		c.JSON(http.StatusOK, gin.H{
@@ -1383,6 +1397,7 @@ func fluxcdReconcile(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		invalidateDiscoveryCache()
 		logAudit(deps, c, "reconcile", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
 
 		c.JSON(http.StatusOK, gin.H{
@@ -1416,6 +1431,7 @@ func fluxcdDelete(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		invalidateDiscoveryCache()
 		logAudit(deps, c, "delete", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
 
 		c.JSON(http.StatusOK, gin.H{

@@ -1801,7 +1801,7 @@ export const jira = {
 
 // ── Connections ─────────────────────────────────────────────
 
-export type ConnectionType = 'kubernetes' | 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification' | 'docker' | 'secret' | 'sonarqube';
+export type ConnectionType = 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification' | 'docker' | 'secret' | 'sonarqube';
 
 export interface Connection {
   id: string;
@@ -3366,6 +3366,9 @@ export const helmRepositories = {
   // Download a chart .tgz (returns the download URL)
   downloadChartURL: (repoId: string, chartName: string, version: string) =>
     `/api/v1/helm-repositories/${repoId}/charts/${encodeURIComponent(chartName)}/versions/${encodeURIComponent(version)}/download`,
+  // Fetch default values.yaml for a chart version (parsed JSON + raw YAML)
+  getChartValues: (repoId: string, chartName: string, version: string) =>
+    fetchAPI<{ values: Record<string, unknown>; raw_yaml: string }>(`/api/v1/helm-repositories/${repoId}/charts/${encodeURIComponent(chartName)}/versions/${encodeURIComponent(version)}/values`),
 };
 
 export interface HelmChart {

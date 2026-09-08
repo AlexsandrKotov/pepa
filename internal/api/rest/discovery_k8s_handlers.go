@@ -627,35 +627,46 @@ func getDeploymentEvents(ctx context.Context, kubeconfig, namespace, name string
 		return nil, fmt.Errorf("build rest config: %w", err)
 	}
 
-	// Get events for the deployment
-	eventsPath := fmt.Sprintf("/api/v1/namespaces/%s/events?fieldSelector=involvedObject.name=%s,involvedObject.kind=Deployment", namespace, name)
-	body, err := k8sRequestWithBody(ctx, restConfig, "GET", eventsPath, "")
-	if err != nil {
-		return nil, fmt.Errorf("get events: %w", err)
-	}
+	// Query events for both Deployment and HelmRelease kinds
+	kinds := []string{"Deployment", "HelmRelease"}
+	var allEvents []map[string]interface{}
+	seen := make(map[string]bool)
 
-	var eventsList map[string]interface{}
-	if err := json.Unmarshal(body, &eventsList); err != nil {
-		return nil, fmt.Errorf("unmarshal events: %w", err)
-	}
+	for _, kind := range kinds {
+		eventsPath := fmt.Sprintf("/api/v1/namespaces/%s/events?fieldSelector=involvedObject.name=%s,involvedObject.kind=%s", namespace, name, kind)
+		body, err := k8sRequestWithBody(ctx, restConfig, "GET", eventsPath, "")
+		if err != nil {
+			continue // Kind may not exist, skip silently
+		}
 
-	items, _ := eventsList["items"].([]interface{})
-	var events []map[string]interface{}
-	for _, item := range items {
-		event, _ := item.(map[string]interface{})
-		if event == nil {
+		var eventsList map[string]interface{}
+		if err := json.Unmarshal(body, &eventsList); err != nil {
 			continue
 		}
-		simplified := map[string]interface{}{
-			"type":           event["type"],
-			"reason":         event["reason"],
-			"message":        event["message"],
-			"count":          event["count"],
-			"lastTimestamp":  event["lastTimestamp"],
-			"firstTimestamp": event["firstTimestamp"],
+
+		items, _ := eventsList["items"].([]interface{})
+		for _, item := range items {
+			event, _ := item.(map[string]interface{})
+			if event == nil {
+				continue
+			}
+			// Deduplicate by message+reason+timestamp
+			key := fmt.Sprintf("%v|%v|%v", event["reason"], event["message"], event["lastTimestamp"])
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			simplified := map[string]interface{}{
+				"type":           event["type"],
+				"reason":         event["reason"],
+				"message":        event["message"],
+				"count":          event["count"],
+				"lastTimestamp":  event["lastTimestamp"],
+				"firstTimestamp": event["firstTimestamp"],
+			}
+			allEvents = append(allEvents, simplified)
 		}
-		events = append(events, simplified)
 	}
 
-	return events, nil
+	return allEvents, nil
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
-	"github.com/pepa/pepa/internal/k8s"
 	"github.com/pepa/pepa/internal/repository"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -184,9 +183,6 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Auto-sync: create cluster entry for kubernetes connections
-		syncClusterFromConnection(deps, c, conn)
-
 		// Auto-sync: register AI provider connections with the AI manager
 		applyAIConnection(deps, c.Request.Context(), conn)
 
@@ -249,9 +245,6 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
-
-		// Auto-sync: update cluster entry for kubernetes connections
-		syncClusterFromConnection(deps, c, conn)
 
 		// Auto-sync: re-register AI provider connections with the AI manager
 		applyAIConnection(deps, c.Request.Context(), conn)
@@ -376,19 +369,6 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		defer cancel()
 
 		switch conn.Type {
-		case repository.ConnectionKubernetes:
-			kubeconfig, ok := conn.Config["kubeconfig"].(string)
-			if ok && kubeconfig != "" {
-				result := deps.Services.Connection.TestKubernetesConnection(ctx, kubeconfig, conn.Config)
-				status, message = result.Status, result.Message
-			} else if server, srvOk := conn.Config["server"].(string); srvOk && server != "" {
-				// Minimal config: just a server URL (e.g. k3s)
-				result := deps.Services.Connection.TestKubernetesServerConnection(ctx, server, conn.Config)
-				status, message = result.Status, result.Message
-			} else {
-				status = "error"
-				message = "No kubeconfig or server URL provided"
-			}
 		case repository.ConnectionGit, repository.ConnectionGitLab:
 			url, urlOk := conn.Config["url"].(string)
 			if !urlOk || url == "" {
@@ -489,11 +469,6 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		conn.LastCheckAt = &now
 		conn.Status = status
 		_ = deps.Repos.Connection.Update(c.Request.Context(), conn)
-
-		// Sync cluster from connection for kubernetes type
-		if conn.Type == repository.ConnectionKubernetes && status == "connected" {
-			syncClusterFromConnection(deps, c, conn)
-		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":  status,
@@ -600,141 +575,6 @@ func parseKubeconfig(deps Dependencies) gin.HandlerFunc {
 			"clusters": clusters,
 			"count":    len(clusters),
 		})
-	}
-}
-
-// syncClusterFromConnection creates or updates a cluster entry when a kubernetes connection is created/updated.
-func syncClusterFromConnection(deps Dependencies, c *gin.Context, conn *repository.Connection) {
-	if deps.Repos.Cluster == nil {
-		return
-	}
-	if conn.Type != repository.ConnectionKubernetes {
-		return
-	}
-
-	ctx := c.Request.Context()
-
-	// Extract API server URL from connection config
-	apiServer := ""
-	if server, ok := conn.Config["api_server"].(string); ok {
-		apiServer = server
-	} else if server, ok := conn.Config["server"].(string); ok {
-		apiServer = server
-	} else if kubeconfig, ok := conn.Config["kubeconfig"].(string); ok && kubeconfig != "" {
-		// Try to parse kubeconfig to extract server URL
-		if cfg, err := clientcmd.Load([]byte(kubeconfig)); err == nil {
-			for _, cluster := range cfg.Clusters {
-				if cluster.Server != "" {
-					apiServer = cluster.Server
-					break
-				}
-			}
-		}
-	}
-
-	// Determine cluster status from connection status
-	clusterStatus := "disconnected"
-	isActive := false
-	if conn.Status == "connected" {
-		clusterStatus = "connected"
-		isActive = true
-	}
-
-	// Check if a cluster already exists for this connection
-	existing, err := deps.Repos.Cluster.FindByConnectionID(ctx, conn.ID)
-	if err != nil {
-		slog.Warn("failed to find cluster by connection ID ", "id", conn.ID, "error", err)
-		return
-	}
-
-	if existing != nil {
-		// Update existing cluster
-		existing.Name = conn.Name
-		existing.Description = conn.Description
-		existing.APIServerURL = apiServer
-		existing.Status = clusterStatus
-		existing.IsActive = isActive
-		if conn.Labels != nil {
-			existing.Labels = conn.Labels
-		}
-		existing.Notes = conn.Notes
-		// Set default node_count if not set
-		if existing.NodeCount <= 0 {
-			existing.NodeCount = 3
-		}
-		if err := deps.Repos.Cluster.Update(ctx, existing); err != nil {
-			slog.Warn("failed to update cluster from connection", "id", existing.ID, "error", err)
-		}
-
-		// Transfer kubeconfig from connection to cluster and detect GitOps engines
-		if kubeconfig, ok := conn.Config["kubeconfig"].(string); ok && kubeconfig != "" {
-			if err := deps.Repos.Cluster.SaveKubeconfig(ctx, existing.ID, kubeconfig); err != nil {
-				slog.Warn("failed to save kubeconfig to cluster ", "id", existing.ID, "error", err)
-			}
-			// Detect GitOps engines from kubeconfig
-			if client, err := k8s.NewClient(kubeconfig); err == nil {
-				detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if engine, err := client.DetectGitOpsEngine(detectCtx); err == nil {
-					existing.FluxInstalled = engine.FluxCD
-					if engine.ArgoCD {
-						if existing.Labels == nil {
-							existing.Labels = make(map[string]string)
-						}
-						existing.Labels["argocd_detected"] = "true"
-					}
-					_ = deps.Repos.Cluster.Update(context.Background(), existing)
-				}
-				detectCancel()
-			}
-		}
-	} else {
-		// Create new cluster linked to this connection
-		cluster := &repository.Cluster{
-			TenantID:     conn.TenantID,
-			Name:         conn.Name,
-			Description:  conn.Description,
-			Environment:  "dev",
-			APIServerURL: apiServer,
-			Status:       clusterStatus,
-			IsActive:     isActive,
-			Labels:       conn.Labels,
-			Notes:        conn.Notes,
-			ConnectionID: &conn.ID,
-			NodeCount:    3,
-		}
-		if cluster.Labels == nil {
-			cluster.Labels = map[string]string{}
-		}
-		// Check if environment is in labels or config
-		if env, ok := conn.Config["environment"].(string); ok && env != "" {
-			cluster.Environment = env
-		}
-		if err := deps.Repos.Cluster.Create(ctx, cluster); err != nil {
-			slog.Warn("failed to create cluster from connection ", "id", conn.ID, "error", err)
-			return
-		}
-
-		// Transfer kubeconfig from connection to cluster and detect GitOps engines
-		if kubeconfig, ok := conn.Config["kubeconfig"].(string); ok && kubeconfig != "" {
-			if err := deps.Repos.Cluster.SaveKubeconfig(ctx, cluster.ID, kubeconfig); err != nil {
-				slog.Warn("failed to save kubeconfig to cluster ", "id", cluster.ID, "error", err)
-			}
-			// Detect GitOps engines from kubeconfig
-			if client, err := k8s.NewClient(kubeconfig); err == nil {
-				detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if engine, err := client.DetectGitOpsEngine(detectCtx); err == nil {
-					cluster.FluxInstalled = engine.FluxCD
-					if engine.ArgoCD {
-						if cluster.Labels == nil {
-							cluster.Labels = make(map[string]string)
-						}
-						cluster.Labels["argocd_detected"] = "true"
-					}
-					_ = deps.Repos.Cluster.Update(context.Background(), cluster)
-				}
-				detectCancel()
-			}
-		}
 	}
 }
 

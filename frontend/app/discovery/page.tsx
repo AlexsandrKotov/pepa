@@ -119,6 +119,14 @@ export default function DiscoveryPage() {
       setTimeout(() => setActionMessage(null), 3000);
       // Reload after action
       await loadServices();
+      // Update the managing service panel with fresh data
+      setManagingService(prev => {
+        if (!prev) return prev;
+        // Optimistically update the local service state
+        if (action === 'suspend') return { ...prev, health: 'suspended', status: 'suspended' };
+        if (action === 'resume') return { ...prev, health: 'healthy', status: 'running' };
+        return prev;
+      });
     } catch (err) {
       setActionMessage({ type: 'error', text: `Failed to ${action}: ${err}` });
       setTimeout(() => setActionMessage(null), 5000);
@@ -179,6 +187,7 @@ export default function DiscoveryPage() {
     healthy: 'text-green-600',
     degraded: 'text-yellow-600',
     progressing: 'text-blue-600',
+    suspended: 'text-orange-600',
     unknown: 'text-[var(--text-tertiary)]',
   };
 
@@ -587,29 +596,30 @@ function FluxcdActions({ svc, actionLoading, onAction }: {
   onAction: (action: 'suspend' | 'resume' | 'reconcile' | 'delete', svc: DiscoveredService) => void;
 }) {
   const key = `${svc.cluster}-${svc.namespace}-${svc.name}`;
+  const isSuspended = svc.health === 'suspended' || svc.status === 'suspended';
   return (
     <div className="flex gap-1">
       <button
         onClick={() => onAction('suspend', svc)}
-        disabled={actionLoading === `${key}-suspend`}
+        disabled={actionLoading === `${key}-suspend` || isSuspended}
         className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/15 disabled:opacity-50"
-        title="Suspend reconciliation"
+        title={isSuspended ? 'Already suspended' : 'Suspend reconciliation'}
       >
         {actionLoading === `${key}-suspend` ? '...' : '⏸'}
       </button>
       <button
         onClick={() => onAction('resume', svc)}
-        disabled={actionLoading === `${key}-resume`}
-        className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15 disabled:opacity-50"
-        title="Resume reconciliation"
+        disabled={actionLoading === `${key}-resume` || (!isSuspended && svc.health !== 'unknown')}
+        className={`text-[10px] px-1.5 py-0.5 rounded ${isSuspended ? 'bg-emerald-500/20 text-emerald-500 font-semibold ring-1 ring-emerald-500/30' : 'bg-emerald-500/10 text-emerald-600'} hover:bg-emerald-500/15 disabled:opacity-50`}
+        title={isSuspended ? 'Resume reconciliation' : 'Already running'}
       >
         {actionLoading === `${key}-resume` ? '...' : '▶'}
       </button>
       <button
         onClick={() => onAction('reconcile', svc)}
-        disabled={actionLoading === `${key}-reconcile`}
+        disabled={actionLoading === `${key}-reconcile` || isSuspended}
         className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500 hover:bg-blue-500/15 disabled:opacity-50"
-        title="Force reconcile"
+        title={isSuspended ? 'Resume first to reconcile' : 'Force reconcile'}
       >
         {actionLoading === `${key}-reconcile` ? '...' : '🔄'}
       </button>
@@ -634,7 +644,7 @@ function ServiceCard({ svc, sourceColors, sourceIcons, healthColors, actionLoadi
   onAction: (action: 'suspend' | 'resume' | 'reconcile' | 'delete', svc: DiscoveredService) => void;
   onManage: (svc: DiscoveredService) => void;
 }) {
-  const healthBarColor = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'progressing' ? 'bg-blue-500' : svc.health === 'failed' ? 'bg-red-500' : 'bg-gray-300';
+  const healthBarColor = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'progressing' ? 'bg-blue-500' : svc.health === 'failed' ? 'bg-red-500' : svc.health === 'suspended' ? 'bg-orange-500' : 'bg-gray-300';
 
   return (
     <div

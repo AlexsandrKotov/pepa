@@ -1407,7 +1407,7 @@ env:
                 </select>
                 {clusterList.length === 0 && (
                   <p className="text-[11px] text-orange-500 mt-1">
-                    No clusters available. <Link href="/connections" className="underline">Add a Kubernetes connection</Link> or <Link href="/clusters" className="underline">register a cluster</Link>.
+                    No clusters available. <Link href="/clusters" className="underline">Add a cluster</Link>.
                   </p>
                 )}
                 <p className="text-[11px] text-[var(--text-tertiary)] mt-1">

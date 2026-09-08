@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -245,6 +246,20 @@ func enablePlugin(deps Dependencies) gin.HandlerFunc {
 			if entry, ok := deps.ProviderRegistry.Get(name); ok {
 				entry.Enabled = true
 			}
+		}
+
+		// ── Trivy plugin: auto-download databases on enable ─────────────
+		if name == "trivy" && deps.Scanner != nil {
+			deps.Scanner.StartDBManager(c.Request.Context())
+			go func() {
+				dlCtx, dlCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+				defer dlCancel()
+				if err := deps.Scanner.DownloadDB(dlCtx); err != nil {
+					slog.Warn("Trivy DB auto-download failed on plugin enable", "error", err)
+				} else {
+					slog.Info("Trivy DB auto-download complete after plugin enable")
+				}
+			}()
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "plugin enabled", "name": name})

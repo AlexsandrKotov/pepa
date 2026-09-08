@@ -1324,8 +1324,8 @@ type createConnectionTool struct{ deps *AgentDeps }
 func (t *createConnectionTool) Definition() ToolDefinition {
 	return ToolDefinition{
 		Name:        "create_connection",
-		Description: "Create a connection to an external service (GitLab, GitHub, K8s, Jira, CI, AI, storage).",
-		Parameters:  json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string","enum":["gitlab","git","kubernetes","jira","ci","ai","storage"]},"description":{"type":"string"},"config":{"type":"object","description":"Connection config (url, token, etc)"}},"required":["name","type","config"]}`),
+		Description: "Create a connection to an external service (GitLab, GitHub, Jira, CI, AI, storage).",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"type":{"type":"string","enum":["gitlab","git","jira","ci","ai","storage"]},"description":{"type":"string"},"config":{"type":"object","description":"Connection config (url, token, etc)"}},"required":["name","type","config"]}`),
 	}
 }
 func (t *createConnectionTool) Execute(ctx context.Context, params json.RawMessage) (string, error) {

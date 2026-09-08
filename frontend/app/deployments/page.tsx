@@ -8,6 +8,7 @@ import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
 import DeploymentDetailClient from './DeploymentDetailClient';
 import ConfirmModal from '@/components/ConfirmModal';
+import HelmValuesEditor, { toYaml, fromYaml } from '@/components/HelmValuesEditor';
 
 function DeploymentsPageContent() {
   const searchParams = useSearchParams();
@@ -114,7 +115,10 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     { name: 'main', image: '', cpu: '100m', memory: '128Mi', ports: [{ containerPort: 8080 }] }
   ]);
   const [valuesYaml, setValuesYaml] = useState('');
-  const [envMode, setEnvMode] = useState<'kv' | 'yaml'>('kv');
+  const [valuesViewMode, setValuesViewMode] = useState<'visual' | 'yaml'>('visual');
+  const [chartDefaultValues, setChartDefaultValues] = useState<Record<string, unknown> | null>(null);
+  const [chartEditedValues, setChartEditedValues] = useState<Record<string, unknown> | null>(null);
+  const [loadingChartValues, setLoadingChartValues] = useState(false);
   const [servicePort, setServicePort] = useState(80);
   const [serviceType, setServiceType] = useState('ClusterIP');
   const [ingressEnabled, setIngressEnabled] = useState(false);
@@ -170,7 +174,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
 
   const handleHelmRepoChartChange = async (value: string) => {
     setSelectedHelmRepoChart(value);
-    if (!value) { setChartUrl(''); setChartName(''); setChartVersion(''); setHelmChartVersions([]); return; }
+    if (!value) { setChartUrl(''); setChartName(''); setChartVersion(''); setHelmChartVersions([]); setChartDefaultValues(null); setChartEditedValues(null); return; }
     const [repoId, cName] = value.split(':');
     const chart = helmCharts.find(c => c.repoId === repoId && c.name === cName);
     if (chart) {
@@ -185,6 +189,29 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
       const versionsData = await helmRepositories.listChartVersions(repoId, cName);
       setHelmChartVersions(versionsData.versions || []);
     } catch { setHelmChartVersions([]); }
+  };
+
+  // Fetch default chart values when version is selected
+  const handleChartVersionChange = async (version: string) => {
+    setChartVersion(version);
+    if (!version || !selectedHelmRepoChart) return;
+    const [repoId, cName] = selectedHelmRepoChart.split(':');
+    if (!repoId || !cName) return;
+    setLoadingChartValues(true);
+    try {
+      const result = await helmRepositories.getChartValues(repoId, cName, version);
+      if (result.values && Object.keys(result.values).length > 0) {
+        setChartDefaultValues(result.values);
+        setChartEditedValues(structuredClone(result.values));
+        setValuesViewMode('visual');
+      } else if (result.raw_yaml) {
+        setValuesYaml(result.raw_yaml);
+        setValuesViewMode('yaml');
+      }
+    } catch {
+      // Silently fail - user can still manually enter values
+    }
+    setLoadingChartValues(false);
   };
 
   const refresh = async () => {
@@ -218,7 +245,12 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     const spec: Record<string, unknown> = {};
     const containerList = containers.filter(c => c.image);
     if (containerList.length > 0) spec.containers = containerList;
-    if (valuesYaml.trim()) spec.values_yaml = valuesYaml;
+    // Use chart edited values if available, otherwise fall back to manual YAML
+    if (chartEditedValues && Object.keys(chartEditedValues).length > 0) {
+      spec.values_yaml = toYaml(chartEditedValues);
+    } else if (valuesYaml.trim()) {
+      spec.values_yaml = valuesYaml;
+    }
     spec.service = { port: servicePort, type: serviceType };
     if (ingressEnabled) spec.ingress = { enabled: true, host: ingressHost };
     spec.health = { livenessPath, readinessPath, port: servicePort };
@@ -861,7 +893,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
                               <label className="text-[11px] text-[var(--text-tertiary)]">Version</label>
                               <select
                                 value={chartVersion}
-                                onChange={e => setChartVersion(e.target.value)}
+                                onChange={e => handleChartVersionChange(e.target.value)}
                                 className="input text-[12px]"
                               >
                                 <option value="">Latest</option>
@@ -980,32 +1012,88 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-[12px] text-[var(--text-secondary)]">Paste your Helm values.yaml for this deployment</p>
-                      <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">This will be used as-is for Helm-based deployments</p>
+                      <p className="text-[12px] text-[var(--text-secondary)]">
+                        {chartEditedValues ? 'Edit Helm chart values' : 'Helm values.yaml'}
+                      </p>
+                      <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                        {chartEditedValues
+                          ? 'Values auto-populated from chart defaults. Edit as needed.'
+                          : chartName && chartVersion
+                            ? 'Loading chart defaults...'
+                            : 'Select a chart and version to auto-populate, or paste manually below.'}
+                      </p>
                     </div>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 items-center">
+                      {chartEditedValues && (
+                        <button
+                          onClick={() => {
+                            if (chartDefaultValues) {
+                              setChartEditedValues(structuredClone(chartDefaultValues));
+                            }
+                          }}
+                          className="text-[11px] px-2 py-1 rounded bg-[var(--bg)] text-[var(--text-secondary)] hover:text-[var(--accent)]"
+                          title="Reset to chart defaults"
+                        >
+                          Reset
+                        </button>
+                      )}
                       <button
-                        onClick={() => setEnvMode('kv')}
-                        className={`text-[11px] px-2 py-1 rounded ${envMode === 'kv' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg)] text-[var(--text-secondary)]'}`}
+                        onClick={() => setValuesViewMode('visual')}
+                        className={`text-[11px] px-2 py-1 rounded ${valuesViewMode === 'visual' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg)] text-[var(--text-secondary)]'}`}
                       >
-                        Key-Value
+                        Visual
                       </button>
                       <button
-                        onClick={() => setEnvMode('yaml')}
-                        className={`text-[11px] px-2 py-1 rounded ${envMode === 'yaml' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg)] text-[var(--text-secondary)]'}`}
+                        onClick={() => setValuesViewMode('yaml')}
+                        className={`text-[11px] px-2 py-1 rounded ${valuesViewMode === 'yaml' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg)] text-[var(--text-secondary)]'}`}
                       >
                         YAML
                       </button>
                     </div>
                   </div>
-                  <textarea
-                    value={valuesYaml}
-                    onChange={e => setValuesYaml(e.target.value)}
-                    className="input font-mono text-[12px] w-full"
-                    rows={16}
-                    spellCheck={false}
-                    placeholder={`# Paste your values.yaml here
-# Example:
+
+                  {loadingChartValues && (
+                    <div className="flex items-center gap-2 text-[12px] text-[var(--text-tertiary)] py-2">
+                      <div className="loading-spinner" style={{ width: 14, height: 14 }} />
+                      Loading chart default values...
+                    </div>
+                  )}
+
+                  {valuesViewMode === 'visual' ? (
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-3 max-h-[500px] overflow-y-auto">
+                      {chartEditedValues ? (
+                        <HelmValuesEditor values={chartEditedValues} onChange={setChartEditedValues} />
+                      ) : (
+                        <div className="text-center py-6">
+                          <p className="text-[12px] text-[var(--text-tertiary)] mb-2">
+                            No chart values loaded. Select a chart and version to auto-populate.
+                          </p>
+                          <p className="text-[11px] text-[var(--text-tertiary)]">
+                            Or switch to YAML mode to paste values manually.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      {valuesViewMode === 'yaml' && chartEditedValues && !valuesYaml && (
+                        <p className="text-[11px] text-[var(--text-tertiary)] mb-1">
+                          Pre-filled from chart defaults. Edit as needed.
+                        </p>
+                      )}
+                      <textarea
+                        value={valuesYaml || (chartEditedValues ? toYaml(chartEditedValues) : '')}
+                        onChange={e => {
+                          setValuesYaml(e.target.value);
+                          // Try to parse YAML back into chartEditedValues for visual mode sync
+                          const parsed = fromYaml(e.target.value);
+                          if (parsed) setChartEditedValues(parsed);
+                        }}
+                        className="input font-mono text-[12px] w-full"
+                        rows={16}
+                        spellCheck={false}
+                        placeholder={`# Paste your values.yaml here
+# Or select a chart and version above to auto-populate
 replicaCount: ${replicas}
 
 image:
@@ -1023,7 +1111,9 @@ resources:
   requests:
     cpu: 100m
     memory: 128Mi`}
-                  />
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 

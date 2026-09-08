@@ -8,7 +8,6 @@ import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
 
 const TYPE_INFO: Record<string, { icon: string; label: string; color: string }> = {
-  kubernetes: { icon: 'kubernetes', label: 'Kubernetes', color: '#326CE5' },
   git: { icon: 'git', label: 'Git', color: '#F05032' },
   gitlab: { icon: 'gitlab', label: 'GitLab', color: '#FC6D26' },
   jira: { icon: 'jira', label: 'Jira', color: '#0052CC' },

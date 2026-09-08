@@ -21,9 +21,10 @@
 13. [RBAC — Roles & Permissions](#rbac--roles--permissions)
 14. [Settings](#settings)
 15. [AI Assistant](#ai-assistant)
-16. [Plugin System](#plugin-system)
-17. [Troubleshooting](#troubleshooting)
-18. [FAQ](#faq)
+16. [Security Scanning](#security-scanning)
+17. [Plugin System](#plugin-system)
+18. [Troubleshooting](#troubleshooting)
+19. [FAQ](#faq)
 
 ---
 
@@ -70,13 +71,15 @@ cd frontend && npm install && npm run dev
 │  Port 3000   │     │  Port 8080   │     │  Port 5432   │
 └─────────────┘     └──────┬───────┘     └──────────────┘
                            │
-                    ┌──────┴───────┐
-                    │              │
-              ┌─────▼─────┐ ┌─────▼─────┐
-              │   Redis    │ │   MinIO   │
-              │ (Queue)    │ │ (S3/Art.) │
-              └───────────┘ └───────────┘
+              ┌────────────┼────────────┐
+              │            │            │
+        ┌─────▼─────┐ ┌─────▼─────┐ ┌──▼──────────┐
+        │   Redis    │ │   MinIO   │ │  Trivy DB   │
+        │ (Queue)    │ │ (S3/Art.) │ │ (Vuln. Scan)│
+        └───────────┘ └───────────┘ └─────────────┘
 ```
+
+The API server also manages Trivy vulnerability databases — downloading and refreshing them automatically when the Trivy plugin is installed. See [Security Scanning](#security-scanning) for details.
 
 ---
 
@@ -227,6 +230,7 @@ The Dashboard is the main landing page showing platform overview.
 - **Clusters** — connected Kubernetes clusters
 - **Deployments** — active deployments across environments
 - **Pipelines** — CI/CD pipelines configured
+- **Security** — vulnerability scan status and recent findings (when Trivy is installed)
 - **AI Chat** — quick access to AI assistant
 
 ### Customization
@@ -429,6 +433,7 @@ From the cluster view, you can:
 | AI Provider | LLM access | API Key |
 | Storage | S3/MinIO | Endpoint + Keys |
 | Vault | Secret management | URL + Token |
+| Security Scanner | Trivy vulnerability scanning | Auto-configured on plugin install |
 
 ![Connections](screenshots/screenshot-connections.png)
 
@@ -850,6 +855,135 @@ Built-in tools:
 
 ---
 
+## Security Scanning
+
+PEPA includes integrated vulnerability scanning powered by [Trivy](https://aquasecurity.github.io/trivy/). Scan container images, filesystems, git repositories, and IaC configurations for CVEs and misconfigurations.
+
+### Automatic Database Management
+
+When the Trivy plugin is installed from the Marketplace, the API server **automatically downloads** the vulnerability databases (`trivy-db` and `trivy-java-db`) and keeps them fresh in the background. No separate container or manual setup is required.
+
+- **Auto-download**: DBs are downloaded immediately on plugin install
+- **Auto-refresh**: DBs are refreshed every 6 hours (configurable)
+- **Fallback**: If the primary registry fails, GHCR is used automatically
+- **Custom registries**: Switch DB source at runtime via API
+
+### Installing the Trivy Plugin
+
+1. Go to **Marketplace** → find **Trivy Security Scanner**
+2. Click **Install** — databases are downloaded automatically
+3. The plugin is ready to use immediately
+
+Or via API:
+```bash
+curl -X POST http://localhost:8088/api/v1/marketplace/trivy/install \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Checking Database Status
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8088/api/v1/security/db-status
+```
+
+Response:
+```json
+{
+  "trivy_db": { "available": true, "updated_at": "...", "size_bytes": 1073741824 },
+  "java_db": { "available": true, "updated_at": "...", "size_bytes": 536870912 },
+  "trivy_version": "Version: 0.74.0"
+}
+```
+
+### Running Scans
+
+#### Via Web UI
+1. Navigate to **Security** → **Scan Targets**
+2. Click **Add Target**
+3. Select scanner type: **Trivy**
+4. Configure the target (image name, repo URL, or filesystem path)
+5. Click **Scan**
+
+#### Via API
+```bash
+curl -X POST http://localhost:8088/api/v1/security/targets \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target_ref": "nginx:latest",
+    "scanner_type": "trivy",
+    "scan_config": {
+      "scan_type": "image",
+      "severity": "HIGH,CRITICAL"
+    }
+  }'
+```
+
+### Scan Types
+
+| Type | Description | Example Target |
+|------|-------------|----------------|
+| `image` | Container image vulnerability scan | `nginx:latest` |
+| `fs` | Filesystem scan | `/app` |
+| `repo` | Git repository scan | `https://github.com/org/repo` |
+| `config` | IaC configuration scan (Terraform, K8s, Dockerfile) | `/terraform` |
+
+### Custom DB Registry
+
+To use a custom or private DB mirror:
+
+```bash
+# Change DB source at runtime (no restart needed)
+curl -X PUT http://localhost:8088/api/v1/security/db-repository \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"db_repository": "ghcr.io/aquasecurity/trivy-db"}'
+
+# Or install with a custom registry
+curl -X POST http://localhost:8088/api/v1/marketplace/trivy/install \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"db_repository": "my-mirror.internal.com/trivy-db"}'
+```
+
+### Manual DB Download
+
+```bash
+curl -X POST http://localhost:8088/api/v1/security/db-download \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### VEX Documents (False Positive Filtering)
+
+VEX (Vulnerability Exploitability eXchange) documents let you filter false positives:
+
+1. Place VEX files (OpenVEX or CycloneDX format) in `deployments/compose/trivy-vex/`
+2. Reference them in scan config:
+```json
+{
+  "target_ref": "my-app:latest",
+  "scanner_type": "trivy",
+  "scan_config": {
+    "vex": "/etc/trivy/vex/my-app-vex.json"
+  }
+}
+```
+
+### Security Scanning API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/security/db-status` | GET | Check DB availability and freshness |
+| `/api/v1/security/db-download` | POST | Trigger manual DB download (admin) |
+| `/api/v1/security/db-repository` | PUT | Change DB registry (admin, no restart) |
+| `/api/v1/security/targets` | GET/POST | List/create scan targets |
+| `/api/v1/security/targets/:id/scan` | POST | Trigger a scan |
+| `/api/v1/security/scans` | GET | List scan runs |
+| `/api/v1/security/ignores` | GET | List ignored CVEs |
+
+---
+
 ## Plugin System
 
 PEPA includes 19 free, open-source plugins across 7 categories.
@@ -901,7 +1035,9 @@ PEPA includes 19 free, open-source plugins across 7 categories.
 
 | Plugin | Purpose |
 |--------|---------|
-| Trivy | Vulnerability scanning for images, filesystem, repos, IaC |
+| Trivy | Vulnerability scanning for images, filesystem, repos, IaC. Auto-downloads and refreshes vulnerability databases on install |
+
+> **Note:** When the Trivy plugin is installed, the API server automatically downloads the `trivy-db` and `trivy-java-db` databases and keeps them updated in the background. No separate container or manual setup is required. See [Security Scanning](#security-scanning) for full details.
 
 **Automation:**
 
@@ -917,8 +1053,16 @@ PEPA includes 19 free, open-source plugins across 7 categories.
 1. Go to **Plugins** or **Marketplace**
 2. Browse available plugins
 3. Click **Install** on the desired plugin
-4. Configure the plugin connection settings
+4. Configure the plugin connection settings (if applicable)
 5. Enable the plugin
+
+> **Tip:** When installing the **Trivy** plugin, vulnerability databases are downloaded automatically. You can optionally specify a custom DB registry during installation:
+> ```bash
+> curl -X POST http://localhost:8088/api/v1/marketplace/trivy/install \
+>   -H "Authorization: Bearer $TOKEN" \
+>   -H "Content-Type: application/json" \
+>   -d '{"db_repository": "my-mirror.internal.com/trivy-db"}'
+> ```
 
 > 📸 **Screenshot suggestion**: Plugin installation modal
 
@@ -1018,6 +1162,26 @@ func main() {
 - If change was accidental, trigger reconciliation from the GitOps page
 - Consider enabling auto-heal to automatically reconcile drift
 
+#### 8. Trivy DB shows "Not available"
+
+**Symptoms:** Security page shows Vulnerability DB: "Not available"
+
+**Solutions:**
+- Ensure the Trivy plugin is installed from the Marketplace
+- Trigger a manual DB download:
+  ```bash
+  curl -X POST http://localhost:8088/api/v1/security/db-download \
+    -H "Authorization: Bearer $TOKEN"
+  ```
+- Check API server logs: `docker logs pepa-api | grep trivy`
+- Verify network connectivity to the DB registry
+- Try a different registry:
+  ```bash
+  curl -X PUT http://localhost:8088/api/v1/security/db-repository \
+    -H "Authorization: Bearer $TOKEN" \
+    -d '{"db_repository": "ghcr.io/aquasecurity/trivy-db"}'
+  ```
+
 ---
 
 ## FAQ
@@ -1066,6 +1230,45 @@ The API server is stateless. Run multiple instances behind a load balancer:
 docker compose -f docker-compose.prod.yml up --scale api=3 -d
 ```
 
+### How do I run a vulnerability scan?
+
+Install the Trivy plugin from the Marketplace — databases are downloaded automatically. Then:
+1. Go to **Security → Scan Targets → Add Target**
+2. Select scanner type: **Trivy**
+3. Enter the target (image name, repo URL, or path)
+4. Click **Scan**
+
+Or via API:
+```bash
+curl -X POST http://localhost:8088/api/v1/security/targets \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"target_ref": "nginx:latest", "scanner_type": "trivy"}'
+```
+
+### How do I change the Trivy DB source?
+
+Use a custom or private DB mirror:
+```bash
+curl -X PUT http://localhost:8088/api/v1/security/db-repository \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"db_repository": "ghcr.io/aquasecurity/trivy-db"}'
+```
+
+### How do I check Trivy database status?
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8088/api/v1/security/db-status
+```
+
+If the DB shows "Not available", trigger a manual download:
+```bash
+curl -X POST http://localhost:8088/api/v1/security/db-download \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ---
 
 ## Configuration Reference
@@ -1087,6 +1290,9 @@ docker compose -f docker-compose.prod.yml up --scale api=3 -d
 | `S3_ENDPOINT` | — | MinIO/S3 endpoint |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
 | `PLUGIN_DIR` | `./plugins` | Plugin directory |
+| `TRIVY_DB_REPOSITORY` | `public.ecr.aws/aquasecurity/trivy-db` | Trivy vulnerability DB OCI registry |
+| `TRIVY_JAVA_DB_REPOSITORY` | `public.ecr.aws/aquasecurity/trivy-java-db` | Trivy Java DB OCI registry |
+| `TRIVY_DB_UPDATE_INTERVAL` | `21600` | DB refresh interval in seconds (6h) |
 
 ---
 

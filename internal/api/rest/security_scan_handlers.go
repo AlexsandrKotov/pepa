@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -43,6 +44,9 @@ func registerSecurityScanRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 
 	// Database status
 	scans.GET("/db-status", getDatabaseStatus(deps))
+	// Database management (admin only)
+	scans.POST("/db-download", requireAdminRole(deps), downloadDatabase(deps))
+	scans.PUT("/db-repository", requireAdminRole(deps), setDBRepository(deps))
 
 	// Scan Ignores (CVE ignore lists)
 	scans.GET("/ignores", listScanIgnores(deps))
@@ -628,6 +632,83 @@ func getDatabaseStatus(deps Dependencies) gin.HandlerFunc {
 		}
 		status := deps.Scanner.GetDatabaseStatus(c.Request.Context())
 		c.JSON(http.StatusOK, status)
+	}
+}
+
+// ── Database Management Handlers ───────────────────────────────
+
+// downloadDatabase triggers an immediate download of the Trivy vulnerability
+// and Java databases. This is called automatically when the Trivy plugin is
+// installed or enabled, but can also be triggered manually from the UI.
+func downloadDatabase(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Scanner == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scanner not available"})
+			return
+		}
+
+		// Optional: override repositories for this download
+		var req struct {
+			DBRepository     string `json:"db_repository,omitempty"`
+			JavaDBRepository string `json:"java_db_repository,omitempty"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		if req.DBRepository != "" || req.JavaDBRepository != "" {
+			deps.Scanner.SetDBRepository(req.DBRepository, req.JavaDBRepository)
+		}
+
+		// Run download with a timeout (this can take several minutes for large DBs)
+		dlCtx, dlCancel := context.WithTimeout(c.Request.Context(), 15*time.Minute)
+		defer dlCancel()
+
+		slog.Info("manual Trivy DB download triggered", "db_repo", req.DBRepository, "java_db_repo", req.JavaDBRepository)
+		if err := deps.Scanner.DownloadDB(dlCtx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Trivy DB download failed",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		// Return updated status
+		status := deps.Scanner.GetDatabaseStatus(c.Request.Context())
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Trivy databases downloaded successfully",
+			"status":  status,
+		})
+	}
+}
+
+// setDBRepository updates the OCI registry endpoints used for Trivy DB downloads.
+// This allows administrators to switch between different DB sources (e.g., ECR,
+// GHCR, or a private mirror) without restarting the API server.
+func setDBRepository(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Scanner == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scanner not available"})
+			return
+		}
+
+		var req struct {
+			DBRepository     string `json:"db_repository" binding:"required"`
+			JavaDBRepository string `json:"java_db_repository"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "db_repository is required"})
+			return
+		}
+
+		deps.Scanner.SetDBRepository(req.DBRepository, req.JavaDBRepository)
+		logAudit(deps, c, "update", "trivy_db_repository", "", nil, gin.H{
+			"db_repository":      req.DBRepository,
+			"java_db_repository": req.JavaDBRepository,
+		})
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":            "Trivy DB repository updated",
+			"db_repository":      req.DBRepository,
+			"java_db_repository": req.JavaDBRepository,
+		})
 	}
 }
 

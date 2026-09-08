@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,9 +36,9 @@ var validSeverities = map[string]bool{
 
 // validScanConfigKeys is the whitelist of allowed scan_config keys per scanner type.
 var validScanConfigKeys = map[string]map[string]bool{
-	"trivy":     {"scan_type": true, "severity": true, "ignore_unfixed": true, "vex": true},
+	"trivy":     {"scan_type": true, "severity": true, "ignore_unfixed": true, "vex": true, "db_repository": true, "java_db_repository": true},
 	"sonarqube": {"url": true, "token": true, "project_key": true, "branch": true},
-	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "url": true, "token": true, "project_key": true, "branch": true, "vex": true},
+	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "url": true, "token": true, "project_key": true, "branch": true, "vex": true, "db_repository": true, "java_db_repository": true},
 }
 
 // Scanner orchestrates security scans via Trivy and SonarQube.
@@ -50,11 +51,17 @@ type Scanner struct {
 	sem            chan struct{} // concurrency limiter
 	mu             sync.Mutex
 	cancels        map[uuid.UUID]context.CancelFunc
+
+	// DB manager fields — the API server acts as the DB cache warmer,
+	// downloading and refreshing Trivy databases without a separate container.
+	dbRepo        string        // OCI registry for trivy-db (env: TRIVY_DB_REPOSITORY)
+	javaDBRepo    string        // OCI registry for trivy-java-db (env: TRIVY_JAVA_DB_REPOSITORY)
+	dbRefreshInterval time.Duration // how often to refresh DBs (env: TRIVY_DB_UPDATE_INTERVAL)
 }
 
 // NewScanner creates a new Scanner.
 func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository, registryRepo *repository.RegistryRepository, ignoreRepo *repository.ScanIgnoreRepository) *Scanner {
-	return &Scanner{
+	s := &Scanner{
 		pluginMgr:      pluginMgr,
 		repo:           repo,
 		connectionRepo: connRepo,
@@ -63,6 +70,25 @@ func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanReposito
 		sem:            make(chan struct{}, maxConcurrentScans),
 		cancels:        make(map[uuid.UUID]context.CancelFunc),
 	}
+
+	// Initialize DB manager from environment variables.
+	s.dbRepo = os.Getenv("TRIVY_DB_REPOSITORY")
+	if s.dbRepo == "" {
+		s.dbRepo = "public.ecr.aws/aquasecurity/trivy-db"
+	}
+	s.javaDBRepo = os.Getenv("TRIVY_JAVA_DB_REPOSITORY")
+	if s.javaDBRepo == "" {
+		s.javaDBRepo = "public.ecr.aws/aquasecurity/trivy-java-db"
+	}
+	intervalSec := 21600 // default: 6 hours
+	if v := os.Getenv("TRIVY_DB_UPDATE_INTERVAL"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			intervalSec = n
+		}
+	}
+	s.dbRefreshInterval = time.Duration(intervalSec) * time.Second
+
+	return s
 }
 
 // CancelScan cancels a running scan by its run ID.
@@ -281,6 +307,14 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 
 	// VEX document path for false-positive filtering
 	vexPath, _ := target.ScanConfig["vex"].(string)
+
+	// Per-target DB repository override (allows different scan targets to use different DB sources)
+	if dbRepo, ok := target.ScanConfig["db_repository"].(string); ok && dbRepo != "" {
+		s.SetDBRepository(dbRepo, "")
+	}
+	if javaDBRepo, ok := target.ScanConfig["java_db_repository"].(string); ok && javaDBRepo != "" {
+		s.SetDBRepository("", javaDBRepo)
+	}
 
 	slog.Info("runTrivyScan starting", "target_ref", target.TargetRef, "target_type", target.TargetType, "connection_id", target.ConnectionID, "scan_type", scanType)
 
@@ -1144,4 +1178,162 @@ func (s *Scanner) GetDatabaseStatus(ctx context.Context) map[string]any {
 	}
 
 	return status
+}
+
+// DownloadDB downloads the Trivy vulnerability and Java databases into the
+// shared cache directory. It uses the configured OCI registries (dbRepo,
+// javaDBRepo) which can be overridden at runtime via SetDBRepository.
+// This eliminates the need for a separate db-cache container.
+func (s *Scanner) DownloadDB(ctx context.Context) error {
+	cacheDir := os.Getenv("TRIVY_CACHE_DIR")
+	if cacheDir == "" {
+		cacheDir = "/tmp/trivy-cache"
+	}
+	cacheDir = filepath.Clean(cacheDir)
+
+	// Ensure cache directories exist
+	if err := os.MkdirAll(filepath.Join(cacheDir, "db"), 0o755); err != nil {
+		return fmt.Errorf("create db cache dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Join(cacheDir, "java-db"), 0o755); err != nil {
+		return fmt.Errorf("create java-db cache dir: %w", err)
+	}
+
+	// Download trivy-db (Vulnerability DB)
+	slog.Info("downloading trivy-db", "repository", s.dbRepo)
+	if err := s.runTrivyDBDownload(ctx, cacheDir, "--db-repository", s.dbRepo); err != nil {
+		slog.Warn("trivy-db download failed from primary", "repository", s.dbRepo, "error", err)
+		// Try fallback registries
+		fallbacks := []string{
+			"ghcr.io/aquasecurity/trivy-db",
+		}
+		downloaded := false
+		for _, fb := range fallbacks {
+			if fb == s.dbRepo {
+				continue // skip if it's the same as primary
+			}
+			slog.Info("trying trivy-db fallback", "repository", fb)
+			if fbErr := s.runTrivyDBDownload(ctx, cacheDir, "--db-repository", fb); fbErr == nil {
+				slog.Info("trivy-db downloaded from fallback", "repository", fb)
+				downloaded = true
+				break
+			}
+		}
+		if !downloaded {
+			return fmt.Errorf("trivy-db download failed from all sources: %w", err)
+		}
+	} else {
+		slog.Info("trivy-db downloaded successfully", "repository", s.dbRepo)
+	}
+
+	// Download trivy-java-db (Java DB)
+	slog.Info("downloading trivy-java-db", "repository", s.javaDBRepo)
+	if err := s.runTrivyDBDownload(ctx, cacheDir, "--java-db-repository", s.javaDBRepo); err != nil {
+		slog.Warn("trivy-java-db download failed from primary", "repository", s.javaDBRepo, "error", err)
+		fallbacks := []string{
+			"ghcr.io/aquasecurity/trivy-java-db",
+		}
+		downloaded := false
+		for _, fb := range fallbacks {
+			if fb == s.javaDBRepo {
+				continue
+			}
+			slog.Info("trying trivy-java-db fallback", "repository", fb)
+			if fbErr := s.runTrivyDBDownload(ctx, cacheDir, "--java-db-repository", fb); fbErr == nil {
+				slog.Info("trivy-java-db downloaded from fallback", "repository", fb)
+				downloaded = true
+				break
+			}
+		}
+		if !downloaded {
+			return fmt.Errorf("trivy-java-db download failed from all sources: %w", err)
+		}
+	} else {
+		slog.Info("trivy-java-db downloaded successfully", "repository", s.javaDBRepo)
+	}
+
+	return nil
+}
+
+// runTrivyDBDownload executes a single trivy --download-db-only command.
+func (s *Scanner) runTrivyDBDownload(ctx context.Context, cacheDir string, repoFlag, repoValue string) error {
+	// Use a timeout to prevent hanging indefinitely
+	dlCtx, dlCancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer dlCancel()
+
+	args := []string{
+		"--cache-dir", cacheDir,
+		"image",
+		"--download-db-only",
+		"--no-progress",
+		repoFlag, repoValue,
+		"alpine:latest",
+	}
+
+	cmd := exec.CommandContext(dlCtx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // #nosec G104 //nolint:errcheck // negative PID kills process group
+		}
+		return nil
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// StartDBManager launches a background goroutine that periodically refreshes
+// the Trivy databases. Call this when the Trivy plugin is activated.
+func (s *Scanner) StartDBManager(ctx context.Context) {
+	slog.Info("Trivy DB manager started", "refresh_interval", s.dbRefreshInterval,
+		"db_repo", s.dbRepo, "java_db_repo", s.javaDBRepo)
+
+	go func() {
+		// Initial download on startup
+		if dlCtx, dlCancel := context.WithTimeout(ctx, 15*time.Minute); dlCtx != nil {
+			if err := s.DownloadDB(dlCtx); err != nil {
+				slog.Warn("initial Trivy DB download failed", "error", err)
+			} else {
+				slog.Info("initial Trivy DB download complete")
+			}
+			dlCancel()
+		}
+
+		// Periodic refresh
+		ticker := time.NewTicker(s.dbRefreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("Trivy DB manager stopped")
+				return
+			case <-ticker.C:
+				refreshCtx, refreshCancel := context.WithTimeout(ctx, 15*time.Minute)
+				if err := s.DownloadDB(refreshCtx); err != nil {
+					slog.Warn("Trivy DB refresh failed", "error", err)
+				} else {
+					slog.Info("Trivy DB refresh complete")
+				}
+				refreshCancel()
+			}
+		}
+	}()
+}
+
+// SetDBRepository overrides the DB registry endpoints at runtime.
+// Call this when the Trivy plugin config specifies custom repositories.
+func (s *Scanner) SetDBRepository(dbRepo, javaDBRepo string) {
+	if dbRepo != "" {
+		s.dbRepo = dbRepo
+	}
+	if javaDBRepo != "" {
+		s.javaDBRepo = javaDBRepo
+	}
+	slog.Info("Trivy DB repository updated", "db_repo", s.dbRepo, "java_db_repo", s.javaDBRepo)
 }

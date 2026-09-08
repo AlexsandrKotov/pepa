@@ -29,7 +29,6 @@ const STATUS_COLORS: Record<string, string> = {
 
 // Plain-language "what you need" guidance per connection type
 const TYPE_REQUIREMENTS: Record<ConnectionType, string> = {
-  kubernetes: 'You need the cluster API server URL and authentication credentials (token or kubeconfig). For self-signed clusters, a CA certificate is required.',
   git: 'Select your git provider and provide the instance URL and an API token. Supports GitHub, GitLab, Gitea, Bitbucket, local repositories, and other git-compatible services.',
   gitlab: 'You need your GitLab instance URL and a personal/group access token with api scope. Create a token in GitLab under Preferences → Access Tokens.',
   jira: 'You need your Atlassian site URL (https://your-domain.atlassian.net) and an API token from id.atlassian.com → Security → API tokens.',
@@ -56,7 +55,6 @@ const AI_PROVIDER_DEFAULTS: Record<string, { url: string; model: string }> = {
 
 // Fields that support Vault references per connection type
 const VAULT_FIELDS: Record<string, string[]> = {
-  kubernetes: ['token', 'ca_certificate', 'kubeconfig'],
   git: ['token'],
   gitlab: ['token'],
   jira: ['password', 'token'],
@@ -209,9 +207,6 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
             <p className="page-subtitle-modern">Manage external services and integrations</p>
           </div>
           <div className="flex gap-2">
-            <Link href="/clusters" className="btn btn-secondary" data-tour="connections-manage-clusters">
-              Manage Clusters
-            </Link>
             <button
               onClick={() => setShowAddModal(true)}
               className="btn btn-primary"

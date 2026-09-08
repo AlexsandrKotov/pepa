@@ -32,6 +32,14 @@ config_schema:
       description: "Output format for reports"
       enum: ["json", "table", "sarif"]
       default: "json"
+    db_repository:
+      type: string
+      description: "OCI registry for the Trivy vulnerability database (auto-downloaded on install)"
+      default: "public.ecr.aws/aquasecurity/trivy-db"
+    java_db_repository:
+      type: string
+      description: "OCI registry for the Trivy Java vulnerability database"
+      default: "public.ecr.aws/aquasecurity/trivy-java-db"
   required:
     - target
 

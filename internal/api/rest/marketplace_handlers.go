@@ -2,6 +2,7 @@ package rest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pepa/pepa/internal/auth"
@@ -398,6 +400,13 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Parse optional request body for custom DB repository configuration
+		var installReq struct {
+			DBRepository    string `json:"db_repository,omitempty"`
+			JavaDBRepository string `json:"java_db_repository,omitempty"`
+		}
+		_ = c.ShouldBindJSON(&installReq) // ignore error — body is optional
+
 		if deps.Repos.Plugin == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "plugin repository not available"})
 			return
@@ -501,6 +510,28 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		reloadMarketplaceCache()
 
 		logAudit(deps, c, "install", "marketplace_plugin", id, nil, gin.H{"plugin": found.ID, "version": found.Version})
+
+		// ── Trivy plugin: auto-download databases ──────────────────────
+		// When the Trivy security scanner plugin is installed, automatically
+		// download the vulnerability and Java databases so scans work immediately.
+		// The API server acts as the DB cache warmer (no separate container needed).
+		if id == "trivy" && deps.Scanner != nil {
+			if installReq.DBRepository != "" || installReq.JavaDBRepository != "" {
+				deps.Scanner.SetDBRepository(installReq.DBRepository, installReq.JavaDBRepository)
+			}
+			// Start the background DB manager for periodic refresh
+			deps.Scanner.StartDBManager(c.Request.Context())
+			// Trigger immediate download in a goroutine so the response is not blocked
+			go func() {
+				dlCtx, dlCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+				defer dlCancel()
+				if err := deps.Scanner.DownloadDB(dlCtx); err != nil {
+					slog.Warn("Trivy DB auto-download failed on plugin install", "error", err)
+				} else {
+					slog.Info("Trivy DB auto-download complete after plugin install")
+				}
+			}()
+		}
 
 		// If binary failed to load, return error so admin knows immediately
 		if loadErr != nil {

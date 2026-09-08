@@ -306,7 +306,7 @@ This document tracks the implementation progress of PEPA against the roadmap def
 | Helm templates | 5 |
 | CI/CD jobs | 4 |
 | Documentation pages | 20+ |
-| User guide pages | 920 (EN) + 697 (RU) |
+| User guide pages | 1299 (EN) + 951 (RU) |
 | Auth providers | 6 (local, LDAP, Azure AD, OIDC, GitHub, Google) |
 
 ## Completion Percentage

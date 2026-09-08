@@ -1,11 +1,13 @@
 package rest
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +31,7 @@ func registerHelmRepoRoutes(r *gin.RouterGroup, deps Dependencies) {
 		helmRepos.GET("/:id/charts", listHelmCharts(deps))
 		helmRepos.GET("/:id/charts/:chartName/versions", listHelmChartVersions(deps))
 		helmRepos.GET("/:id/charts/:chartName/versions/:version/download", downloadHelmChart(deps))
+		helmRepos.GET("/:id/charts/:chartName/versions/:version/values", getHelmChartValues(deps))
 	}
 }
 
@@ -457,7 +460,89 @@ func listHelmChartVersions(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
-// downloadHelmChart downloads a specific chart version .tgz file
+// getHelmChartValues fetches the default values.yaml for a specific chart version
+// by running `helm show values` and returns both parsed JSON and raw YAML.
+func getHelmChartValues(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Helm == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "helm repository not available"})
+			return
+		}
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+			return
+		}
+
+		chartName := c.Param("chartName")
+		version := c.Param("version")
+		if chartName == "" || version == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "chart name and version required"})
+			return
+		}
+
+		tenantID := auth.GetTenantID(c)
+		repo, err := deps.Repos.Helm.GetDecrypted(c.Request.Context(), id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "helm repository not found"})
+			return
+		}
+
+		// Determine chart reference and build helm command args
+		var chartRef string
+		var preArgs []string // args before "show values" (e.g. repo add)
+
+		switch repo.RepoType {
+		case "oci":
+			chartRef = strings.TrimSuffix(repo.URL, "/") + "/" + chartName
+		default: // helm_http, helm_git
+			repoName := "pepa-values-" + strings.ReplaceAll(chartName, "/", "-")
+			addArgs := []string{"repo", "add", repoName, repo.URL, "--force-update"}
+			if repo.Username != "" && repo.Password != "" {
+				addArgs = append(addArgs, "--username", repo.Username, "--password", repo.Password)
+			} else if repo.Token != "" {
+				addArgs = append(addArgs, "--username", "gitlab-ci-token", "--password", repo.Token)
+			}
+			preArgs = addArgs
+			chartRef = repoName + "/" + chartName
+		}
+
+		// Add the repo first if needed (for HTTP/Git repos)
+		if len(preArgs) > 0 {
+			cmdAdd := exec.CommandContext(c.Request.Context(), "helm", preArgs...) //nolint:gosec // #nosec // G204: helm is an admin-configured binary
+			if out, err := cmdAdd.CombinedOutput(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("helm repo add failed: %s: %v", strings.TrimSpace(string(out)), err)})
+				return
+			}
+		}
+
+		// Run helm show values
+		showArgs := []string{"show", "values", chartRef, "--version", version}
+		cmd := exec.CommandContext(c.Request.Context(), "helm", showArgs...) //nolint:gosec // #nosec // G204: helm is an admin-configured binary
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("helm show values failed: %s: %v", strings.TrimSpace(stderr.String()), err)})
+			return
+		}
+
+		rawYAML := stdout.String()
+
+		// Parse YAML into a generic map for JSON response
+		var values map[string]interface{}
+		if err := yaml.Unmarshal([]byte(rawYAML), &values); err != nil {
+			// If parsing fails, return raw YAML only
+			c.JSON(http.StatusOK, gin.H{"values": nil, "raw_yaml": rawYAML})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"values": values, "raw_yaml": rawYAML})
+	}
+}
+
+// downloadHelmChart downloads a specific chart version .tgz file.
 func downloadHelmChart(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Helm == nil {
