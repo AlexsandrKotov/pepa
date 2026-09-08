@@ -650,7 +650,7 @@ func getDeploymentEvents(ctx context.Context, kubeconfig, namespace, name string
 			if event == nil {
 				continue
 			}
-			// Deduplicate by message+reason+timestamp
+			// Deduplicate by reason+message+timestamp
 			key := fmt.Sprintf("%v|%v|%v", event["reason"], event["message"], event["lastTimestamp"])
 			if seen[key] {
 				continue

@@ -411,12 +411,14 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
                   </div>
                 </div>
               )}
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <span className="text-amber-600 text-[12px] shrink-0 mt-px">&#9888;</span>
-                <p className="text-[11px] text-amber-600 leading-relaxed">
-                  Detailed deployment info is not available. This {service.source === 'fluxcd' ? 'HelmRelease' : 'service'} may not have a matching Kubernetes Deployment resource, or the cluster API returned an error.
-                </p>
-              </div>
+              {!isSuspended && (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <span className="text-amber-600 text-[12px] shrink-0 mt-px">&#9888;</span>
+                  <p className="text-[11px] text-amber-600 leading-relaxed">
+                    Detailed deployment info is not available. This {service.source === 'fluxcd' ? 'HelmRelease' : 'service'} may not have a matching Kubernetes Deployment resource.
+                  </p>
+                </div>
+              )}
             </div>
           ) : tab === 'logs' ? (
             <div>

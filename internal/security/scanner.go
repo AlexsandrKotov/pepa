@@ -1192,10 +1192,10 @@ func (s *Scanner) DownloadDB(ctx context.Context) error {
 	cacheDir = filepath.Clean(cacheDir)
 
 	// Ensure cache directories exist
-	if err := os.MkdirAll(filepath.Join(cacheDir, "db"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cacheDir, "db"), 0o750); err != nil {
 		return fmt.Errorf("create db cache dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Join(cacheDir, "java-db"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(cacheDir, "java-db"), 0o750); err != nil {
 		return fmt.Errorf("create java-db cache dir: %w", err)
 	}
 
@@ -1296,14 +1296,7 @@ func (s *Scanner) StartDBManager(ctx context.Context) {
 
 	go func() {
 		// Initial download on startup
-		if dlCtx, dlCancel := context.WithTimeout(ctx, 15*time.Minute); dlCtx != nil {
-			if err := s.DownloadDB(dlCtx); err != nil {
-				slog.Warn("initial Trivy DB download failed", "error", err)
-			} else {
-				slog.Info("initial Trivy DB download complete")
-			}
-			dlCancel()
-		}
+		s.initialDBDownload(ctx)
 
 		// Periodic refresh
 		ticker := time.NewTicker(s.dbRefreshInterval)
@@ -1324,6 +1317,17 @@ func (s *Scanner) StartDBManager(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// initialDBDownload performs the first Trivy DB download with a bounded timeout.
+func (s *Scanner) initialDBDownload(ctx context.Context) {
+	dlCtx, dlCancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer dlCancel()
+	if err := s.DownloadDB(dlCtx); err != nil {
+		slog.Warn("initial Trivy DB download failed", "error", err)
+	} else {
+		slog.Info("initial Trivy DB download complete")
+	}
 }
 
 // SetDBRepository overrides the DB registry endpoints at runtime.

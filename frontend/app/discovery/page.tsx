@@ -119,10 +119,9 @@ export default function DiscoveryPage() {
       setTimeout(() => setActionMessage(null), 3000);
       // Reload after action
       await loadServices();
-      // Update the managing service panel with fresh data
+      // Update the managing service panel with fresh state
       setManagingService(prev => {
         if (!prev) return prev;
-        // Optimistically update the local service state
         if (action === 'suspend') return { ...prev, health: 'suspended', status: 'suspended' };
         if (action === 'resume') return { ...prev, health: 'healthy', status: 'running' };
         return prev;
@@ -609,7 +608,7 @@ function FluxcdActions({ svc, actionLoading, onAction }: {
       </button>
       <button
         onClick={() => onAction('resume', svc)}
-        disabled={actionLoading === `${key}-resume` || (!isSuspended && svc.health !== 'unknown')}
+        disabled={actionLoading === `${key}-resume` || !isSuspended}
         className={`text-[10px] px-1.5 py-0.5 rounded ${isSuspended ? 'bg-emerald-500/20 text-emerald-500 font-semibold ring-1 ring-emerald-500/30' : 'bg-emerald-500/10 text-emerald-600'} hover:bg-emerald-500/15 disabled:opacity-50`}
         title={isSuspended ? 'Resume reconciliation' : 'Already running'}
       >

@@ -1323,14 +1323,25 @@ func fluxcdSuspend(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		err = fluxcdSetSuspend(ctx, kubeconfig, namespace, name, true)
-		if err != nil {
-			respondInternalError(c, err)
-			return
+		via := "builtin"
+		// Try plugin first
+		handled, pluginErr := fluxcdSuspendViaPlugin(ctx, deps, namespace, name, kubeconfig)
+		if handled {
+			via = "plugin"
+		} else {
+			// Fallback to direct k8s API
+			err = fluxcdSetSuspend(ctx, kubeconfig, namespace, name, true)
+			if err != nil {
+				if pluginErr != nil {
+					slog.Warn("fluxcd plugin suspend failed", "plugin_err", pluginErr)
+				}
+				respondInternalError(c, err)
+				return
+			}
 		}
 
 		invalidateDiscoveryCache()
-		logAudit(deps, c, "suspend", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
+		logAudit(deps, c, "suspend", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName, "via": via})
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":   fmt.Sprintf("HelmRelease %s/%s suspended", namespace, name),
@@ -1357,14 +1368,23 @@ func fluxcdResume(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		err = fluxcdSetSuspend(ctx, kubeconfig, namespace, name, false)
-		if err != nil {
-			respondInternalError(c, err)
-			return
+		via := "builtin"
+		handled, pluginErr := fluxcdResumeViaPlugin(ctx, deps, namespace, name, kubeconfig)
+		if handled {
+			via = "plugin"
+		} else {
+			err = fluxcdSetSuspend(ctx, kubeconfig, namespace, name, false)
+			if err != nil {
+				if pluginErr != nil {
+					slog.Warn("fluxcd plugin resume failed", "plugin_err", pluginErr)
+				}
+				respondInternalError(c, err)
+				return
+			}
 		}
 
 		invalidateDiscoveryCache()
-		logAudit(deps, c, "resume", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
+		logAudit(deps, c, "resume", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName, "via": via})
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":   fmt.Sprintf("HelmRelease %s/%s resumed", namespace, name),
@@ -1391,14 +1411,23 @@ func fluxcdReconcile(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		err = fluxcdForceReconcile(ctx, kubeconfig, namespace, name)
-		if err != nil {
-			respondInternalError(c, err)
-			return
+		via := "builtin"
+		handled, pluginErr := fluxcdReconcileViaPlugin(ctx, deps, namespace, name, kubeconfig)
+		if handled {
+			via = "plugin"
+		} else {
+			err = fluxcdForceReconcile(ctx, kubeconfig, namespace, name)
+			if err != nil {
+				if pluginErr != nil {
+					slog.Warn("fluxcd plugin reconcile failed", "plugin_err", pluginErr)
+				}
+				respondInternalError(c, err)
+				return
+			}
 		}
 
 		invalidateDiscoveryCache()
-		logAudit(deps, c, "reconcile", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName})
+		logAudit(deps, c, "reconcile", "fluxcd_helmrelease", fmt.Sprintf("%s/%s/%s", clusterName, namespace, name), nil, gin.H{"cluster": clusterName, "via": via})
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":   fmt.Sprintf("HelmRelease %s/%s reconciliation triggered", namespace, name),
