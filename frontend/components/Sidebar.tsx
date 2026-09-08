@@ -112,6 +112,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
         label: 'Releases',
         items: [
           { href: '/deployments', label: 'Deployments', permission: 'deployments' },
+          { href: '/deployments/batch', label: 'Batch Deploy', permission: 'deployments' },
           { href: '/environments', label: 'Environments', permission: 'environments' },
         ],
       },
@@ -180,7 +181,6 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/settings/observability', label: 'Observability', permission: 'settings', adminOnly: true },
       { href: '/roles', label: 'Roles', permission: 'roles', adminOnly: true },
       { href: '/audit', label: 'Audit Log', permission: 'audit', adminOnly: true },
-      { href: '/plugin-activity', label: 'Plugin Activity', permission: 'plugin_activity', adminOnly: true },
       { href: '/notifications', label: 'Notifications', permission: 'notifications', adminOnly: true },
     ],
   },

@@ -156,11 +156,22 @@ func main() {
 			NotificationLog:  comp.NotificationLogRepo,
 		},
 		Services: &rest.Services{
-			Deployment: service.NewDeploymentService(
-				comp.ClusterRepo,
-				comp.DeploymentRepo,
-				comp.HelmRepo,
-			),
+			Deployment: func() *service.DeploymentService {
+				svc := service.NewDeploymentService(
+					comp.ClusterRepo,
+					comp.DeploymentRepo,
+					comp.HelmRepo,
+				)
+				// Wire up deployment event recorder for timeline
+				if comp.DB != nil {
+					svc.SetEventRecorder(func(deploymentID uuid.UUID, eventType, message string) {
+						_, _ = comp.DB.Pool.Exec(context.Background(),
+							`INSERT INTO deployment_events (deployment_id, event_type, message) VALUES ($1, $2, $3)`,
+							deploymentID, eventType, message)
+					})
+				}
+				return svc
+			}(),
 			ServiceDeployment: service.NewServiceDeploymentService(
 				comp.ClusterRepo,
 				comp.ServiceRepo,

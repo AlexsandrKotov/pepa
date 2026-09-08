@@ -1123,6 +1123,15 @@ export const audit = {
     return fetchAPI<AuditListResponse>(`/api/v1/audit${qs}`);
   },
   stats: () => fetchAPI<{ by_action: Record<string, number>; by_resource: Record<string, number> }>('/api/v1/audit/stats'),
+  // Plugin actions and SSH commands — consolidated from /plugin-activity
+  pluginActions: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ items: PluginActionEntry[]; total: number }>(`/api/v1/audit/plugin-actions${qs}`);
+  },
+  sshCommands: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ items: SSHCommandEntry[]; total: number }>(`/api/v1/audit/ssh-commands${qs}`);
+  },
 };
 
 // ── RBAC ──────────────────────────────────────────────────
@@ -1525,10 +1534,24 @@ export const deployments = {
     fetchAPI<{ deployment: Deployment; message: string }>(`/api/v1/deployments/${id}/rollback`, { method: 'POST' }),
   cancel: (id: string) =>
     fetchAPI<{ deployment: Deployment; message: string }>(`/api/v1/deployments/${id}/cancel`, { method: 'POST' }),
+  retry: (id: string) =>
+    fetchAPI<{ deployment: Deployment; original_id: string; message: string }>(`/api/v1/deployments/${id}/retry`, { method: 'POST' }),
+  diff: (id: string, compareWith: string) =>
+    fetchAPI<{ deployment_a: Deployment; deployment_b: Deployment; diffs: { field: string; old_value: unknown; new_value: unknown }[]; total_changes: number }>(`/api/v1/deployments/${id}/diff?compare_with=${compareWith}`),
+  pipeline: (project?: string) =>
+    fetchAPI<{ pipelines: { project: string; stages: { stage: string; status: string; image_tag: string; deployed_at: string; deployment_id: string }[] }[]; projects: string[] }>(`/api/v1/deployments/pipeline${project ? `?project=${encodeURIComponent(project)}` : ''}`),
+  metrics: (period = '30d') =>
+    fetchAPI<{ period_days: number; total_deployments: number; deployment_frequency: string; avg_lead_time_hours: string; change_failure_rate: string; avg_mttr_minutes: string; successful: number; failed: number }>(`/api/v1/deployments/metrics?period=${period}`),
   history: (id: string) =>
     fetchAPI<{ history: Deployment[]; total: number }>(`/api/v1/deployments/${id}/history`),
   logs: (id: string) =>
     fetchAPI<{ logs: { timestamp: string; level: string; message: string }[]; deployment_id: string; status: string; error_message: string }>(`/api/v1/deployments/${id}/logs`),
+  dryRun: (data: Record<string, unknown>) =>
+    fetchAPI<{ resources: string; manifests: string; deploy_type: string; release_name: string; namespace: string }>('/api/v1/deployments/dry-run', { method: 'POST', body: JSON.stringify(data) }),
+  resources: (id: string) =>
+    fetchAPI<{ resources: { kind: string; name: string; namespace: string; status: string; created_at: string }[]; total: number; namespace: string }>(`/api/v1/deployments/${id}/resources`),
+  events: (id: string) =>
+    fetchAPI<{ events: { id: string; deployment_id: string; event_type: string; message: string; created_at: string }[]; deployment_id: string; total: number }>(`/api/v1/deployments/${id}/events`),
   delete: (id: string) =>
     fetchAPI<void>(`/api/v1/deployments/${id}`, { method: 'DELETE' }),
 };
@@ -4390,15 +4413,10 @@ export interface PluginActionEntry {
   created_at: string;
 }
 
+// @deprecated Use audit.pluginActions / audit.sshCommands instead
 export const pluginActivity = {
-  listSSHCommands: (params?: Record<string, string>) => {
-    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-    return fetchAPI<{ items: SSHCommandEntry[]; total: number }>(`/api/v1/plugin-activity/ssh-commands${qs}`);
-  },
-  listPluginActions: (params?: Record<string, string>) => {
-    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-    return fetchAPI<{ items: PluginActionEntry[]; total: number }>(`/api/v1/plugin-activity/plugin-actions${qs}`);
-  },
+  listSSHCommands: (params?: Record<string, string>) => audit.sshCommands(params),
+  listPluginActions: (params?: Record<string, string>) => audit.pluginActions(params),
 };
 
 // ── Security Scanning ──────────────────────────────────────────
@@ -4705,6 +4723,9 @@ export const devops = {
   cancelBatchOperation: (id: string) =>
     fetchAPI<{ message: string }>(`/api/v1/batch-operations/${id}/cancel`, { method: 'POST' }),
 
+  executeBatchOperation: (id: string) =>
+    fetchAPI<{ message: string; operation: BatchOperation }>(`/api/v1/batch-operations/${id}/execute`, { method: 'POST' }),
+
   // Compliance Policies
   listPolicies: async () => {
     const res = await fetchAPI<{ policies: CompliancePolicy[]; total: number }>('/api/v1/compliance-policies');
@@ -4849,6 +4870,24 @@ export interface EventCategories {
   categories: Record<string, string[]>;
 }
 
+export interface TemplatePreset {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: string;
+  event_types: string[];
+  body: string;
+  subject?: string;
+}
+
+export interface ProviderPreview {
+  provider: string;
+  icon: string;
+  rendered: string;
+  format: 'html' | 'json' | 'text';
+}
+
 export const notifications = {
   // Rules CRUD
   listRules: () => fetchAPI<{ rules: NotificationRule[]; total: number }>('/api/v1/notifications/rules'),
@@ -4868,9 +4907,16 @@ export const notifications = {
   // Event types
   eventTypes: () => fetchAPI<EventCategories>('/api/v1/notifications/events'),
 
-  // Template preview
+  // Template presets
+  presets: () => fetchAPI<{ presets: TemplatePreset[] }>('/api/v1/notifications/presets'),
+
+  // Template preview (plain text)
   preview: (data: { body_template: string; event_type: string }) =>
     fetchAPI<{ rendered: string }>('/api/v1/notifications/preview', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Template preview for all providers
+  previewAll: (data: { body_template: string; event_type: string }) =>
+    fetchAPI<{ previews: ProviderPreview[] }>('/api/v1/notifications/preview-all', { method: 'POST', body: JSON.stringify(data) }),
 
   // History
   history: (params?: Record<string, string>) => {

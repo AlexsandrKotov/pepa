@@ -14,27 +14,30 @@ import (
 	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/provider"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/pkg/models"
 	"github.com/pepa/pepa/pkg/utils"
 )
 
 // Engine executes workflow DAGs step by step.
 type Engine struct {
-	workflowRepo     *repository.WorkflowRepository
-	entityRepo       *repository.EntityRepository
-	deploymentRepo   *repository.DeploymentRepository
-	eventBus         *events.Bus
-	providerRegistry *provider.Registry
+	workflowRepo       *repository.WorkflowRepository
+	entityRepo         *repository.EntityRepository
+	deploymentRepo     *repository.DeploymentRepository
+	deploymentService  *service.DeploymentService
+	eventBus           *events.Bus
+	providerRegistry   *provider.Registry
 }
 
 // NewEngine creates a new workflow execution engine.
-func NewEngine(repo *repository.WorkflowRepository, entityRepo *repository.EntityRepository, deploymentRepo *repository.DeploymentRepository, bus *events.Bus, registry *provider.Registry) *Engine {
+func NewEngine(repo *repository.WorkflowRepository, entityRepo *repository.EntityRepository, deploymentRepo *repository.DeploymentRepository, deploymentSvc *service.DeploymentService, bus *events.Bus, registry *provider.Registry) *Engine {
 	return &Engine{
-		workflowRepo:     repo,
-		entityRepo:       entityRepo,
-		deploymentRepo:   deploymentRepo,
-		eventBus:         bus,
-		providerRegistry: registry,
+		workflowRepo:      repo,
+		entityRepo:        entityRepo,
+		deploymentRepo:    deploymentRepo,
+		deploymentService: deploymentSvc,
+		eventBus:          bus,
+		providerRegistry:  registry,
 	}
 }
 
@@ -264,18 +267,24 @@ func (e *Engine) executeEntityUpdate(ctx context.Context, step *models.StepSpec,
 }
 
 // executeDeploy creates a real deployment record so the workflow materializes
-// on the GitOps Workflow board. Without a connected cluster the lifecycle is
-// simulated (status goes straight to "deployed").
+// on the GitOps Workflow board. If a target_cluster_id is specified and a
+// DeploymentService is available, the deployment is actually executed against
+// the Kubernetes cluster. Otherwise the lifecycle is simulated (status goes
+// straight to "deployed") for demo mode.
 func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenantID uuid.UUID) (json.RawMessage, error) {
 	var params struct {
-		ProjectName     string `json:"project_name"`
-		ImageTag        string `json:"image_tag"`
-		ImageRepository string `json:"image_repository"`
-		Stage           string `json:"stage"`
-		TeamName        string `json:"team_name"`
-		Namespace       string `json:"namespace"`
-		JiraIssueKey    string `json:"jira_issue_key"`
-		JiraSummary     string `json:"jira_summary"`
+		ProjectName     string     `json:"project_name"`
+		ImageTag        string     `json:"image_tag"`
+		ImageRepository string     `json:"image_repository"`
+		Stage           string     `json:"stage"`
+		TeamName        string     `json:"team_name"`
+		Namespace       string     `json:"namespace"`
+		JiraIssueKey    string     `json:"jira_issue_key"`
+		JiraSummary     string     `json:"jira_summary"`
+		TargetClusterID *uuid.UUID `json:"target_cluster_id"`
+		Replicas        int        `json:"replicas"`
+		TimeoutSeconds  int        `json:"timeout_seconds"`
+		Spec            json.RawMessage `json:"spec"`
 	}
 	if step.Params != nil {
 		if err := json.Unmarshal(step.Params, &params); err != nil {
@@ -291,11 +300,23 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 	if params.Namespace == "" {
 		params.Namespace = "app-" + params.Stage
 	}
+	if params.Replicas <= 0 {
+		params.Replicas = 1
+	}
+	if params.TimeoutSeconds <= 0 {
+		params.TimeoutSeconds = 300
+	}
 
-	slog.Info("Step : deploy project= image= team= stage=", "name", step.Name, "name", params.ProjectName, "arg3", params.ImageTag, "name", params.TeamName, "arg5", params.Stage)
+	slog.Info("Step : deploy project= image= team= stage= cluster=", "name", step.Name, "name", params.ProjectName, "arg3", params.ImageTag, "name", params.TeamName, "arg5", params.Stage, "arg6", params.TargetClusterID)
 
 	if e.deploymentRepo == nil {
 		return nil, fmt.Errorf("deployment repository not available")
+	}
+
+	// Determine initial status: if we have a cluster and service, deployment will be real
+	initialStatus := "deployed" // simulated mode
+	if params.TargetClusterID != nil && e.deploymentService != nil {
+		initialStatus = "pending"
 	}
 
 	deployment := &repository.Deployment{
@@ -303,16 +324,43 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 		GitlabProjectName: params.ProjectName,
 		ImageTag:          params.ImageTag,
 		ImageRepository:   params.ImageRepository,
+		TargetClusterID:   params.TargetClusterID,
 		TargetNamespace:   params.Namespace,
 		TeamName:          params.TeamName,
 		Stage:             params.Stage,
 		JiraIssueKey:      params.JiraIssueKey,
 		JiraSummary:       params.JiraSummary,
-		Status:            "deployed",
+		Replicas:          params.Replicas,
+		TimeoutSeconds:    params.TimeoutSeconds,
+		Spec:              params.Spec,
+		Status:            initialStatus,
 		CreatedBy:         "workflow-engine",
 	}
 	if err := e.deploymentRepo.Create(ctx, deployment); err != nil {
 		return nil, fmt.Errorf("create deployment: %w", err)
+	}
+
+	// If a target cluster is specified and deployment service is available,
+	// perform the actual Kubernetes deployment
+	if params.TargetClusterID != nil && e.deploymentService != nil {
+		slog.Info("Step : performing real deployment via DeploymentService", "name", step.Name, "id", deployment.ID)
+		go func() {
+			result := e.deploymentService.PerformDeployment(
+				context.Background(),
+				deployment.ID,
+				*params.TargetClusterID,
+				params.Namespace,
+				params.ProjectName,
+				int32(params.Replicas),
+				params.Spec,
+				params.TimeoutSeconds,
+			)
+			if result.Success {
+				slog.Info("Step : real deployment succeeded", "name", step.Name, "id", deployment.ID)
+			} else {
+				slog.Info("Step : real deployment failed", "name", step.Name, "id", deployment.ID, "error", result.Message)
+			}
+		}()
 	}
 
 	out, _ := json.Marshal(map[string]interface{}{

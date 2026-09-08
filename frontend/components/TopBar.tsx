@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
-import { audit, logout as doLogout, removeToken, getStoredUser, setStoredUser, getMe, setToken, workspaces, getBase, type AuditEntry, type Workspace } from '@/lib/api';
+import { notifications as notificationsAPI, logout as doLogout, removeToken, getStoredUser, setStoredUser, getMe, setToken, workspaces, getBase, type NotificationLog, type Workspace } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
 import GearIcon from '@/components/GearIcon';
 
@@ -51,75 +51,6 @@ interface Notification {
   type: 'info' | 'success' | 'warning' | 'error';
   icon: string; // SVG path for the icon
 }
-
-// Human-readable action labels
-const ACTION_LABELS: Record<string, string> = {
-  login: 'Signed in',
-  logout: 'Signed out',
-  reset_password: 'Password reset',
-  create: 'Created',
-  update: 'Updated',
-  delete: 'Deleted',
-  deploy: 'Deployed',
-  startup: 'System started',
-  shutdown: 'System stopped',
-  trigger: 'Triggered',
-  install: 'Installed',
-  uninstall: 'Uninstalled',
-  enable: 'Enabled',
-  disable: 'Disabled',
-  sync: 'Synced',
-  write: 'Updated',
-  execute: 'Executed',
-  promote: 'Promoted',
-  rollback: 'Rolled back',
-  cancel: 'Cancelled',
-  restart: 'Restarted',
-  scale: 'Scaled',
-  suspend: 'Suspended',
-  resume: 'Resumed',
-  reconcile: 'Reconciled',
-  grant: 'Granted',
-  assign: 'Assigned',
-  revoke: 'Revoked',
-  configure: 'Configured',
-  evaluate: 'Evaluated',
-  api_create: 'Created via API',
-  api_update: 'Updated via API',
-  api_delete: 'Deleted via API',
-  api_patch: 'Patched via API',
-};
-
-// Human-readable entity type labels
-const ENTITY_LABELS: Record<string, string> = {
-  user: 'User',
-  role: 'Role',
-  team: 'Team',
-  service: 'Service',
-  deployment: 'Deployment',
-  cluster: 'Cluster',
-  connection: 'Connection',
-  entity: 'Entity',
-  workflow: 'Workflow',
-  plugin: 'Plugin',
-  scorecard: 'Scorecard',
-  setting: 'Setting',
-  environment: 'Environment',
-  docker_host: 'Docker Host',
-  docker_service: 'Docker Service',
-  helm_repository: 'Helm Repository',
-  pipeline_source: 'Pipeline Source',
-  pipeline_run: 'Pipeline Run',
-  vault: 'Vault',
-  credential: 'Credential',
-  system: 'System',
-  discovery: 'Discovery',
-  marketplace: 'Marketplace',
-  gitops: 'GitOps',
-  jira: 'Jira',
-  k8s_deployment: 'K8s Deployment',
-  fluxcd_helmrelease: 'Helm Release',
-};
 
 // Specific SVG icon paths per action
 const ACTION_ICONS: Record<string, string> = {
@@ -215,51 +146,51 @@ export default function TopBar() {
     };
   }, [fetchWorkspaces]);
 
-  // Notifications — fetched from audit log
+  // Notifications — fetched from notification delivery history
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  // Map audit entries to notifications
-  const mapAuditToNotification = useCallback((entry: AuditEntry): Notification => {
-    const action = entry.action?.toLowerCase() || '';
-    const entityType = entry.entity_type?.toLowerCase() || '';
+  // Map notification log entries to bell notifications
+  const mapNotifLogToNotification = useCallback((entry: NotificationLog): Notification => {
+    const eventType = entry.event_type || '';
+    const status = entry.status || 'pending';
 
-    // Determine notification type from action
+    // Determine notification type from delivery status and event
     let type: Notification['type'] = 'info';
-    if (action.includes('delete') || action.includes('remove') || action.includes('revoke')) {
-      type = 'warning';
-    } else if (action.includes('create') || action.includes('deploy') || action.includes('install') || action.includes('enable') || action.includes('grant') || action.includes('assign') || action.includes('login')) {
-      type = 'success';
-    } else if (action.includes('fail') || action.includes('error') || action.includes('violation')) {
-      type = 'error';
-    }
+    if (status === 'failed') type = 'error';
+    else if (eventType.includes('failed') || eventType.includes('error') || eventType.includes('violation')) type = 'error';
+    else if (eventType.includes('warning') || eventType.includes('gate')) type = 'warning';
+    else if (eventType.includes('succeeded') || eventType.includes('completed') || eventType.includes('deployed')) type = 'success';
 
-    // Human-readable title
-    const actionLabel = ACTION_LABELS[action] || entry.action || 'Activity';
-    const entityLabel = ENTITY_LABELS[entityType] || entry.entity_type || '';
-    const title = entityLabel ? `${actionLabel} ${entityLabel.toLowerCase()}` : actionLabel;
+    // Human-readable title from event type
+    const parts = eventType.split('.');
+    const action = parts.pop() || 'event';
+    const service = parts.join('.');
+    const title = `${action.charAt(0).toUpperCase() + action.slice(1)} — ${service || 'system'}`;
 
-    // Description: show entity name from new_values if available, otherwise entity_id snippet
-    let description = '';
-    const vals = entry.new_values;
-    if (vals && typeof vals === 'object') {
-      const name = (vals.name || vals.email || vals.title || vals.username) as string;
-      if (name) description = name;
-    }
-    if (!description && entry.entity_id) {
-      const id = entry.entity_id;
-      description = id.length > 12 ? `${id.slice(0, 8)}...` : id;
+    // Description: rendered subject or body preview
+    let description = entry.rendered_subject || '';
+    if (!description && entry.rendered_body) {
+      description = entry.rendered_body.length > 60 ? entry.rendered_body.slice(0, 60) + '...' : entry.rendered_body;
     }
     if (!description) {
-      description = entityLabel || 'System event';
+      const payload = entry.event_payload;
+      if (payload && typeof payload === 'object') {
+        description = (payload.service_name || payload.user || payload.vm_name || entry.provider) as string || 'System event';
+      } else {
+        description = entry.provider || 'Notification';
+      }
     }
 
-    // Pick the best icon
-    const icon = ACTION_ICONS[action] || FALLBACK_ICONS[type];
+    // Icon based on event type
+    let icon = FALLBACK_ICONS[type];
+    if (eventType.includes('deploy')) icon = ACTION_ICONS['deploy'] || icon;
+    else if (eventType.includes('create')) icon = ACTION_ICONS['create'] || icon;
+    else if (eventType.includes('delete')) icon = ACTION_ICONS['delete'] || icon;
 
     // Format relative time
-    const created = new Date(entry.created_at);
+    const created = new Date(entry.sent_at);
     const now = new Date();
     const diffSec = Math.floor((now.getTime() - created.getTime()) / 1000);
     let time = 'just now';
@@ -300,21 +231,21 @@ export default function TopBar() {
     return () => { cancelled = true; window.removeEventListener('pepa:auth-changed', loadUser); };
   }, []);
 
-  // Fetch recent audit entries as notifications — deferred until dropdown opens
+  // Fetch recent notification delivery history — deferred until dropdown opens
   const [notifFetched, setNotifFetched] = useState(false);
   const fetchNotifications = useCallback(() => {
     if (notifFetched) return;
     setNotifLoading(true);
-    audit.list({ per_page: '10', page: '1' })
+    notificationsAPI.history({ per_page: '5', page: '1' })
       .then(res => {
         const items = (res.items || []).slice(0, 5);
-        setNotifications(items.map(mapAuditToNotification));
+        setNotifications(items.map(mapNotifLogToNotification));
       })
       .catch(() => {
         // Silently fail — notifications are non-critical
       })
       .finally(() => { setNotifLoading(false); setNotifFetched(true); });
-  }, [mapAuditToNotification, notifFetched]);
+  }, [mapNotifLogToNotification, notifFetched]);
 
   // API health check — deferred to avoid blocking initial paint
   useEffect(() => {
@@ -759,8 +690,7 @@ export default function TopBar() {
                 { href: '/analytics', label: 'Analytics', icon: '📊' },
                 { href: '/ai', label: 'AI Assistant', icon: '🤖' },
                 { href: '/knowledge-base', label: 'Knowledge Base', icon: '📚' },
-                { href: '/audit', label: 'Audit Log', icon: '📝', adminOnly: true, permission: 'audit' },
-                { href: '/plugin-activity', label: 'Plugin Activity', icon: '🔌', adminOnly: true, permission: 'plugin_activity' },
+                { href: '/audit', label: 'Activity Log', icon: '📝', adminOnly: true, permission: 'audit' },
                 { href: '/roles', label: 'Roles', icon: '👥', adminOnly: true, permission: 'roles' },
                 { href: '/settings', label: 'Settings', icon: <GearIcon className="w-4 h-4" />, adminOnly: true, permission: 'settings' },
               ].filter(item => !item.adminOnly || isAdmin || (item.permission && hasPermission(item.permission, 'read'))).map(item => (

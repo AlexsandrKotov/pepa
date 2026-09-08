@@ -18,6 +18,7 @@ import (
 	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/queue"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/internal/workflow"
 	"github.com/pepa/pepa/pkg/models"
 	"github.com/redis/go-redis/v9"
@@ -42,8 +43,19 @@ func main() {
 	// (AutoRegisterPlugins runs asynchronously inside Bootstrap after plugin discovery)
 	comp.StartEventBus()
 
+	// Initialize deployment service for real workflow deployments
+	deploymentSvc := service.NewDeploymentService(comp.ClusterRepo, comp.DeploymentRepo, comp.HelmRepo)
+	// Wire up deployment event recorder for timeline
+	if comp.DB != nil {
+		deploymentSvc.SetEventRecorder(func(deploymentID uuid.UUID, eventType, message string) {
+			_, _ = comp.DB.Pool.Exec(context.Background(),
+				`INSERT INTO deployment_events (deployment_id, event_type, message) VALUES ($1, $2, $3)`,
+				deploymentID, eventType, message)
+		})
+	}
+
 	// Initialize workflow engine
-	wfEngine := workflow.NewEngine(comp.WorkflowRepo, comp.EntityRepo, comp.DeploymentRepo, comp.EventBus, comp.ProviderRegistry)
+	wfEngine := workflow.NewEngine(comp.WorkflowRepo, comp.EntityRepo, comp.DeploymentRepo, deploymentSvc, comp.EventBus, comp.ProviderRegistry)
 
 	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,7 +76,7 @@ func main() {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			runWorker(ctx, workerID, comp.Redis.Client, comp.DB, comp.EventBus, wfEngine, comp.EntityRepo, comp.JobQueue, comp.AIManager)
+			runWorker(ctx, workerID, comp.Redis.Client, comp.DB, comp.EventBus, wfEngine, comp.EntityRepo, comp.JobQueue, comp.AIManager, deploymentSvc)
 		}(i)
 	}
 
@@ -88,7 +100,7 @@ func main() {
 	slog.Info("PEPA Worker stopped")
 }
 
-func runWorker(ctx context.Context, id int, client *redis.Client, db *database.DB, bus *events.Bus, wfEngine *workflow.Engine, entityRepo *repository.EntityRepository, jobQueue *queue.Queue, aiManager *ai.Manager) {
+func runWorker(ctx context.Context, id int, client *redis.Client, db *database.DB, bus *events.Bus, wfEngine *workflow.Engine, entityRepo *repository.EntityRepository, jobQueue *queue.Queue, aiManager *ai.Manager, deploymentSvc *service.DeploymentService) {
 	queueKey := "pepa:jobs"
 	slog.Info("worker started", "id", id)
 
@@ -119,7 +131,7 @@ func runWorker(ctx context.Context, id int, client *redis.Client, db *database.D
 			}
 
 			slog.Info("processing job", "id", id, "job", job.ID, "type", job.Type)
-			if err := processJob(ctx, &job, db, bus, wfEngine, entityRepo, aiManager); err != nil {
+			if err := processJob(ctx, &job, db, bus, wfEngine, entityRepo, aiManager, deploymentSvc); err != nil {
 				slog.Error("job failed", "id", id, "job", job.ID, "error", err)
 				// Re-queue with exponential backoff if retries remain
 				if job.Retries < 3 {
@@ -143,7 +155,7 @@ func runWorker(ctx context.Context, id int, client *redis.Client, db *database.D
 	}
 }
 
-func processJob(ctx context.Context, job *queue.Job, db *database.DB, bus *events.Bus, wfEngine *workflow.Engine, entityRepo *repository.EntityRepository, aiManager *ai.Manager) error {
+func processJob(ctx context.Context, job *queue.Job, db *database.DB, bus *events.Bus, wfEngine *workflow.Engine, entityRepo *repository.EntityRepository, aiManager *ai.Manager, deploymentSvc *service.DeploymentService) error {
 	switch job.Type {
 	case "entity.sync":
 		return processEntitySync(ctx, job, db, bus, entityRepo)
@@ -151,6 +163,8 @@ func processJob(ctx context.Context, job *queue.Job, db *database.DB, bus *event
 		return processWorkflowExecute(ctx, job, wfEngine)
 	case "entity.index":
 		return processEntityIndex(ctx, job, entityRepo, aiManager)
+	case "deployment.execute":
+		return processDeploymentExecute(ctx, job, deploymentSvc)
 	default:
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}
@@ -268,6 +282,62 @@ func processEntityIndex(ctx context.Context, job *queue.Job, entityRepo *reposit
 	}
 
 	slog.Info("entity indexed", "entity", entityIDStr, "dims", len(resp.Vectors[0]), "tokens", resp.TokensUsed)
+	return nil
+}
+
+func processDeploymentExecute(ctx context.Context, job *queue.Job, deploymentSvc *service.DeploymentService) error {
+	if deploymentSvc == nil {
+		return fmt.Errorf("deployment.execute: deployment service not available")
+	}
+
+	deploymentIDStr, ok := job.Payload["deployment_id"].(string)
+	if !ok || deploymentIDStr == "" {
+		return fmt.Errorf("deployment.execute: missing deployment_id in payload")
+	}
+	clusterIDStr, ok := job.Payload["cluster_id"].(string)
+	if !ok || clusterIDStr == "" {
+		return fmt.Errorf("deployment.execute: missing cluster_id in payload")
+	}
+
+	deploymentID, err := uuid.Parse(deploymentIDStr)
+	if err != nil {
+		return fmt.Errorf("deployment.execute: invalid deployment_id: %w", err)
+	}
+	clusterID, err := uuid.Parse(clusterIDStr)
+	if err != nil {
+		return fmt.Errorf("deployment.execute: invalid cluster_id: %w", err)
+	}
+
+	namespace, _ := job.Payload["namespace"].(string)
+	releaseName, _ := job.Payload["release_name"].(string)
+	replicasFloat, _ := job.Payload["replicas"].(float64)
+	replicas := int32(replicasFloat)
+	if replicas <= 0 {
+		replicas = 1
+	}
+	timeoutSeconds := 300
+	if ts, ok := job.Payload["timeout_seconds"].(float64); ok && ts > 0 {
+		timeoutSeconds = int(ts)
+	}
+
+	// Parse spec from payload
+	var specJSON json.RawMessage
+	if specRaw, ok := job.Payload["spec"]; ok {
+		specJSON, _ = json.Marshal(specRaw)
+	}
+
+	slog.Info("executing deployment", "deployment", deploymentID, "cluster", clusterID, "namespace", namespace)
+
+	result := deploymentSvc.PerformDeployment(ctx, deploymentID, clusterID, namespace, releaseName, replicas, specJSON, timeoutSeconds)
+	if !result.Success {
+		return fmt.Errorf("deployment failed: %s", result.Message)
+	}
+
+	// Publish deployment.succeeded event
+	if bus := job.Payload; bus != nil {
+		slog.Info("deployment executed successfully", "deployment", deploymentID)
+	}
+
 	return nil
 }
 

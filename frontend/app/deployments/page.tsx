@@ -88,7 +88,12 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   }, [autoCreate, loading]);
   const [creating, setCreating] = useState(false);
   const [showLogs, setShowLogs] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'pipeline'>('list');
+  const [pipelineData, setPipelineData] = useState<{ pipelines: { project: string; stages: { stage: string; status: string; image_tag: string; deployed_at: string; deployment_id: string }[] }[]; projects: string[] } | null>(null);
+  const [doraMetrics, setDoraMetrics] = useState<{ deployment_frequency: string; avg_lead_time_hours: string; change_failure_rate: string; avg_mttr_minutes: string; total_deployments: number } | null>(null);
   const [createFeedback, setCreateFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [dryRunResult, setDryRunResult] = useState<{ resources: string; manifests: string; deploy_type: string; release_name: string; namespace: string } | null>(null);
+  const [dryRunning, setDryRunning] = useState(false);
 
   useEscapeKey(() => {
     if (showLogs) setShowLogs(null);
@@ -187,6 +192,8 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
       const [d, c] = await Promise.all([deployments.list(), clusters.list()]);
       setDeployList(d.deployments || []);
       setClusterList(c.clusters || []);
+      // Load DORA metrics
+      deployments.metrics('30d').then(m => setDoraMetrics(m)).catch(() => {});
     } catch { /* ignore */ }
     setLoading(false);
   };
@@ -207,43 +214,43 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     }
   }, [deployType]);
 
+  const buildSpec = (): Record<string, unknown> => {
+    const spec: Record<string, unknown> = {};
+    const containerList = containers.filter(c => c.image);
+    if (containerList.length > 0) spec.containers = containerList;
+    if (valuesYaml.trim()) spec.values_yaml = valuesYaml;
+    spec.service = { port: servicePort, type: serviceType };
+    if (ingressEnabled) spec.ingress = { enabled: true, host: ingressHost };
+    spec.health = { livenessPath, readinessPath, port: servicePort };
+    if (deployType === 'helm' && chartUrl) {
+      spec.chart = { source_type: chartSourceType, chart_url: chartUrl, chart_name: chartName, chart_version: chartVersion || undefined };
+    }
+    return spec;
+  };
+
+  const handleDryRun = async () => {
+    setDryRunning(true);
+    setDryRunResult(null);
+    try {
+      const result = await deployments.dryRun({
+        target_cluster_id: selectedClusterId || undefined,
+        target_namespace: form.target_namespace,
+        gitlab_project_name: form.gitlab_project_name || 'pepa-release',
+        replicas,
+        spec: buildSpec(),
+        timeout_seconds: timeoutSeconds,
+      });
+      setDryRunResult(result);
+    } catch (e: unknown) {
+      setCreateFeedback({ ok: false, text: 'Dry-run failed: ' + (e instanceof Error ? e.message : 'Error') });
+    }
+    setDryRunning(false);
+  };
+
   const handleCreate = async () => {
     setCreating(true);
     try {
-      // Build spec from form data
-      const spec: Record<string, unknown> = {};
-
-      // Containers
-      const containerList = containers.filter(c => c.image);
-      if (containerList.length > 0) {
-        spec.containers = containerList;
-      }
-
-      // values.yaml
-      if (valuesYaml.trim()) {
-        spec.values_yaml = valuesYaml;
-      }
-
-      // Service
-      spec.service = { port: servicePort, type: serviceType };
-
-      // Ingress
-      if (ingressEnabled) {
-        spec.ingress = { enabled: true, host: ingressHost };
-      }
-
-      // Health checks
-      spec.health = { livenessPath, readinessPath, port: servicePort };
-
-      // Chart info for Helm deploys
-      if (deployType === 'helm' && chartUrl) {
-        spec.chart = {
-          source_type: chartSourceType,
-          chart_url: chartUrl,
-          chart_name: chartName,
-          chart_version: chartVersion || undefined,
-        };
-      }
+      const spec = buildSpec();
 
       await deployments.create({
         ...form,
@@ -310,6 +317,13 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
 
   const handleCancel = async (id: string) => {
     setActionConfirm({ type: 'cancel', id });
+  };
+
+  const handleRetry = async (id: string) => {
+    try {
+      await deployments.retry(id);
+      await refresh();
+    } catch { /* ignore */ }
   };
 
   const handleDelete = async (id: string) => {
@@ -433,7 +447,84 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
         ))}
       </div>
 
-      {/* Filters */}
+      {/* DORA Metrics */}
+      {doraMetrics && (
+        <div className="grid grid-cols-4 gap-4 page-animate-up page-delay-1">
+          {[
+            { label: 'Deploy Frequency', value: doraMetrics.deployment_frequency, color: 'text-blue-600' },
+            { label: 'Lead Time', value: `${doraMetrics.avg_lead_time_hours}h`, color: 'text-emerald-600' },
+            { label: 'Failure Rate', value: doraMetrics.change_failure_rate, color: 'text-orange-600' },
+            { label: 'MTTR', value: `${doraMetrics.avg_mttr_minutes}m`, color: 'text-violet-600' },
+          ].map(m => (
+            <div key={m.label} className="modern-stat-card">
+              <div className={`text-[18px] font-bold ${m.color}`}>{m.value}</div>
+              <div className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">{m.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* View Toggle */}
+      <div className="flex gap-2 page-animate-up page-delay-2">
+        <button
+          onClick={() => setViewMode('list')}
+          className={`text-xs px-3 py-1.5 rounded-lg border ${viewMode === 'list' ? 'bg-blue-500/10 border-blue-500/20 text-blue-500' : 'border-[var(--border)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
+        >
+          List
+        </button>
+        <button
+          onClick={() => {
+            setViewMode('pipeline');
+            deployments.pipeline().then(setPipelineData).catch(() => {});
+          }}
+          className={`text-xs px-3 py-1.5 rounded-lg border ${viewMode === 'pipeline' ? 'bg-blue-500/10 border-blue-500/20 text-blue-500' : 'border-[var(--border)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
+        >
+          Pipeline
+        </button>
+      </div>
+
+      {/* Pipeline View */}
+      {viewMode === 'pipeline' && pipelineData && (
+        <div className="space-y-4 page-animate-up">
+          {pipelineData.pipelines.map(p => (
+            <div key={p.project} className="card">
+              <div className="card-body">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-3">{p.project}</h3>
+                <div className="flex items-center gap-4">
+                  {['dev', 'staging', 'production'].map((stage, idx) => {
+                    const stageData = p.stages.find(s => s.stage === stage);
+                    return (
+                      <div key={stage} className="flex items-center gap-3">
+                        <div className={`rounded-lg border px-3 py-2 min-w-[140px] ${
+                          stageData?.status === 'deployed' ? 'border-emerald-500/20 bg-emerald-500/5' :
+                          stageData?.status === 'failed' ? 'border-red-500/20 bg-red-500/5' :
+                          'border-[var(--border)] bg-[var(--bg-secondary)]'
+                        }`}>
+                          <div className="text-[10px] text-[var(--text-tertiary)] uppercase">{stage}</div>
+                          <div className="text-xs font-medium text-[var(--text-primary)]">
+                            {stageData ? stageData.image_tag || stageData.status : '—'}
+                          </div>
+                          {stageData && (
+                            <div className="text-[10px] text-[var(--text-tertiary)]">
+                              {new Date(stageData.deployed_at).toLocaleDateString()}
+                            </div>
+                          )}
+                        </div>
+                        {idx < 2 && <span className="text-[var(--text-tertiary)]">→</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ))}
+          {pipelineData.pipelines.length === 0 && (
+            <div className="text-center py-8 text-[var(--text-tertiary)] text-sm">No deployment pipelines found</div>
+          )}
+        </div>
+      )}
+
+      {viewMode === 'list' && (<>
       <div className="flex gap-3 page-animate-up page-delay-2">
         <select
           value={statusFilter}
@@ -614,6 +705,11 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
                           Cancel
                         </button>
                       )}
+                      {d.status === 'failed' && (
+                        <button onClick={() => handleRetry(d.id)} className="text-[11px] px-2 py-1 bg-amber-500/10 text-amber-600 rounded hover:bg-amber-500/15">
+                          Retry
+                        </button>
+                      )}
                       <button onClick={() => handleDelete(d.id)} className="text-[11px] px-2 py-1 bg-red-500/5 text-red-400 rounded hover:bg-red-500/10" title="Delete deployment record">
                         Delete
                       </button>
@@ -626,6 +722,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
           </table>
         </div>
       )}
+      </>)}
 
       </>)}
 
@@ -1054,6 +1151,9 @@ resources:
                   {gateChecking ? 'Checking...' : 'Security Gate'}
                 </button>
                 <button onClick={() => switchTab('all')} className="btn btn-secondary text-[12px]">Cancel</button>
+                <button onClick={handleDryRun} disabled={dryRunning} className="btn btn-secondary text-[12px]">
+                  {dryRunning ? 'Previewing...' : 'Preview'}
+                </button>
                 <button onClick={handleCreate} disabled={creating} className="btn btn-primary text-[12px]">
                   {creating ? 'Creating...' : 'Create Deployment'}
                 </button>
@@ -1125,6 +1225,51 @@ resources:
                 View full details {'\u2197'}
               </Link>
               <button onClick={() => setShowLogs(null)} className="btn btn-secondary text-[12px]">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dry-Run Result Modal */}
+      {dryRunResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDryRunResult(null)} />
+          <div className="relative z-10 card w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="card-body">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-[15px] font-semibold text-[var(--text-primary)]">Deployment Preview (Dry-Run)</h3>
+                <button onClick={() => setDryRunResult(null)} className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">{'\u2715'}</button>
+              </div>
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-lg border border-[var(--border)] p-2">
+                    <p className="text-[10px] text-[var(--text-tertiary)] uppercase">Type</p>
+                    <p className="text-[12px] font-medium text-[var(--text-primary)]">{dryRunResult.deploy_type}</p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--border)] p-2">
+                    <p className="text-[10px] text-[var(--text-tertiary)] uppercase">Release</p>
+                    <p className="text-[12px] font-mono text-[var(--text-primary)]">{dryRunResult.release_name}</p>
+                  </div>
+                  <div className="rounded-lg border border-[var(--border)] p-2">
+                    <p className="text-[10px] text-[var(--text-tertiary)] uppercase">Namespace</p>
+                    <p className="text-[12px] font-mono text-[var(--text-primary)]">{dryRunResult.namespace}</p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[11px] text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Resources</p>
+                  <pre className="font-mono text-[12px] bg-[var(--bg)] rounded-lg p-4 max-h-[300px] overflow-y-auto whitespace-pre-wrap text-[var(--text-primary)]">{dryRunResult.resources}</pre>
+                </div>
+                {dryRunResult.manifests && (
+                  <div>
+                    <p className="text-[11px] text-[var(--text-tertiary)] uppercase tracking-wider mb-2">Rendered Manifests</p>
+                    <pre className="font-mono text-[11px] bg-[#1a1a2e] text-[#e0e0e0] rounded-lg p-4 max-h-[300px] overflow-y-auto whitespace-pre-wrap">{dryRunResult.manifests}</pre>
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={() => setDryRunResult(null)} className="btn btn-secondary text-[12px]">Close</button>
+                <button onClick={() => { setDryRunResult(null); handleCreate(); }} className="btn btn-primary text-[12px]">Deploy Now</button>
+              </div>
             </div>
           </div>
         </div>

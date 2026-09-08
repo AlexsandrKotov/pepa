@@ -4,9 +4,12 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -309,6 +312,187 @@ func (c *Client) GetClusterInfo(ctx context.Context) (nodeCount int, k8sVersion 
 	nodeCount = len(nodes.Items)
 
 	return nodeCount, k8sVersion, nil
+}
+
+// WaitForReady polls the Kubernetes Deployment identified by namespace and releaseName
+// until all desired replicas are Ready, or the timeout is reached.
+// The check interval is 5 seconds.
+func (c *Client) WaitForReady(ctx context.Context, namespace, releaseName string, expectedReplicas int32, timeoutSeconds int) error {
+	if expectedReplicas <= 0 {
+		expectedReplicas = 1
+	}
+
+	// If timeoutSeconds is 0, rely on the context deadline (set by the caller).
+	// Otherwise, create a separate deadline for the health check.
+	if timeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		defer cancel()
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	slog.Info("WaitForReady: starting health check", "namespace", namespace, "release", releaseName, "expected_replicas", expectedReplicas, "timeout_s", timeoutSeconds)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("health check timed out waiting for %s/%s to reach %d ready replicas: %w", namespace, releaseName, expectedReplicas, ctx.Err())
+		case <-ticker.C:
+
+			dep, err := c.clientset.AppsV1().Deployments(namespace).Get(ctx, releaseName, metav1.GetOptions{})
+			if err != nil {
+				slog.Info("WaitForReady: failed to get deployment, retrying", "error", err)
+				continue
+			}
+
+			readyReplicas := dep.Status.ReadyReplicas
+			updatedReplicas := dep.Status.UpdatedReplicas
+			unavailableReplicas := dep.Status.UnavailableReplicas
+
+			slog.Info("WaitForReady: checking", "ready", readyReplicas, "updated", updatedReplicas, "unavailable", unavailableReplicas, "expected", expectedReplicas)
+
+			// Check if all replicas are ready and match the desired count
+			if readyReplicas >= expectedReplicas && unavailableReplicas == 0 {
+				// Also verify all pods are Running and Ready
+				allPodsReady := c.checkPodsReady(ctx, namespace, releaseName)
+				if allPodsReady {
+					slog.Info("WaitForReady: deployment is healthy", "namespace", namespace, "release", releaseName, "ready_replicas", readyReplicas)
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// checkPodsReady verifies that all pods matching the deployment's label selector
+// are in Running phase and have passed readiness probes.
+func (c *Client) checkPodsReady(ctx context.Context, namespace, releaseName string) bool {
+	labelSelector := fmt.Sprintf("app.kubernetes.io/name=%s", releaseName)
+	pods, err := c.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		slog.Info("checkPodsReady: failed to list pods", "error", err)
+		return false
+	}
+
+	if len(pods.Items) == 0 {
+		return false
+	}
+
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != corev1.PodRunning {
+			return false
+		}
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status != corev1.ConditionTrue {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// HelmRollback rolls back a Helm release to a previous revision.
+func (c *Client) HelmRollback(ctx context.Context, namespace, releaseName string, revision int) error {
+	// Write kubeconfig to temp file
+	kubeconfigData := c.kubeconfig
+	if c.serverOverride != "" {
+		kubeconfigData = overrideKubeconfigServer(kubeconfigData, c.serverOverride)
+	}
+	kubeconfigFile, err := os.CreateTemp("", "pepa-kubeconfig-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create kubeconfig temp file: %w", err)
+	}
+	defer func() { _ = os.Remove(kubeconfigFile.Name()) }()
+	if _, err := kubeconfigFile.WriteString(kubeconfigData); err != nil {
+		_ = kubeconfigFile.Close()
+		return fmt.Errorf("write kubeconfig: %w", err)
+	}
+	_ = kubeconfigFile.Close()
+
+	args := []string{"rollback", releaseName, fmt.Sprintf("%d", revision),
+		"--namespace", namespace,
+		"--kubeconfig", kubeconfigFile.Name(),
+		"--wait", "--timeout", "300s",
+	}
+
+	if err := c.runHelm(ctx, args...); err != nil {
+		return fmt.Errorf("helm rollback: %w", err)
+	}
+
+	slog.Info("Helm rollback succeeded", "release", releaseName, "namespace", namespace, "revision", revision)
+	return nil
+}
+
+// UndoRollout undoes a Kubernetes Deployment rollout by reverting to the previous ReplicaSet's template.
+// This is equivalent to `kubectl rollout undo`.
+func (c *Client) UndoRollout(ctx context.Context, namespace, deploymentName string) error {
+	// Find the previous ReplicaSet to rollback to
+	rsList, err := c.clientset.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=%s", deploymentName),
+	})
+	if err != nil {
+		return fmt.Errorf("list replicasets for undo: %w", err)
+	}
+
+	if len(rsList.Items) < 2 {
+		// Fallback: trigger a rollout restart by patching the annotation
+		patch := fmt.Sprintf(`{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"%s"}}}}}`,
+			time.Now().UTC().Format(time.RFC3339))
+		_, err = c.clientset.AppsV1().Deployments(namespace).Patch(ctx, deploymentName,
+			"application/strategic-merge-patch+json", []byte(patch), metav1.PatchOptions{})
+		if err != nil {
+			return fmt.Errorf("rollout restart: %w", err)
+		}
+		slog.Info("Rollout restart triggered (no previous revision)", "namespace", namespace, "deployment", deploymentName)
+		return nil
+	}
+
+	// Sort ReplicaSets by creation timestamp to find the previous one
+	type rsWithTime struct {
+		rs   appsv1.ReplicaSet
+		time time.Time
+	}
+	var sorted []rsWithTime
+	for _, rs := range rsList.Items {
+		sorted = append(sorted, rsWithTime{rs: rs, time: rs.CreationTimestamp.Time})
+	}
+	// Sort by creation time descending (newest first)
+	for i := 0; i < len(sorted)-1; i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			if sorted[j].time.After(sorted[i].time) {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
+	// The second entry is the previous revision
+	prevRS := sorted[1].rs
+
+	// Get current deployment
+	dep, err := c.clientset.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get deployment for undo: %w", err)
+	}
+
+	// Update the deployment's pod template to match the previous ReplicaSet
+	dep.Spec.Template = prevRS.Spec.Template
+	// Ensure the managed-by label is preserved
+	if dep.Spec.Template.Labels == nil {
+		dep.Spec.Template.Labels = make(map[string]string)
+	}
+	dep.Spec.Template.Labels["app.kubernetes.io/managed-by"] = "pepa"
+
+	_, err = c.clientset.AppsV1().Deployments(namespace).Update(ctx, dep, metav1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("update deployment to previous revision: %w", err)
+	}
+
+	slog.Info("Rollout undo succeeded", "namespace", namespace, "deployment", deploymentName, "previous_rs", prevRS.Name)
+	return nil
 }
 
 // Helper functions

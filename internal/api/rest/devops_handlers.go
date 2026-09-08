@@ -51,6 +51,7 @@ func registerDevOpsRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 		batch.POST("", h.CreateBatchOperation)
 		batch.GET("/:id", h.GetBatchOperation)
 		batch.POST("/:id/cancel", h.CancelBatchOperation)
+		batch.POST("/:id/execute", h.ExecuteBatchOperation)
 	}
 
 	// ── Compliance Policies ─────────────────────────────────────
@@ -381,6 +382,149 @@ func (h *DevOpsHandlers) CancelBatchOperation(c *gin.Context) {
 
 	logAudit(h.deps, c, "cancel", "batch_operation", id.String(), nil, nil)
 	c.JSON(http.StatusOK, gin.H{"message": "Batch operation cancelled"})
+}
+
+// ExecuteBatchOperation starts executing a pending batch operation.
+// It processes each service in the batch sequentially, creating deployment records.
+func (h *DevOpsHandlers) ExecuteBatchOperation(c *gin.Context) {
+	tenantID := auth.GetTenantID(c)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid operation ID"})
+		return
+	}
+
+	op, err := h.repo.GetBatchOperation(c.Request.Context(), id, tenantID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	if op.Status != "pending" {
+		c.JSON(http.StatusConflict, gin.H{"error": "batch operation is not in pending status: " + op.Status})
+		return
+	}
+
+	// Mark as running
+	now := time.Now()
+	op.Status = "running"
+	op.StartedAt = &now
+	if err := h.repo.UpdateBatchOperation(c.Request.Context(), op); err != nil {
+		respondInternalError(c, err)
+		return
+	}
+
+	// Execute batch in background
+	go func() {
+		results := make(map[string]interface{})
+		completed := 0
+		failed := 0
+
+		for _, svcID := range op.ServiceIDs {
+			// Check if cancelled
+			current, err := h.repo.GetBatchOperation(context.Background(), id, tenantID)
+			if err != nil || current.Status == "cancelled" {
+				break
+			}
+
+			if h.deps.Repos.Deployment == nil {
+				failed++
+				results[svcID.String()] = map[string]string{"status": "failed", "error": "deployment repository not available"}
+				continue
+			}
+
+			// Find the latest deployment for this service to use as a template
+			deployments, listErr := h.deps.Repos.Deployment.List(context.Background(), tenantID)
+			if listErr != nil {
+				failed++
+				results[svcID.String()] = map[string]string{"status": "failed", "error": listErr.Error()}
+				continue
+			}
+
+			var template *repository.Deployment
+			for i := range deployments {
+				d := &deployments[i]
+				if d.GitlabProjectName == svcID.String() || d.ID == svcID {
+					template = d
+					break
+				}
+			}
+			if template == nil {
+				failed++
+				results[svcID.String()] = map[string]string{"status": "skipped", "error": "no existing deployment found for service"}
+				continue
+			}
+
+			// Create a new deployment record copying config from the template
+			deploy := &repository.Deployment{
+				TenantID:          tenantID,
+				GitlabProjectName: template.GitlabProjectName,
+				ImageTag:          template.ImageTag,
+				ImageRepository:   template.ImageRepository,
+				TargetClusterID:   template.TargetClusterID,
+				TargetNamespace:   template.TargetNamespace,
+				DeployType:        template.DeployType,
+				Replicas:          template.Replicas,
+				Strategy:          template.Strategy,
+				Spec:              template.Spec,
+				Status:            "pending",
+				CreatedBy:         "batch-operation",
+				TimeoutSeconds:    template.TimeoutSeconds,
+				TeamName:          op.Name,
+				Stage:             "batch",
+			}
+			if err := h.deps.Repos.Deployment.Create(context.Background(), deploy); err != nil {
+				failed++
+				results[svcID.String()] = map[string]string{"status": "failed", "error": err.Error()}
+				continue
+			}
+
+			// Enqueue the deployment for execution
+			if deploy.TargetClusterID != nil {
+				if h.deps.JobQueue != nil {
+					var specMap interface{}
+					_ = json.Unmarshal(deploy.Spec, &specMap)
+					err := h.deps.JobQueue.Enqueue("deployment.execute", deploy.TenantID.String(), map[string]interface{}{
+						"deployment_id":   deploy.ID.String(),
+						"cluster_id":      deploy.TargetClusterID.String(),
+						"namespace":       deploy.TargetNamespace,
+						"release_name":    deploy.GitlabProjectName,
+						"replicas":        deploy.Replicas,
+						"timeout_seconds": deploy.TimeoutSeconds,
+						"spec":            specMap,
+					})
+					if err != nil {
+						slog.Info("Failed to enqueue batch deployment", "id", deploy.ID, "error", err)
+						go performDeployment(deploy.ID, *deploy.TargetClusterID, deploy.TargetNamespace,
+							deploy.GitlabProjectName, safeInt32(deploy.Replicas), deploy.Spec, deploy.TimeoutSeconds, h.deps)
+					}
+				} else {
+					go performDeployment(deploy.ID, *deploy.TargetClusterID, deploy.TargetNamespace,
+						deploy.GitlabProjectName, safeInt32(deploy.Replicas), deploy.Spec, deploy.TimeoutSeconds, h.deps)
+				}
+			}
+
+			results[svcID.String()] = map[string]string{"status": "deploying", "deployment_id": deploy.ID.String()}
+			completed++
+		}
+
+		// Update batch operation with results
+		finished := time.Now()
+		op.CompletedCount = completed
+		op.FailedCount = failed
+		op.CompletedAt = &finished
+		if failed > 0 {
+			op.Status = "completed" // partial completion
+		} else {
+			op.Status = "completed"
+		}
+		resultsJSON, _ := json.Marshal(results)
+		op.Results = resultsJSON
+		_ = h.repo.UpdateBatchOperation(context.Background(), op)
+	}()
+
+	logAudit(h.deps, c, "execute", "batch_operation", id.String(), nil, nil)
+	c.JSON(http.StatusAccepted, gin.H{"message": "Batch operation started", "operation": op})
 }
 
 // ============================================================

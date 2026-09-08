@@ -108,9 +108,11 @@ func formatTelegram(body string, formatConfig map[string]any, connConfig map[str
 			parseMode = s
 		}
 	}
+	// Auto-convert plain text to rich HTML for Telegram
+	htmlBody := plainTextToTelegramHTML(body)
 	params := map[string]interface{}{
-		"text":        body,
-		"parse_mode":  parseMode,
+		"text":       htmlBody,
+		"parse_mode": parseMode,
 	}
 	// Optional chat_id override
 	if cid, ok := formatConfig["chat_id"]; ok {
@@ -118,6 +120,179 @@ func formatTelegram(body string, formatConfig map[string]any, connConfig map[str
 	}
 	data, err := json.Marshal(params)
 	return "send_message", data, err
+}
+
+// plainTextToTelegramHTML converts a plain text notification template into
+// beautifully formatted HTML for Telegram. It detects headers, emoji, status
+// indicators, key:value pairs, separator lines, and URLs, then wraps them
+// in styled HTML for a rich reading experience.
+func plainTextToTelegramHTML(text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return text
+	}
+
+	var result strings.Builder
+	isFirst := true
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		// Separator lines (━━━━, ────, ----)
+		if isSeparatorLine(trimmed) {
+			continue // skip visual separators, we use Telegram's own structure
+		}
+
+		// Header detection: first non-empty line or lines with only emoji+text
+		if isFirst {
+			result.WriteString("<b>")
+			result.WriteString(escapeHTML(trimmed))
+			result.WriteString("</b>")
+			isFirst = false
+		} else if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+			// URL line — clickable link
+			result.WriteString("🔗 <a href=\"")
+			result.WriteString(escapeHTML(trimmed))
+			result.WriteString("\">Open Link</a>")
+		} else if isStatusLine(trimmed) {
+			// Lines like "🔴 Critical: 5" or "Status: success" — bold the label
+			result.WriteString(formatStatusLine(trimmed))
+		} else if isKeyValueLine(trimmed) {
+			// Key: Value line — bold the key, keep emoji in value
+			result.WriteString(formatKeyValueLine(trimmed))
+		} else if isSectionHeader(trimmed) {
+			// Lines like "── Details ─" or "── Links ─"
+			result.WriteString("\n<b>")
+			result.WriteString(escapeHTML(trimmed))
+			result.WriteString("</b>")
+		} else {
+			result.WriteString(escapeHTML(trimmed))
+		}
+
+		result.WriteString("\n")
+	}
+
+	// Add subtle footer
+	result.WriteString("\n<i>🤖 PEPA Platform</i>")
+
+	return result.String()
+}
+
+// isSeparatorLine checks if a line is a visual separator (━━━, ───, ---, ===).
+func isSeparatorLine(s string) bool {
+	cleaned := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s, "━", ""), "─", ""), "-", "")
+	cleaned = strings.ReplaceAll(cleaned, "=", "")
+	return len(strings.TrimSpace(cleaned)) == 0 && len(s) > 2
+}
+
+// isStatusLine checks if a line starts with a colored circle emoji or status indicator.
+func isStatusLine(s string) bool {
+	statusPrefixes := []string{"🔴", "🟠", "🟡", "🟢", "✅", "❌", "⚠️", "🚨", "🚫", "⏪", "🚀"}
+	for _, prefix := range statusPrefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	// Also match "Status: ..." pattern
+	if strings.HasPrefix(strings.ToLower(s), "status:") {
+		return true
+	}
+	return false
+}
+
+// formatStatusLine formats a status line with bold emoji prefix.
+func formatStatusLine(s string) string {
+	// Find the emoji at the start and bold the whole line
+	return "<b>" + escapeHTML(s) + "</b>"
+}
+
+// isKeyValueLine checks if a line contains a "Key: Value" pattern (with optional emoji prefix).
+func isKeyValueLine(s string) bool {
+	// Strip leading emoji first
+	stripped := stripLeadingEmoji(s)
+	return strings.Contains(stripped, ": ") && !strings.HasPrefix(strings.TrimSpace(stripped), "http")
+}
+
+// formatKeyValueLine bolds the key part and keeps the value normal.
+func formatKeyValueLine(s string) string {
+	// Handle emoji prefix: "📦 Service: my-app" → "📦 <b>Service:</b> my-app"
+	emoji, rest := splitLeadingEmoji(s)
+	if strings.Contains(rest, ": ") {
+		parts := strings.SplitN(rest, ": ", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			result := emoji + "<b>" + escapeHTML(key) + ":</b> " + escapeHTML(val)
+			// Colorize status values
+			if strings.ToLower(key) == "status" {
+				result = emoji + "<b>" + escapeHTML(key) + ":</b> " + colorizeStatusValue(val)
+			}
+			return result
+		}
+	}
+	return escapeHTML(s)
+}
+
+// isSectionHeader detects lines like "── Details ──────" or "━━ SECTION ━━".
+func isSectionHeader(s string) bool {
+	return (strings.Contains(s, "──") || strings.Contains(s, "━━")) && len(s) > 4
+}
+
+// colorizeStatusValue wraps known status words in colored indicators.
+func colorizeStatusValue(val string) string {
+	lower := strings.ToLower(val)
+	switch {
+	case lower == "success" || lower == "delivered" || lower == "passed" || lower == "healthy":
+		return "✅ " + escapeHTML(val)
+	case lower == "failed" || lower == "error" || lower == "critical":
+		return "❌ " + escapeHTML(val)
+	case lower == "pending" || lower == "running" || lower == "in_progress":
+		return "⏳ " + escapeHTML(val)
+	case lower == "cancelled" || lower == "canceled":
+		return "🚫 " + escapeHTML(val)
+	default:
+		return escapeHTML(val)
+	}
+}
+
+// stripLeadingEmoji removes the first emoji character(s) from a string.
+func stripLeadingEmoji(s string) string {
+	for i, r := range s {
+		if r > 0x1F000 || (r >= 0x2600 && r <= 0x27BF) {
+			// This is likely an emoji, continue to find where emoji sequence ends
+			continue
+		}
+		if i > 0 {
+			return strings.TrimSpace(s[i:])
+		}
+		return s
+	}
+	return s
+}
+
+// splitLeadingEmoji separates leading emoji from the rest of the string.
+func splitLeadingEmoji(s string) (emoji string, rest string) {
+	for i, r := range s {
+		if r > 0x1F000 || (r >= 0x2600 && r <= 0x27BF) || r == 0xFE0F {
+			continue // emoji or variation selector
+		}
+		if i > 0 {
+			return s[:i], strings.TrimSpace(s[i:])
+		}
+		return "", s
+	}
+	return s, ""
+}
+
+// escapeHTML escapes HTML special characters for Telegram HTML mode.
+func escapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 func formatTeams(body string, payload map[string]interface{}, formatConfig map[string]any, connConfig map[string]any) (string, []byte, error) {
@@ -265,6 +440,265 @@ func DefaultTemplates() map[string]string {
 		"scorecard.created": "📋 Scorecard created: {{ scorecard_name }}",
 		"scorecard.updated": "📋 Scorecard updated: {{ scorecard_name }}",
 		"blueprint.created": "📐 Blueprint created: {{ blueprint_name }}",
+	}
+}
+
+// TemplatePreset represents a pre-designed notification template that users
+// can select and customize.
+type TemplatePreset struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Icon        string   `json:"icon"`
+	Category    string   `json:"category"`
+	EventTypes  []string `json:"event_types"`
+	Body        string   `json:"body"`
+	Subject     string   `json:"subject,omitempty"`
+}
+
+// TemplatePresets returns a collection of cleanly designed notification
+// templates that users can select and customize for their needs.
+// Emojis are used sparingly — only on headers and critical status lines.
+func TemplatePresets() []TemplatePreset {
+	return []TemplatePreset{
+		// ── Deployment presets ──────────────────────────────────
+		{
+			ID:          "deploy-success",
+			Name:        "Deployment Success",
+			Description: "Clean success alert with service details",
+			Icon:        "✅",
+			Category:    "Deployments",
+			EventTypes:  []string{"deployment.succeeded"},
+			Subject:     "Deploy: {{ service_name }} → {{ environment }}",
+			Body: `✅ Deployment Succeeded
+
+Service: {{ service_name }}
+Environment: {{ environment }}
+Image: {{ image_tag }}
+Duration: {{ duration }}
+Triggered by: {{ user }}
+{{ timestamp }}`,
+		},
+		{
+			ID:          "deploy-fail",
+			Name:        "Deployment Failure",
+			Description: "Critical failure alert with error details",
+			Icon:        "❌",
+			Category:    "Deployments",
+			EventTypes:  []string{"deployment.failed"},
+			Subject:     "Deploy FAILED: {{ service_name }}",
+			Body: `❌ Deployment FAILED
+
+Service: {{ service_name }}
+Environment: {{ environment }}
+Stage: {{ stage }}
+Error: {{ error }}
+User: {{ user }}
+{{ timestamp }}
+
+Details: {{ url }}`,
+		},
+		{
+			ID:          "deploy-all",
+			Name:        "All Deployment Events",
+			Description: "Universal template for any deployment event",
+			Icon:        "🚀",
+			Category:    "Deployments",
+			EventTypes:  []string{"deployment.created", "deployment.succeeded", "deployment.failed", "deployment.promoted", "deployment.rolled_back", "deployment.cancelled"},
+			Subject:     "Deploy [{{ status }}]: {{ service_name }}",
+			Body: `Deployment Event
+
+Event: {{ event_type }}
+Service: {{ service_name }}
+Environment: {{ environment }}
+Status: {{ status }}
+User: {{ user }}
+Duration: {{ duration }}
+{{ timestamp }}
+
+Details: {{ url }}`,
+		},
+		// ── Pipeline presets ────────────────────────────────────
+		{
+			ID:          "pipeline-complete",
+			Name:        "Pipeline Complete",
+			Description: "Pipeline run summary with steps breakdown",
+			Icon:        "🔧",
+			Category:    "Pipelines",
+			EventTypes:  []string{"pipeline_run.completed"},
+			Subject:     "Pipeline: {{ pipeline_name }} — {{ status }}",
+			Body: `Pipeline Completed
+
+Pipeline: {{ pipeline_name }}
+Status: {{ status }}
+Branch: {{ branch }}
+Source: {{ source_name }}
+Commit: {{ commit_sha }}
+Duration: {{ duration }}
+Steps: {{ steps_completed }}/{{ steps_total }}
+{{ timestamp }}`,
+		},
+		{
+			ID:          "pipeline-fail",
+			Name:        "Pipeline Failure",
+			Description: "Pipeline failure with debugging info",
+			Icon:        "🔴",
+			Category:    "Pipelines",
+			EventTypes:  []string{"pipeline_run.completed"},
+			Subject:     "Pipeline FAILED: {{ pipeline_name }}",
+			Body: `❌ Pipeline FAILED
+
+Pipeline: {{ pipeline_name }}
+Branch: {{ branch }}
+Source: {{ source_name }}
+Commit: {{ commit_sha }}
+Error: {{ error }}
+Steps: {{ steps_completed }}/{{ steps_total }}
+{{ timestamp }}
+
+Details: {{ url }}`,
+		},
+		// ── Security presets ────────────────────────────────────
+		{
+			ID:          "scan-report",
+			Name:        "Security Scan Report",
+			Description: "Vulnerability summary with quality gate",
+			Icon:        "🛡️",
+			Category:    "Security",
+			EventTypes:  []string{"scan.completed"},
+			Subject:     "Scan: {{ target_name }} — {{ quality_gate }}",
+			Body: `🛡️ Security Scan Report
+
+Target: {{ target_name }}
+Scanner: {{ scanner_type }}
+Quality Gate: {{ quality_gate }}
+
+Critical: {{ critical }} | High: {{ high }} | Medium: {{ medium }} | Low: {{ low }}
+
+Duration: {{ duration }}
+{{ timestamp }}`,
+		},
+		{
+			ID:          "critical-finding",
+			Name:        "Critical Vulnerability",
+			Description: "Urgent alert for critical findings",
+			Icon:        "🚨",
+			Category:    "Security",
+			EventTypes:  []string{"finding.critical"},
+			Subject:     "CRITICAL: {{ finding_title }}",
+			Body: `🚨 CRITICAL VULNERABILITY
+
+Title: {{ finding_title }}
+Resource: {{ resource_name }}
+Severity: {{ severity }}
+Identifier: {{ identifier }}
+{{ timestamp }}
+
+Immediate action required!`,
+		},
+		// ── Workflow presets ────────────────────────────────────
+		{
+			ID:          "workflow-complete",
+			Name:        "Workflow Complete",
+			Description: "Workflow execution summary",
+			Icon:        "⚡",
+			Category:    "Workflows",
+			EventTypes:  []string{"workflow.completed"},
+			Subject:     "Workflow: {{ workflow_name }} completed",
+			Body: `✅ Workflow Completed
+
+Workflow: {{ workflow_name }}
+Status: {{ status }}
+Duration: {{ duration }}
+Steps: {{ steps_completed }}/{{ steps_total }}
+{{ timestamp }}`,
+		},
+		{
+			ID:          "workflow-fail",
+			Name:        "Workflow Failure",
+			Description: "Workflow failure with error details",
+			Icon:        "💥",
+			Category:    "Workflows",
+			EventTypes:  []string{"workflow.failed"},
+			Subject:     "Workflow FAILED: {{ workflow_name }}",
+			Body: `❌ Workflow FAILED
+
+Workflow: {{ workflow_name }}
+Error: {{ error }}
+Failed step: {{ failed_step }}
+{{ timestamp }}`,
+		},
+		// ── Service presets ─────────────────────────────────────
+		{
+			ID:          "service-lifecycle",
+			Name:        "Service Lifecycle",
+			Description: "Track all service create/update/delete events",
+			Icon:        "📦",
+			Category:    "Services",
+			EventTypes:  []string{"service.created", "service.updated", "service.deleted"},
+			Subject:     "Service [{{ event_type }}]: {{ service_name }}",
+			Body: `Service Event
+
+Event: {{ event_type }}
+Service: {{ service_name }}
+Type: {{ service_type }}
+Owner: {{ owner }}
+{{ timestamp }}`,
+		},
+		// ── Infrastructure presets ──────────────────────────────
+		{
+			ID:          "vm-lifecycle",
+			Name:        "VM Lifecycle",
+			Description: "Virtual machine create/delete/action events",
+			Icon:        "🖥️",
+			Category:    "Infrastructure",
+			EventTypes:  []string{"vm.created", "vm.deleted", "vm.action"},
+			Subject:     "VM [{{ event_type }}]: {{ vm_name }}",
+			Body: `VM Event
+
+Event: {{ event_type }}
+VM: {{ vm_name }}
+Provider: {{ provider }}
+Status: {{ status }}
+IP: {{ ip_address }}
+{{ timestamp }}`,
+		},
+		// ── Compact preset ──────────────────────────────────────
+		{
+			ID:          "compact-universal",
+			Name:        "Compact Universal",
+			Description: "Short one-liner for high-volume events",
+			Icon:        "📎",
+			Category:    "General",
+			EventTypes:  []string{"deployment.succeeded", "deployment.failed", "pipeline_run.completed", "scan.completed", "workflow.completed"},
+			Subject:     "PEPA: {{ event_type }}",
+			Body:        "{{ event_type }} | {{ service_name }}{{ pipeline_name }} | {{ status }} | {{ duration }} | {{ timestamp }}",
+		},
+		// ── Detailed preset ─────────────────────────────────────
+		{
+			ID:          "detailed-universal",
+			Name:        "Detailed Universal",
+			Description: "Full details with all available information",
+			Icon:        "📄",
+			Category:    "General",
+			EventTypes:  []string{"deployment.succeeded", "deployment.failed", "pipeline_run.completed", "scan.completed", "workflow.completed"},
+			Subject:     "PEPA: {{ event_type }}",
+			Body: `PEPA Notification
+
+Event: {{ event_type }}
+Status: {{ status }}
+Time: {{ timestamp }}
+
+Service: {{ service_name }}
+Environment: {{ environment }}
+User: {{ user }}
+Duration: {{ duration }}
+Image: {{ image_tag }}
+Branch: {{ branch }}
+Commit: {{ commit_sha }}
+
+{{ url }}`,
+		},
 	}
 }
 

@@ -50,12 +50,19 @@ func registerAuditRoutes(r *gin.RouterGroup, deps Dependencies) {
 	{
 		audit.GET("", listAuditLogs(deps))
 		audit.GET("/stats", auditStats(deps))
+		// Unified activity endpoints — plugin actions and SSH commands
+		// are served alongside audit entries so the Audit Log page can
+		// present all activity in one place.
+		audit.GET("/plugin-actions", listPluginActions(deps))
+		audit.GET("/ssh-commands", listSSHCommands(deps))
 	}
 	// Alias: /audit-logs → /audit (frontend compatibility)
 	auditLogs := r.Group("/audit-logs")
 	{
 		auditLogs.GET("", listAuditLogs(deps))
 		auditLogs.GET("/stats", auditStats(deps))
+		auditLogs.GET("/plugin-actions", listPluginActions(deps))
+		auditLogs.GET("/ssh-commands", listSSHCommands(deps))
 	}
 }
 

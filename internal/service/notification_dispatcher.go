@@ -82,11 +82,17 @@ func (d *NotificationDispatcher) processRule(rule repository.NotificationRule, e
 
 	tenantID, _ := uuid.Parse(event.TenantID)
 
+	if d.connRepo == nil {
+		slog.Error("notification dispatcher: connection repository not available")
+		d.logDelivery(tenantID, &rule, event, "", "", "failed", "", "connection repository not available")
+		return
+	}
+
 	// Load the connection with decrypted credentials
 	conn, err := d.connRepo.GetDecrypted(ctx, rule.ConnectionID, tenantID)
 	if err != nil {
 		slog.Error("notification dispatcher: failed to load connection", "error", err,
-			"connection_id", rule.ConnectionID, "rule_id", rule.ID)
+			"connection_id", rule.ConnectionID, "rule_id", rule.ID, "tenant_id", tenantID)
 		d.logDelivery(tenantID, &rule, event, "", "", "failed", "", fmt.Sprintf("failed to load connection: %v", err))
 		return
 	}
@@ -188,12 +194,15 @@ func (d *NotificationDispatcher) logDelivery(
 // SendTest sends a test notification through a specific rule's connection.
 // Used by the API endpoint POST /notifications/rules/:id/test.
 func (d *NotificationDispatcher) SendTest(ctx context.Context, rule *repository.NotificationRule) (string, error) {
+	if d.connRepo == nil {
+		return "", fmt.Errorf("connection repository not available")
+	}
 	tenantID := rule.TenantID
 
 	// Load the connection with decrypted credentials
 	conn, err := d.connRepo.GetDecrypted(ctx, rule.ConnectionID, tenantID)
 	if err != nil {
-		return "", fmt.Errorf("failed to load connection: %w", err)
+		return "", fmt.Errorf("failed to load connection %s for tenant %s: %w", rule.ConnectionID, tenantID, err)
 	}
 
 	provider, _ := conn.Config["provider"].(string)
@@ -265,6 +274,134 @@ func PreviewTemplate(bodyTemplate string, eventType string) string {
 		"url":            "/deployments/example-uuid",
 	}
 	return RenderTemplate(bodyTemplate, BuildTemplateVars(eventType, samplePayload))
+}
+
+// ProviderPreview represents how a notification looks for a specific provider.
+type ProviderPreview struct {
+	Provider string `json:"provider"`
+	Icon     string `json:"icon"`
+	Rendered string `json:"rendered"`
+	Format   string `json:"format"` // "html", "json", "text"
+}
+
+// PreviewAllProviders renders a template for every supported provider so the
+// user can see how the notification will look in Telegram, Slack, Email, etc.
+func PreviewAllProviders(bodyTemplate string, eventType string) []ProviderPreview {
+	samplePayload := map[string]interface{}{
+		"event_type":      eventType,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		"service_name":    "my-service",
+		"environment":     "production",
+		"stage":           "prod",
+		"status":          "success",
+		"user":            "admin",
+		"duration":        "2m30s",
+		"image_tag":       "v1.2.3",
+		"pipeline_name":   "Build & Deploy",
+		"source_name":     "github/my-repo",
+		"branch":          "main",
+		"commit_sha":      "abc123def",
+		"workflow_name":   "Deploy Pipeline",
+		"steps_completed": 4,
+		"steps_total":     4,
+		"error":           "connection timeout",
+		"url":             "https://pepa.example.com/deployments/abc-123",
+		"finding_title":   "CVE-2026-1234 Remote Code Execution",
+		"resource_name":   "my-service",
+		"severity":        "CRITICAL",
+		"identifier":      "CVE-2026-1234",
+		"scanner_type":    "Trivy",
+		"target_name":     "my-service:latest",
+		"quality_gate":    "FAILED",
+		"critical":        2,
+		"high":            5,
+		"medium":          12,
+		"low":             3,
+		"from_stage":      "staging",
+		"to_stage":        "production",
+		"vm_name":         "web-server-01",
+		"provider_name":   "proxmox",
+		"ip_address":      "10.0.1.50",
+		"action":          "start",
+		"entity_name":     "payment-service",
+		"entity_type":     "service",
+		"connection_name": "pepa_chat",
+		"connection_type": "telegram",
+		"username":        "john.doe",
+		"role":            "developer",
+		"scorecard_name":  "Production Readiness",
+		"blueprint_name":  "Go Microservice",
+		"owner":           "team-platform",
+		"service_type":    "backend",
+		"failed_step":     "deploy-to-prod",
+		"step_name":       "run-tests",
+		"step_duration":   "45s",
+	}
+
+	vars := BuildTemplateVars(eventType, samplePayload)
+	rendered := RenderTemplate(bodyTemplate, vars)
+
+	emptyConfig := map[string]any{}
+	previews := make([]ProviderPreview, 0, 5)
+
+	// Telegram — rich HTML
+	tgHTML := plainTextToTelegramHTML(rendered)
+	previews = append(previews, ProviderPreview{
+		Provider: "Telegram",
+		Icon:     "📱",
+		Rendered: tgHTML,
+		Format:   "html",
+	})
+
+	// Slack — plain text (same as rendered)
+	previews = append(previews, ProviderPreview{
+		Provider: "Slack",
+		Icon:     "💬",
+		Rendered: rendered,
+		Format:   "text",
+	})
+
+	// Email — wrapped in HTML email template
+	emailHTML := buildHTMLEmail(rendered)
+	previews = append(previews, ProviderPreview{
+		Provider: "Email",
+		Icon:     "📧",
+		Rendered: emailHTML,
+		Format:   "html",
+	})
+
+	// Teams — MessageCard JSON
+	_, teamsParams, _ := formatTeams(rendered, samplePayload, emptyConfig, emptyConfig)
+	previews = append(previews, ProviderPreview{
+		Provider: "Teams",
+		Icon:     "👥",
+		Rendered: prettyJSON(teamsParams),
+		Format:   "json",
+	})
+
+	// Webhook — JSON payload
+	_, webhookParams, _ := formatWebhook(rendered, samplePayload, emptyConfig, emptyConfig)
+	previews = append(previews, ProviderPreview{
+		Provider: "Webhook",
+		Icon:     "🔗",
+		Rendered: prettyJSON(webhookParams),
+		Format:   "json",
+	})
+
+	return previews
+}
+
+// prettyJSON formats JSON bytes as an indented string.
+func prettyJSON(data []byte) string {
+	var out map[string]interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return string(data)
+	}
+	pretty, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return string(data)
+	}
+	return string(pretty)
 }
 
 // MarshalPayload is a helper to serialize event payload to JSON for logging.

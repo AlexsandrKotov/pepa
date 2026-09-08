@@ -21,22 +21,28 @@ export default function DeploymentDetailPage() {
   const [history, setHistory] = useState<Deployment[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'timeline' | 'logs' | 'history'>('timeline');
+  const [activeTab, setActiveTab] = useState<'timeline' | 'logs' | 'history' | 'resources'>('timeline');
   const [showRollbackConfirm, setShowRollbackConfirm] = useState(false);
   const [rollingBack, setRollingBack] = useState(false);
+  const [timelineEvents, setTimelineEvents] = useState<{ id: string; deployment_id: string; event_type: string; message: string; created_at: string }[]>([]);
+  const [k8sResources, setK8sResources] = useState<{ kind: string; name: string; namespace: string; status: string; created_at: string }[]>([]);
 
   const loadData = useCallback(async () => {
     try {
-      const [dep, hist, logData, clusterData] = await Promise.all([
+      const [dep, hist, logData, clusterData, eventsData, resourcesData] = await Promise.all([
         deployments.get(id),
         deployments.history(id).catch(() => ({ history: [], total: 0 })),
         deployments.logs(id).catch(() => ({ logs: [], deployment_id: id })),
         clusters.list().catch(() => ({ clusters: [], total: 0 })),
+        deployments.events(id).catch(() => ({ events: [], deployment_id: id, total: 0 })),
+        deployments.resources(id).catch(() => ({ resources: [], total: 0, namespace: '' })),
       ]);
       setDeployment(dep);
       setHistory(hist.history || []);
       setLogs(logData.logs || []);
       setClusterList(clusterData.clusters || []);
+      setTimelineEvents(eventsData.events || []);
+      setK8sResources(resourcesData.resources || []);
     } catch (err) {
       console.error('Failed to load deployment:', err);
     } finally {
@@ -199,7 +205,7 @@ export default function DeploymentDetailPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-[var(--border)]">
-        {(['timeline', 'logs', 'history'] as const).map(tab => (
+        {(['timeline', 'resources', 'logs', 'history'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -218,49 +224,124 @@ export default function DeploymentDetailPage() {
       {activeTab === 'timeline' && (
         <div className="card">
           <div className="card-body space-y-3">
-            {(() => {
-              const events: { time: string; label: string; icon: string; done: boolean }[] = [
-                { time: deployment.created_at, label: 'Deployment created', icon: '\u25CB', done: true },
-              ];
-
-              if (deployment.status === 'syncing' || deployment.status === 'pending') {
-                events.push({ time: deployment.created_at, label: 'Helm chart rendering', icon: '\u21BB', done: false });
-              } else if (['deployed', 'promoted', 'rolled_back'].includes(deployment.status)) {
-                events.push({ time: deployment.created_at, label: 'Helm chart rendered', icon: '\u21BB', done: true });
-                events.push({ time: deployment.created_at, label: 'Resources applied', icon: '\u2713', done: true });
-                events.push({ time: deployment.created_at, label: 'All pods ready', icon: '\u2713', done: true });
-              }
-
-              if (deployment.status === 'failed') {
-                events.push({ time: deployment.updated_at, label: 'Deployment failed', icon: '\u2717', done: true });
-              }
-
-              if (deployment.status === 'promoted') {
-                events.push({ time: deployment.promoted_at || deployment.created_at, label: 'Promoted to next environment', icon: '\u2B06', done: true });
-              }
-
-              if (deployment.status === 'rolled_back') {
-                events.push({ time: deployment.updated_at, label: 'Rolled back', icon: '\u21A9', done: true });
-              }
-
-              if (deployment.status === 'cancelled') {
-                events.push({ time: deployment.updated_at, label: 'Deployment cancelled', icon: '\u2717', done: true });
-              }
-
-              return events.map((event, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] shrink-0 mt-0.5 ${
-                    event.done ? 'bg-emerald-500/15 text-emerald-600' : 'bg-[var(--border-light)] text-[var(--text-secondary)]'
-                  }`}>
-                    {event.icon}
+            {timelineEvents.length > 0 ? (
+              // Real timeline events from the deployment_events table
+              timelineEvents.map((event, i) => {
+                const eventIcons: Record<string, string> = {
+                  created: '\u25CB', kubeconfig_loaded: '\uD83D\uDD11', helm_rendered: '\u21BB',
+                  resources_applied: '\u2713', pods_ready: '\u2713', deployed: '\u2713',
+                  failed: '\u2717', rolled_back: '\u21A9',
+                };
+                const isDone = event.event_type !== 'failed';
+                return (
+                  <div key={event.id || i} className="flex items-start gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] shrink-0 mt-0.5 ${
+                      isDone ? 'bg-emerald-500/15 text-emerald-600' : 'bg-red-500/15 text-red-500'
+                    }`}>
+                      {eventIcons[event.event_type] || '\u25CB'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] text-[var(--text-primary)]">{event.message || event.event_type}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[11px] text-[var(--text-tertiary)]">{new Date(event.created_at).toLocaleString()}</p>
+                        {i > 0 && timelineEvents[i - 1] && (
+                          <span className="text-[10px] text-[var(--text-tertiary)]">
+                            (+{((new Date(event.created_at).getTime() - new Date(timelineEvents[i - 1].created_at).getTime()) / 1000).toFixed(1)}s)
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[13px] text-[var(--text-primary)]">{event.label}</p>
-                    <p className="text-[11px] text-[var(--text-tertiary)]">{new Date(event.time).toLocaleString()}</p>
+                );
+              })
+            ) : (
+              // Fallback: static timeline based on deployment status
+              (() => {
+                const events: { time: string; label: string; icon: string; done: boolean }[] = [
+                  { time: deployment.created_at, label: 'Deployment created', icon: '\u25CB', done: true },
+                ];
+                if (deployment.status === 'syncing' || deployment.status === 'pending') {
+                  events.push({ time: deployment.created_at, label: 'Helm chart rendering', icon: '\u21BB', done: false });
+                } else if (['deployed', 'promoted', 'rolled_back'].includes(deployment.status)) {
+                  events.push({ time: deployment.created_at, label: 'Helm chart rendered', icon: '\u21BB', done: true });
+                  events.push({ time: deployment.created_at, label: 'Resources applied', icon: '\u2713', done: true });
+                  events.push({ time: deployment.created_at, label: 'All pods ready', icon: '\u2713', done: true });
+                }
+                if (deployment.status === 'failed') {
+                  events.push({ time: deployment.updated_at, label: 'Deployment failed', icon: '\u2717', done: true });
+                }
+                if (deployment.status === 'promoted') {
+                  events.push({ time: deployment.promoted_at || deployment.created_at, label: 'Promoted to next environment', icon: '\u2B06', done: true });
+                }
+                if (deployment.status === 'rolled_back') {
+                  events.push({ time: deployment.updated_at, label: 'Rolled back', icon: '\u21A9', done: true });
+                }
+                if (deployment.status === 'cancelled') {
+                  events.push({ time: deployment.updated_at, label: 'Deployment cancelled', icon: '\u2717', done: true });
+                }
+                return events.map((event, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[11px] shrink-0 mt-0.5 ${
+                      event.done ? 'bg-emerald-500/15 text-emerald-600' : 'bg-[var(--border-light)] text-[var(--text-secondary)]'
+                    }`}>
+                      {event.icon}
+                    </div>
+                    <div>
+                      <p className="text-[13px] text-[var(--text-primary)]">{event.label}</p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">{new Date(event.time).toLocaleString()}</p>
+                    </div>
                   </div>
-                </div>
-              ));
-            })()}
+                ));
+              })()
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'resources' && (
+        <div className="card">
+          <div className="card-body">
+            {k8sResources.length > 0 ? (
+              <div className="space-y-2">
+                {/* Group resources by kind */}
+                {Object.entries(
+                  k8sResources.reduce<Record<string, typeof k8sResources>>((acc, r) => {
+                    if (!acc[r.kind]) acc[r.kind] = [];
+                    acc[r.kind].push(r);
+                    return acc;
+                  }, {})
+                ).map(([kind, items]) => (
+                  <div key={kind}>
+                    <p className="text-[11px] text-[var(--text-tertiary)] uppercase tracking-wider mb-2">{kind}s ({items.length})</p>
+                    <div className="space-y-1 mb-3">
+                      {items.map((r, i) => (
+                        <div key={i} className="flex items-center justify-between p-2 rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${
+                              r.status === 'Ready' || r.status === 'Active' || r.status === 'Running' || r.status === 'ClusterIP' ? 'bg-emerald-500' :
+                              r.status === 'Progressing' ? 'bg-yellow-500' : 'bg-[var(--text-tertiary)]'
+                            }`} />
+                            <span className="text-[12px] font-mono text-[var(--text-primary)]">{r.name}</span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] text-[var(--text-tertiary)]">{r.namespace}</span>
+                            <span className={`text-[11px] px-2 py-0.5 rounded ${
+                              r.status === 'Ready' || r.status === 'Active' || r.status === 'Running' ? 'bg-emerald-500/10 text-emerald-600' :
+                              r.status === 'Progressing' ? 'bg-yellow-500/10 text-yellow-600' :
+                              'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+                            }`}>{r.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[13px] text-[var(--text-tertiary)] text-center py-6">
+                {deployment.target_cluster_id ? 'No resources found in cluster' : 'No target cluster configured for this deployment'}
+              </p>
+            )}
           </div>
         </div>
       )}

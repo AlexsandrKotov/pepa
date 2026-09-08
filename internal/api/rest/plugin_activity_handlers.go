@@ -84,14 +84,9 @@ func logPluginActionAsync(deps Dependencies, c *gin.Context, pluginName, action,
 	}(entry)
 }
 
-// registerPluginActivityRoutes registers API endpoints for querying SSH command and plugin action logs.
-func registerPluginActivityRoutes(r *gin.RouterGroup, deps Dependencies) {
-	pa := r.Group("/plugin-activity")
-	{
-		pa.GET("/ssh-commands", listSSHCommands(deps))
-		pa.GET("/plugin-actions", listPluginActions(deps))
-	}
-}
+// Plugin activity routes have been consolidated under /audit.
+// The listPluginActions and listSSHCommands handlers are now
+// registered by registerAuditRoutes in audit_handlers.go.
 
 func listSSHCommands(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {

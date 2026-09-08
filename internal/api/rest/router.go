@@ -272,7 +272,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerVMwareRoutes(v1, deps)
 		registerObservabilityRoutes(v1, deps)
 		registerRemoteConsoleRoutes(v1, deps)
-		registerPluginActivityRoutes(v1, deps)
+		// Plugin activity endpoints moved under /audit (plugin-actions, ssh-commands)
 		registerSecurityScanRoutes(v1, deps)
 		registerDevOpsRoutes(v1, deps)
 		registerNotificationRoutes(v1, deps)

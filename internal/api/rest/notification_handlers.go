@@ -27,7 +27,9 @@ func registerNotificationRoutes(r *gin.RouterGroup, deps Dependencies) {
 
 		// Utilities
 		notifications.GET("/events", listEventTypes(deps))
+		notifications.GET("/presets", listTemplatePresets(deps))
 		notifications.POST("/preview", previewTemplate(deps))
+		notifications.POST("/preview-all", previewAllProviders(deps))
 	}
 }
 
@@ -272,6 +274,13 @@ func listEventTypes(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+func listTemplatePresets(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		presets := service.TemplatePresets()
+		c.JSON(http.StatusOK, gin.H{"presets": presets})
+	}
+}
+
 func previewTemplate(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
@@ -292,5 +301,28 @@ func previewTemplate(deps Dependencies) gin.HandlerFunc {
 
 		rendered := service.PreviewTemplate(req.BodyTemplate, req.EventType)
 		c.JSON(http.StatusOK, gin.H{"rendered": rendered})
+	}
+}
+
+func previewAllProviders(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			BodyTemplate string `json:"body_template"`
+			EventType    string `json:"event_type"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body: " + err.Error()})
+			return
+		}
+		if req.BodyTemplate == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "body_template is required"})
+			return
+		}
+		if req.EventType == "" {
+			req.EventType = "deployment.succeeded"
+		}
+
+		previews := service.PreviewAllProviders(req.BodyTemplate, req.EventType)
+		c.JSON(http.StatusOK, gin.H{"previews": previews})
 	}
 }

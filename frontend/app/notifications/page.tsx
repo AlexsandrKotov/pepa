@@ -9,6 +9,8 @@ import {
   type NotificationStats,
   type EventCategories,
   type Connection,
+  type TemplatePreset,
+  type ProviderPreview,
 } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 
@@ -61,7 +63,7 @@ function NotificationsContent() {
         ))}
       </div>
 
-      {tab === 'overview' && <OverviewTab showToast={showToast} />}
+      {tab === 'overview' && <OverviewTab showToast={showToast} onSwitchTab={setTab} />}
       {tab === 'rules' && <RulesTab showToast={showToast} />}
       {tab === 'history' && <HistoryTab />}
 
@@ -81,32 +83,39 @@ function NotificationsContent() {
 // Overview Tab
 // ============================================================
 
-function OverviewTab({ showToast }: { showToast: (msg: string, type?: 'success' | 'error') => void }) {
+function OverviewTab({ showToast, onSwitchTab }: { showToast: (msg: string, type?: 'success' | 'error') => void; onSwitchTab: (tab: Tab) => void }) {
   const [stats, setStats] = useState<NotificationStats[]>([]);
+  const [connList, setConnList] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    notifications.stats()
-      .then(data => setStats(data.stats || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      notifications.stats().then(data => setStats(data.stats || [])).catch(() => {}),
+      connections.list('notification').then(data => setConnList((data as { connections: Connection[] }).connections || [])).catch(() => {}),
+    ]).finally(() => setLoading(false));
   }, []);
 
   if (loading) {
-    return <div className="text-[var(--muted)] text-sm py-8">Loading statistics...</div>;
+    return <div className="text-[var(--muted)] text-sm py-8">Loading...</div>;
   }
 
-  if (stats.length === 0) {
+  // Merge: show all notification connections, enriched with stats where available
+  const connCards = connList.map(conn => {
+    const provider = (conn.config?.provider as string) || '';
+    const stat = stats.find(s => s.connection_id === conn.id);
+    return { conn, provider, stat };
+  });
+
+  if (connCards.length === 0) {
     return (
       <div className="text-center py-12">
         <svg className="mx-auto h-12 w-12 text-[var(--muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
-        <h3 className="mt-2 text-sm font-medium text-[var(--foreground)]">No notifications sent yet</h3>
-        <p className="mt-1 text-sm text-[var(--muted)]">Create a routing rule to start sending notifications when platform events occur.</p>
-        <p className="mt-2 text-sm text-[var(--muted)]">
-          Notification connections are configured on the{' '}
-          <a href="/connections" className="text-[var(--accent)] hover:underline">Connections</a> page.
+        <h3 className="mt-2 text-sm font-medium text-[var(--foreground)]">No notification connections</h3>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          Create a notification connection on the{' '}
+          <a href="/connections" className="text-[var(--accent)] hover:underline">Connections</a> page first (Slack, Telegram, Email, Teams, or Webhook).
         </p>
       </div>
     );
@@ -114,37 +123,44 @@ function OverviewTab({ showToast }: { showToast: (msg: string, type?: 'success' 
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {stats.map(stat => (
-        <div key={stat.connection_id} className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
+      {connCards.map(({ conn, provider, stat }) => (
+        <div key={conn.id} className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center space-x-2">
-              <ProviderIcon provider={stat.provider} />
+              <ProviderIcon provider={provider} />
               <div>
-                <h3 className="text-sm font-medium text-[var(--foreground)]">{stat.connection_name || 'Unknown'}</h3>
-                <p className="text-xs text-[var(--muted)] capitalize">{stat.provider}</p>
+                <h3 className="text-sm font-medium text-[var(--foreground)]">{conn.name}</h3>
+                <p className="text-xs text-[var(--muted)] capitalize">{provider}</p>
               </div>
             </div>
-            <HealthDot delivered={stat.delivered} failed={stat.failed} />
+            {stat ? <HealthDot delivered={stat.delivered} failed={stat.failed} /> : <span className="w-2.5 h-2.5 rounded-full bg-gray-400" title="No deliveries yet" />}
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div className="bg-[var(--bg)] rounded p-2">
-              <p className="text-lg font-semibold text-[var(--foreground)]">{stat.total_sent}</p>
+              <p className="text-lg font-semibold text-[var(--foreground)]">{stat?.total_sent ?? 0}</p>
               <p className="text-xs text-[var(--muted)]">Total</p>
             </div>
             <div className="bg-[var(--bg)] rounded p-2">
-              <p className="text-lg font-semibold text-green-500">{stat.delivered}</p>
+              <p className="text-lg font-semibold text-green-500">{stat?.delivered ?? 0}</p>
               <p className="text-xs text-[var(--muted)]">Delivered</p>
             </div>
             <div className="bg-[var(--bg)] rounded p-2">
-              <p className="text-lg font-semibold text-red-500">{stat.failed}</p>
+              <p className="text-lg font-semibold text-red-500">{stat?.failed ?? 0}</p>
               <p className="text-xs text-[var(--muted)]">Failed</p>
             </div>
           </div>
-          {stat.last_sent_at && (
+          {stat?.last_sent_at ? (
             <p className="text-xs text-[var(--muted)] mt-3">
               Last sent: {new Date(stat.last_sent_at).toLocaleString()}
             </p>
+          ) : (
+            <p className="text-xs text-[var(--muted)] mt-3 italic">No notifications sent yet</p>
           )}
+          <div className="flex gap-2 mt-3 pt-3 border-t border-[var(--border)]">
+            <a href="#" className="text-xs text-[var(--accent)] hover:underline" onClick={(e) => { e.preventDefault(); onSwitchTab('rules'); }}>Create rule</a>
+            <span className="text-xs text-[var(--muted)]">|</span>
+            <span className="text-xs text-[var(--muted)] capitalize">{conn.status}</span>
+          </div>
         </div>
       ))}
     </div>
@@ -395,20 +411,61 @@ function RuleModal({
   const [connectionId, setConnectionId] = useState(rule?.connection_id || '');
   const [subjectTemplate, setSubjectTemplate] = useState(rule?.subject_template || '');
   const [bodyTemplate, setBodyTemplate] = useState(rule?.body_template || '');
-  const [preview, setPreview] = useState('');
+  const [providerPreviews, setProviderPreviews] = useState<ProviderPreview[]>([]);
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [presets, setPresets] = useState<TemplatePreset[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [showPresets, setShowPresets] = useState(!rule); // show presets by default when creating
+  const [activePreviewTab, setActivePreviewTab] = useState<string>('');
 
   const selectedConn = connList.find(c => c.id === connectionId);
   const provider = (selectedConn?.config?.provider as string) || '';
   const showSubject = provider === 'email';
 
+  // Load presets on mount
+  useEffect(() => {
+    notifications.presets()
+      .then(data => setPresets(data.presets || []))
+      .catch(() => {});
+  }, []);
+
+  // Group presets by category
+  const presetsByCategory = presets.reduce<Record<string, TemplatePreset[]>>((acc, p) => {
+    if (!acc[p.category]) acc[p.category] = [];
+    acc[p.category].push(p);
+    return acc;
+  }, {});
+
+  const handleSelectPreset = (preset: TemplatePreset) => {
+    setSelectedPreset(preset.id);
+    setBodyTemplate(preset.body);
+    if (preset.event_types.length > 0) {
+      setEventTypes(preset.event_types);
+    }
+    if (preset.subject && showSubject) {
+      setSubjectTemplate(preset.subject);
+    }
+    // Auto-generate name if empty
+    if (!name) {
+      setName(preset.name + ' Notification');
+    }
+  };
+
   const handlePreview = async () => {
     if (!bodyTemplate) return;
+    setLoadingPreview(true);
     try {
-      const res = await notifications.preview({ body_template: bodyTemplate, event_type: eventTypes[0] || 'test.notification' });
-      setPreview(res.rendered);
+      const res = await notifications.previewAll({ body_template: bodyTemplate, event_type: eventTypes[0] || 'deployment.succeeded' });
+      const previews = res.previews || [];
+      setProviderPreviews(previews);
+      if (!activePreviewTab && previews.length > 0) {
+        setActivePreviewTab(previews[0].provider);
+      }
     } catch {
-      setPreview('Failed to render preview');
+      setProviderPreviews([]);
+    } finally {
+      setLoadingPreview(false);
     }
   };
 
@@ -539,13 +596,64 @@ function RuleModal({
             </div>
           )}
 
+          {/* Template Presets */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-[var(--foreground)]">
+                Template Presets
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowPresets(!showPresets)}
+                className="text-xs text-[var(--accent)] hover:underline"
+              >
+                {showPresets ? 'Hide presets' : 'Show presets'}
+              </button>
+            </div>
+
+            {showPresets && presets.length > 0 && (
+              <div className="border border-[var(--border)] rounded-lg p-3 bg-[var(--bg)] max-h-64 overflow-y-auto space-y-3">
+                {Object.entries(presetsByCategory).map(([category, categoryPresets]) => (
+                  <div key={category}>
+                    <p className="text-xs font-semibold text-[var(--muted)] uppercase mb-1.5">{category}</p>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {categoryPresets.map(preset => (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleSelectPreset(preset)}
+                          className={`flex items-start text-left px-3 py-2 rounded-lg border transition-all ${
+                            selectedPreset === preset.id
+                              ? 'border-[var(--accent)] bg-[var(--accent)]/10 ring-1 ring-[var(--accent)]'
+                              : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--surface)]'
+                          }`}
+                        >
+                          <span className="text-lg mr-2 mt-0.5">{preset.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-[var(--foreground)]">{preset.name}</p>
+                            <p className="text-xs text-[var(--muted)] truncate">{preset.description}</p>
+                          </div>
+                          {selectedPreset === preset.id && (
+                            <svg className="w-4 h-4 text-[var(--accent)] ml-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Body Template */}
           <div>
             <label className="block text-sm font-medium text-[var(--foreground)] mb-1">Message Template *</label>
             <textarea
               value={bodyTemplate}
-              onChange={e => setBodyTemplate(e.target.value)}
-              rows={6}
+              onChange={e => { setBodyTemplate(e.target.value); setSelectedPreset(null); }}
+              rows={8}
               className="w-full px-3 py-2 bg-[var(--bg)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] font-mono focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
               placeholder={'{{ event_type }}\nService: {{ service_name }}\nStatus: {{ status }}'}
             />
@@ -554,18 +662,72 @@ function RuleModal({
             </p>
           </div>
 
-          {/* Preview */}
+          {/* Multi-Provider Preview */}
           <div>
             <button
               onClick={handlePreview}
-              className="px-3 py-1.5 text-xs rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]"
+              disabled={loadingPreview}
+              className="px-3 py-1.5 text-xs rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
             >
-              Preview Template
+              {loadingPreview ? 'Loading...' : 'Preview All Providers'}
             </button>
-            {preview && (
-              <pre className="mt-2 p-3 bg-[var(--bg)] border border-[var(--border)] rounded-lg text-xs text-[var(--foreground)] whitespace-pre-wrap font-mono">
-                {preview}
-              </pre>
+
+            {providerPreviews.length > 0 && (
+              <div className="mt-3 border border-[var(--border)] rounded-lg overflow-hidden">
+                {/* Provider tabs */}
+                <div className="flex border-b border-[var(--border)] bg-[var(--bg)]">
+                  {providerPreviews.map(p => (
+                    <button
+                      key={p.provider}
+                      onClick={() => setActivePreviewTab(p.provider)}
+                      className={`px-3 py-2 text-xs font-medium transition-colors ${
+                        activePreviewTab === p.provider
+                          ? 'text-[var(--accent)] border-b-2 border-[var(--accent)] bg-[var(--surface)]'
+                          : 'text-[var(--muted)] hover:text-[var(--foreground)]'
+                      }`}
+                    >
+                      <span className="mr-1">{p.icon}</span>
+                      {p.provider}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Active provider preview */}
+                {providerPreviews.filter(p => p.provider === activePreviewTab).map(p => (
+                  <div key={p.provider} className="p-4 bg-[var(--surface)]">
+                    {p.format === 'html' && p.provider === 'Telegram' && (
+                      <div className="bg-[#1a1a2e] rounded-lg p-4 max-w-sm">
+                        <div className="flex items-start space-x-2 mb-2">
+                          <div className="w-8 h-8 rounded-full bg-[#0088cc] flex items-center justify-center text-white text-xs font-bold">P</div>
+                          <div className="text-sm text-white leading-relaxed" dangerouslySetInnerHTML={{ __html: p.rendered }} />
+                        </div>
+                      </div>
+                    )}
+                    {p.format === 'html' && p.provider === 'Email' && (
+                      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                        <div className="bg-gray-100 px-3 py-2 border-b border-gray-200">
+                          <p className="text-xs text-gray-500">From: <span className="text-gray-700">notifications@pepa.platform</span></p>
+                          <p className="text-xs text-gray-500">Subject: <span className="text-gray-700 font-medium">PEPA Notification</span></p>
+                        </div>
+                        <div className="p-4" dangerouslySetInnerHTML={{ __html: p.rendered }} />
+                      </div>
+                    )}
+                    {p.format === 'text' && (
+                      <div className="bg-[#1a1a2e] rounded-lg p-4">
+                        <div className="flex items-start space-x-2">
+                          <div className="w-8 h-8 rounded bg-[#4A154B] flex items-center justify-center text-white text-xs font-bold">S</div>
+                          <pre className="text-sm text-white whitespace-pre-wrap font-sans">{p.rendered}</pre>
+                        </div>
+                      </div>
+                    )}
+                    {p.format === 'json' && (
+                      <pre className="text-xs text-[var(--foreground)] whitespace-pre-wrap font-mono bg-[var(--bg)] p-3 rounded border border-[var(--border)] overflow-x-auto">
+                        {p.rendered}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
