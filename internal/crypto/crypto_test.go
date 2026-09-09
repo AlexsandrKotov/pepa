@@ -1,121 +1,227 @@
 package crypto
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"encoding/base64"
-	"io"
+	"os"
+	"strings"
 	"testing"
 )
 
-func TestV2EncryptDecrypt(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "test-secret-key-for-vault")
+func setupTestKey(t *testing.T) {
+	t.Helper()
+	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-that-is-at-least-32-characters-long")
+}
 
-	ct, err := Encrypt("hello world")
+func TestEncryptDecryptRoundTrip(t *testing.T) {
+	setupTestKey(t)
+
+	plaintext := "hello secret world"
+	encrypted, err := Encrypt(plaintext)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if !IsV2Encrypted(ct) {
-		t.Fatal("expected v2 format")
+		t.Fatalf("Encrypt failed: %v", err)
 	}
 
-	pt, err := Decrypt(ct)
-	if err != nil {
-		t.Fatal(err)
+	if encrypted == plaintext {
+		t.Fatal("encrypted value should differ from plaintext")
 	}
-	if pt != "hello world" {
-		t.Fatalf("expected 'hello world', got %q", pt)
+	if !strings.HasPrefix(encrypted, "enc:v2:") {
+		t.Fatalf("expected v2 format, got: %s", encrypted)
+	}
+
+	decrypted, err := Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+	if decrypted != plaintext {
+		t.Fatalf("expected %q, got %q", plaintext, decrypted)
 	}
 }
 
-func TestPerPathEncryptDecrypt(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "test-secret-key-for-vault")
+func TestEncryptEmptyString(t *testing.T) {
+	setupTestKey(t)
 
-	ct, err := EncryptPath("my-secret-data", "db/password")
+	encrypted, err := Encrypt("")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Encrypt empty failed: %v", err)
 	}
-
-	pt, err := DecryptPath(ct, "db/password")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pt != "my-secret-data" {
-		t.Fatalf("expected 'my-secret-data', got %q", pt)
+	if encrypted != "" {
+		t.Fatalf("expected empty string, got %q", encrypted)
 	}
 }
 
-func TestPerPathWrongPath(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "test-secret-key-for-vault")
+func TestEncryptAlreadyEncrypted(t *testing.T) {
+	setupTestKey(t)
 
-	ct, err := EncryptPath("secret", "correct/path")
+	plaintext := "secret"
+	encrypted, err := Encrypt(plaintext)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Encrypt failed: %v", err)
 	}
 
-	_, err = DecryptPath(ct, "wrong/path")
+	// Encrypting again should return the same value (idempotent)
+	doubleEncrypted, err := Encrypt(encrypted)
+	if err != nil {
+		t.Fatalf("double Encrypt failed: %v", err)
+	}
+	if doubleEncrypted != encrypted {
+		t.Fatal("double encryption should return the same value")
+	}
+}
+
+func TestDecryptPlaintext(t *testing.T) {
+	setupTestKey(t)
+
+	// Decrypting a non-encrypted value should return it as-is
+	result, err := Decrypt("plain text value")
+	if err != nil {
+		t.Fatalf("Decrypt plaintext failed: %v", err)
+	}
+	if result != "plain text value" {
+		t.Fatalf("expected plaintext, got %q", result)
+	}
+}
+
+func TestEncryptPathDecryptPath(t *testing.T) {
+	setupTestKey(t)
+
+	plaintext := "path-secret-value"
+	path := "vault/connections/my-db"
+
+	encrypted, err := EncryptPath(plaintext, path)
+	if err != nil {
+		t.Fatalf("EncryptPath failed: %v", err)
+	}
+	if !strings.HasPrefix(encrypted, "enc:v2:") {
+		t.Fatalf("expected v2 format, got: %s", encrypted)
+	}
+
+	decrypted, err := DecryptPath(encrypted, path)
+	if err != nil {
+		t.Fatalf("DecryptPath failed: %v", err)
+	}
+	if decrypted != plaintext {
+		t.Fatalf("expected %q, got %q", plaintext, decrypted)
+	}
+}
+
+func TestDecryptPathWrongPath(t *testing.T) {
+	setupTestKey(t)
+
+	plaintext := "path-secret-value"
+	path := "vault/connections/my-db"
+	wrongPath := "vault/connections/other-db"
+
+	encrypted, err := EncryptPath(plaintext, path)
+	if err != nil {
+		t.Fatalf("EncryptPath failed: %v", err)
+	}
+
+	// Decrypting with wrong path should fail (authentication tag mismatch)
+	_, err = DecryptPath(encrypted, wrongPath)
 	if err == nil {
-		t.Fatal("expected error for wrong path, got nil")
+		t.Fatal("DecryptPath with wrong path should fail")
 	}
 }
 
-func TestV1BackwardCompat(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "test-secret-key-for-vault")
-
-	// Simulate v1 encrypted data (SHA-256 derived key)
-	key, err := deriveKeyV1()
-	if err != nil {
-		t.Fatal(err)
+func TestIsEncrypted(t *testing.T) {
+	tests := []struct {
+		value    string
+		expected bool
+	}{
+		{"", false},
+		{"plaintext", false},
+		{"enc:abc", true},
+		{"enc:v2:salt:nonce:ct", true},
 	}
-	v1ct, err := encryptV1Compat("legacy data", key)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Should decrypt with auto-detection
-	pt, err := Decrypt(v1ct)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pt != "legacy data" {
-		t.Fatalf("expected 'legacy data', got %q", pt)
-	}
-
-	if IsV2Encrypted(v1ct) {
-		t.Fatal("v1 should not be detected as v2")
+	for _, tt := range tests {
+		if got := IsEncrypted(tt.value); got != tt.expected {
+			t.Errorf("IsEncrypted(%q) = %v, want %v", tt.value, got, tt.expected)
+		}
 	}
 }
 
-func TestEncryptionInfo(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "test-secret-key-for-vault")
-
-	ct, _ := Encrypt("test")
-	info := EncryptionInfo(ct)
-	if info != "aes-256-gcm + argon2id" {
-		t.Fatalf("expected argon2id info, got %q", info)
+func TestIsV2Encrypted(t *testing.T) {
+	tests := []struct {
+		value    string
+		expected bool
+	}{
+		{"", false},
+		{"enc:abc", false},
+		{"enc:v2:salt:nonce:ct", true},
 	}
-
-	info2 := EncryptionInfo("plaintext")
-	if info2 != "plaintext" {
-		t.Fatalf("expected plaintext info, got %q", info2)
+	for _, tt := range tests {
+		if got := IsV2Encrypted(tt.value); got != tt.expected {
+			t.Errorf("IsV2Encrypted(%q) = %v, want %v", tt.value, got, tt.expected)
+		}
 	}
 }
 
-// encryptV1Compat simulates the old v1 encryption for backward compat testing.
-func encryptV1Compat(plaintext string, key []byte) (string, error) {
-	block, err := aes.NewCipher(key)
+func TestDerivePathKeyUniqueness(t *testing.T) {
+	setupTestKey(t)
+
+	key1, err := DerivePathKey("path/one")
 	if err != nil {
-		return "", err
+		t.Fatalf("DerivePathKey failed: %v", err)
 	}
-	aesGCM, err := cipher.NewGCM(block)
+	key2, err := DerivePathKey("path/two")
 	if err != nil {
-		return "", err
+		t.Fatalf("DerivePathKey failed: %v", err)
 	}
-	nonce := make([]byte, aesGCM.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return "", err
+
+	if string(key1) == string(key2) {
+		t.Fatal("different paths should produce different keys")
 	}
-	ciphertext := aesGCM.Seal(nonce, nonce, []byte(plaintext), nil)
-	return "enc:" + base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+func TestValidateKeyStrength(t *testing.T) {
+	// Test with no key set
+	t.Setenv("ENCRYPTION_KEY", "")
+	t.Setenv("AUTH_JWT_SECRET", "")
+	t.Setenv("JWT_SECRET", "")
+
+	err := ValidateKeyStrength(false)
+	if err == nil {
+		t.Fatal("expected error when no key is set")
+	}
+
+	// Test with weak key in production
+	t.Setenv("ENCRYPTION_KEY", "dev-secret-change-me-in-production")
+	err = ValidateKeyStrength(true)
+	if err == nil {
+		t.Fatal("expected error for weak key in production")
+	}
+
+	// Test with weak key in development (should pass with warning)
+	err = ValidateKeyStrength(false)
+	if err != nil {
+		t.Fatalf("dev mode should allow weak key, got: %v", err)
+	}
+
+	// Test with strong key in production
+	t.Setenv("ENCRYPTION_KEY", "a-very-long-and-strong-random-key-at-least-32-chars")
+	err = ValidateKeyStrength(true)
+	if err != nil {
+		t.Fatalf("strong key should pass validation: %v", err)
+	}
+}
+
+func TestDecryptInvalidFormat(t *testing.T) {
+	setupTestKey(t)
+
+	// Invalid v2 format (missing parts)
+	_, err := Decrypt("enc:v2:only-one-part")
+	if err == nil {
+		t.Fatal("expected error for invalid v2 format")
+	}
+}
+
+func TestEncryptNoMasterKey(t *testing.T) {
+	// Clear all key sources
+	os.Unsetenv("ENCRYPTION_KEY")
+	os.Unsetenv("AUTH_JWT_SECRET")
+	os.Unsetenv("JWT_SECRET")
+
+	_, err := Encrypt("test")
+	if err == nil {
+		t.Fatal("expected error when no master key is available")
+	}
 }

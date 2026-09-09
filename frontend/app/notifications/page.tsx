@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import DOMPurify from 'dompurify';
 import {
   notifications,
   connections,
@@ -69,7 +70,7 @@ function NotificationsContent() {
 
       {/* Toast */}
       {toast && (
-        <div className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-sm font-medium z-50 ${
+        <div role="status" aria-live="polite" className={`fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-sm font-medium z-50 ${
           toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
         }`}>
           {toast.message}
@@ -699,7 +700,7 @@ function RuleModal({
                       <div className="bg-[#1a1a2e] rounded-lg p-4 max-w-sm">
                         <div className="flex items-start space-x-2 mb-2">
                           <div className="w-8 h-8 rounded-full bg-[#0088cc] flex items-center justify-center text-white text-xs font-bold">P</div>
-                          <div className="text-sm text-white leading-relaxed" dangerouslySetInnerHTML={{ __html: p.rendered }} />
+                          <div className="text-sm text-white leading-relaxed" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.rendered) }} />
                         </div>
                       </div>
                     )}
@@ -709,7 +710,7 @@ function RuleModal({
                           <p className="text-xs text-gray-500">From: <span className="text-gray-700">notifications@pepa.platform</span></p>
                           <p className="text-xs text-gray-500">Subject: <span className="text-gray-700 font-medium">PEPA Notification</span></p>
                         </div>
-                        <div className="p-4" dangerouslySetInnerHTML={{ __html: p.rendered }} />
+                        <div className="p-4" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.rendered) }} />
                       </div>
                     )}
                     {p.format === 'text' && (

@@ -508,3 +508,33 @@ func (c *Config) Validate() []string {
 
 	return warnings
 }
+
+// ValidateStrict returns an error if any critical secrets are still set to
+// their insecure development defaults. This must be called before starting
+// in production mode to prevent running with well-known credentials.
+func (c *Config) ValidateStrict() error {
+	var failures []string
+
+	if c.Auth.JWTSecret == knownInsecureDefaults["auth.jwt_secret"] {
+		failures = append(failures, "AUTH_JWT_SECRET is set to the development default — set a secure random value")
+	}
+	if c.Database.Password == knownInsecureDefaults["database.password"] {
+		failures = append(failures, "POSTGRES_PASSWORD is set to the development default — set a secure random value")
+	}
+	if c.Redis.Password == knownInsecureDefaults["redis.password"] {
+		failures = append(failures, "REDIS_PASSWORD is set to the development default — set a secure random value")
+	}
+
+	encKey := os.Getenv("ENCRYPTION_KEY")
+	if encKey == "" {
+		encKey = os.Getenv("AUTH_JWT_SECRET")
+	}
+	if encKey == "" || encKey == knownInsecureDefaults["encryption_key"] {
+		failures = append(failures, "ENCRYPTION_KEY is not set or is the development default — set a secure random value")
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("production mode requires secure credentials: %s", strings.Join(failures, "; "))
+	}
+	return nil
+}

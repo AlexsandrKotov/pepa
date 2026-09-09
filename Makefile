@@ -77,6 +77,16 @@ test:
 test-cover: test
 	@go tool cover -html=coverage.out -o coverage.html
 
+test-coverage: test
+	@echo "→ Checking coverage threshold (60%)..."
+	@coverage=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
+	echo "  Total coverage: $${coverage}%"; \
+	if [ "$$(echo "$$coverage < 60" | bc -l)" -eq 1 ]; then \
+		echo "  FAIL: coverage below 60% threshold"; \
+		exit 1; \
+	fi; \
+	echo "  PASS: coverage meets minimum threshold"
+
 lint:
 	@echo "→ Running linter..."
 	@golangci-lint run ./...

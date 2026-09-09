@@ -100,8 +100,10 @@ type Components struct {
 }
 
 // Bootstrap loads configuration, connects to infrastructure, discovers plugins,
-// and initializes all shared components. Callers must call Shutdown() when done.
-func Bootstrap() (*Components, error) {
+// and initializes all shared components. The provided context controls the
+// lifecycle of background goroutines (plugin discovery, doc seeding, etc.).
+// Callers must call Shutdown() when done.
+func Bootstrap(ctx context.Context) (*Components, error) {
 	// Load configuration
 	cfg := config.DefaultConfig()
 	cfg.LoadFromEnv()
@@ -122,6 +124,13 @@ func Bootstrap() (*Components, error) {
 	// Warn about insecure defaults
 	for _, w := range cfg.Validate() {
 		slog.Warn("insecure default detected", "warning", w)
+	}
+
+	// In production mode, refuse to start with default secrets.
+	if cfg.Server.Env == "production" {
+		if err := cfg.ValidateStrict(); err != nil {
+			return nil, fmt.Errorf("refusing to start in production: %w", err)
+		}
 	}
 
 	// Validate encryption key strength
@@ -225,7 +234,6 @@ func Bootstrap() (*Components, error) {
 	}
 
 	// Initialize OpenTelemetry (traces + metrics + logs) after DB settings are loaded.
-	ctx := context.Background()
 	var otelShutdown func(context.Context) error
 	if cfg.Observability.Enabled && cfg.Observability.OTLPEndpoint != "" {
 		shutdown, err := observability.InitOTel(ctx, observability.TracingConfig{
@@ -508,7 +516,7 @@ func Bootstrap() (*Components, error) {
 	
 	// Always seed knowledge base with built-in documentation (runs in background)
 	go func() {
-		seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		seedCtx, seedCancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer seedCancel()
 		if err := ai.SeedDocuments(seedCtx, ingestionEngine, tenantID); err != nil {
 			slog.Warn("RAG: documentation seeding failed", "error", err)
@@ -522,7 +530,7 @@ func Bootstrap() (*Components, error) {
 		c.RAGPipeline = ragPipeline
 
 		// Event-driven watcher
-		ragWatcher := ai.NewRAGWatcher(eventBus, ingestionEngine, tenantID)
+		ragWatcher := ai.NewRAGWatcher(eventBus, ingestionEngine, tenantID, ctx)
 		ragWatcher.Start()
 		ragWatcher.PeriodicReindex(15 * time.Minute)
 		c.RAGWatcher = ragWatcher

@@ -777,7 +777,7 @@ function DiscoveryTable({ services, sourceColors, sourceIcons, healthColors, act
     </button>
   );
 
-  const columns: ColumnDef[] = [
+  const columns: ColumnDef<DiscoveredService>[] = [
     {
       key: 'name',
       label: 'Service',
@@ -887,7 +887,7 @@ function DiscoveryTable({ services, sourceColors, sourceIcons, healthColors, act
           </button>
         ))}
       </div>
-      <ResizableTable
+      <ResizableTable<DiscoveredService>
         columns={columns}
         data={sorted}
         rowKey={(svc, idx) => `${svc.source}-${svc.name}-${idx}`}

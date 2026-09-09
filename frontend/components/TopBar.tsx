@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { notifications as notificationsAPI, logout as doLogout, removeToken, getStoredUser, setStoredUser, getMe, setToken, workspaces, getBase, type NotificationLog, type Workspace } from '@/lib/api';
@@ -89,7 +89,7 @@ const typeColors: Record<string, string> = {
   error: 'bg-red-500/10 text-red-400',
 };
 
-export default function TopBar() {
+function TopBar() {
   const pathname = usePathname();
   const { isAdmin, hasPermission } = usePermission();
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
@@ -713,3 +713,5 @@ export default function TopBar() {
     </header>
   );
 }
+
+export default memo(TopBar);

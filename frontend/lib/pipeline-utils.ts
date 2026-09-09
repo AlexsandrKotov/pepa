@@ -19,8 +19,19 @@ export interface PipelineEdge {
   target: string;
 }
 
+// Pipeline step specification (from API/backend)
+export interface PipelineStep {
+  name?: string;
+  type?: string;
+  plugin?: string;
+  action?: string;
+  params?: Record<string, unknown>;
+  depends_on?: string[];
+  run_when?: string;
+}
+
 // Convert step spec to pipeline node
-export function stepToNode(step: any, index: number): PipelineNode {
+export function stepToNode(step: PipelineStep, index: number): PipelineNode {
   return {
     id: step.name || `step-${index}`,
     name: step.name || `step-${index}`,
@@ -35,7 +46,7 @@ export function stepToNode(step: any, index: number): PipelineNode {
 }
 
 // Convert pipeline node to step spec
-export function nodeToStep(node: PipelineNode): any {
+export function nodeToStep(node: PipelineNode): PipelineStep {
   return {
     name: node.name,
     type: node.type,

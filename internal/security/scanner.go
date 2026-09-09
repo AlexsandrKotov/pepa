@@ -1270,7 +1270,7 @@ func (s *Scanner) runTrivyDBDownload(ctx context.Context, cacheDir string, repoF
 		"alpine:latest",
 	}
 
-	cmd := exec.CommandContext(dlCtx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	cmd := exec.CommandContext(dlCtx, "trivy", args...) // #nosec G702 //nolint:gosec // trivy is an admin-configured binary
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {

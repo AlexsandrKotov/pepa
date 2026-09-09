@@ -23,10 +23,15 @@ type RAGWatcher struct {
 
 	// stopCh signals background goroutines to exit.
 	stopCh chan struct{}
+	// ctx is the parent context for all ingestion operations.
+	ctx context.Context
 }
 
 // NewRAGWatcher creates a new RAG event watcher.
-func NewRAGWatcher(eventBus *events.Bus, engine *IngestionEngine, tenantID uuid.UUID) *RAGWatcher {
+func NewRAGWatcher(eventBus *events.Bus, engine *IngestionEngine, tenantID uuid.UUID, ctx context.Context) *RAGWatcher {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &RAGWatcher{
 		eventBus:   eventBus,
 		engine:     engine,
@@ -34,6 +39,7 @@ func NewRAGWatcher(eventBus *events.Bus, engine *IngestionEngine, tenantID uuid.
 		lastIngest: make(map[string]time.Time),
 		debounce:   30 * time.Second,
 		stopCh:     make(chan struct{}),
+		ctx:        ctx,
 	}
 }
 
@@ -105,7 +111,7 @@ func (w *RAGWatcher) debouncedIngest(sourceType string, fn func(context.Context)
 	w.lastIngest[sourceType] = time.Now()
 	w.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(w.ctx, 60*time.Second)
 	defer cancel()
 
 	if err := fn(ctx); err != nil {
@@ -143,7 +149,7 @@ func (w *RAGWatcher) PeriodicReindex(interval time.Duration) {
 				return
 			case <-ticker.C:
 				slog.Info("RAG: starting periodic re-index")
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				ctx, cancel := context.WithTimeout(w.ctx, 5*time.Minute)
 
 				loaders := []namedLoader{
 					{"service", NewServiceDocumentLoader(w.engine.pool, w.tenantID)},

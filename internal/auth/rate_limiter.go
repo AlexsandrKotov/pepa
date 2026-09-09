@@ -14,6 +14,7 @@ type LoginRateLimiter struct {
 	maxFails int
 	window   time.Duration
 	lockout  time.Duration
+	stopCh   chan struct{}
 }
 
 type loginAttempt struct {
@@ -32,10 +33,21 @@ func NewLoginRateLimiter(maxFails int, window, lockout time.Duration) *LoginRate
 		maxFails: maxFails,
 		window:   window,
 		lockout:  lockout,
+		stopCh:   make(chan struct{}),
 	}
 	// Start cleanup goroutine to prevent memory leaks.
 	go r.cleanup()
 	return r
+}
+
+// Stop terminates the background cleanup goroutine.
+func (r *LoginRateLimiter) Stop() {
+	select {
+	case <-r.stopCh:
+		// already closed
+	default:
+		close(r.stopCh)
+	}
 }
 
 // Allow checks whether the key is currently allowed to attempt login.
@@ -99,15 +111,20 @@ func (r *LoginRateLimiter) RecordSuccess(key string) {
 func (r *LoginRateLimiter) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		r.mu.Lock()
-		now := time.Now()
-		for key, a := range r.attempts {
-			// Remove entries that are no longer locked and whose window has expired.
-			if now.After(a.lockedUntil) && now.Sub(a.lastFail) > r.window {
-				delete(r.attempts, key)
+	for {
+		select {
+		case <-r.stopCh:
+			return
+		case <-ticker.C:
+			r.mu.Lock()
+			now := time.Now()
+			for key, a := range r.attempts {
+				// Remove entries that are no longer locked and whose window has expired.
+				if now.After(a.lockedUntil) && now.Sub(a.lastFail) > r.window {
+					delete(r.attempts, key)
+				}
 			}
+			r.mu.Unlock()
 		}
-		r.mu.Unlock()
 	}
 }

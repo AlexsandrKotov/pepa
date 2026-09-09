@@ -32,8 +32,12 @@ var (
 func main() {
 	slog.Info("PEPA Worker starting", "version", version, "build_time", buildTime)
 
+	// Create a root context that is cancelled on SIGINT/SIGTERM.
+	rootCtx, rootCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer rootCancel()
+
 	// Bootstrap all shared components
-	comp, err := bootstrap.Bootstrap()
+	comp, err := bootstrap.Bootstrap(rootCtx)
 	if err != nil {
 		slog.Error("bootstrap failed", "error", err)
 		os.Exit(1)
@@ -57,13 +61,9 @@ func main() {
 	// Initialize workflow engine
 	wfEngine := workflow.NewEngine(comp.WorkflowRepo, comp.EntityRepo, comp.DeploymentRepo, deploymentSvc, comp.EventBus, comp.ProviderRegistry)
 
-	// Context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	// Context for graceful shutdown (derived from rootCtx)
+	ctx, cancel := context.WithCancel(rootCtx)
 	defer cancel()
-
-	// Handle signals
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	// Start workers
 	var wg sync.WaitGroup
@@ -89,8 +89,8 @@ func main() {
 		runDelayedJobPromoter(ctx, comp.JobQueue)
 	}()
 
-	// Wait for shutdown signal
-	<-done
+	// Wait for shutdown signal (rootCtx is cancelled on SIGINT/SIGTERM)
+	<-rootCtx.Done()
 	slog.Info("shutting down worker")
 	cancel()
 

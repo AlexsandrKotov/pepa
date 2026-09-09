@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { usePermission } from '@/hooks/usePermission';
 
 // Main navigation — pinned items (daily golden path), always visible
@@ -342,7 +342,7 @@ function CollapsibleSection({ section, collapsed, expandedSections, toggleSectio
   );
 }
 
-export default function Sidebar() {
+function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -720,3 +720,5 @@ export default function Sidebar() {
     </aside>
   );
 }
+
+export default memo(Sidebar);

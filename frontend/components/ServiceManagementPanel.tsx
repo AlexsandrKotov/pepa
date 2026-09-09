@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { discovery, type DiscoveredService, type DeploymentInfo } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -29,12 +29,9 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   const [editReplicas, setEditReplicas] = useState(0);
   const [editEnv, setEditEnv] = useState<Array<{ key: string; value: string }>>([]);
 
-  useEffect(() => {
-    loadDeployInfo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const isMountedRef = useRef(true);
 
-  const loadDeployInfo = async () => {
+  const loadDeployInfo = useCallback(async () => {
     if (isDockerContainer) return; // Not applicable for Docker containers
     setLoading(true);
     try {
@@ -50,9 +47,13 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } finally {
       setLoading(false);
     }
-  };
+  }, [isDockerContainer, service.cluster, service.namespace, service.name]);
 
-  const loadLogs = async () => {
+  useEffect(() => {
+    loadDeployInfo();
+  }, [loadDeployInfo]);
+
+  const loadLogs = useCallback(async () => {
     setLoading(true);
     try {
       if (isDockerContainer) {
@@ -67,9 +68,9 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } finally {
       setLoading(false);
     }
-  };
+  }, [isDockerContainer, service.cluster, service.name, service.namespace]);
 
-  const loadEvents = async () => {
+  const loadEvents = useCallback(async () => {
     if (isDockerContainer) return; // Not applicable for Docker containers
     setLoading(true);
     try {
@@ -80,12 +81,12 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } finally {
       setLoading(false);
     }
-  };
+  }, [isDockerContainer, service.cluster, service.namespace, service.name]);
 
   useEffect(() => {
     if (tab === 'logs') loadLogs();
     if (tab === 'events') loadEvents();
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, loadLogs, loadEvents]);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });

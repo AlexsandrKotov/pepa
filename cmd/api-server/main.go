@@ -30,8 +30,14 @@ var (
 func main() {
 	slog.Info("PEPA API server starting", "version", version, "build_time", buildTime)
 
+	// Create a root context that is cancelled on SIGINT/SIGTERM.
+	// All background goroutines (plugin discovery, doc seeding, RAG watcher)
+	// derive from this context so they exit cleanly on shutdown.
+	rootCtx, rootCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer rootCancel()
+
 	// Bootstrap all shared components
-	comp, err := bootstrap.Bootstrap()
+	comp, err := bootstrap.Bootstrap(rootCtx)
 	if err != nil {
 		slog.Error("bootstrap failed", "error", err)
 		os.Exit(1)
@@ -216,10 +222,8 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Graceful shutdown
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
-
+	// Graceful shutdown — wait for the root context to be cancelled
+	// (SIGINT/SIGTERM) instead of using a separate signal channel.
 	go func() {
 		slog.Info("PEPA API listening", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -228,7 +232,7 @@ func main() {
 		}
 	}()
 
-	<-done
+	<-rootCtx.Done()
 	slog.Info("shutting down gracefully")
 
 	// Write shutdown audit event

@@ -2,22 +2,22 @@
 
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
 
-export interface ColumnDef {
+export interface ColumnDef<T = unknown> {
   key: string;
   label: string;
   width?: number; // default width in px
   minWidth?: number;
-  render: (row: any, idx: number) => ReactNode;
+  render: (row: T, idx: number) => ReactNode;
 }
 
-interface ResizableTableProps {
-  columns: ColumnDef[];
-  data: any[];
-  rowKey: (row: any, idx: number) => string;
+interface ResizableTableProps<T = unknown> {
+  columns: ColumnDef<T>[];
+  data: T[];
+  rowKey: (row: T, idx: number) => string;
   onColumnOrderChange?: (order: string[]) => void;
 }
 
-export default function ResizableTable({ columns, data, rowKey, onColumnOrderChange }: ResizableTableProps) {
+export default function ResizableTable<T = unknown>({ columns, data, rowKey, onColumnOrderChange }: ResizableTableProps<T>) {
   // Column order state
   const [colOrder, setColOrder] = useState<string[]>(() => columns.map(c => c.key));
   // Column widths state
@@ -49,7 +49,7 @@ export default function ResizableTable({ columns, data, rowKey, onColumnOrderCha
   // Get ordered columns
   const orderedColumns = colOrder
     .map(key => columns.find(c => c.key === key))
-    .filter(Boolean) as ColumnDef[];
+    .filter(Boolean) as ColumnDef<T>[];
 
   // === RESIZE LOGIC ===
   const handleResizeStart = useCallback((key: string, e: React.MouseEvent) => {

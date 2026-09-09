@@ -361,6 +361,9 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 
 	return r, func() {
 		rateLimiter.Stop()
+		if deps.LoginLimiter != nil {
+			deps.LoginLimiter.Stop()
+		}
 	}
 }
 

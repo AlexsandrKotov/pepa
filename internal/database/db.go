@@ -92,3 +92,15 @@ func (d *DB) SetTenant(ctx context.Context, tenantID string) error {
 	_, err := d.Pool.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID)
 	return err
 }
+
+// BeginTx starts a new database transaction. The caller is responsible for
+// committing or rolling back the transaction. Use with defer:
+//
+//	tx, err := db.BeginTx(ctx)
+//	if err != nil { return err }
+//	defer tx.Rollback(ctx) // no-op after Commit
+func (d *DB) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	return d.Pool.Begin(ctx)
+}
