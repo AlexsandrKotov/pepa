@@ -24,6 +24,8 @@ func registerConnectionRoutes(r *gin.RouterGroup, deps Dependencies) {
 		conns.POST("", createConnection(deps))
 		conns.GET("/summary", connectionSummary(deps))
 		conns.GET("/plugin-status", connectionPluginStatus(deps))
+		conns.GET("/credential-status", credentialStatus(deps))
+		conns.GET("/health", connectionHealthDashboard(deps))
 		conns.POST("/parse-kubeconfig", parseKubeconfig(deps))
 		conns.GET("/:id", getConnection(deps))
 		conns.PUT("/:id", updateConnection(deps))
@@ -370,7 +372,14 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			provName, provURLKey := testProviderInfo(conn.Type, conn.Config)
 			if provName != "" {
 				resolved, resErr := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, provName, provURLKey)
-				if resErr == nil && resolved != nil {
+				if resErr != nil {
+					// Honor fallback_to_admin policy: if resolver rejects and fallback is disabled, fail.
+					if !conn.FallbackToAdmin {
+						c.JSON(http.StatusForbidden, gin.H{"error": resErr.Error()})
+						return
+					}
+					// Fallback allowed — continue with admin config.
+				} else if resolved != nil {
 					// Override config with resolved (user/shared) credentials
 					for k, v := range resolved.Config {
 						conn.Config[k] = v
@@ -1040,4 +1049,183 @@ func testFluxCDConnection(deps Dependencies, c *gin.Context, connConfig map[stri
 	}
 	// FluxCD only works via CRD mode (kubeconfig)
 	return "connected", "FluxCD CRD mode — will verify on first use"
+}
+
+// credentialStatus returns per-connection credential status for the current user.
+// For each connection it reports whether the user has a personal credential,
+// a shared credential, or relies on the admin fallback.
+func credentialStatus(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID := auth.GetTenantID(c)
+		userID := auth.GetUserID(c)
+		if userID == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+			return
+		}
+
+		items, err := deps.Repos.Connection.List(c.Request.Context(), tenantID, "")
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		type connCredStatus struct {
+			ConnectionID   uuid.UUID `json:"connection_id"`
+			ConnectionName string    `json:"connection_name"`
+			Type           string    `json:"type"`
+			HasPersonal    bool      `json:"has_personal"`
+			HasShared      bool      `json:"has_shared"`
+			FallbackAdmin  bool      `json:"fallback_admin"`
+			Effective      string    `json:"effective"` // "user", "shared", "admin", "none"
+		}
+
+		result := make([]connCredStatus, 0, len(items))
+		for _, conn := range items {
+			cs := connCredStatus{
+				ConnectionID:   conn.ID,
+				ConnectionName: conn.Name,
+				Type:           string(conn.Type),
+				FallbackAdmin:  conn.FallbackToAdmin,
+				Effective:      "none",
+			}
+
+			// Determine provider name and URL for lookup
+			provName, provURL := credLookupForConn(conn)
+
+			if provName != "" && provURL != "" {
+				// Check personal credential
+				if deps.Repos.UserCredential != nil {
+					cred, err := deps.Repos.UserCredential.GetByProvider(c.Request.Context(), *userID, provName, provURL)
+					if err == nil && cred != nil {
+						cs.HasPersonal = true
+						cs.Effective = "user"
+					}
+				}
+				// Check shared credential
+				if !cs.HasPersonal && deps.Repos.CredentialShare != nil {
+					tokenEnc, _, _, err := deps.Repos.CredentialShare.GetSharedToken(c.Request.Context(), *userID, tenantID, provName, provURL)
+					if err == nil && tokenEnc != "" {
+						cs.HasShared = true
+						cs.Effective = "shared"
+					}
+				}
+			}
+
+			if cs.Effective == "none" && conn.FallbackToAdmin {
+				cs.Effective = "admin"
+			}
+
+			result = append(result, cs)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"statuses": result, "total": len(result)})
+	}
+}
+
+// credLookupForConn returns the provider name and URL for credential lookup.
+func credLookupForConn(conn repository.Connection) (string, string) {
+	switch conn.Type {
+	case repository.ConnectionGitLab:
+		url, _ := conn.Config["url"].(string)
+		return "gitlab", url
+	case repository.ConnectionGit:
+		provider, _ := conn.Config["provider"].(string)
+		url, _ := conn.Config["url"].(string)
+		if provider == "" {
+			provider = "gitlab"
+		}
+		return provider, url
+	case repository.ConnectionJira:
+		url, _ := conn.Config["url"].(string)
+		return "jira", url
+	case repository.ConnectionArgoCD:
+		url, _ := conn.Config["server_url"].(string)
+		return "argocd", url
+	default:
+		return "", ""
+	}
+}
+
+// connectionHealthDashboard returns a health matrix for admin dashboards.
+// It shows each connection's status, who has credentials, and last check time.
+func connectionHealthDashboard(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantID := auth.GetTenantID(c)
+
+		items, err := deps.Repos.Connection.List(c.Request.Context(), tenantID, "")
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		type connHealth struct {
+			ID           uuid.UUID  `json:"id"`
+			Name         string     `json:"name"`
+			Type         string     `json:"type"`
+			Status       string     `json:"status"`
+			LastCheckAt  *time.Time `json:"last_check_at,omitempty"`
+			Fallback     bool       `json:"fallback_to_admin"`
+			OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
+			UserCount    int        `json:"user_credential_count"`
+			SharedCount  int        `json:"shared_credential_count"`
+		}
+
+		result := make([]connHealth, 0, len(items))
+		for _, conn := range items {
+			h := connHealth{
+				ID:          conn.ID,
+				Name:        conn.Name,
+				Type:        string(conn.Type),
+				Status:      conn.Status,
+				LastCheckAt: conn.LastCheckAt,
+				Fallback:    conn.FallbackToAdmin,
+				OwnerID:     conn.OwnerID,
+			}
+
+			provName, provURL := credLookupForConn(conn)
+			if provName != "" && provURL != "" && deps.DB != nil {
+				// Count users with personal credentials for this provider+URL
+				var userCount int
+				_ = deps.DB.QueryRow(c.Request.Context(),
+					`SELECT COUNT(*) FROM user_credentials WHERE tenant_id = $1 AND provider = $2 AND provider_url = $3`,
+					tenantID, provName, provURL).Scan(&userCount)
+				h.UserCount = userCount
+
+				// Count shared credentials
+				var sharedCount int
+				_ = deps.DB.QueryRow(c.Request.Context(),
+					`SELECT COUNT(*) FROM credential_shares cs JOIN user_credentials uc ON uc.id = cs.credential_id WHERE uc.tenant_id = $1 AND uc.provider = $2 AND uc.provider_url = $3`,
+					tenantID, provName, provURL).Scan(&sharedCount)
+				h.SharedCount = sharedCount
+			}
+
+			result = append(result, h)
+		}
+
+		// Summary counts
+		total := len(result)
+		healthy := 0
+		degraded := 0
+		down := 0
+		for _, h := range result {
+			switch h.Status {
+			case "connected":
+				healthy++
+			case "error":
+				down++
+			default:
+				degraded++
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"connections": result,
+			"summary": gin.H{
+				"total":    total,
+				"healthy":  healthy,
+				"degraded": degraded,
+				"down":     down,
+			},
+		})
+	}
 }

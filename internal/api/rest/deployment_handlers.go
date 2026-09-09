@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +52,36 @@ func listDeployments(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"deployments": items, "total": len(items)})
+
+		// Apply optional query filters.
+		statusFilter := c.Query("status")
+		teamFilter := c.Query("team")
+		serviceFilter := c.Query("service")
+		limitStr := c.DefaultQuery("limit", "0")
+		limit := 0
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+
+		filtered := make([]repository.Deployment, 0, len(items))
+		for _, d := range items {
+			if statusFilter != "" && d.Status != statusFilter {
+				continue
+			}
+			if teamFilter != "" && d.TeamName != teamFilter {
+				continue
+			}
+			if serviceFilter != "" && d.GitlabProjectName != serviceFilter {
+				continue
+			}
+			filtered = append(filtered, d)
+		}
+
+		if limit > 0 && len(filtered) > limit {
+			filtered = filtered[:limit]
+		}
+
+		c.JSON(http.StatusOK, gin.H{"deployments": filtered, "total": len(filtered)})
 	}
 }
 

@@ -198,13 +198,17 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
       const retry = await fetch(`${getBase()}${path}`, { ...options, headers, cache: 'no-store', credentials: 'include' });
       if (!retry.ok) {
         const body = await retry.json().catch(() => ({}));
-        throw new Error(body.error || `API error: ${retry.status}`);
+        const err = new Error(body.error || `API error: ${retry.status}`);
+        (err as any).response = body;
+        throw err;
       }
       return retry.json();
     }
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `API error: ${res.status}`);
+      const err = new Error(body.error || `API error: ${res.status}`);
+      (err as any).response = body;
+      throw err;
     }
     return res.json();
   }
@@ -251,7 +255,9 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
         }
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || `API error: ${res.status}`);
+          const err = new Error(body.error || `API error: ${res.status}`);
+          (err as any).response = body;
+          throw err;
         }
         const data = await res.json();
         cache.set(key, { data, expiry: Date.now() + getTtl(path) });
@@ -285,7 +291,9 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `API error: ${res.status}`);
+        const err = new Error(body.error || `API error: ${res.status}`);
+        (err as any).response = body;
+        throw err;
       }
       const data = await res.json();
       serverCache.set(key, { data, expiry: Date.now() + getServerTtl(path) });
@@ -995,8 +1003,9 @@ export const plugins = {
       method: 'POST',
       body: JSON.stringify({ config }),
     }),
-  uninstall: (name: string) =>
-    fetchAPI<{ message: string }>(`/api/v1/plugins/${name}`, { method: 'DELETE' }),
+  uninstall: (name: string, force?: boolean) =>
+    fetchAPI<{ message: string; error?: string; dependent_connections?: { id: string; name: string; type: string }[] }>(
+      `/api/v1/plugins/${name}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
   execute: (name: string, action: string, params?: Record<string, unknown>, config?: Record<string, string>) =>
     fetchAPI<{ success: boolean; output: unknown; error?: string }>(`/api/v1/plugins/${name}/execute`, {
       method: 'POST',
@@ -1524,7 +1533,16 @@ export interface DeploymentSpec {
 }
 
 export const deployments = {
-  list: () => fetchAPI<{ deployments: Deployment[]; total: number }>('/api/v1/deployments'),
+  list: (filters?: { status?: string; team?: string; service?: string; limit?: number }) => {
+    if (!filters) return fetchAPI<{ deployments: Deployment[]; total: number }>('/api/v1/deployments');
+    const qs = new URLSearchParams();
+    if (filters.status) qs.set('status', filters.status);
+    if (filters.team) qs.set('team', filters.team);
+    if (filters.service) qs.set('service', filters.service);
+    if (filters.limit) qs.set('limit', String(filters.limit));
+    const q = qs.toString();
+    return fetchAPI<{ deployments: Deployment[]; total: number }>(`/api/v1/deployments${q ? `?${q}` : ''}`);
+  },
   get: (id: string) => fetchAPI<Deployment>(`/api/v1/deployments/${id}`),
   create: (data: Record<string, unknown>) =>
     fetchAPI<Deployment>('/api/v1/deployments', { method: 'POST', body: JSON.stringify(data) }),
@@ -1824,6 +1842,28 @@ export interface ConnectionSummary {
   count: number;
 }
 
+export interface ConnectionCredentialStatus {
+  connection_id: string;
+  connection_name: string;
+  type: string;
+  has_personal: boolean;
+  has_shared: boolean;
+  fallback_admin: boolean;
+  effective: 'user' | 'shared' | 'admin' | 'none';
+}
+
+export interface ConnectionHealth {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  last_check_at?: string;
+  fallback_to_admin: boolean;
+  owner_id?: string;
+  user_credential_count: number;
+  shared_credential_count: number;
+}
+
 export interface ParsedCluster {
   name: string;
   server: string;
@@ -1864,6 +1904,10 @@ export const connections = {
     fetchAPI<{ summary: ConnectionSummary[] }>('/api/v1/connections/summary'),
   pluginStatus: () =>
     fetchAPI<Record<string, { installed: boolean; enabled: boolean }>>('/api/v1/connections/plugin-status'),
+  credentialStatus: () =>
+    fetchAPI<{ statuses: ConnectionCredentialStatus[]; total: number }>('/api/v1/connections/credential-status'),
+  health: () =>
+    fetchAPI<{ connections: ConnectionHealth[]; summary: { total: number; healthy: number; degraded: number; down: number } }>('/api/v1/connections/health'),
   parseKubeconfig: (kubeconfig: string) =>
     fetchAPI<{ clusters: ParsedCluster[]; count: number }>('/api/v1/connections/parse-kubeconfig', {
       method: 'POST',
@@ -2952,8 +2996,8 @@ export const marketplace = {
     fetchAPI<{ message: string; plugin: PluginInfo }>(`/api/v1/marketplace/${id}/install`, {
       method: 'POST',
     }),
-  uninstall: (id: string) =>
-    fetchAPI<{ message: string }>(`/api/v1/marketplace/${id}/uninstall`, {
+  uninstall: (id: string, force?: boolean) =>
+    fetchAPI<{ message: string }>(`/api/v1/marketplace/${id}/uninstall${force ? '?force=true' : ''}`, {
       method: 'POST',
     }),
 };
@@ -3307,6 +3351,15 @@ export interface DockerService {
   updated_at: string;
 }
 
+export interface DockerServiceHistory {
+  id: string;
+  service_id: string;
+  compose_yaml: string;
+  deployed_at: string;
+  deployed_by?: string;
+  status: string;
+}
+
 export const dockerServices = {
   list: () =>
     fetchAPI<{ docker_services: DockerService[]; total: number }>('/api/v1/docker-services'),
@@ -3328,6 +3381,10 @@ export const dockerServices = {
     fetchAPI<{ logs: string }>(`/api/v1/docker-services/${id}/logs?service=${service || ''}&tail=${tail || 200}`),
   deployLocal: (data: { name: string; compose_yaml?: string; folder_path?: string; env_vars?: Record<string, string> }) =>
     fetchAPI<DockerService>('/api/v1/docker-services/deploy-local', { method: 'POST', body: JSON.stringify(data) }),
+  rollback: (id: string) =>
+    fetchAPI<{ status: string; message: string }>(`/api/v1/docker-services/${id}/rollback`, { method: 'POST' }),
+  history: (id: string) =>
+    fetchAPI<{ history: DockerServiceHistory[] }>(`/api/v1/docker-services/${id}/history`),
 };
 
 // ── Helm Repositories ───────────────────────────────────────

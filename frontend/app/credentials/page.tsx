@@ -136,39 +136,61 @@ export default function CredentialsPage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {creds.map(cred => (
-            <div key={cred.id} className="card modern-card-hover" style={{ borderRadius: '12px' }}>
-              <div className="card-body flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <span className="bg-[var(--border-light)] text-[var(--text-secondary)] px-2 py-1 rounded text-xs font-medium uppercase">
-                    {cred.provider}
-                  </span>
-                  <div>
-                    <div className="text-sm font-medium text-[var(--text-primary)]">{cred.display_name || cred.provider_url}</div>
-                    <div className="text-xs text-[var(--text-tertiary)]">{cred.provider_url} &middot; {cred.token_masked}</div>
-                    {cred.username && cred.provider !== 's3' && <div className="text-xs text-[var(--text-tertiary)]">Remote user: {cred.username} ({cred.email})</div>}
-                    {cred.username && cred.provider === 's3' && <div className="text-xs text-[var(--text-tertiary)]">Access key: {cred.username}</div>}
+        <>
+          {/* Group credentials by provider */}
+          {(() => {
+            const grouped: Record<string, UserCredential[]> = {};
+            for (const cred of creds) {
+              const key = `${cred.provider}:${cred.provider_url}`;
+              if (!grouped[key]) grouped[key] = [];
+              grouped[key].push(cred);
+            }
+            return Object.entries(grouped).map(([key, items]) => {
+              const provider = items[0].provider;
+              const url = items[0].provider_url;
+              const providerLabel = PROVIDERS.find(p => p.value === provider)?.label || provider;
+              return (
+                <div key={key} className="space-y-2">
+                  <div className="flex items-center gap-2 pt-2">
+                    <span className="bg-[var(--border-light)] text-[var(--text-secondary)] px-2 py-1 rounded text-xs font-medium uppercase">
+                      {providerLabel}
+                    </span>
+                    <span className="text-xs text-[var(--text-tertiary)]">{url}</span>
+                    <span className="text-xs text-[var(--text-tertiary)] bg-[var(--border-light)] px-1.5 py-0.5 rounded-full">{items.length}</span>
+                  </div>
+                  <div className="space-y-2 pl-2">
+                    {items.map(cred => (
+                      <div key={cred.id} className="card modern-card-hover" style={{ borderRadius: '12px' }}>
+                        <div className="card-body flex items-center justify-between">
+                          <div>
+                            <div className="text-sm font-medium text-[var(--text-primary)]">{cred.display_name || cred.provider_url}</div>
+                            <div className="text-xs text-[var(--text-tertiary)]">{cred.token_masked}</div>
+                            {cred.username && cred.provider !== 's3' && <div className="text-xs text-[var(--text-tertiary)]">Remote user: {cred.username} ({cred.email})</div>}
+                            {cred.username && cred.provider === 's3' && <div className="text-xs text-[var(--text-tertiary)]">Access key: {cred.username}</div>}
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            {cred.is_default && (
+                              <span className="bg-blue-500/10 text-blue-500 px-2 py-1 rounded text-xs">Default</span>
+                            )}
+                            {cred.last_verified && (
+                              <span className="text-xs text-[var(--text-tertiary)]">Verified: {new Date(cred.last_verified).toLocaleDateString()}</span>
+                            )}
+                            <button onClick={() => handleVerify(cred.id)} className="text-emerald-600 text-xs hover:text-emerald-500">Verify</button>
+                            <button onClick={() => handleToggleDefault(cred)} className="text-[var(--accent)] text-xs hover:text-[var(--accent)]">
+                              {cred.is_default ? 'Unset Default' : 'Set Default'}
+                            </button>
+                            <button onClick={() => setShareModalCred(cred)} className="text-violet-500 text-xs hover:text-violet-400">Share</button>
+                            <button onClick={() => handleDelete(cred.id)} className="text-red-500 text-xs hover:text-red-400">Delete</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  {cred.is_default && (
-                    <span className="bg-blue-500/10 text-blue-500 px-2 py-1 rounded text-xs">Default</span>
-                  )}
-                  {cred.last_verified && (
-                    <span className="text-xs text-[var(--text-tertiary)]">Verified: {new Date(cred.last_verified).toLocaleDateString()}</span>
-                  )}
-                  <button onClick={() => handleVerify(cred.id)} className="text-emerald-600 text-xs hover:text-emerald-500">Verify</button>
-                  <button onClick={() => handleToggleDefault(cred)} className="text-[var(--accent)] text-xs hover:text-[var(--accent)]">
-                    {cred.is_default ? 'Unset Default' : 'Set Default'}
-                  </button>
-                  <button onClick={() => setShareModalCred(cred)} className="text-violet-500 text-xs hover:text-violet-400">Share</button>
-                  <button onClick={() => handleDelete(cred.id)} className="text-red-500 text-xs hover:text-red-400">Delete</button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            });
+          })()}
+        </>
       )}
 
       {/* Shared with me section */}

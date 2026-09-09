@@ -72,6 +72,8 @@ func registerDockerServiceRoutes(r *gin.RouterGroup, deps Dependencies) {
 		dockerServices.POST("/:id/restart", restartDockerService(deps))
 		dockerServices.POST("/:id/stop", stopDockerService(deps))
 		dockerServices.POST("/:id/start", startDockerService(deps))
+		dockerServices.POST("/:id/rollback", rollbackDockerService(deps))
+		dockerServices.GET("/:id/history", dockerServiceHistory(deps))
 		dockerServices.DELETE("/:id", deleteDockerService(deps))
 		dockerServices.GET("/:id/logs", getDockerServiceLogs(deps))
 	}
@@ -320,6 +322,19 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 		}
 		svc.Status = "running"
 		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+
+		// Record deployment in history for rollback support.
+		if deps.DB != nil && svc.ComposeYaml != "" {
+			userID := auth.GetUserID(c)
+			deployedBy := ""
+			if userID != nil {
+				deployedBy = userID.String()
+			}
+			_, _ = deps.DB.Exec(c.Request.Context(),
+				`INSERT INTO docker_service_history (service_id, tenant_id, compose_yaml, deployed_by, status)
+				 VALUES ($1, $2, $3, $4, 'deployed')`,
+				svc.ID, svc.TenantID, svc.ComposeYaml, deployedBy)
+		}
 
 		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local", "folder_path": svc.FolderPath})
 		c.JSON(http.StatusCreated, svc)
@@ -740,5 +755,130 @@ func getDockerServiceLogs(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"logs": logs})
+	}
+}
+
+// dockerServiceHistory returns deployment history for a Docker service.
+func dockerServiceHistory(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		if deps.DB == nil {
+			c.JSON(http.StatusOK, gin.H{"history": []interface{}{}})
+			return
+		}
+
+		type historyEntry struct {
+			ID          uuid.UUID `json:"id"`
+			ServiceID   uuid.UUID `json:"service_id"`
+			ComposeYaml string    `json:"compose_yaml"`
+			DeployedAt  time.Time `json:"deployed_at"`
+			DeployedBy  string    `json:"deployed_by,omitempty"`
+			Status      string    `json:"status"`
+		}
+
+		rows, err := deps.DB.Query(c.Request.Context(),
+			`SELECT id, service_id, compose_yaml, deployed_at, COALESCE(deployed_by,''), status
+			 FROM docker_service_history
+			 WHERE service_id = $1 AND tenant_id = $2
+			 ORDER BY deployed_at DESC LIMIT 50`, id, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		defer rows.Close()
+
+		var entries []historyEntry
+		for rows.Next() {
+			var e historyEntry
+			if err := rows.Scan(&e.ID, &e.ServiceID, &e.ComposeYaml, &e.DeployedAt, &e.DeployedBy, &e.Status); err == nil {
+				entries = append(entries, e)
+			}
+		}
+		if entries == nil {
+			entries = []historyEntry{}
+		}
+		c.JSON(http.StatusOK, gin.H{"history": entries})
+	}
+}
+
+// rollbackDockerService redeploys the previous compose configuration.
+func rollbackDockerService(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DockerHost == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "docker host repository not available"})
+			return
+		}
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		svc, err := deps.Repos.DockerHost.GetService(c.Request.Context(), id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "docker service not found"})
+			return
+		}
+
+		if deps.DB == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database not available"})
+			return
+		}
+
+		// Find the previous successful deployment.
+		var prevCompose string
+		err = deps.DB.QueryRow(c.Request.Context(),
+			`SELECT compose_yaml FROM docker_service_history
+			 WHERE service_id = $1 AND tenant_id = $2 AND status = 'deployed'
+			 ORDER BY deployed_at DESC OFFSET 1 LIMIT 1`,
+			id, tenantID).Scan(&prevCompose)
+		if err != nil || prevCompose == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "no previous deployment to rollback to"})
+			return
+		}
+
+		client, err := dockerClientForService(deps, svc, tenantID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
+		defer cancel()
+
+		// Redeploy with the previous compose configuration.
+		// Reuse the service's stored env vars to match the original deployment.
+		var envVars map[string]string
+		if svc.EnvVars != nil && len(svc.EnvVars) > 0 {
+			_ = json.Unmarshal(svc.EnvVars, &envVars)
+		}
+		if err := client.ComposeUp(ctx, svc.Name, prevCompose, envVars); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		// Update the service's compose to the rolled-back version.
+		svc.ComposeYaml = prevCompose
+		svc.Status = "running"
+		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+
+		// Record the rollback in history.
+		userID := auth.GetUserID(c)
+		deployedBy := ""
+		if userID != nil {
+			deployedBy = userID.String()
+		}
+		_, _ = deps.DB.Exec(c.Request.Context(),
+			`INSERT INTO docker_service_history (service_id, tenant_id, compose_yaml, deployed_by, status)
+			 VALUES ($1, $2, $3, $4, 'rolled_back')`,
+			id, tenantID, prevCompose, deployedBy)
+
+		logAudit(deps, c, "rollback", "docker_service", id.String(), nil, gin.H{"status": "rolled_back"})
+		c.JSON(http.StatusOK, gin.H{"status": "rolled_back", "message": "Service rolled back to previous deployment"})
 	}
 }

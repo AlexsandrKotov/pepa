@@ -579,6 +579,35 @@ func uninstallMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		force := c.Query("force") == "true"
+
+		// Check for connections that depend on this plugin.
+		var dependentConns []gin.H
+		if connType, ok := pluginToConnType[id]; ok && deps.Repos.Connection != nil {
+			tenantID := auth.GetTenantID(c)
+			if conns, err := deps.Repos.Connection.List(c.Request.Context(), tenantID, ""); err == nil {
+				for _, conn := range conns {
+					if string(conn.Type) == connType {
+						dependentConns = append(dependentConns, gin.H{
+							"id":   conn.ID,
+							"name": conn.Name,
+							"type": string(conn.Type),
+						})
+					}
+				}
+			}
+		}
+
+		if len(dependentConns) > 0 && !force {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":                "plugin has dependent connections",
+				"dependent_count":      len(dependentConns),
+				"dependent_connections": dependentConns,
+				"message":              "This plugin is used by connections. Use ?force=true to uninstall anyway.",
+			})
+			return
+		}
+
 		// Unload from engine if running
 		if deps.PluginMgr != nil {
 			_ = deps.PluginMgr.UnloadPlugin(id)

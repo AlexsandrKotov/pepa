@@ -52,16 +52,25 @@ export default function MarketplacePage() {
     }
   };
 
-  const handleUninstall = async (pluginId: string) => {
+  const handleUninstall = async (pluginId: string, force = false) => {
     setInstalling(pluginId);
     try {
-      await marketplace.uninstall(pluginId);
+      await marketplace.uninstall(pluginId, force);
       setToast({ message: 'Plugin uninstalled successfully!', type: 'success' });
       await loadPlugins();
       // Notify sidebar to refresh enabled plugins list
       window.dispatchEvent(new CustomEvent('pepa:plugins-changed'));
-    } catch (err) {
-      setToast({ message: err instanceof Error ? err.message : 'Failed to uninstall plugin', type: 'error' });
+    } catch (err: unknown) {
+      const e = err as { message?: string; response?: { error?: string; dependent_connections?: { id: string; name: string }[]; message?: string } };
+      if (e.response?.dependent_connections && e.response.dependent_connections.length > 0) {
+        const connNames = e.response.dependent_connections.map(c => c.name).join(', ');
+        if (confirm(`This plugin is used by connections: ${connNames}.\n\nUninstall anyway? This may break those connections.`)) {
+          await handleUninstall(pluginId, true);
+          return;
+        }
+      } else {
+        setToast({ message: err instanceof Error ? err.message : 'Failed to uninstall plugin', type: 'error' });
+      }
     } finally {
       setInstalling(null);
       setUninstallTarget(null);

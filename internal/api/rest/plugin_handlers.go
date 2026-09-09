@@ -309,6 +309,7 @@ func disablePlugin(deps Dependencies) gin.HandlerFunc {
 func uninstallPlugin(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		name := c.Param("name")
+		force := c.Query("force") == "true"
 
 		if deps.Repos.Plugin != nil {
 			p, err := deps.Repos.Plugin.GetByName(c.Request.Context(), name)
@@ -316,6 +317,34 @@ func uninstallPlugin(deps Dependencies) gin.HandlerFunc {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
+
+			// Check for connections that depend on this plugin.
+			var dependentConns []gin.H
+			if connType, ok := pluginToConnType[name]; ok && deps.Repos.Connection != nil {
+				tenantID := auth.GetTenantID(c)
+				if conns, err := deps.Repos.Connection.List(c.Request.Context(), tenantID, ""); err == nil {
+					for _, conn := range conns {
+						if string(conn.Type) == connType {
+							dependentConns = append(dependentConns, gin.H{
+								"id":   conn.ID,
+								"name": conn.Name,
+								"type": string(conn.Type),
+							})
+						}
+					}
+				}
+			}
+
+			if len(dependentConns) > 0 && !force {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":              "plugin has dependent connections",
+					"dependent_count":    len(dependentConns),
+					"dependent_connections": dependentConns,
+					"message":            "This plugin is used by connections. Use ?force=true to uninstall anyway.",
+				})
+				return
+			}
+
 			// Soft-delete by disabling and marking as uninstalled.
 			p.Enabled = false
 			p.Status = "uninstalled"
@@ -323,7 +352,11 @@ func uninstallPlugin(deps Dependencies) gin.HandlerFunc {
 				respondInternalError(c, err)
 				return
 			}
-			logAudit(deps, c, "uninstall", "plugin", p.ID.String(), nil, gin.H{"name": name})
+			logAudit(deps, c, "uninstall", "plugin", p.ID.String(), nil, gin.H{
+				"name":                name,
+				"force":               force,
+				"dependent_connections": len(dependentConns),
+			})
 		}
 
 		// Disable in the live Manager so the gRPC subprocess model is consistent.

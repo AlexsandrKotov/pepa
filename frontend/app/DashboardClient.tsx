@@ -9,7 +9,7 @@ import {
   platformSettings,
   type Connection, type Cluster, type Deployment, type AuditEntry,
   type Service, type Environment, type GitopsRepo, type PipelineSource, type PipelineRun,
-  type DockerService,
+  type DockerService, type ConnectionHealth,
 } from '@/lib/api';
 import { getStoredUser } from '@/lib/api';
 import CollapsibleSection from '@/components/CollapsibleSection';
@@ -186,6 +186,7 @@ export default function DashboardClient() {
   const { profile, setProfile, config, hasWidget } = useDashboardProfile();
   const { isAdmin, hasPermission } = usePermission();
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [connHealth, setConnHealth] = useState<{ connections: ConnectionHealth[]; summary: { total: number; healthy: number; degraded: number; down: number } } | null>(null);
 
   const user = getStoredUser();
   const userName = user?.name?.split(' ')[0] || 'User';
@@ -262,6 +263,15 @@ export default function DashboardClient() {
       }).catch(() => {});
     } catch { /* ignore */ }
   }, []);
+
+  // Fetch connection health for admin dashboard
+  useEffect(() => {
+    if (isAdmin) {
+      connections.health()
+        .then(data => setConnHealth(data))
+        .catch(() => {});
+    }
+  }, [isAdmin]);
 
   if (loading || !data) {
     return (
@@ -477,6 +487,49 @@ export default function DashboardClient() {
               totalConnections={connList.length}
               recentAuditCount={recentAudit.length}
             />
+          )}
+
+          {/* Connection Health Matrix (Admin only) */}
+          {isAdmin && connHealth && connHealth.connections.length > 0 && (
+            <CollapsibleSection id="connection-health" title="Connection Health" defaultExpanded={true} action={<Link href="/connections" className="text-[12px] text-[var(--accent)] hover:underline">View all</Link>}>
+              <div className="space-y-3">
+                {/* Summary badges */}
+                <div className="flex gap-2 flex-wrap">
+                  <span className="px-2 py-1 text-[11px] font-medium rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                    {connHealth.summary.healthy} healthy
+                  </span>
+                  <span className="px-2 py-1 text-[11px] font-medium rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                    {connHealth.summary.degraded} degraded
+                  </span>
+                  <span className="px-2 py-1 text-[11px] font-medium rounded-full bg-red-500/10 text-red-500 border border-red-500/20">
+                    {connHealth.summary.down} down
+                  </span>
+                </div>
+                {/* Connection list */}
+                <div className="divide-y divide-[var(--border-light)]">
+                  {connHealth.connections.slice(0, 6).map(conn => (
+                    <div key={conn.id} className="py-2 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          conn.status === 'connected' ? 'bg-emerald-500' :
+                          conn.status === 'error' ? 'bg-red-500' : 'bg-[var(--text-tertiary)]'
+                        }`} />
+                        <span className="text-[13px] text-[var(--text-primary)] truncate">{conn.name}</span>
+                        <span className="text-[10px] text-[var(--text-tertiary)] px-1.5 py-0.5 bg-[var(--border-light)] rounded">{conn.type}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+                        {conn.user_credential_count > 0 && (
+                          <span title="Users with credentials">{conn.user_credential_count} user creds</span>
+                        )}
+                        {conn.last_check_at && (
+                          <span>Checked {new Date(conn.last_check_at).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CollapsibleSection>
           )}
         </div>
       </div>

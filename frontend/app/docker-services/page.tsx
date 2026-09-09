@@ -69,10 +69,13 @@ export default function DockerServicesPage() {
     return hosts.find(h => h.id === id)?.name || 'Unknown';
   };
 
-  const handleAction = async (id: string, action: 'start' | 'stop' | 'restart' | 'refresh' | 'delete') => {
+  const handleAction = async (id: string, action: 'start' | 'stop' | 'restart' | 'refresh' | 'delete' | 'rollback') => {
     if (action === 'delete') {
       setDeleteConfirm(id);
       return;
+    }
+    if (action === 'rollback') {
+      if (!confirm('Rollback this service to the previous deployment?')) return;
     }
     setActionLoading(id);
     try {
@@ -81,6 +84,7 @@ export default function DockerServicesPage() {
         case 'stop': await dockerServices.stop(id); break;
         case 'restart': await dockerServices.restart(id); break;
         case 'refresh': await dockerServices.refresh(id); break;
+        case 'rollback': await dockerServices.rollback(id); break;
       }
       load();
     } catch { /* ignore */ }
@@ -257,6 +261,14 @@ export default function DockerServicesPage() {
                     Start
                   </button>
                 )}
+                <button
+                  onClick={() => handleAction(svc.id, 'rollback')}
+                  disabled={actionLoading === svc.id}
+                  className="text-[11px] px-2.5 py-1 text-violet-500 hover:bg-violet-500/10 rounded-lg transition-colors disabled:opacity-50"
+                  title="Rollback to previous deployment"
+                >
+                  Rollback
+                </button>
                 <button
                   onClick={() => handleShowLogs(svc.id)}
                   className="text-[11px] px-2.5 py-1 text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded-lg transition-colors"

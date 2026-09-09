@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { connections as connectionsAPI, plugins as pluginsAPI, ai as aiAPI, type Connection, type ConnectionType, type PluginInfo } from '@/lib/api';
+import { connections as connectionsAPI, plugins as pluginsAPI, ai as aiAPI, type Connection, type ConnectionType, type PluginInfo, type ConnectionCredentialStatus } from '@/lib/api';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
 import { friendlyError } from '@/lib/errors';
@@ -86,6 +86,7 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   const [gitPluginStatus, setGitPluginStatus] = useState<Record<string, { installed: boolean; enabled: boolean }>>({});
   const [defaultAIProvider, setDefaultAIProvider] = useState('');
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
+  const [credStatuses, setCredStatuses] = useState<Record<string, ConnectionCredentialStatus>>({});
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
   const { isAdmin, hasPermission } = usePermission();
   const canCreate = isAdmin || hasPermission('connections', 'create');
@@ -120,6 +121,19 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
       .then(data => setDefaultAIProvider(data.default_provider || ''))
       .catch(() => {});
   }, []);
+
+  // Fetch credential statuses for the current user
+  useEffect(() => {
+    connectionsAPI.credentialStatus()
+      .then(data => {
+        const map: Record<string, ConnectionCredentialStatus> = {};
+        for (const s of data.statuses || []) {
+          map[s.connection_id] = s;
+        }
+        setCredStatuses(map);
+      })
+      .catch(() => {});
+  }, [connections.length]);
 
   const handleSetDefaultProvider = async (provider: string) => {
     setSettingDefault(provider);
@@ -327,11 +341,27 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
                       <span className="text-xs text-[var(--text-tertiary)]">
                         {conn.last_check_at ? `Last check: ${new Date(conn.last_check_at).toLocaleString()}` : 'Never tested'}
                       </span>
-                      {!isAdmin && (
-                        <span className={`text-xs ${conn.fallback_to_admin !== false ? 'text-amber-600' : 'text-red-500'}`}>
-                          {conn.fallback_to_admin !== false ? 'Admin fallback' : 'Personal cred. required'}
-                        </span>
-                      )}
+                      {!isAdmin && (() => {
+                        const cs = credStatuses[conn.id];
+                        if (!cs) return (
+                          <span className="text-xs text-amber-600">
+                            {conn.fallback_to_admin !== false ? 'Admin fallback' : 'Personal cred. required'}
+                          </span>
+                        );
+                        const badgeColor = cs.effective === 'user' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                          : cs.effective === 'shared' ? 'bg-blue-500/10 text-blue-600 border-blue-500/20'
+                          : cs.effective === 'admin' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                          : 'bg-red-500/10 text-red-500 border-red-500/20';
+                        const badgeLabel = cs.effective === 'user' ? 'Your credentials'
+                          : cs.effective === 'shared' ? 'Shared credentials'
+                          : cs.effective === 'admin' ? 'Admin credentials'
+                          : 'No credentials';
+                        return (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full border ${badgeColor}`}>
+                            {badgeLabel}
+                          </span>
+                        );
+                      })()}
                       <div className="flex gap-2">
                         {group.type === 'ai' && !isDefaultAI && connProvider && (
                           <button
