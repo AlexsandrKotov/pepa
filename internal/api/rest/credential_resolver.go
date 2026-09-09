@@ -155,6 +155,12 @@ func overrideConfigWithUserCred(adminConfig map[string]string, provider, token, 
 	case "docker":
 		// Docker hosts use SSH key or TLS certs. User stores SSH key in TokenEnc.
 		merged["ssh_key"] = token
+	case "argocd":
+		// ArgoCD uses server_url + auth_token. User stores auth_token in TokenEnc.
+		merged["auth_token"] = token
+		if username != "" {
+			merged["username"] = username
+		}
 	default:
 		// Generic: override the token field.
 		merged["token"] = token

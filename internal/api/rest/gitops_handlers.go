@@ -662,8 +662,12 @@ func maskRepoToken(repo *gitops.Repo) {
 	if repo == nil || repo.Config == nil {
 		return
 	}
-	if t, ok := repo.Config["token"]; ok && t != "" {
-		repo.Config["token"] = "***"
+	// Mask all secret fields
+	secretFields := []string{"token", "argocd_auth_token", "password", "private_key"}
+	for _, field := range secretFields {
+		if val, ok := repo.Config[field]; ok && val != "" {
+			repo.Config[field] = "***"
+		}
 	}
 }
 

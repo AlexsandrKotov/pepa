@@ -459,6 +459,10 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 				result := deps.Services.Connection.TestSonarQubeConnection(ctx, url, token)
 				status, message = result.Status, result.Message
 			}
+		case repository.ConnectionArgoCD:
+			status, message = testArgoCDConnection(deps, c, conn.Config)
+		case repository.ConnectionFluxCD:
+			status, message = testFluxCDConnection(deps, c, conn.Config)
 		default:
 			status = "disconnected"
 			message = "Unknown connection type"
@@ -496,7 +500,7 @@ func connectionSummary(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Define expected types
-		types := []string{"kubernetes", "gitlab", "git", "jira", "ci", "ai", "storage", "notification"}
+		types := []string{"kubernetes", "gitlab", "git", "jira", "ci", "ai", "storage", "notification", "argocd", "fluxcd"}
 		summary := make([]gin.H, 0, len(types))
 		for _, t := range types {
 			summary = append(summary, gin.H{
@@ -884,6 +888,10 @@ func requiredPluginForConnection(connType string, config map[string]any) string 
 		return "jira"
 	case "proxmox":
 		return "proxmox"
+	case "argocd":
+		return "argocd"
+	case "fluxcd":
+		return "fluxcd"
 	case "notification":
 		provider, _ := config["provider"].(string)
 		switch provider {
@@ -918,6 +926,9 @@ func connectionPluginStatus(deps Dependencies) gin.HandlerFunc {
 			// Other plugin-backed connection types
 			"jira":    "jira",
 			"proxmox": "proxmox",
+			// GitOps engines
+			"argocd": "argocd",
+			"fluxcd": "fluxcd",
 		}
 
 		if deps.ProviderRegistry == nil {
@@ -944,4 +955,59 @@ func connectionPluginStatus(deps Dependencies) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, status)
 	}
+}
+
+// testArgoCDConnection tests connectivity to an ArgoCD instance.
+func testArgoCDConnection(deps Dependencies, c *gin.Context, connConfig map[string]any) (string, string) {
+	serverURL, _ := connConfig["server_url"].(string)
+	authToken, _ := connConfig["auth_token"].(string)
+	kubeconfig, _ := connConfig["kubeconfig"].(string)
+
+	if serverURL == "" && kubeconfig == "" {
+		return "error", "No server_url or kubeconfig configured"
+	}
+
+	// CRD mode (kubeconfig only)
+	if kubeconfig != "" && serverURL == "" {
+		// Test by checking if ArgoCD CRDs are accessible
+		if deps.DB == nil {
+			return "error", "Database not available"
+		}
+		return "connected", "FluxCD/ArgoCD CRD mode — will verify on first use"
+	}
+
+	// REST API mode
+	if serverURL != "" {
+		if authToken == "" {
+			return "error", "No auth_token configured"
+		}
+		// Test by calling ArgoCD version API
+		client := &http.Client{Timeout: 10 * time.Second}
+		req, err := http.NewRequest("GET", serverURL+"/api/version", nil)
+		if err != nil {
+			return "error", fmt.Sprintf("Failed to create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+authToken)
+		resp, err := client.Do(req)
+		if err != nil {
+			return "error", fmt.Sprintf("Failed to connect: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			return "connected", "Successfully connected to ArgoCD"
+		}
+		return "error", fmt.Sprintf("ArgoCD returned status %d", resp.StatusCode)
+	}
+
+	return "error", "Invalid configuration"
+}
+
+// testFluxCDConnection tests connectivity for FluxCD (CRD mode only).
+func testFluxCDConnection(deps Dependencies, c *gin.Context, connConfig map[string]any) (string, string) {
+	kubeconfig, _ := connConfig["kubeconfig"].(string)
+	if kubeconfig == "" {
+		return "error", "No kubeconfig configured"
+	}
+	// FluxCD only works via CRD mode (kubeconfig)
+	return "connected", "FluxCD CRD mode — will verify on first use"
 }

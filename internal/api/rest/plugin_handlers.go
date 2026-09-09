@@ -517,8 +517,8 @@ var pluginToConnType = map[string]string{
 	"jira":      "jira",
 	"bitbucket": "git",
 	"gitea":     "git",
-	"fluxcd":    "kubernetes",
-	"argocd":    "kubernetes",
+	"fluxcd":    "fluxcd",
+	"argocd":    "argocd",
 	"proxmox":   "proxmox",
 	"vmware":    "vmware",
 }

@@ -1801,7 +1801,7 @@ export const jira = {
 
 // ── Connections ─────────────────────────────────────────────
 
-export type ConnectionType = 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification' | 'docker' | 'secret' | 'sonarqube';
+export type ConnectionType = 'gitlab' | 'git' | 'jira' | 'ci' | 'ai' | 'storage' | 'proxmox' | 'vmware' | 'notification' | 'docker' | 'secret' | 'sonarqube' | 'argocd' | 'fluxcd';
 
 export interface Connection {
   id: string;

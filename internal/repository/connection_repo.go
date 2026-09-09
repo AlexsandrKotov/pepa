@@ -31,6 +31,8 @@ const (
 	ConnectionSecret       ConnectionType = "secret"
 	ConnectionNotification ConnectionType = "notification"
 	ConnectionSonarQube    ConnectionType = "sonarqube"
+	ConnectionArgoCD       ConnectionType = "argocd"
+	ConnectionFluxCD       ConnectionType = "fluxcd"
 )
 
 // Connection represents an external service connection.

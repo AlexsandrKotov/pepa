@@ -322,34 +322,42 @@ func nullString(s string) interface{} {
 	return s
 }
 
-// encryptConfig encrypts sensitive fields (token) in the config map before storage.
+// encryptConfig encrypts sensitive fields in the config map before storage.
 func encryptConfig(cfg map[string]string) map[string]string {
 	if cfg == nil {
 		return cfg
 	}
-	if token, ok := cfg["token"]; ok && token != "" {
-		encrypted, err := crypto.Encrypt(token)
-		if err != nil {
-			slog.Info("WARNING: failed to encrypt gitops token", "error", err)
-			return cfg
+	// Encrypt all secret fields
+	secretFields := []string{"token", "argocd_auth_token", "password", "private_key"}
+	for _, field := range secretFields {
+		if val, ok := cfg[field]; ok && val != "" {
+			encrypted, err := crypto.Encrypt(val)
+			if err != nil {
+				slog.Info("WARNING: failed to encrypt gitops secret", "field", field, "error", err)
+				continue
+			}
+			cfg[field] = encrypted
 		}
-		cfg["token"] = encrypted
 	}
 	return cfg
 }
 
-// decryptConfig decrypts sensitive fields (token) in the config map after retrieval.
+// decryptConfig decrypts sensitive fields in the config map after retrieval.
 func decryptConfig(cfg map[string]string) map[string]string {
 	if cfg == nil {
 		return cfg
 	}
-	if token, ok := cfg["token"]; ok && token != "" {
-		decrypted, err := crypto.Decrypt(token)
-		if err != nil {
-			slog.Info("WARNING: failed to decrypt gitops token", "error", err)
-			return cfg
+	// Decrypt all secret fields
+	secretFields := []string{"token", "argocd_auth_token", "password", "private_key"}
+	for _, field := range secretFields {
+		if val, ok := cfg[field]; ok && val != "" {
+			decrypted, err := crypto.Decrypt(val)
+			if err != nil {
+				slog.Info("WARNING: failed to decrypt gitops secret", "field", field, "error", err)
+				continue
+			}
+			cfg[field] = decrypted
 		}
-		cfg["token"] = decrypted
 	}
 	return cfg
 }
