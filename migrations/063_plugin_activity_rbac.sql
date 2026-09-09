@@ -1,5 +1,5 @@
 -- ============================================================
--- 046: Seed RBAC permissions for the plugin_activity resource
+-- 063: Seed RBAC permissions for the plugin_activity resource (renumbered from 046)
 -- ============================================================
 -- Plugin Activity was previously gated behind the 'audit' permission.
 -- This migration creates a dedicated 'plugin_activity' resource so

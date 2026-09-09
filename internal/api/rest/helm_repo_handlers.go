@@ -274,6 +274,18 @@ func applyHelmAuth(req *http.Request, repo *repository.HelmRepo) {
 	}
 }
 
+// helmAuthType returns a human-readable label for the auth method on the
+// request. Used only for structured logging — no secrets are exposed.
+func helmAuthType(req *http.Request) string {
+	if req.Header.Get("PRIVATE-TOKEN") != "" {
+		return "token"
+	}
+	if auth := req.Header.Get("Authorization"); strings.HasPrefix(auth, "Basic") {
+		return "basic"
+	}
+	return "none"
+}
+
 // fetchHelmIndex fetches and parses the index.yaml from a Helm repository
 func fetchHelmIndex(repo *repository.HelmRepo) (*helmIndex, error) {
 	url := strings.TrimSuffix(repo.URL, "/") + "/index.yaml"
@@ -286,24 +298,7 @@ func fetchHelmIndex(repo *repository.HelmRepo) (*helmIndex, error) {
 
 	applyHelmAuth(req, repo)
 
-	// Debug: log auth headers being sent
-	slog.Info("DEBUG: Fetching helm index from", "arg1", url)
-	slog.Info("DEBUG: Has PRIVATE-TOKEN", "arg1", req.Header.Get("PRIVATE-TOKEN") != "")
-	slog.Info("DEBUG: Has Authorization", "arg1", req.Header.Get("Authorization") != "")
-	slog.Info("DEBUG: Has BasicAuth", "arg1", req.Header.Get("Authorization") != "" && strings.HasPrefix(req.Header.Get("Authorization"), "Basic"))
-	// Masked token for debugging
-	if repo.Token != "" {
-		maskedToken := repo.Token
-		if len(maskedToken) > 8 {
-			maskedToken = maskedToken[:4] + "..." + maskedToken[len(maskedToken)-4:]
-		}
-		slog.Info("DEBUG: Token (masked)", "arg1", maskedToken)
-	} else {
-		slog.Info("DEBUG: Token is EMPTY")
-	}
-	if repo.Username != "" {
-		slog.Info("DEBUG: Username", "name", repo.Username)
-	}
+	slog.Debug("fetching helm index", "url", url, "auth_type", helmAuthType(req))
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -312,10 +307,8 @@ func fetchHelmIndex(repo *repository.HelmRepo) (*helmIndex, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		// Read error response body for debugging
-		errorBody, _ := io.ReadAll(resp.Body)
-		slog.Info("DEBUG: Helm repo error response ()", "arg1", resp.Status, "error", string(errorBody))
-		return nil, fmt.Errorf("fetch index from %s returned %s: %s", url, resp.Status, string(errorBody))
+		slog.Warn("helm repo returned non-OK status", "url", url, "status", resp.Status)
+		return nil, fmt.Errorf("fetch index from %s returned %s", url, resp.Status)
 	}
 
 	body, err := io.ReadAll(resp.Body)

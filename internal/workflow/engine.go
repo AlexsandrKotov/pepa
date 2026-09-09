@@ -46,7 +46,25 @@ func NewEngine(repo *repository.WorkflowRepository, entityRepo *repository.Entit
 }
 
 // Execute runs a workflow execution to completion.
-func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID) error {
+func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID) (retErr error) {
+	// Mark execution as running immediately so it never stays "pending"
+	// if an early validation error occurs below.
+	if err := e.workflowRepo.UpdateExecutionStatus(ctx, executionID, models.ExecutionRunning, nil); err != nil {
+		return fmt.Errorf("update execution status: %w", err)
+	}
+
+	// Track whether we already persisted a final result so the deferred
+	// failure handler does not overwrite detailed step results with NULL.
+	var resultRecorded bool
+
+	// If we return with an error after marking running, ensure the execution
+	// is recorded as failed rather than stuck in "running" forever.
+	defer func() {
+		if retErr != nil && !resultRecorded {
+			_ = e.workflowRepo.UpdateExecutionResult(ctx, executionID, models.ExecutionFailed, nil, nil)
+		}
+	}()
+
 	// Load workflow
 	wf, err := e.workflowRepo.Get(ctx, workflowID)
 	if err != nil {
@@ -74,11 +92,6 @@ func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID)
 	dag, err := buildDAG(spec.Steps)
 	if err != nil {
 		return fmt.Errorf("build DAG: %w", err)
-	}
-
-	// Mark execution as running
-	if err := e.workflowRepo.UpdateExecutionStatus(ctx, executionID, models.ExecutionRunning, nil); err != nil {
-		return fmt.Errorf("update execution status: %w", err)
 	}
 
 	e.publishEvent("workflow.running", wf.TenantID, map[string]interface{}{
@@ -141,6 +154,7 @@ func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID)
 
 	if firstErr != nil {
 		// Mark execution as failed but all run_when="always" steps were still processed
+		resultRecorded = true
 		_ = e.workflowRepo.UpdateExecutionResult(ctx, executionID, models.ExecutionFailed, resultJSON, &duration)
 		e.publishEvent("workflow.failed", wf.TenantID, map[string]interface{}{
 			"workflow_id":  workflowID.String(),
@@ -148,11 +162,12 @@ func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID)
 			"error":        firstErr.Error(),
 			"duration_ms":  duration,
 		})
-		slog.Info("Workflow execution failed in ms", "name", wf.Name, "id", executionID, "duration", duration, "error", firstErr)
+		slog.Warn("workflow execution failed", "name", wf.Name, "execution_id", executionID, "duration_ms", duration, "error", firstErr)
 		return firstErr
 	}
 
 	// Mark execution as success
+	resultRecorded = true
 	_ = e.workflowRepo.UpdateExecutionResult(ctx, executionID, models.ExecutionSuccess, resultJSON, &duration)
 
 	e.publishEvent("workflow.completed", wf.TenantID, map[string]interface{}{
@@ -162,13 +177,13 @@ func (e *Engine) Execute(ctx context.Context, workflowID, executionID uuid.UUID)
 		"steps_total":  len(spec.Steps),
 	})
 
-	slog.Info("Workflow execution completed in ms ( steps)", "name", wf.Name, "id", executionID, "duration", duration, "count", len(spec.Steps))
+	slog.Info("workflow execution completed", "name", wf.Name, "execution_id", executionID, "duration_ms", duration, "steps_total", len(spec.Steps))
 	return nil
 }
 
 // executeStep dispatches a single step to the appropriate handler.
 func (e *Engine) executeStep(ctx context.Context, step *models.StepSpec, executionID uuid.UUID, prev map[string]*stepResult, tenantID uuid.UUID, inputs map[string]string) (json.RawMessage, error) {
-	slog.Info("Executing step (type=, plugin=, action=)", "name", step.Name, "type", step.Type, "arg3", step.Plugin, "arg4", step.Action)
+	slog.Info("executing step", "name", step.Name, "type", step.Type, "plugin", step.Plugin, "action", step.Action)
 
 	switch {
 	case step.Type == "condition":
@@ -203,7 +218,7 @@ func (e *Engine) executeCondition(step *models.StepSpec, prev map[string]*stepRe
 
 func (e *Engine) executeApproval(ctx context.Context, step *models.StepSpec, executionID uuid.UUID) (json.RawMessage, error) {
 	// Create an approval request in the workflow execution result
-	slog.Info("Step : creating approval request for execution", "name", step.Name, "id", executionID)
+	slog.Info("creating approval request", "step", step.Name, "execution_id", executionID)
 
 	// Parse approval metadata
 	var approvalReq struct {
@@ -228,7 +243,7 @@ func (e *Engine) executeApproval(ctx context.Context, step *models.StepSpec, exe
 }
 
 func (e *Engine) executeEntityUpdate(ctx context.Context, step *models.StepSpec, tenantID uuid.UUID) (json.RawMessage, error) {
-	slog.Info("Step : entity_update (params=)", "name", step.Name, "arg2", redactParams(step.Params))
+	slog.Info("step entity_update", "step", step.Name, "params", redactParams(step.Params))
 	var params struct {
 		EntityID string          `json:"entity_id"`
 		Status   string          `json:"status"`
@@ -260,7 +275,7 @@ func (e *Engine) executeEntityUpdate(ctx context.Context, step *models.StepSpec,
 		return nil, fmt.Errorf("update entity %s: %w", params.EntityID, err)
 	}
 
-	slog.Info("Step : entity updated successfully", "name", step.Name, "id", params.EntityID)
+	slog.Info("entity updated successfully", "step", step.Name, "entity_id", params.EntityID)
 	out, _ := json.Marshal(map[string]interface{}{
 		"entity_id": params.EntityID,
 		"updated":   true,
@@ -311,7 +326,7 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 		params.TimeoutSeconds = 300
 	}
 
-	slog.Info("Step : deploy project= image= team= stage= cluster=", "name", step.Name, "name", params.ProjectName, "arg3", params.ImageTag, "name", params.TeamName, "arg5", params.Stage, "arg6", params.TargetClusterID)
+	slog.Info("step deploy", "step", step.Name, "project", params.ProjectName, "image_tag", params.ImageTag, "team", params.TeamName, "stage", params.Stage, "cluster_id", params.TargetClusterID)
 
 	if e.deploymentRepo == nil {
 		return nil, fmt.Errorf("deployment repository not available")
@@ -347,7 +362,7 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 	// If a target cluster is specified and deployment service is available,
 	// perform the actual Kubernetes deployment
 	if params.TargetClusterID != nil && e.deploymentService != nil {
-		slog.Info("Step : performing real deployment via DeploymentService", "name", step.Name, "id", deployment.ID)
+		slog.Info("performing real deployment via DeploymentService", "step", step.Name, "deployment_id", deployment.ID)
 		deployCtx := context.WithoutCancel(ctx)
 		go func() {
 			result := e.deploymentService.PerformDeployment(
@@ -361,9 +376,9 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 				params.TimeoutSeconds,
 			)
 			if result.Success {
-				slog.Info("Step : real deployment succeeded", "name", step.Name, "id", deployment.ID)
+				slog.Info("real deployment succeeded", "step", step.Name, "deployment_id", deployment.ID)
 			} else {
-				slog.Info("Step : real deployment failed", "name", step.Name, "id", deployment.ID, "error", result.Message)
+				slog.Warn("real deployment failed", "step", step.Name, "deployment_id", deployment.ID, "error", result.Message)
 			}
 		}()
 	}
@@ -381,7 +396,7 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 }
 
 func (e *Engine) executeDeploySim(step *models.StepSpec) (json.RawMessage, error) {
-	slog.Info("Step : deploy_sim (simulated deployment)", "name", step.Name)
+	slog.Info("step deploy_sim (simulated deployment)", "step", step.Name)
 	// Parse params for deployment simulation
 	var params struct {
 		ServiceName string `json:"service_name"`
@@ -417,7 +432,7 @@ func (e *Engine) executePluginAction(ctx context.Context, step *models.StepSpec,
 		actionName = parts[1]
 	}
 
-	slog.Info("Step : plugin= action= params=", "name", step.Name, "name", pluginName, "name", actionName, "arg4", redactParams(step.Params))
+	slog.Info("step plugin action", "step", step.Name, "plugin", pluginName, "action", actionName, "params", redactParams(step.Params))
 
 	// Resolve plugin config from connections/vault if resolver is available.
 	var config map[string]string
@@ -429,14 +444,14 @@ func (e *Engine) executePluginAction(ctx context.Context, step *models.StepSpec,
 	if e.providerRegistry != nil {
 		resp, err := e.providerRegistry.ExecuteAction(ctx, pluginName, actionName, step.Params, config)
 		if err == nil && resp.Success {
-			slog.Info("Step : plugin action succeeded ( bytes output)", "name", step.Name, "name", pluginName, "name", actionName, "count", len(resp.Output))
+			slog.Info("plugin action succeeded", "step", step.Name, "plugin", pluginName, "action", actionName, "output_bytes", len(resp.Output))
 			return json.RawMessage(resp.Output), nil
 		}
 		if err != nil {
-			slog.Info("Step : plugin dispatch to failed: (falling back to simulated)", "name", step.Name, "name", pluginName, "error", err)
+			slog.Warn("plugin dispatch failed, falling back to simulated", "step", step.Name, "plugin", pluginName, "error", err)
 		} else {
 			// The plugin reported failure — log but do not silently succeed.
-			slog.Info("Step : plugin action reported failure: (falling back to simulated)", "name", step.Name, "name", pluginName, "name", actionName, "error", resp.Error)
+			slog.Warn("plugin action reported failure, falling back to simulated", "step", step.Name, "plugin", pluginName, "action", actionName, "error", resp.Error)
 		}
 	}
 
@@ -464,7 +479,7 @@ func (e *Engine) executeStepWithConditions(ctx context.Context, step *models.Ste
 	// Check skip condition
 	if step.SkipWhen != "" {
 		if evaluateCondition(step.SkipWhen, results, inputs) {
-			slog.Info("Step skipped (skip_when: )", "name", step.Name, "arg2", step.SkipWhen)
+			slog.Info("step skipped", "step", step.Name, "skip_when", step.SkipWhen)
 			e.recordStepExecution(ctx, execID, step, models.ExecutionSuccess, nil, nil, "skipped by condition", 0)
 			return nil, "skipped", nil
 		}
@@ -487,7 +502,7 @@ func (e *Engine) executeStepWithConditions(ctx context.Context, step *models.Ste
 	stepDuration := int(time.Since(stepStart).Milliseconds())
 
 	if err != nil {
-		slog.Info("Step failed", "name", step.Name, "error", err)
+		slog.Warn("step failed", "step", step.Name, "error", err)
 		e.recordStepExecution(ctx, execID, step, models.ExecutionFailed, nil, nil, err.Error(), stepDuration)
 		return nil, "failed", err
 	}
@@ -523,7 +538,7 @@ func (e *Engine) recordStepExecution(ctx context.Context, execID uuid.UUID, step
 	}
 
 	if err := e.workflowRepo.CreateStepExecution(ctx, stepExec); err != nil {
-		slog.Info("Failed to record step execution for ", "name", step.Name, "error", err)
+		slog.Warn("failed to record step execution", "step", step.Name, "error", err)
 	}
 }
 

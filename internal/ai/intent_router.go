@@ -496,7 +496,7 @@ func (r *IntentRouter) RunStream(ctx context.Context, userMessage string, opts *
 		defer close(ch)
 		defer func() {
 			if rv := recover(); rv != nil {
-				slog.Info("PANIC in RunStream goroutine", "arg1", rv)
+				slog.Error("PANIC in RunStream goroutine", "recover_value", rv)
 				ch <- &StreamChunk{Type: "text", Content: fmt.Sprintf("Internal error: %v", rv)}
 			}
 		}()

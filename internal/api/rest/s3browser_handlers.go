@@ -56,7 +56,7 @@ func s3ClientFromConnection(ctx context.Context, deps Dependencies, connID uuid.
 			useSSL = true
 		}
 	}
-	slog.Info("connection config: endpoint= type=", "arg1", endpoint, "type", conn.Type)
+	slog.Debug("S3 connection config resolved", "endpoint", endpoint, "type", conn.Type)
 
 	if endpoint == "" {
 		return nil, "", "", fmt.Errorf("S3 endpoint is not configured in this connection")
@@ -266,7 +266,7 @@ func s3ListObjects(deps Dependencies) gin.HandlerFunc {
 			for _, obj := range topLevel {
 				keys = append(keys, obj.Key)
 			}
-			slog.Info("LIST objects", "bucket", bucketName, "prefix", prefix, "count", len(topLevel), "keys", keys)
+			slog.Debug("LIST objects", "bucket", bucketName, "prefix", prefix, "count", len(topLevel))
 		}
 		if len(folders) > 0 {
 			names := make([]string, 0, len(folders))
@@ -454,7 +454,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "object key is required"})
 			return
 		}
-		slog.Info("GET object", "bucket", bucketName, "key", key, "preview", c.Query("preview"), "download", c.Query("download"))
+		slog.Debug("GET object", "bucket", bucketName, "key", key, "preview", c.Query("preview"), "download", c.Query("download"))
 
 		client, _, _, err := s3ClientFromConnection(c.Request.Context(), deps, connID, tenantID, auth.GetUserID(c))
 		if err != nil {
@@ -467,7 +467,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		if c.Query("preview") == "true" {
 			meta, err := client.StatObjectInBucket(c.Request.Context(), bucketName, key)
 			if err != nil {
-				slog.Info("StatObject error: bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
+				slog.Warn("StatObject error (preview)", "bucket", bucketName, "key", key, "error", err)
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot stat object: %v", err)})
 				return
 			}
@@ -489,7 +489,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 
 			reader, err := client.DownloadFromBucket(c.Request.Context(), bucketName, key)
 			if err != nil {
-				slog.Info("Download error (preview): bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
+				slog.Warn("download error (preview)", "bucket", bucketName, "key", key, "error", err)
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot download object: %v", err)})
 				return
 			}
@@ -503,7 +503,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 			c.Header("X-Content-Type-Options", "nosniff")
 			c.Status(http.StatusOK)
 			if _, err := io.Copy(c.Writer, reader); err != nil {
-				slog.Info("s3browser preview stream error", "error", err)
+				slog.Warn("s3browser preview stream error", "error", err)
 			}
 			return
 		}
@@ -512,7 +512,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		if c.Query("download") == "true" {
 			reader, err := client.DownloadFromBucket(c.Request.Context(), bucketName, key)
 			if err != nil {
-				slog.Info("Download error: bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
+				slog.Warn("download error", "bucket", bucketName, "key", key, "error", err)
 				c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot download object: %v", err)})
 				return
 			}
@@ -525,7 +525,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 			c.Header("Content-Type", "application/octet-stream")
 			c.Status(http.StatusOK)
 			if _, err := io.Copy(c.Writer, reader); err != nil {
-				slog.Info("s3browser download stream error", "error", err)
+				slog.Warn("s3browser download stream error", "error", err)
 			}
 			return
 		}
@@ -533,7 +533,7 @@ func s3GetObject(deps Dependencies) gin.HandlerFunc {
 		// Otherwise return metadata + presigned URL
 		meta, err := client.StatObjectInBucket(c.Request.Context(), bucketName, key)
 		if err != nil {
-			slog.Info("StatObject error (meta): bucket= key= err=", "name", bucketName, "arg2", key, "error", err)
+			slog.Warn("StatObject error (meta)", "bucket", bucketName, "key", key, "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("cannot stat object: %v", err)})
 			return
 		}

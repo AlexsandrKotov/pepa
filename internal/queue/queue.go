@@ -158,7 +158,7 @@ func (q *Queue) PromoteDelayedJobs(ctx context.Context) error {
 	}
 
 	if result > 0 {
-		slog.Info("queue: promoted delayed job(s)", "arg1", result)
+		slog.Info("queue: promoted delayed job(s)", "count", result)
 	}
 	return nil
 }

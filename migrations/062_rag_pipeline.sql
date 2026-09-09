@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration 034: RAG Pipeline Enhancement
+-- Migration 062: RAG Pipeline Enhancement (renumbered from 034)
 -- ============================================================
 -- Adds vector similarity search index, hybrid search function,
 -- and ingestion tracking for the RAG knowledge base.

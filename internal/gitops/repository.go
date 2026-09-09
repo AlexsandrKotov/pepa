@@ -333,7 +333,7 @@ func encryptConfig(cfg map[string]string) map[string]string {
 		if val, ok := cfg[field]; ok && val != "" {
 			encrypted, err := crypto.Encrypt(val)
 			if err != nil {
-				slog.Info("WARNING: failed to encrypt gitops secret", "field", field, "error", err)
+				slog.Warn("failed to encrypt gitops secret", "field", field, "error", err)
 				continue
 			}
 			cfg[field] = encrypted
@@ -353,7 +353,7 @@ func decryptConfig(cfg map[string]string) map[string]string {
 		if val, ok := cfg[field]; ok && val != "" {
 			decrypted, err := crypto.Decrypt(val)
 			if err != nil {
-				slog.Info("WARNING: failed to decrypt gitops secret", "field", field, "error", err)
+				slog.Warn("failed to decrypt gitops secret", "field", field, "error", err)
 				continue
 			}
 			cfg[field] = decrypted

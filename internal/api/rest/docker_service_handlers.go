@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -206,7 +207,9 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 
 		if deployErr != nil {
 			svc.Status = "error"
-			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+			if updateErr := deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc); updateErr != nil {
+				slog.Warn("failed to update service status to error", "service", svc.Name, "error", updateErr)
+			}
 			respondInternalError(c, deployErr)
 			return
 		}
@@ -218,7 +221,9 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 			svc.Containers = cJSON
 		}
 		svc.Status = "running"
-		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		if updateErr := deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc); updateErr != nil {
+			slog.Warn("failed to update service status to running", "service", svc.Name, "error", updateErr)
+		}
 
 		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "folder_path": svc.FolderPath})
 		c.JSON(http.StatusCreated, svc)
@@ -310,7 +315,9 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 
 		if deployErr != nil {
 			svc.Status = "error"
-			_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+			if updateErr := deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc); updateErr != nil {
+				slog.Warn("failed to update service status to error", "service", svc.Name, "error", updateErr)
+			}
 			respondInternalError(c, deployErr)
 			return
 		}
@@ -321,7 +328,9 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 			svc.Containers = cJSON
 		}
 		svc.Status = "running"
-		_ = deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc)
+		if updateErr := deps.Repos.DockerHost.UpdateService(c.Request.Context(), svc); updateErr != nil {
+			slog.Warn("failed to update service status to running", "service", svc.Name, "error", updateErr)
+		}
 
 		// Record deployment in history for rollback support.
 		if deps.DB != nil && svc.ComposeYaml != "" {
@@ -330,10 +339,12 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 			if userID != nil {
 				deployedBy = userID.String()
 			}
-			_, _ = deps.DB.Exec(c.Request.Context(),
+			if _, histErr := deps.DB.Exec(c.Request.Context(),
 				`INSERT INTO docker_service_history (service_id, tenant_id, compose_yaml, deployed_by, status)
 				 VALUES ($1, $2, $3, $4, 'deployed')`,
-				svc.ID, svc.TenantID, svc.ComposeYaml, deployedBy)
+				svc.ID, svc.TenantID, svc.ComposeYaml, deployedBy); histErr != nil {
+				slog.Warn("failed to record service history", "service", svc.Name, "error", histErr)
+			}
 		}
 
 		logAudit(deps, c, "create", "docker_service", svc.ID.String(), nil, gin.H{"name": svc.Name, "target": "local", "folder_path": svc.FolderPath})

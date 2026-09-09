@@ -195,7 +195,7 @@ func (p *httpProvider) doChat(ctx context.Context, body map[string]any) (*ChatRe
 			// Rate limited — retry with backoff
 			if attempt < maxRetries {
 				wait := time.Duration((attempt+1)*3) * time.Second
-				slog.Info("Rate limited (429). Retrying in (attempt /)", "arg1", wait, "arg2", attempt+1, "arg3", maxRetries)
+				slog.Warn("rate limited (429), retrying", "wait", wait, "attempt", attempt+1, "max_retries", maxRetries)
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
@@ -238,10 +238,10 @@ func (p *httpProvider) doChat(ctx context.Context, body map[string]any) (*ChatRe
 		if len(result.Choices[0].Message.ToolCalls) > 0 {
 			slog.Info("Received tool calls from LLM", "count", len(result.Choices[0].Message.ToolCalls))
 			for _, tc := range result.Choices[0].Message.ToolCalls {
-				slog.Info("- ()", "name", tc.Function.Name, "arg2", tc.Function.Arguments)
+				slog.Info("tool call in response", "name", tc.Function.Name, "args_len", len(tc.Function.Arguments))
 			}
 		} else {
-			slog.Info("No tool calls in response, finish_reason", "arg1", result.Choices[0].FinishReason)
+			slog.Info("No tool calls in response", "finish_reason", result.Choices[0].FinishReason)
 		}
 
 		return &ChatResponse{
@@ -330,7 +330,7 @@ func (p *httpProvider) Stream(ctx context.Context, messages []Message, opts *Cha
 
 		if resp.StatusCode == 429 && attempt < maxRetries {
 			wait := time.Duration((attempt+1)*3) * time.Second
-			slog.Info("Stream rate limited (429). Retrying in (attempt /)", "arg1", wait, "arg2", attempt+1, "arg3", maxRetries)
+			slog.Info("Stream rate limited (429), retrying", "wait", wait, "attempt", attempt+1, "max_retries", maxRetries)
 			_ = resp.Body.Close()
 			select {
 			case <-ctx.Done():

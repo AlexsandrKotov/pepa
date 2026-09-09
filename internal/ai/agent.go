@@ -230,11 +230,11 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 			errMsg := err.Error()
 			// Provide actionable messages for common provider errors
 			if strings.Contains(errMsg, "413") || strings.Contains(errMsg, "too large") || strings.Contains(errMsg, "rate_limit") {
-				slog.Info("Token limit exceeded", "error", err)
+				slog.Warn("token limit exceeded", "error", err)
 				return nil, fmt.Errorf("the request is too large for this model. Try switching to 'Prompt' mode in the toolbar above, or start a new chat to clear conversation history")
 			}
 			if strings.Contains(errMsg, "404") {
-				slog.Info("Model not found (404)", "error", err)
+				slog.Warn("model not found (404)", "error", err)
 				return nil, fmt.Errorf("the selected model or endpoint was not found. Please check your AI provider settings in Connections")
 			}
 			return nil, fmt.Errorf("agent LLM call failed: %w", err)
@@ -245,7 +245,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 		totalTokens.TotalTokens += resp.TokensUsed.TotalTokens
 		modelUsed = resp.ModelUsed
 
-		slog.Info("Iteration : LLM returned tool calls, finish_reason=, content_len=", "arg1", iteration, "count", len(resp.ToolCalls), resp.FinishReason, len(resp.Content))
+		slog.Info("LLM returned tool calls", "iteration", iteration, "tool_calls", len(resp.ToolCalls), "finish_reason", resp.FinishReason, "content_len", len(resp.Content))
 
 		// If no tool calls — we have the final answer
 		if len(resp.ToolCalls) == 0 {
@@ -269,7 +269,7 @@ func (a *Agent) runNativeToolLoop(ctx context.Context, task *AgentTask, userMess
 					totalTokens.TotalTokens += resp2.TokensUsed.TotalTokens
 					modelUsed = resp2.ModelUsed
 					if len(resp2.ToolCalls) == 0 {
-						slog.Info("WARNING: Model did not call tools after re-prompt (model=)", "arg1", resp2.ModelUsed)
+						slog.Warn("model did not call tools after re-prompt", "model", resp2.ModelUsed)
 						return &nativeToolLoopResult{
 							messages:    messages,
 							results:     results,

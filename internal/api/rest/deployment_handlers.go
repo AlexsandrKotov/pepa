@@ -556,7 +556,7 @@ func retryDeployment(deps Dependencies) gin.HandlerFunc {
 			if deps.JobQueue != nil {
 				var specMap interface{}
 				_ = json.Unmarshal(newDeploy.Spec, &specMap)
-				_ = deps.JobQueue.Enqueue("deployment.execute", newDeploy.TenantID.String(), map[string]interface{}{
+				if enqueueErr := deps.JobQueue.Enqueue("deployment.execute", newDeploy.TenantID.String(), map[string]interface{}{
 					"deployment_id":   newDeploy.ID.String(),
 					"cluster_id":      newDeploy.TargetClusterID.String(),
 					"namespace":       newDeploy.TargetNamespace,
@@ -564,7 +564,13 @@ func retryDeployment(deps Dependencies) gin.HandlerFunc {
 					"replicas":        newDeploy.Replicas,
 					"timeout_seconds": newDeploy.TimeoutSeconds,
 					"spec":            specMap,
-				})
+				}); enqueueErr != nil {
+					slog.Warn("failed to enqueue deployment for execution", "deployment_id", newDeploy.ID, "error", enqueueErr)
+					newDeploy.Status = "error"
+					_ = deps.Repos.Deployment.Update(c.Request.Context(), newDeploy)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "deployment created but failed to enqueue for execution: " + enqueueErr.Error()})
+					return
+				}
 			} else if deps.Services.Deployment != nil {
 				go performDeployment(newDeploy.ID, *newDeploy.TargetClusterID, newDeploy.TargetNamespace,
 					newDeploy.GitlabProjectName, newDeploy.Replicas, newDeploy.Spec, newDeploy.TimeoutSeconds, deps)

@@ -135,7 +135,7 @@ func (b *Bus) Start() {
 				case b.eventCh <- event:
 				case <-time.After(dispatchTimeout):
 					b.droppedCount.Add(1)
-					slog.Info("events: worker pool saturated after , sending event type= to dead-letter queue", "arg1", dispatchTimeout, "type", event.Type)
+					slog.Warn("events: worker pool saturated, sending to dead-letter queue", "timeout", dispatchTimeout, "event_type", event.Type)
 					b.sendToDeadLetter(event)
 				}
 			}

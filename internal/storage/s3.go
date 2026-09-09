@@ -74,9 +74,9 @@ func (c *S3Client) EnsureBuckets(ctx context.Context) error {
 		if err := c.mc.MakeBucket(ctx, c.bucketPlugins, minio.MakeBucketOptions{}); err != nil {
 			return fmt.Errorf("create bucket %s: %w", c.bucketPlugins, err)
 		}
-		slog.Info("created S3 bucket", "arg1", c.bucketPlugins)
+		slog.Info("created S3 bucket", "bucket", c.bucketPlugins)
 	}
-	slog.Info("S3 connected, bucket verified: plugins=", "arg1", c.bucketPlugins)
+	slog.Info("S3 connected, bucket verified", "bucket", c.bucketPlugins)
 	return nil
 }
 
