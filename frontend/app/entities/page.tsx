@@ -44,8 +44,8 @@ function EntitiesList() {
 
   // Sync status
   const [syncStatus, setSyncStatus] = useState<{ last_synced_at: string | null; status: string } | null>(null);
-  // Scorecard levels per entity
-  const [entityLevels, setEntityLevels] = useState<Record<string, string>>({});
+  // Scorecard levels per entity (level + percentage)
+  const [entityScores, setEntityScores] = useState<Record<string, { level: string; pct: number }>>({});
 
   useEffect(() => {
     setPage(1);
@@ -76,23 +76,27 @@ function EntitiesList() {
   // Fetch scorecard levels for loaded entities
   useEffect(() => {
     if (items.length === 0) return;
-    const levels: Record<string, string> = {};
-    const fetchLevels = async () => {
+    const scores: Record<string, { level: string; pct: number }> = {};
+    const fetchScores = async () => {
       for (const ent of items) {
         try {
           const data = await scorecards.entityScores(ent.id);
-          const scores = data.scores || [];
-          if (scores.length > 0) {
-            // Use the best level (highest score)
-            const levelOrder: Record<string, number> = { platinum: 4, gold: 3, silver: 2, bronze: 1 };
-            const best = scores.reduce((a: ScorecardResult, b: ScorecardResult) => (levelOrder[b.level] || 0) > (levelOrder[a.level] || 0) ? b : a);
-            levels[ent.id] = best.level;
+          const resultScores = data.scores || [];
+          if (resultScores.length > 0) {
+            // Use the best score (highest percentage)
+            const best = resultScores.reduce((a: ScorecardResult, b: ScorecardResult) => {
+              const pctA = a.max_score > 0 ? (a.score / a.max_score) * 100 : 0;
+              const pctB = b.max_score > 0 ? (b.score / b.max_score) * 100 : 0;
+              return pctB > pctA ? b : a;
+            });
+            const pct = best.max_score > 0 ? Math.round((best.score / best.max_score) * 100) : 0;
+            scores[ent.id] = { level: best.level, pct };
           }
         } catch { /* ignore */ }
       }
-      setEntityLevels(levels);
+      setEntityScores(scores);
     };
-    fetchLevels();
+    fetchScores();
   }, [items]);
 
   const handleSync = async () => {
@@ -269,14 +273,18 @@ function EntitiesList() {
                       </td>
                       <td><span className={`badge ${statusBadge(ent.status)}`}>{ent.status}</span></td>
                       <td>
-                        {entityLevels[ent.id] ? (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                            entityLevels[ent.id] === 'platinum' ? 'bg-indigo-500/10 text-indigo-500' :
-                            entityLevels[ent.id] === 'gold' ? 'bg-amber-500/10 text-amber-600' :
-                            entityLevels[ent.id] === 'silver' ? 'bg-slate-500/10 text-slate-500' :
-                            'bg-orange-500/10 text-orange-600'
-                          }`}>
-                            {entityLevels[ent.id]}
+                        {entityScores[ent.id] ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              entityScores[ent.id].level === 'platinum' ? 'bg-indigo-500/10 text-indigo-500' :
+                              entityScores[ent.id].level === 'gold' ? 'bg-amber-500/10 text-amber-600' :
+                              entityScores[ent.id].level === 'silver' ? 'bg-slate-500/10 text-slate-500' :
+                              entityScores[ent.id].level === 'bronze' ? 'bg-orange-500/10 text-orange-600' :
+                              'bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]'
+                            }`}>
+                              {entityScores[ent.id].level === 'none' ? '—' : entityScores[ent.id].level}
+                            </span>
+                            <span className="text-[10px] text-[var(--text-tertiary)]">{entityScores[ent.id].pct}%</span>
                           </span>
                         ) : (
                           <span className="text-[11px] text-[var(--text-tertiary)]">—</span>
@@ -305,12 +313,30 @@ function ImportDiscoveryModal({ onClose, onImported }: { onClose: () => void; on
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [sourceFilter, setSourceFilter] = useState('');
+  const [existingExternalIds, setExistingExternalIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    discovery.services()
-      .then(data => setDiscovered(data.services || []))
-      .catch(() => setDiscovered([]))
-      .finally(() => setLoading(false));
+    const load = async () => {
+      try {
+        // Fetch discovered services and existing entities in parallel
+        const [discData, entData] = await Promise.all([
+          discovery.services().catch(() => ({ services: [] })),
+          entities.list({ per_page: '1000' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 1000, total_pages: 0 })),
+        ]);
+        setDiscovered(discData.services || []);
+        // Build set of already-imported external_ids (format: {source}:{cluster}:{namespace}:{name})
+        const ids = new Set<string>();
+        for (const ent of (entData.items || [])) {
+          if (ent.external_id) ids.add(ent.external_id);
+        }
+        setExistingExternalIds(ids);
+      } catch {
+        setDiscovered([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
   }, []);
 
   const toggleSelect = (index: number) => {
@@ -327,9 +353,19 @@ function ImportDiscoveryModal({ onClose, onImported }: { onClose: () => void; on
     }
   };
 
-  const filtered = sourceFilter
-    ? discovered.filter(s => s.source === sourceFilter)
-    : discovered;
+  // Filter by source, then exclude already-imported services
+  const filtered = discovered.filter(svc => {
+    if (sourceFilter && svc.source !== sourceFilter) return false;
+    const externalId = `${svc.source}:${svc.cluster}:${svc.namespace}:${svc.name}`;
+    if (existingExternalIds.has(externalId)) return false;
+    return true;
+  });
+
+  // Count how many discovered services match the source filter (before dedup filtering)
+  const sourceFilteredCount = sourceFilter
+    ? discovered.filter(s => s.source === sourceFilter).length
+    : discovered.length;
+  const alreadyImportedCount = sourceFilteredCount - filtered.length;
 
   const handleImport = async () => {
     const items = Array.from(selected).map(i => {
@@ -379,8 +415,18 @@ function ImportDiscoveryModal({ onClose, onImported }: { onClose: () => void; on
               <p className="text-[13px] text-[var(--text-secondary)] mb-1">No services discovered</p>
               <p className="text-[12px] text-[var(--text-tertiary)]">Connect a cluster or add services to see discovered resources here.</p>
             </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-[13px] text-[var(--text-secondary)] mb-1">All discovered services are already imported</p>
+              <p className="text-[12px] text-[var(--text-tertiary)]">{alreadyImportedCount} service{alreadyImportedCount !== 1 ? 's' : ''} already in your entities list.</p>
+            </div>
           ) : (
             <>
+              {alreadyImportedCount > 0 && (
+                <p className="text-[11px] text-[var(--text-tertiary)]">
+                  {alreadyImportedCount} already imported service{alreadyImportedCount !== 1 ? 's' : ''} hidden
+                </p>
+              )}
               {/* Filters */}
               <div className="flex items-center gap-2">
                 <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)} className="input flex-1">

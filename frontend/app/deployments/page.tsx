@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { deployments, clusters, helmRepositories, devops, type Deployment, type DeploymentContainer, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type WindowCheckResult, type PreDeployGateResult } from '@/lib/api';
+import { deployments, clusters, helmRepositories, devops, type Deployment, type DeploymentContainer, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type HelmChartMetadata, type WindowCheckResult, type PreDeployGateResult } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
 import DeploymentDetailClient from './DeploymentDetailClient';
@@ -119,6 +119,8 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   const [chartDefaultValues, setChartDefaultValues] = useState<Record<string, unknown> | null>(null);
   const [chartEditedValues, setChartEditedValues] = useState<Record<string, unknown> | null>(null);
   const [loadingChartValues, setLoadingChartValues] = useState(false);
+  const [chartMetadata, setChartMetadata] = useState<HelmChartMetadata | null>(null);
+  const [autoPopulated, setAutoPopulated] = useState(false);
   const [servicePort, setServicePort] = useState(80);
   const [serviceType, setServiceType] = useState('ClusterIP');
   const [ingressEnabled, setIngressEnabled] = useState(false);
@@ -174,7 +176,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
 
   const handleHelmRepoChartChange = async (value: string) => {
     setSelectedHelmRepoChart(value);
-    if (!value) { setChartUrl(''); setChartName(''); setChartVersion(''); setHelmChartVersions([]); setChartDefaultValues(null); setChartEditedValues(null); return; }
+    if (!value) { setChartUrl(''); setChartName(''); setChartVersion(''); setHelmChartVersions([]); setChartDefaultValues(null); setChartEditedValues(null); setChartMetadata(null); setAutoPopulated(false); return; }
     const [repoId, cName] = value.split(':');
     const chart = helmCharts.find(c => c.repoId === repoId && c.name === cName);
     if (chart) {
@@ -187,19 +189,25 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     }
     try {
       const versionsData = await helmRepositories.listChartVersions(repoId, cName);
-      setHelmChartVersions(versionsData.versions || []);
+      const versions = versionsData.versions || [];
+      setHelmChartVersions(versions);
+      // Auto-fetch latest version metadata when chart is selected
+      if (versions.length > 0) {
+        const latestVersion = versions[0].version;
+        setChartVersion(''); // Keep "Latest" selected in dropdown
+        // Trigger the version change handler to fetch metadata
+        handleChartVersionChangeWithRepo('', repoId, cName, latestVersion);
+      }
     } catch { setHelmChartVersions([]); }
   };
 
-  // Fetch default chart values when version is selected
-  const handleChartVersionChange = async (version: string) => {
-    setChartVersion(version);
-    if (!version || !selectedHelmRepoChart) return;
-    const [repoId, cName] = selectedHelmRepoChart.split(':');
-    if (!repoId || !cName) return;
+  // Internal helper to fetch chart metadata with explicit repo/chart/version
+  const handleChartVersionChangeWithRepo = async (displayVersion: string, repoId: string, cName: string, effectiveVersion: string) => {
+    setChartVersion(displayVersion);
+    setAutoPopulated(false);
     setLoadingChartValues(true);
     try {
-      const result = await helmRepositories.getChartValues(repoId, cName, version);
+      const result = await helmRepositories.getChartMetadata(repoId, cName, effectiveVersion);
       if (result.values && Object.keys(result.values).length > 0) {
         setChartDefaultValues(result.values);
         setChartEditedValues(structuredClone(result.values));
@@ -208,10 +216,52 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
         setValuesYaml(result.raw_yaml);
         setValuesViewMode('yaml');
       }
-    } catch {
-      // Silently fail - user can still manually enter values
-    }
+      // Auto-populate form fields from parsed chart metadata
+      if (result.metadata) {
+        setChartMetadata(result.metadata);
+        const m = result.metadata;
+        let populated = false;
+        if (m.replicas && m.replicas > 0) { setReplicas(m.replicas); populated = true; }
+        if (m.image) {
+          if (m.image.repository) { setForm(prev => ({ ...prev, image_repository: m.image!.repository })); populated = true; }
+          if (m.image.tag) { setForm(prev => ({ ...prev, image_tag: m.image!.tag })); populated = true; }
+        }
+        if (m.service) {
+          if (m.service.port > 0) { setServicePort(m.service.port); populated = true; }
+          if (m.service.type) { setServiceType(m.service.type); populated = true; }
+        }
+        if (m.ingress) {
+          setIngressEnabled(m.ingress.enabled);
+          if (m.ingress.hosts && m.ingress.hosts.length > 0) { setIngressHost(m.ingress.hosts[0]); }
+          if (m.ingress.enabled || (m.ingress.hosts && m.ingress.hosts.length > 0)) { populated = true; }
+        }
+        if (m.ports && m.ports.length > 0) {
+          setContainers(prev => {
+            const updated = [...prev];
+            if (updated.length > 0) {
+              updated[0] = { ...updated[0], ports: m.ports!.map(p => ({ containerPort: p.container_port })) };
+              if (m.image?.repository && m.image?.tag) { updated[0] = { ...updated[0], image: `${m.image.repository}:${m.image.tag}` }; }
+              else if (m.image?.repository) { updated[0] = { ...updated[0], image: m.image.repository }; }
+            }
+            return updated;
+          });
+          populated = true;
+        }
+        setAutoPopulated(populated);
+      }
+    } catch { /* silently fail */ }
     setLoadingChartValues(false);
+  };
+
+  // Fetch default chart values when version is selected and auto-populate form fields
+  const handleChartVersionChange = async (version: string) => {
+    if (!selectedHelmRepoChart) return;
+    const [repoId, cName] = selectedHelmRepoChart.split(':');
+    if (!repoId || !cName) return;
+    // If "Latest" is selected (empty version), use the first available version
+    const effectiveVersion = version || (helmChartVersions.length > 0 ? helmChartVersions[0].version : '');
+    if (!effectiveVersion) return;
+    await handleChartVersionChangeWithRepo(version, repoId, cName, effectiveVersion);
   };
 
   const refreshClusters = async () => {
@@ -308,6 +358,8 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
       setChartUrl('');
       setChartName('');
       setChartVersion('');
+      setChartMetadata(null);
+      setAutoPopulated(false);
       setModalTab('basic');
       await refresh();
       setCreateFeedback({ ok: true, text: 'Deployment created successfully' });
@@ -957,6 +1009,24 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
                         <p className="text-[11px] text-[var(--text-tertiary)]">
                           No Helm repositories configured. <Link href="/helm-repositories" className="text-[var(--accent)] hover:underline">Add one</Link> to browse charts.
                         </p>
+                      )}
+                      {autoPopulated && chartMetadata && (
+                        <div className="flex items-start gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+                          <span className="text-emerald-500 text-[12px] mt-0.5 shrink-0">{'\u2713'}</span>
+                          <div className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                            <span className="font-semibold">Auto-populated from chart defaults.</span>
+                            <span className="ml-1">
+                              {[
+                                chartMetadata.replicas ? `${chartMetadata.replicas} replica(s)` : null,
+                                chartMetadata.image?.repository ? `image: ${chartMetadata.image.repository}${chartMetadata.image.tag ? ':' + chartMetadata.image.tag : ''}` : null,
+                                chartMetadata.service?.port ? `port: ${chartMetadata.service.port}` : null,
+                                chartMetadata.ingress?.enabled ? 'ingress: on' : null,
+                                chartMetadata.ports?.length ? `${chartMetadata.ports.length} port(s)` : null,
+                              ].filter(Boolean).join(' · ')}
+                            </span>
+                            <span className="ml-1 text-[var(--text-tertiary)]">Edit any field as needed.</span>
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}

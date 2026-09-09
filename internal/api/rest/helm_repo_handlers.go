@@ -32,6 +32,7 @@ func registerHelmRepoRoutes(r *gin.RouterGroup, deps Dependencies) {
 		helmRepos.GET("/:id/charts/:chartName/versions", listHelmChartVersions(deps))
 		helmRepos.GET("/:id/charts/:chartName/versions/:version/download", downloadHelmChart(deps))
 		helmRepos.GET("/:id/charts/:chartName/versions/:version/values", getHelmChartValues(deps))
+		helmRepos.GET("/:id/charts/:chartName/versions/:version/metadata", getHelmChartMetadata(deps))
 	}
 }
 
@@ -623,5 +624,320 @@ func downloadHelmChart(deps Dependencies) gin.HandlerFunc {
 		c.Header("Content-Type", "application/gzip")
 		c.Status(http.StatusOK)
 		_, _ = io.Copy(c.Writer, resp.Body)
+	}
+}
+
+// helmChartMetadata represents parsed common fields from a Helm chart's values.yaml.
+type helmChartMetadata struct {
+	Replicas    *int               `json:"replicas,omitempty"`
+	Image       *helmImageMeta     `json:"image,omitempty"`
+	Service     *helmServiceMeta   `json:"service,omitempty"`
+	Ingress     *helmIngressMeta   `json:"ingress,omitempty"`
+	Resources   *helmResourcesMeta `json:"resources,omitempty"`
+	Ports       []helmPortMeta     `json:"ports,omitempty"`
+	Autoscaling *helmAutoscalingMeta `json:"autoscaling,omitempty"`
+}
+
+type helmImageMeta struct {
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	PullPolicy string `json:"pull_policy"`
+}
+
+type helmServiceMeta struct {
+	Type string `json:"type"`
+	Port int    `json:"port"`
+}
+
+type helmIngressMeta struct {
+	Enabled bool     `json:"enabled"`
+	Hosts   []string `json:"hosts"`
+}
+
+type helmResourcesMeta struct {
+	LimitsCPU      string `json:"limits_cpu"`
+	LimitsMemory   string `json:"limits_memory"`
+	RequestsCPU    string `json:"requests_cpu"`
+	RequestsMemory string `json:"requests_memory"`
+}
+
+type helmPortMeta struct {
+	Name         string `json:"name"`
+	ContainerPort int   `json:"container_port"`
+	Protocol     string `json:"protocol"`
+}
+
+type helmAutoscalingMeta struct {
+	Enabled      bool `json:"enabled"`
+	MinReplicas  int  `json:"min_replicas"`
+	MaxReplicas  int  `json:"max_replicas"`
+	TargetCPU    int  `json:"target_cpu_utilization"`
+}
+
+// extractChartMetadata parses common fields from a Helm chart's values.yaml.
+func extractChartMetadata(values map[string]interface{}) helmChartMetadata {
+	meta := helmChartMetadata{}
+
+	// Replicas: check replicaCount, replicas
+	if v, ok := getIntValue(values, "replicaCount"); ok {
+		meta.Replicas = &v
+	} else if v, ok := getIntValue(values, "replicas"); ok {
+		meta.Replicas = &v
+	}
+
+	// Image: image.repository, image.tag, image.pullPolicy
+	if img, ok := getMapValue(values, "image"); ok {
+		imageMeta := &helmImageMeta{}
+		if v, ok := getStringValue(img, "repository"); ok {
+			imageMeta.Repository = v
+		}
+		if v, ok := getStringValue(img, "tag"); ok {
+			imageMeta.Tag = v
+		}
+		if v, ok := getStringValue(img, "pullPolicy"); ok {
+			imageMeta.PullPolicy = v
+		}
+		if imageMeta.Repository != "" || imageMeta.Tag != "" {
+			meta.Image = imageMeta
+		}
+	}
+
+	// Service: service.type, service.port
+	if svc, ok := getMapValue(values, "service"); ok {
+		serviceMeta := &helmServiceMeta{}
+		if v, ok := getStringValue(svc, "type"); ok {
+			serviceMeta.Type = v
+		}
+		if v, ok := getIntValue(svc, "port"); ok {
+			serviceMeta.Port = v
+		}
+		if serviceMeta.Type != "" || serviceMeta.Port > 0 {
+			meta.Service = serviceMeta
+		}
+	}
+
+	// Ingress: ingress.enabled, ingress.hosts
+	if ing, ok := getMapValue(values, "ingress"); ok {
+		ingressMeta := &helmIngressMeta{}
+		if v, ok := ing["enabled"].(bool); ok {
+			ingressMeta.Enabled = v
+		}
+		// Check for hosts array
+		if hosts, ok := ing["hosts"].([]interface{}); ok {
+			for _, h := range hosts {
+				switch hv := h.(type) {
+				case string:
+					ingressMeta.Hosts = append(ingressMeta.Hosts, hv)
+				case map[string]interface{}:
+					if host, ok := hv["host"].(string); ok {
+						ingressMeta.Hosts = append(ingressMeta.Hosts, host)
+					}
+				}
+			}
+		}
+		// Check for hostname (some charts use ingress.hostname)
+		if len(ingressMeta.Hosts) == 0 {
+			if host, ok := getStringValue(ing, "hostname"); ok {
+				ingressMeta.Hosts = append(ingressMeta.Hosts, host)
+			}
+		}
+		meta.Ingress = ingressMeta
+	}
+
+	// Resources: resources.limits.cpu, resources.limits.memory, etc.
+	if res, ok := getMapValue(values, "resources"); ok {
+		resMeta := &helmResourcesMeta{}
+		if limits, ok := getMapValue(res, "limits"); ok {
+			if v, ok := getStringValue(limits, "cpu"); ok {
+				resMeta.LimitsCPU = v
+			}
+			if v, ok := getStringValue(limits, "memory"); ok {
+				resMeta.LimitsMemory = v
+			}
+		}
+		if requests, ok := getMapValue(res, "requests"); ok {
+			if v, ok := getStringValue(requests, "cpu"); ok {
+				resMeta.RequestsCPU = v
+			}
+			if v, ok := getStringValue(requests, "memory"); ok {
+				resMeta.RequestsMemory = v
+			}
+		}
+		if resMeta.LimitsCPU != "" || resMeta.LimitsMemory != "" || resMeta.RequestsCPU != "" || resMeta.RequestsMemory != "" {
+			meta.Resources = resMeta
+		}
+	}
+
+	// Container ports: service.ports or containerPort
+	if svc, ok := getMapValue(values, "service"); ok {
+		if ports, ok := svc["ports"].([]interface{}); ok {
+			for _, p := range ports {
+				if pm, ok := p.(map[string]interface{}); ok {
+					port := helmPortMeta{Protocol: "TCP"}
+					if v, ok := getStringValue(pm, "name"); ok {
+						port.Name = v
+					}
+					if v, ok := getIntValue(pm, "port"); ok {
+						port.ContainerPort = v
+					} else if v, ok := getIntValue(pm, "containerPort"); ok {
+						port.ContainerPort = v
+					}
+					if v, ok := getStringValue(pm, "protocol"); ok {
+						port.Protocol = v
+					}
+					if port.ContainerPort > 0 {
+						meta.Ports = append(meta.Ports, port)
+					}
+				}
+			}
+		}
+	}
+	// Fallback: check for containerPort at top level or in common locations
+	if len(meta.Ports) == 0 {
+		if v, ok := getIntValue(values, "containerPort"); ok {
+			meta.Ports = append(meta.Ports, helmPortMeta{Name: "http", ContainerPort: v, Protocol: "TCP"})
+		}
+	}
+
+	// Autoscaling: autoscaling.enabled, autoscaling.minReplicas, etc.
+	if as, ok := getMapValue(values, "autoscaling"); ok {
+		asMeta := &helmAutoscalingMeta{}
+		if v, ok := as["enabled"].(bool); ok {
+			asMeta.Enabled = v
+		}
+		if v, ok := getIntValue(as, "minReplicas"); ok {
+			asMeta.MinReplicas = v
+		}
+		if v, ok := getIntValue(as, "maxReplicas"); ok {
+			asMeta.MaxReplicas = v
+		}
+		if v, ok := getIntValue(as, "targetCPUUtilizationPercentage"); ok {
+			asMeta.TargetCPU = v
+		}
+		meta.Autoscaling = asMeta
+	}
+
+	return meta
+}
+
+// Helper functions for extracting typed values from maps.
+func getMapValue(m map[string]interface{}, key string) (map[string]interface{}, bool) {
+	v, ok := m[key]
+	if !ok {
+		return nil, false
+	}
+	result, ok := v.(map[string]interface{})
+	return result, ok
+}
+
+func getStringValue(m map[string]interface{}, key string) (string, bool) {
+	v, ok := m[key]
+	if !ok {
+		return "", false
+	}
+	result, ok := v.(string)
+	return result, ok
+}
+
+func getIntValue(m map[string]interface{}, key string) (int, bool) {
+	v, ok := m[key]
+	if !ok {
+		return 0, false
+	}
+	switch val := v.(type) {
+	case int:
+		return val, true
+	case float64:
+		return int(val), true
+	case int64:
+		return int(val), true
+	}
+	return 0, false
+}
+
+// getHelmChartMetadata fetches chart default values and returns both the raw values
+// and parsed metadata with extracted common fields (image, replicas, service, ingress, etc.).
+func getHelmChartMetadata(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Helm == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "helm repository not available"})
+			return
+		}
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+			return
+		}
+
+		chartName := c.Param("chartName")
+		version := c.Param("version")
+		if chartName == "" || version == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "chart name and version required"})
+			return
+		}
+
+		tenantID := auth.GetTenantID(c)
+		repo, err := deps.Repos.Helm.GetDecrypted(c.Request.Context(), id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "helm repository not found"})
+			return
+		}
+
+		// Determine chart reference and build helm command args
+		var chartRef string
+		var preArgs []string
+
+		switch repo.RepoType {
+		case "oci":
+			chartRef = strings.TrimSuffix(repo.URL, "/") + "/" + chartName
+		default:
+			repoName := "pepa-meta-" + strings.ReplaceAll(chartName, "/", "-")
+			addArgs := []string{"repo", "add", repoName, repo.URL, "--force-update"}
+			if repo.Username != "" && repo.Password != "" {
+				addArgs = append(addArgs, "--username", repo.Username, "--password", repo.Password)
+			} else if repo.Token != "" {
+				addArgs = append(addArgs, "--username", "gitlab-ci-token", "--password", repo.Token)
+			}
+			preArgs = addArgs
+			chartRef = repoName + "/" + chartName
+		}
+
+		if len(preArgs) > 0 {
+			cmdAdd := exec.CommandContext(c.Request.Context(), "helm", preArgs...) //nolint:gosec
+			if out, err := cmdAdd.CombinedOutput(); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("helm repo add failed: %s: %v", strings.TrimSpace(string(out)), err)})
+				return
+			}
+		}
+
+		// Run helm show values
+		showArgs := []string{"show", "values", chartRef, "--version", version}
+		cmd := exec.CommandContext(c.Request.Context(), "helm", showArgs...) //nolint:gosec
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("helm show values failed: %s: %v", strings.TrimSpace(stderr.String()), err)})
+			return
+		}
+
+		rawYAML := stdout.String()
+
+		// Parse YAML into a generic map
+		var values map[string]interface{}
+		if err := yaml.Unmarshal([]byte(rawYAML), &values); err != nil {
+			c.JSON(http.StatusOK, gin.H{"values": nil, "raw_yaml": rawYAML, "metadata": nil})
+			return
+		}
+
+		// Extract common metadata fields
+		metadata := extractChartMetadata(values)
+
+		c.JSON(http.StatusOK, gin.H{
+			"values":   values,
+			"raw_yaml": rawYAML,
+			"metadata": metadata,
+		})
 	}
 }

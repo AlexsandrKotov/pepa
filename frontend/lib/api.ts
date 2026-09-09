@@ -3458,6 +3458,9 @@ export const helmRepositories = {
   // Fetch default values.yaml for a chart version (parsed JSON + raw YAML)
   getChartValues: (repoId: string, chartName: string, version: string) =>
     fetchAPI<{ values: Record<string, unknown>; raw_yaml: string }>(`/api/v1/helm-repositories/${repoId}/charts/${encodeURIComponent(chartName)}/versions/${encodeURIComponent(version)}/values`),
+  // Fetch chart metadata: values + parsed common fields (image, replicas, service, ingress, etc.)
+  getChartMetadata: (repoId: string, chartName: string, version: string) =>
+    fetchAPI<{ values: Record<string, unknown>; raw_yaml: string; metadata: HelmChartMetadata }>(`/api/v1/helm-repositories/${repoId}/charts/${encodeURIComponent(chartName)}/versions/${encodeURIComponent(version)}/metadata`),
 };
 
 export interface HelmChart {
@@ -3475,6 +3478,16 @@ export interface HelmChartVersion {
   deprecated: boolean;
   created: string;
   urls: string[];
+}
+
+export interface HelmChartMetadata {
+  replicas?: number;
+  image?: { repository: string; tag: string; pull_policy: string };
+  service?: { type: string; port: number };
+  ingress?: { enabled: boolean; hosts: string[] };
+  resources?: { limits_cpu: string; limits_memory: string; requests_cpu: string; requests_memory: string };
+  ports?: { name: string; container_port: number; protocol: string }[];
+  autoscaling?: { enabled: boolean; min_replicas: number; max_replicas: number; target_cpu_utilization: number };
 }
 
 // ── Registry Repositories ─────────────────────────────────────

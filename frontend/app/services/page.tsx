@@ -188,7 +188,11 @@ function ServicesList() {
       pepaMap.set(unifiedKey, s);
     }
 
+    // GitOps releases (argocd/fluxcd) are shown on the Releases page, not here
+    const gitopsSources = new Set(['argocd', 'fluxcd']);
+
     for (const ds of discoveredServices) {
+      if (gitopsSources.has(ds.source)) continue;
       const key = `${ds.name}:${ds.namespace}:${ds.cluster || 'default'}`;
       const existing = serviceMap.get(key);
       if (!existing) {
@@ -285,7 +289,7 @@ function ServicesList() {
           </div>
           <p className="page-subtitle-modern">
             Manage and monitor services across your infrastructure
-            {discoveredServices.length > 0 && <span> &middot; {discoveredServices.length} discovered</span>}
+            {discoveredServices.filter(d => d.source !== 'argocd' && d.source !== 'fluxcd').length > 0 && <span> &middot; {discoveredServices.filter(d => d.source !== 'argocd' && d.source !== 'fluxcd').length} discovered</span>}
           </p>
         </div>
         <div className="flex gap-2">
@@ -309,6 +313,7 @@ function ServicesList() {
       <Tabs
         activeKey={serviceTab}
         onChange={handleServiceTabChange}
+        variant="pills"
         tabs={[
           { key: 'all', label: 'All Services', icon: 'services', badge: totalServices || undefined },
           { key: 'problems', label: 'Problems', icon: 'alert', badge: problemServices.length || undefined },
@@ -474,8 +479,6 @@ function ServicesList() {
               <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)} className="select w-36">
                 <option value="">All Sources</option>
                 <option value="pepa">PEPA</option>
-                <option value="argocd">ArgoCD</option>
-                <option value="fluxcd">FluxCD</option>
                 <option value="docker">Docker</option>
                 <option value="docker-container">Docker Container</option>
                 <option value="manual">Manual</option>

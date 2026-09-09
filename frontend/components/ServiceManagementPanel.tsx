@@ -18,6 +18,8 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   const [tab, setTab] = useState<'overview' | 'logs' | 'events'>('overview');
   const [editMode, setEditMode] = useState(false);
   const isDockerContainer = service.source === 'docker-container' || service.source === 'docker';
+  // Sources that have no backing Kubernetes Deployment — skip the lookup entirely
+  const hasNoK8sDeployment = isDockerContainer || service.source === 'pepa' || service.source === 'manual';
   const [deployInfo, setDeployInfo] = useState<DeploymentInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string>('');
@@ -46,7 +48,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   }, []);
 
   const loadDeployInfo = useCallback(async () => {
-    if (isDockerContainer) return; // Not applicable for Docker containers
+    if (hasNoK8sDeployment) return; // No K8s Deployment for docker/pepa/manual sources
     setLoading(true);
     try {
       const info = await discovery.k8sGet(service.cluster, service.namespace, service.name);
@@ -62,7 +64,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } finally {
       if (isMountedRef.current) setLoading(false);
     }
-  }, [isDockerContainer, service.cluster, service.namespace, service.name]);
+  }, [hasNoK8sDeployment, service.cluster, service.namespace, service.name]);
 
   useEffect(() => {
     loadDeployInfo();
@@ -75,6 +77,8 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
       if (isDockerContainer) {
         const data = await discovery.dockerContainerLogs(service.cluster, service.name, count);
         if (isMountedRef.current) setLogs(data.logs || 'No logs available');
+      } else if (hasNoK8sDeployment) {
+        if (isMountedRef.current) setLogs('No logs available for this service');
       } else {
         const data = await discovery.k8sLogs(service.cluster, service.namespace, service.name, count);
         if (isMountedRef.current) setLogs(data.logs || 'No logs available');
@@ -84,10 +88,10 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } finally {
       if (isMountedRef.current) setLoading(false);
     }
-  }, [isDockerContainer, service.cluster, service.name, service.namespace, logLines]);
+  }, [isDockerContainer, hasNoK8sDeployment, service.cluster, service.name, service.namespace, logLines]);
 
   const loadEvents = useCallback(async () => {
-    if (isDockerContainer) return; // Not applicable for Docker containers
+    if (hasNoK8sDeployment) return; // Not applicable for non-K8s services
     setLoading(true);
     setEventsError('');
     try {
@@ -98,7 +102,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } finally {
       if (isMountedRef.current) setLoading(false);
     }
-  }, [isDockerContainer, service.cluster, service.namespace, service.name]);
+  }, [hasNoK8sDeployment, service.cluster, service.namespace, service.name]);
 
   useEffect(() => {
     if (tab === 'logs') loadLogs();

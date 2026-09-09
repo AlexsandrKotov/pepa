@@ -21,8 +21,8 @@ export interface TabsProps {
   activeKey: string;
   /** Called when a tab is clicked. Not needed when tabs use `href`. */
   onChange?: (key: string) => void;
-  /** 'underline' = highlighted pill with accent underline (default), 'rounded' = rounded pill style */
-  variant?: 'underline' | 'rounded';
+  /** 'underline' = highlighted pill with accent underline (default), 'rounded' = rounded pill style, 'pills' = modern segmented control with animated active pill */
+  variant?: 'underline' | 'rounded' | 'pills';
   /** 'md' = default page tabs, 'sm' = compact for panels / modals */
   size?: 'sm' | 'md';
   className?: string;
@@ -78,24 +78,37 @@ export default function Tabs({
   const padY = isSm ? 'py-1.5' : 'py-2.5';
   const textSize = isSm ? 'text-[12px]' : 'text-[13px]';
 
+  const isPills = variant === 'pills';
   const activeClasses = variant === 'rounded'
     ? 'text-[var(--accent)] bg-[var(--surface)] shadow-sm'
-    : 'text-[var(--accent)] bg-[var(--accent)]/10 border-b-2 border-[var(--accent)]';
+    : variant === 'pills'
+      ? 'text-white bg-gradient-to-r from-[var(--accent)] to-[var(--accent)]/85 shadow-md shadow-[var(--accent)]/20'
+      : 'text-[var(--accent)] bg-[var(--accent)]/10 border-b-2 border-[var(--accent)]';
 
   const inactiveClasses = variant === 'rounded'
     ? 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
-    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent)]/5 border-b-2 border-transparent';
+    : variant === 'pills'
+      ? 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent)]/5'
+      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent)]/5 border-b-2 border-transparent';
+
+  const containerClasses = variant === 'pills'
+    ? `inline-flex items-center gap-1 p-1 rounded-xl bg-[var(--surface-hover)]/60 border border-[var(--border)]/60 backdrop-blur-sm ${className}`
+    : variant === 'rounded'
+      ? `relative flex gap-1 overflow-x-auto scrollbar-hide border-b border-[var(--border)] ${className}`
+      : `relative flex gap-1 overflow-x-auto scrollbar-hide`;
+
+  const tabRadius = isPills ? 'rounded-lg' : 'rounded-t-lg';
 
   return (
     <div
       role="tablist"
       aria-orientation="horizontal"
       onKeyDown={handleKeyDown}
-      className={`relative flex gap-1 overflow-x-auto scrollbar-hide ${variant === 'rounded' ? 'border-b border-[var(--border)]' : ''} ${className}`}
+      className={`${containerClasses} ${!isPills && variant !== 'rounded' ? className : ''}`}
     >
       {tabs.map(t => {
         const isActive = t.key === activeKey;
-        const baseClass = `${padX} ${padY} ${textSize} font-medium whitespace-nowrap transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 rounded-t-lg ${isActive ? activeClasses : inactiveClasses}`;
+        const baseClass = `${padX} ${padY} ${textSize} font-medium whitespace-nowrap transition-all duration-200 outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 ${tabRadius} ${isActive ? activeClasses : inactiveClasses}`;
 
         const content = (
           <>
@@ -106,7 +119,11 @@ export default function Tabs({
             )}
             <span>{t.label}</span>
             {t.badge !== undefined && t.badge > 0 && (
-              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>
+              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${
+                isPills
+                  ? isActive ? 'bg-white/20 text-white' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+                  : isActive ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+              }`}>
                 {t.badge}
               </span>
             )}

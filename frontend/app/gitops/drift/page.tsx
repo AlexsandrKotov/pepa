@@ -44,6 +44,8 @@ export default function DriftDetectionPage() {
   const [editingSchedule, setEditingSchedule] = useState<DriftSchedule | null>(null);
   const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [showMapping, setShowMapping] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
   const [scheduleForm, setScheduleForm] = useState<CreateDriftScheduleInput>({
     repo_id: '',
     cluster_id: '',
@@ -284,6 +286,14 @@ export default function DriftDetectionPage() {
     });
   };
 
+  const toggleLog = (logId: string) => {
+    setExpandedLogs(prev => {
+      const next = new Set(prev);
+      if (next.has(logId)) next.delete(logId); else next.add(logId);
+      return next;
+    });
+  };
+
   // Summary counts
   const allEntries: Array<{ repo: GitopsRepo; entry: GitopsDriftEntry }> = [];
   driftResults.forEach((result, repoId) => {
@@ -380,12 +390,6 @@ export default function DriftDetectionPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => { setShowLogs(!showLogs); if (!showLogs) loadLogs(); }}
-              className="btn btn-secondary text-[11px] py-1"
-            >
-              {showLogs ? 'Hide Logs' : 'View Logs'}
-            </button>
             <button
               onClick={openCreateSchedule}
               className="btn btn-primary text-[11px] py-1"
@@ -613,163 +617,262 @@ export default function DriftDetectionPage() {
           </div>
         )}
 
-        {/* Drift logs */}
-        {showLogs && (
-          <div className="mt-4 pt-3 border-t border-[var(--border-light)]">
-            <h4 className="text-[12px] font-semibold text-[var(--text-primary)] mb-2">Detection History</h4>
-            {driftLogs.length > 0 ? (
-              <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
-                {driftLogs.map(log => (
-                  <div key={log.id} className="flex items-center gap-3 px-3 py-2 rounded bg-[var(--bg-primary)] text-[11px]">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${
-                      log.status === 'success' && log.drift_count === 0 ? 'bg-emerald-500' :
-                      log.status === 'success' ? 'bg-amber-500' : 'bg-red-500'
-                    }`} />
-                    <span className="text-[var(--text-secondary)]">{formatTime(log.started_at)}</span>
-                    <span className="font-medium text-[var(--text-primary)]">{log.repo_name}</span>
-                    <span className="text-[var(--text-tertiary)]">{'\u2192'} {log.cluster_name}</span>
-                    <span className={`px-1.5 py-0.5 rounded ${
-                      log.triggered_by === 'manual' ? 'bg-blue-500/10 text-blue-500' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'
-                    }`}>
-                      {log.triggered_by}
-                    </span>
-                    {log.drift_count > 0 ? (
-                      <span className="text-amber-600 font-medium">
-                        {log.drift_count} drifts ({log.critical_count}C / {log.warning_count}W / {log.info_count}I)
-                      </span>
-                    ) : (
-                      <span className="text-emerald-600">No drift</span>
-                    )}
-                    {log.status === 'error' && log.error_message && (
-                      <span className="text-red-500 truncate max-w-[200px]">{log.error_message}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[11px] text-[var(--text-tertiary)] text-center py-3">No detection history yet</p>
+        {/* Drift logs — collapsible section */}
+        <div className="mt-4 pt-3 border-t border-[var(--border-light)]">
+          <button
+            onClick={() => { setShowLogs(!showLogs); if (!showLogs) loadLogs(); }}
+            className="flex items-center gap-2 w-full group"
+          >
+            <svg className={`w-3.5 h-3.5 text-[var(--text-tertiary)] transition-transform ${showLogs ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <h4 className="text-[12px] font-semibold text-[var(--text-primary)]">Detection History</h4>
+            {driftLogs.length > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-tertiary)]">{driftLogs.length}</span>
             )}
-          </div>
-        )}
+          </button>
+          {showLogs && (
+            <div className="mt-2">
+              {driftLogs.length > 0 ? (
+                <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+                  {driftLogs.map(log => {
+                    const isLogExpanded = expandedLogs.has(log.id);
+                    return (
+                      <div key={log.id} className="rounded bg-[var(--bg-primary)] overflow-hidden">
+                        <button
+                          onClick={() => toggleLog(log.id)}
+                          className="w-full flex items-center gap-3 px-3 py-2 text-[11px] hover:bg-[var(--bg-secondary)] transition-colors"
+                        >
+                          <svg className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform shrink-0 ${isLogExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${
+                            log.status === 'success' && log.drift_count === 0 ? 'bg-emerald-500' :
+                            log.status === 'success' ? 'bg-amber-500' : 'bg-red-500'
+                          }`} />
+                          <span className="text-[var(--text-secondary)]">{formatTime(log.started_at)}</span>
+                          <span className="font-medium text-[var(--text-primary)]">{log.repo_name}</span>
+                          <span className="text-[var(--text-tertiary)]">{'\u2192'} {log.cluster_name}</span>
+                          <span className={`px-1.5 py-0.5 rounded ${
+                            log.triggered_by === 'manual' ? 'bg-blue-500/10 text-blue-500' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+                          }`}>
+                            {log.triggered_by}
+                          </span>
+                          {log.drift_count > 0 ? (
+                            <span className="text-amber-600 font-medium">
+                              {log.drift_count} drifts ({log.critical_count}C / {log.warning_count}W / {log.info_count}I)
+                            </span>
+                          ) : (
+                            <span className="text-emerald-600">No drift</span>
+                          )}
+                          {log.status === 'error' && (
+                            <span className="text-red-500 ml-auto shrink-0">Error</span>
+                          )}
+                        </button>
+                        {isLogExpanded && (
+                          <div className="px-3 pb-2.5 pt-0.5 border-t border-[var(--border-light)] bg-[var(--bg-secondary)]">
+                            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] mt-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Status:</span>
+                                <span className={log.status === 'success' ? 'text-emerald-600 font-medium' : 'text-red-500 font-medium'}>{log.status}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Triggered by:</span>
+                                <span className="text-[var(--text-primary)]">{log.triggered_by}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Cluster:</span>
+                                <span className="text-[var(--text-primary)]">{log.cluster_name || '\u2014'}</span>
+                              </div>
+                              {log.scope_path && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Scope:</span>
+                                  <span className="text-[var(--text-primary)] font-mono">{log.scope_path}</span>
+                                </div>
+                              )}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Started:</span>
+                                <span className="text-[var(--text-primary)]">{formatTime(log.started_at)}</span>
+                              </div>
+                              {log.completed_at && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Completed:</span>
+                                  <span className="text-[var(--text-primary)]">{formatTime(log.completed_at)}</span>
+                                </div>
+                              )}
+                              {log.drift_count > 0 && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[var(--text-tertiary)] uppercase text-[10px] tracking-wider">Breakdown:</span>
+                                  <span className="flex items-center gap-2">
+                                    {log.critical_count > 0 && <span className="text-red-500">{log.critical_count} critical</span>}
+                                    {log.warning_count > 0 && <span className="text-yellow-600">{log.warning_count} warning</span>}
+                                    {log.info_count > 0 && <span className="text-blue-500">{log.info_count} info</span>}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                            {log.status === 'error' && log.error_message && (
+                              <div className="mt-2 px-2.5 py-1.5 rounded bg-red-500/10 border border-red-500/20">
+                                <p className="text-[11px] text-red-500 font-mono break-all">{log.error_message}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-[11px] text-[var(--text-tertiary)] text-center py-3">No detection history yet</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── Cluster & Scope Mapping (legacy quick-check) ───────── */}
-      <div className="card card-body">
-        <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-1">Cluster & Scope Mapping</h3>
-        <p className="text-[11px] text-[var(--text-tertiary)] mb-4">
-          Map each GitOps repository to a cluster and select a scope path to compare against. Only resources under the selected scope will be checked.
-        </p>
+      {/* ── Cluster & Scope Mapping (collapsible) ───────── */}
+      <div className="card overflow-hidden">
+        <button
+          onClick={() => setShowMapping(!showMapping)}
+          className="w-full flex items-center justify-between px-5 py-3 hover:bg-[var(--bg)] transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <svg className={`w-4 h-4 text-[var(--text-tertiary)] transition-transform ${showMapping ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <div className="text-left">
+              <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">Cluster & Scope Mapping</h3>
+              <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                Map each GitOps repository to a cluster and select a scope path to compare against.
+              </p>
+            </div>
+          </div>
+          {repos.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                mappedRepos.length === repos.length
+                  ? 'bg-emerald-500/15 text-emerald-600'
+                  : mappedRepos.length > 0
+                    ? 'bg-amber-500/15 text-amber-600'
+                    : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+              }`}>
+                {mappedRepos.length} of {repos.length} mapped
+              </span>
+            </div>
+          )}
+        </button>
 
-        <div className="space-y-3">
-          {repos.map(repo => {
-            const mappedCluster = getMappedCluster(repo);
-            const isMapped = mappedCluster !== null;
-            const isMapping = mappingRepoId === repo.id;
-            const overlays = overlaysByRepo[repo.id] || [];
-            const mapping = mappings[repo.id] || { clusterId: '', overlayPath: '' };
+        {showMapping && (
+          <div className="px-5 pb-5 border-t border-[var(--border-light)]">
+            <div className="space-y-3 pt-4">
+              {repos.map(repo => {
+                const mappedCluster = getMappedCluster(repo);
+                const isMapped = mappedCluster !== null;
+                const isMapping = mappingRepoId === repo.id;
+                const overlays = overlaysByRepo[repo.id] || [];
+                const mapping = mappings[repo.id] || { clusterId: '', overlayPath: '' };
 
-            return (
-              <div key={repo.id} className="p-3 rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)]">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-semibold text-[var(--text-primary)]">{repo.name}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-tertiary)] font-mono">
-                        {repo.engine_type}
-                      </span>
-                      {repo.branch && repo.branch !== 'main' && (
-                        <span className="text-[10px] text-[var(--text-tertiary)]">branch: {repo.branch}</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-[var(--text-tertiary)] truncate mt-0.5">{repo.repo_url}</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">Cluster:</label>
-                    {isMapped ? (
-                      <div className="flex items-center gap-1.5">
-                        <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-600">
-                          <span className="w-2 h-2 rounded-full bg-green-500" />
-                          {mappedCluster!.name}
-                          <span className="text-[10px] text-[var(--text-tertiary)] font-normal">({mappedCluster!.environment})</span>
-                        </span>
-                        <button
-                          onClick={() => unmapCluster(repo.id)}
-                          disabled={isMapping}
-                          className="text-[10px] px-1.5 py-0.5 rounded text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
-                          title="Unmap cluster"
-                        >
-                          {'\u2715'}
-                        </button>
+                return (
+                  <div key={repo.id} className="p-3 rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)]">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-semibold text-[var(--text-primary)]">{repo.name}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-tertiary)] font-mono">
+                            {repo.engine_type}
+                          </span>
+                          {repo.branch && repo.branch !== 'main' && (
+                            <span className="text-[10px] text-[var(--text-tertiary)]">branch: {repo.branch}</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-[var(--text-tertiary)] truncate mt-0.5">{repo.repo_url}</p>
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">Cluster:</label>
+                        {isMapped ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex items-center gap-1.5 text-[12px] font-medium text-emerald-600">
+                              <span className="w-2 h-2 rounded-full bg-green-500" />
+                              {mappedCluster!.name}
+                              <span className="text-[10px] text-[var(--text-tertiary)] font-normal">({mappedCluster!.environment})</span>
+                            </span>
+                            <button
+                              onClick={() => unmapCluster(repo.id)}
+                              disabled={isMapping}
+                              className="text-[10px] px-1.5 py-0.5 rounded text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
+                              title="Unmap cluster"
+                            >
+                              {'\u2715'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={mapping.clusterId || ''}
+                              onChange={(e) => updateMapping(repo.id, 'clusterId', e.target.value)}
+                              className="text-[11px] px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                            >
+                              <option value="">Select cluster...</option>
+                              {availableClusters.map(c => (
+                                <option key={c.id} value={c.id}>{c.name} ({c.environment})</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">Scope:</label>
                         <select
-                          value={mapping.clusterId || ''}
-                          onChange={(e) => updateMapping(repo.id, 'clusterId', e.target.value)}
-                          className="text-[11px] px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                          value={mapping.overlayPath || ''}
+                          onChange={(e) => updateMapping(repo.id, 'overlayPath', e.target.value)}
+                          className="text-[11px] px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] max-w-[280px]"
                         >
-                          <option value="">Select cluster...</option>
-                          {availableClusters.map(c => (
-                            <option key={c.id} value={c.id}>{c.name} ({c.environment})</option>
+                          <option value="">All scopes (entire repo)</option>
+                          {overlays.map(o => (
+                            <option key={o} value={o + '/'}>{o}</option>
                           ))}
                         </select>
                       </div>
-                    )}
-                  </div>
 
-                  <div className="flex items-center gap-2">
-                    <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">Scope:</label>
-                    <select
-                      value={mapping.overlayPath || ''}
-                      onChange={(e) => updateMapping(repo.id, 'overlayPath', e.target.value)}
-                      className="text-[11px] px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] max-w-[280px]"
-                    >
-                      <option value="">All scopes (entire repo)</option>
-                      {overlays.map(o => (
-                        <option key={o} value={o + '/'}>{o}</option>
-                      ))}
-                    </select>
+                      {!isMapped && mapping.clusterId && (
+                        <button
+                          onClick={() => saveMapping(repo.id)}
+                          disabled={isMapping}
+                          className="text-[11px] px-2.5 py-1 rounded bg-[var(--accent)] text-white font-medium disabled:opacity-50"
+                        >
+                          {isMapping ? 'Saving...' : 'Save Mapping'}
+                        </button>
+                      )}
+                    </div>
                   </div>
+                );
+              })}
 
-                  {!isMapped && mapping.clusterId && (
-                    <button
-                      onClick={() => saveMapping(repo.id)}
-                      disabled={isMapping}
-                      className="text-[11px] px-2.5 py-1 rounded bg-[var(--accent)] text-white font-medium disabled:opacity-50"
-                    >
-                      {isMapping ? 'Saving...' : 'Save Mapping'}
-                    </button>
-                  )}
-                </div>
+              {repos.length === 0 && (
+                <p className="text-[12px] text-[var(--text-tertiary)] text-center py-4">
+                  No GitOps repositories configured. <Link href="/gitops" className="text-[var(--accent)] hover:underline">Add a repository</Link>
+                </p>
+              )}
+
+              {repos.length > 0 && availableClusters.length === 0 && (
+                <p className="text-[11px] text-[var(--text-tertiary)] text-center py-2">
+                  No clusters with kubeconfig available. <Link href="/clusters" className="text-[var(--accent)] hover:underline">Import a kubeconfig first</Link>
+                </p>
+              )}
+            </div>
+
+            {repos.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-[var(--border-light)] flex items-center gap-4">
+                {repos.filter(r => !isRepoMapped(r)).length > 0 && (
+                  <span className="text-[10px] text-amber-600">
+                    {repos.filter(r => !isRepoMapped(r)).map(r => r.name).join(', ')} — not mapped
+                  </span>
+                )}
               </div>
-            );
-          })}
-
-          {repos.length === 0 && (
-            <p className="text-[12px] text-[var(--text-tertiary)] text-center py-4">
-              No GitOps repositories configured. <Link href="/gitops" className="text-[var(--accent)] hover:underline">Add a repository</Link>
-            </p>
-          )}
-
-          {repos.length > 0 && availableClusters.length === 0 && (
-            <p className="text-[11px] text-[var(--text-tertiary)] text-center py-2">
-              No clusters with kubeconfig available. <Link href="/clusters" className="text-[var(--accent)] hover:underline">Import a kubeconfig first</Link>
-            </p>
-          )}
-        </div>
-
-        {repos.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-[var(--border-light)] flex items-center gap-4">
-            <span className="text-[11px] text-[var(--text-tertiary)]">
-              {mappedRepos.length} of {repos.length} repos mapped
-            </span>
-            {repos.filter(r => !isRepoMapped(r)).length > 0 && (
-              <span className="text-[10px] text-amber-600">
-                {repos.filter(r => !isRepoMapped(r)).map(r => r.name).join(', ')} — not mapped
-              </span>
             )}
           </div>
         )}
