@@ -71,11 +71,15 @@ func (p *FluxCDPlugin) listKustomizations(ctx context.Context, fc *FluxControlle
 	if err := actionInput(params, &input); err != nil {
 		return nil, err
 	}
-	if input.Namespace == "" {
-		input.Namespace = "flux-system"
+	// When no namespace is specified, list across all namespaces so the
+	// engine client discovers every FluxCD Kustomization in the cluster.
+	var list *unstructured.UnstructuredList
+	var err error
+	if input.Namespace != "" {
+		list, err = fc.client.Resource(kustomizationGVR).Namespace(input.Namespace).List(ctx, metav1.ListOptions{})
+	} else {
+		list, err = fc.client.Resource(kustomizationGVR).List(ctx, metav1.ListOptions{})
 	}
-
-	list, err := fc.client.Resource(kustomizationGVR).Namespace(input.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list kustomizations: %w", err)
 	}
@@ -191,11 +195,15 @@ func (p *FluxCDPlugin) listHelmReleases(ctx context.Context, fc *FluxController,
 	if err := actionInput(params, &input); err != nil {
 		return nil, err
 	}
-	if input.Namespace == "" {
-		input.Namespace = "flux-system"
+	// When no namespace is specified, list across all namespaces so the
+	// engine client discovers every FluxCD HelmRelease in the cluster.
+	var list *unstructured.UnstructuredList
+	var err error
+	if input.Namespace != "" {
+		list, err = fc.client.Resource(helmReleaseGVR).Namespace(input.Namespace).List(ctx, metav1.ListOptions{})
+	} else {
+		list, err = fc.client.Resource(helmReleaseGVR).List(ctx, metav1.ListOptions{})
 	}
-
-	list, err := fc.client.Resource(helmReleaseGVR).Namespace(input.Namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list helmreleases: %w", err)
 	}

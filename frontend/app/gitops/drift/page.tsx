@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { gitops, clusters, type GitopsRepo, type GitopsDriftResult, type GitopsDriftEntry, type Cluster } from '@/lib/api';
+import { gitops, clusters, type GitopsRepo, type GitopsDriftResult, type GitopsDriftEntry, type Cluster, type DriftSchedule, type DriftDetectionLog, type CreateDriftScheduleInput } from '@/lib/api';
 
 type SeverityFilter = '' | 'critical' | 'warning' | 'info';
 type DriftTypeFilter = '' | 'suspended' | 'resumed' | 'version' | 'missing' | 'orphaned';
@@ -11,6 +11,17 @@ interface RepoMapping {
   clusterId: string;
   overlayPath: string;
 }
+
+const CRON_PRESETS = [
+  { label: 'Every 15 minutes', value: '*/15 * * * *' },
+  { label: 'Every 30 minutes', value: '*/30 * * * *' },
+  { label: 'Every hour', value: '0 * * * *' },
+  { label: 'Every 6 hours', value: '0 */6 * * *' },
+  { label: 'Every 12 hours', value: '0 */12 * * *' },
+  { label: 'Daily at midnight', value: '0 0 * * *' },
+  { label: 'Daily at 6 AM', value: '0 6 * * *' },
+  { label: 'Weekly (Monday)', value: '0 0 * * 1' },
+];
 
 export default function DriftDetectionPage() {
   const [repos, setRepos] = useState<GitopsRepo[]>([]);
@@ -26,6 +37,25 @@ export default function DriftDetectionPage() {
   const [mappingRepoId, setMappingRepoId] = useState<string | null>(null);
   const [mappings, setMappings] = useState<Record<string, RepoMapping>>({});
 
+  // Schedule state
+  const [schedules, setSchedules] = useState<DriftSchedule[]>([]);
+  const [driftLogs, setDriftLogs] = useState<DriftDetectionLog[]>([]);
+  const [showScheduleForm, setShowScheduleForm] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<DriftSchedule | null>(null);
+  const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
+  const [showLogs, setShowLogs] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState<CreateDriftScheduleInput>({
+    repo_id: '',
+    cluster_id: '',
+    scope_path: '',
+    name: '',
+    description: '',
+    cron_expression: '0 */6 * * *',
+    enabled: true,
+    alert_on_drift: true,
+    alert_severity_threshold: 'warning',
+  });
+
   useEffect(() => {
     load();
   }, []);
@@ -34,15 +64,17 @@ export default function DriftDetectionPage() {
     setLoading(true);
     setError('');
     try {
-      const [repoData, clusterData] = await Promise.all([
+      const [repoData, clusterData, scheduleData] = await Promise.all([
         gitops.listRepos(),
         clusters.list(),
+        gitops.listDriftSchedules().catch(() => ({ schedules: [] })),
       ]);
       const repoList = repoData.repos || [];
       setRepos(repoList);
       setAllClusters(clusterData.clusters || []);
+      setSchedules(scheduleData.schedules || []);
 
-      // Restore mappings from per-repo config (drift_cluster_id, drift_scope_path)
+      // Restore mappings from per-repo config
       const restored: Record<string, RepoMapping> = {};
       for (const repo of repoList) {
         const clusterId = repo.config?.drift_cluster_id || '';
@@ -70,6 +102,15 @@ export default function DriftDetectionPage() {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLogs = async () => {
+    try {
+      const data = await gitops.listDriftLogs(50);
+      setDriftLogs(data.logs || []);
+    } catch {
+      // silently fail — logs are optional
     }
   };
 
@@ -153,6 +194,88 @@ export default function DriftDetectionPage() {
     setScanning(false);
   };
 
+  // Schedule CRUD
+  const openCreateSchedule = () => {
+    setEditingSchedule(null);
+    setScheduleForm({
+      repo_id: repos[0]?.id || '',
+      cluster_id: '',
+      scope_path: '',
+      name: '',
+      description: '',
+      cron_expression: '0 */6 * * *',
+      enabled: true,
+      alert_on_drift: true,
+      alert_severity_threshold: 'warning',
+    });
+    setShowScheduleForm(true);
+  };
+
+  const openEditSchedule = (s: DriftSchedule) => {
+    setEditingSchedule(s);
+    setScheduleForm({
+      repo_id: s.repo_id,
+      cluster_id: s.cluster_id,
+      scope_path: s.scope_path || '',
+      name: s.name,
+      description: s.description || '',
+      cron_expression: s.cron_expression,
+      enabled: s.enabled,
+      alert_on_drift: s.alert_on_drift,
+      alert_severity_threshold: s.alert_severity_threshold,
+    });
+    setShowScheduleForm(true);
+  };
+
+  const saveSchedule = async () => {
+    try {
+      if (editingSchedule) {
+        await gitops.updateDriftSchedule(editingSchedule.id, scheduleForm);
+      } else {
+        await gitops.createDriftSchedule(scheduleForm);
+      }
+      setShowScheduleForm(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save schedule');
+    }
+  };
+
+  const deleteSchedule = async (id: string) => {
+    if (!confirm('Delete this drift schedule?')) return;
+    try {
+      await gitops.deleteDriftSchedule(id);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete schedule');
+    }
+  };
+
+  const toggleScheduleEnabled = async (s: DriftSchedule) => {
+    try {
+      await gitops.updateDriftSchedule(s.id, { enabled: !s.enabled });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to toggle schedule');
+    }
+  };
+
+  const runSchedule = async (id: string) => {
+    setRunningScheduleId(id);
+    setError('');
+    try {
+      const result = await gitops.runDriftSchedule(id);
+      if (result.drift_count > 0) {
+        setError(`Drift detected: ${result.drift_count} issues (${result.critical_count} critical, ${result.warning_count} warning, ${result.info_count} info)`);
+      }
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Drift detection failed');
+    } finally {
+      setRunningScheduleId(null);
+    }
+  };
+
   const toggleRepo = (repoId: string) => {
     setExpandedRepos(prev => {
       const next = new Set(prev);
@@ -187,13 +310,24 @@ export default function DriftDetectionPage() {
 
   const driftTypeIcon = (driftType: string) => {
     switch (driftType) {
-      case 'suspended': return { icon: '⏸', label: 'Suspended in cluster', color: 'text-red-600' };
-      case 'resumed': return { icon: '▶', label: 'Resumed in cluster', color: 'text-yellow-600' };
-      case 'version': return { icon: '↕', label: 'Version drift', color: 'text-orange-600' };
-      case 'missing': return { icon: '✕', label: 'Missing from cluster', color: 'text-purple-600' };
+      case 'suspended': return { icon: '\u23F8', label: 'Suspended in cluster', color: 'text-red-600' };
+      case 'resumed': return { icon: '\u25B6', label: 'Resumed in cluster', color: 'text-yellow-600' };
+      case 'version': return { icon: '\u2195', label: 'Version drift', color: 'text-orange-600' };
+      case 'missing': return { icon: '\u2715', label: 'Missing from cluster', color: 'text-purple-600' };
       case 'orphaned': return { icon: '?', label: 'Not in Git', color: 'text-blue-600' };
       default: return { icon: '~', label: driftType, color: 'text-[var(--text-tertiary)]' };
     }
+  };
+
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const getCronLabel = (expr: string) => {
+    const preset = CRON_PRESETS.find(p => p.value === expr);
+    return preset ? preset.label : expr;
   };
 
   if (loading) {
@@ -236,7 +370,290 @@ export default function DriftDetectionPage() {
         </div>
       )}
 
-      {/* Cluster & Scope Mapping */}
+      {/* ── Scheduled Drift Detection ──────────────────────────── */}
+      <div className="card card-body">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">Scheduled Drift Detection</h3>
+            <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+              Configure automated drift detection with cron schedules and alerting.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setShowLogs(!showLogs); if (!showLogs) loadLogs(); }}
+              className="btn btn-secondary text-[11px] py-1"
+            >
+              {showLogs ? 'Hide Logs' : 'View Logs'}
+            </button>
+            <button
+              onClick={openCreateSchedule}
+              className="btn btn-primary text-[11px] py-1"
+            >
+              + Add Schedule
+            </button>
+          </div>
+        </div>
+
+        {/* Schedule form modal */}
+        {showScheduleForm && (
+          <div className="mb-4 p-4 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]">
+            <h4 className="text-[12px] font-semibold text-[var(--text-primary)] mb-3">
+              {editingSchedule ? 'Edit Schedule' : 'New Drift Schedule'}
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium block mb-1">Name</label>
+                <input
+                  type="text"
+                  value={scheduleForm.name}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g., Production drift check"
+                  className="w-full text-[12px] px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium block mb-1">Repository</label>
+                <select
+                  value={scheduleForm.repo_id}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, repo_id: e.target.value }))}
+                  className="w-full text-[12px] px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                >
+                  <option value="">Select repository...</option>
+                  {repos.map(r => (
+                    <option key={r.id} value={r.id}>{r.name} ({r.engine_type})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium block mb-1">Cluster</label>
+                <select
+                  value={scheduleForm.cluster_id}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, cluster_id: e.target.value }))}
+                  className="w-full text-[12px] px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                >
+                  <option value="">Select cluster...</option>
+                  {availableClusters.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.environment})</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium block mb-1">Scope Path</label>
+                <select
+                  value={scheduleForm.scope_path || ''}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, scope_path: e.target.value }))}
+                  className="w-full text-[12px] px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                >
+                  <option value="">All scopes (entire repo)</option>
+                  {scheduleForm.repo_id && (overlaysByRepo[scheduleForm.repo_id] || []).map(o => (
+                    <option key={o} value={o + '/'}>{o}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium block mb-1">Schedule</label>
+                <select
+                  value={scheduleForm.cron_expression}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, cron_expression: e.target.value }))}
+                  className="w-full text-[12px] px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                >
+                  {CRON_PRESETS.map(p => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium block mb-1">Alert Severity Threshold</label>
+                <select
+                  value={scheduleForm.alert_severity_threshold}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, alert_severity_threshold: e.target.value }))}
+                  className="w-full text-[12px] px-2.5 py-1.5 rounded border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                >
+                  <option value="critical">Critical only</option>
+                  <option value="warning">Warning and above</option>
+                  <option value="info">All (info and above)</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 mt-3">
+              <label className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={scheduleForm.enabled}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, enabled: e.target.checked }))}
+                  className="rounded"
+                />
+                Enabled
+              </label>
+              <label className="flex items-center gap-2 text-[11px] text-[var(--text-secondary)] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={scheduleForm.alert_on_drift}
+                  onChange={(e) => setScheduleForm(f => ({ ...f, alert_on_drift: e.target.checked }))}
+                  className="rounded"
+                />
+                Send alerts when drift detected
+              </label>
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <button onClick={saveSchedule} className="btn btn-primary text-[11px] py-1">
+                {editingSchedule ? 'Update' : 'Create'}
+              </button>
+              <button onClick={() => setShowScheduleForm(false)} className="btn btn-secondary text-[11px] py-1">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Schedule list */}
+        {schedules.length > 0 ? (
+          <div className="space-y-2">
+            {schedules.map(s => {
+              const repo = repos.find(r => r.id === s.repo_id);
+              const cluster = allClusters.find(c => c.id === s.cluster_id);
+              return (
+                <div key={s.id} className="p-3 rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)]">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleScheduleEnabled(s)}
+                      className={`shrink-0 w-8 h-5 rounded-full transition-colors relative ${s.enabled ? 'bg-emerald-500' : 'bg-[var(--border)]'}`}
+                      title={s.enabled ? 'Enabled — click to disable' : 'Disabled — click to enable'}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${s.enabled ? 'left-3.5' : 'left-0.5'}`} />
+                    </button>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-semibold text-[var(--text-primary)]">{s.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.enabled ? 'bg-emerald-500/15 text-emerald-600' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>
+                          {s.enabled ? 'Active' : 'Paused'}
+                        </span>
+                        {s.alert_on_drift && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                            Alerts on
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1">
+                        {repo && (
+                          <span className="text-[10px] text-[var(--text-tertiary)]">
+                            {repo.name} ({repo.engine_type})
+                          </span>
+                        )}
+                        {cluster && (
+                          <span className="text-[10px] text-emerald-600">
+                            {'\u25CF'} {cluster.name}
+                          </span>
+                        )}
+                        {s.scope_path && (
+                          <span className="text-[10px] font-mono text-[var(--text-tertiary)]">{s.scope_path}</span>
+                        )}
+                        <span className="text-[10px] text-[var(--text-tertiary)]">
+                          {getCronLabel(s.cron_expression)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        {s.last_run_at && (
+                          <p className="text-[10px] text-[var(--text-tertiary)]">
+                            Last: {formatTime(s.last_run_at)}
+                            {s.last_run_status && (
+                              <span className={s.last_run_status === 'success' ? ' text-emerald-600' : ' text-red-500'}>
+                                {' '}({s.last_run_status})
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        {s.next_run_at && s.enabled && (
+                          <p className="text-[10px] text-[var(--text-tertiary)]">
+                            Next: {formatTime(s.next_run_at)}
+                          </p>
+                        )}
+                        {s.last_drift_count > 0 && (
+                          <p className="text-[10px] text-amber-600 font-medium">
+                            {s.last_drift_count} drifts detected
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => runSchedule(s.id)}
+                        disabled={runningScheduleId === s.id}
+                        className="text-[11px] px-2.5 py-1 rounded bg-[var(--accent)] text-white font-medium disabled:opacity-50"
+                      >
+                        {runningScheduleId === s.id ? 'Running...' : 'Run Now'}
+                      </button>
+                      <button
+                        onClick={() => openEditSchedule(s)}
+                        className="text-[11px] px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => deleteSchedule(s.id)}
+                        className="text-[11px] px-2 py-1 rounded text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10"
+                      >
+                        {'\u2715'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-6">
+            <p className="text-[12px] text-[var(--text-tertiary)]">
+              No scheduled drift detection configured.
+              <button onClick={openCreateSchedule} className="text-[var(--accent)] hover:underline ml-1">
+                Create your first schedule
+              </button>
+            </p>
+          </div>
+        )}
+
+        {/* Drift logs */}
+        {showLogs && (
+          <div className="mt-4 pt-3 border-t border-[var(--border-light)]">
+            <h4 className="text-[12px] font-semibold text-[var(--text-primary)] mb-2">Detection History</h4>
+            {driftLogs.length > 0 ? (
+              <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
+                {driftLogs.map(log => (
+                  <div key={log.id} className="flex items-center gap-3 px-3 py-2 rounded bg-[var(--bg-primary)] text-[11px]">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      log.status === 'success' && log.drift_count === 0 ? 'bg-emerald-500' :
+                      log.status === 'success' ? 'bg-amber-500' : 'bg-red-500'
+                    }`} />
+                    <span className="text-[var(--text-secondary)]">{formatTime(log.started_at)}</span>
+                    <span className="font-medium text-[var(--text-primary)]">{log.repo_name}</span>
+                    <span className="text-[var(--text-tertiary)]">{'\u2192'} {log.cluster_name}</span>
+                    <span className={`px-1.5 py-0.5 rounded ${
+                      log.triggered_by === 'manual' ? 'bg-blue-500/10 text-blue-500' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'
+                    }`}>
+                      {log.triggered_by}
+                    </span>
+                    {log.drift_count > 0 ? (
+                      <span className="text-amber-600 font-medium">
+                        {log.drift_count} drifts ({log.critical_count}C / {log.warning_count}W / {log.info_count}I)
+                      </span>
+                    ) : (
+                      <span className="text-emerald-600">No drift</span>
+                    )}
+                    {log.status === 'error' && log.error_message && (
+                      <span className="text-red-500 truncate max-w-[200px]">{log.error_message}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-[var(--text-tertiary)] text-center py-3">No detection history yet</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Cluster & Scope Mapping (legacy quick-check) ───────── */}
       <div className="card card-body">
         <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-1">Cluster & Scope Mapping</h3>
         <p className="text-[11px] text-[var(--text-tertiary)] mb-4">
@@ -253,7 +670,6 @@ export default function DriftDetectionPage() {
 
             return (
               <div key={repo.id} className="p-3 rounded-lg border border-[var(--border-light)] bg-[var(--bg-primary)]">
-                {/* Repo header row */}
                 <div className="flex items-center gap-3 mb-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -269,9 +685,7 @@ export default function DriftDetectionPage() {
                   </div>
                 </div>
 
-                {/* Mapping controls */}
                 <div className="flex flex-wrap items-center gap-3">
-                  {/* Cluster selector */}
                   <div className="flex items-center gap-2">
                     <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">Cluster:</label>
                     {isMapped ? (
@@ -287,7 +701,7 @@ export default function DriftDetectionPage() {
                           className="text-[10px] px-1.5 py-0.5 rounded text-[var(--text-tertiary)] hover:text-red-500 hover:bg-red-500/10 border border-transparent hover:border-red-500/20"
                           title="Unmap cluster"
                         >
-                          ✕
+                          {'\u2715'}
                         </button>
                       </div>
                     ) : (
@@ -306,7 +720,6 @@ export default function DriftDetectionPage() {
                     )}
                   </div>
 
-                  {/* Scope path selector */}
                   <div className="flex items-center gap-2">
                     <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider font-medium">Scope:</label>
                     <select
@@ -321,7 +734,6 @@ export default function DriftDetectionPage() {
                     </select>
                   </div>
 
-                  {/* Save button (show when cluster selected but not yet mapped) */}
                   {!isMapped && mapping.clusterId && (
                     <button
                       onClick={() => saveMapping(repo.id)}
@@ -349,7 +761,6 @@ export default function DriftDetectionPage() {
           )}
         </div>
 
-        {/* Summary */}
         {repos.length > 0 && (
           <div className="mt-4 pt-3 border-t border-[var(--border-light)] flex items-center gap-4">
             <span className="text-[11px] text-[var(--text-tertiary)]">
@@ -398,13 +809,13 @@ export default function DriftDetectionPage() {
             )}
             {totalSuspended > 0 && (
               <div className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20">
-                <span className="text-[12px]">⏸</span>
+                <span className="text-[12px]">{'\u23F8'}</span>
                 <span className="text-[12px] font-semibold text-red-500">{totalSuspended} suspended outside Git</span>
               </div>
             )}
             {allEntries.length === 0 && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
-                <span className="text-[12px]">&#10003;</span>
+                <span className="text-[12px]">{'\u2713'}</span>
                 <span className="text-[12px] font-semibold text-emerald-600">No drift detected</span>
               </div>
             )}
@@ -418,12 +829,12 @@ export default function DriftDetectionPage() {
           <span className="text-[11px] text-[var(--text-tertiary)]">Filters:</span>
           {severityFilter && (
             <button onClick={() => setSeverityFilter('')} className="text-[11px] px-2 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--border)]">
-              {severityFilter} ×
+              {severityFilter} {'\u00D7'}
             </button>
           )}
           {typeFilter && (
             <button onClick={() => setTypeFilter('')} className="text-[11px] px-2 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--border)]">
-              {typeFilter} ×
+              {typeFilter} {'\u00D7'}
             </button>
           )}
           <button onClick={() => { setSeverityFilter(''); setTypeFilter(''); }} className="text-[11px] text-[var(--accent)] hover:underline">
@@ -464,7 +875,7 @@ export default function DriftDetectionPage() {
                     <span className="text-[13px] font-semibold text-[var(--text-primary)]">{repo.name}</span>
                     {mappedCluster && (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 border border-emerald-500/20">
-                        ● {mappedCluster.name}
+                        {'\u25CF'} {mappedCluster.name}
                       </span>
                     )}
                     {overlayPath && (
@@ -538,17 +949,6 @@ export default function DriftDetectionPage() {
                                 </div>
                               )}
                             </div>
-                            <div className="shrink-0">
-                              {entry.drift_type === 'suspended' && (
-                                <span className="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-500 border border-red-500/20">CLI suspend detected</span>
-                              )}
-                              {entry.drift_type === 'missing' && (
-                                <span className="text-[10px] px-2 py-1 rounded bg-violet-500/10 text-violet-500 border border-violet-500/20">Not deployed</span>
-                              )}
-                              {entry.drift_type === 'orphaned' && (
-                                <span className="text-[10px] px-2 py-1 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">Manual deploy?</span>
-                              )}
-                            </div>
                           </div>
                         );
                       })}
@@ -567,7 +967,7 @@ export default function DriftDetectionPage() {
         </div>
       ) : (
         <div className="card card-body text-center py-16">
-          <div className="text-[40px] mb-3 opacity-30">&#128269;</div>
+          <div className="text-[40px] mb-3 opacity-30">{'\uD83D\uDD0D'}</div>
           <h3 className="text-[14px] font-semibold text-[var(--text-primary)] mb-1">
             {mappedRepos.length === 0 && repos.length > 0 ? 'No clusters mapped' : 'No drift scan results yet'}
           </h3>
@@ -580,46 +980,11 @@ export default function DriftDetectionPage() {
           </p>
           {repos.length === 0 && (
             <Link href="/gitops" className="inline-block mt-4 text-[12px] text-[var(--accent)] hover:underline">
-              Add a GitOps repository first →
+              Add a GitOps repository first {'\u2192'}
             </Link>
           )}
         </div>
       )}
-
-      {/* How it works */}
-      <div className="card card-body">
-        <h3 className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">How drift detection works</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-[12px]">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-[var(--accent)] text-white flex items-center justify-center text-[10px] font-bold">1</span>
-              <span className="font-medium text-[var(--text-primary)]">Map cluster</span>
-            </div>
-            <p className="text-[var(--text-tertiary)] pl-7">Select which cluster corresponds to each GitOps repository.</p>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-[var(--accent)] text-white flex items-center justify-center text-[10px] font-bold">2</span>
-              <span className="font-medium text-[var(--text-primary)]">Select scope</span>
-            </div>
-            <p className="text-[var(--text-tertiary)] pl-7">Choose a scope path (e.g. <code className="px-1 rounded bg-[var(--border-light)] text-[10px]">overlays/staging</code>, <code className="px-1 rounded bg-[var(--border-light)] text-[10px]">clusters/production</code>) to scope drift detection.</p>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-[var(--accent)] text-white flex items-center justify-center text-[10px] font-bold">3</span>
-              <span className="font-medium text-[var(--text-primary)]">Compare states</span>
-            </div>
-            <p className="text-[var(--text-tertiary)] pl-7">PEPA reads Git manifests and queries the live cluster (FluxCD CRDs) to find differences.</p>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-[var(--accent)] text-white flex items-center justify-center text-[10px] font-bold">4</span>
-              <span className="font-medium text-[var(--text-primary)]">Detect & alert</span>
-            </div>
-            <p className="text-[var(--text-tertiary)] pl-7">Detects suspend changes, version mismatches, missing or orphaned resources.</p>
-          </div>
-        </div>
-      </div>
       </div>
     </div>
   );

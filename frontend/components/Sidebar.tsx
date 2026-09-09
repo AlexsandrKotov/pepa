@@ -90,8 +90,6 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/entities', label: 'Entities', permission: 'entities' },
       { href: '/scorecards', label: 'Scorecards', permission: 'scorecards' },
       { href: '/discovery', label: 'Discovery', permission: 'discovery' },
-      { href: '/import', label: 'Import', permission: 'import' },
-      { href: '/export', label: 'Export', permission: 'import' },
     ],
   },
   {
@@ -189,6 +187,8 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       { href: '/roles', label: 'Roles', permission: 'roles', adminOnly: true },
       { href: '/audit', label: 'Audit Log', permission: 'audit', adminOnly: true },
       { href: '/notifications', label: 'Notifications', permission: 'notifications', adminOnly: true },
+      { href: '/import', label: 'Import', permission: 'import', adminOnly: true },
+      { href: '/export', label: 'Export', permission: 'import', adminOnly: true },
     ],
   },
 ];

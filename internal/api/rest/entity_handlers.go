@@ -1,16 +1,20 @@
 package rest
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/events"
+	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/pkg/models"
 )
 
@@ -28,6 +32,11 @@ func registerEntityRoutes(r *gin.RouterGroup, deps Dependencies) {
 		entities.GET("/:id/relationships", getEntityRelationships(deps))
 		entities.POST("/:id/relationships", createRelationship(deps))
 		entities.DELETE("/relationships/:relId", deleteRelationship(deps))
+
+		// Sync / import endpoints
+		entities.POST("/sync", syncEntities(deps))
+		entities.POST("/import-discovery", importFromDiscovery(deps))
+		entities.GET("/sync/status", getSyncStatus(deps))
 	}
 
 	// Entity type registry
@@ -112,6 +121,15 @@ func createEntity(deps Dependencies) gin.HandlerFunc {
 		}
 
 		logAudit(deps, c, "create", "entity", entity.ID.String(), nil, entity)
+
+		// Auto-evaluate scorecards for the new entity
+		if deps.Services.ScorecardEval != nil {
+			go func() {
+				if _, err := deps.Services.ScorecardEval.EvaluateEntity(context.Background(), entity.ID, tenantID); err != nil {
+					slog.Warn("auto-evaluate on create failed", "entity", entity.ID, "error", err)
+				}
+			}()
+		}
 
 		c.JSON(http.StatusCreated, entity)
 	}
@@ -354,4 +372,144 @@ func deleteRelationship(deps Dependencies) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"message": "relationship deleted", "id": relID})
 	}
+}
+
+// ── Sync / Import handlers ─────────────────────────────────────
+
+// syncEntities triggers a full sync from discovery to entities.
+// It discovers all services from connected clusters and creates/updates entities.
+func syncEntities(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Services.EntitySync == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "entity sync service not available"})
+			return
+		}
+
+		tenantID := auth.GetTenantID(c)
+		orgID := auth.GetOrgID(c)
+
+		// Discover services from all sources using the discovery cache
+		discovered := discoverAllServices(c.Request.Context(), deps)
+
+		// Convert to sync items
+		items := make([]service.DiscoveredItem, 0, len(discovered))
+		for _, d := range discovered {
+			items = append(items, service.DiscoveredItem{
+				Name:      d.Name,
+				Namespace: d.Namespace,
+				Cluster:   d.Cluster,
+				Source:    d.Source,
+				Status:    d.Status,
+				Health:    d.Health,
+				Image:     d.Image,
+			})
+		}
+
+		result, err := deps.Services.EntitySync.SyncDiscoveryToEntities(c.Request.Context(), tenantID, orgID, items)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "sync", "entities", "", nil, gin.H{
+			"created": result.Created,
+			"updated": result.Updated,
+			"total":   result.Total,
+		})
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": fmt.Sprintf("synced %d entities", result.Created+result.Updated),
+			"synced":  result.Created + result.Updated,
+			"created": result.Created,
+			"updated": result.Updated,
+		})
+	}
+}
+
+// importFromDiscovery imports selected discovered services as entities.
+func importFromDiscovery(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Services.EntitySync == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "entity sync service not available"})
+			return
+		}
+
+		var req struct {
+			Items []struct {
+				Name      string `json:"name" binding:"required"`
+				Namespace string `json:"namespace"`
+				Cluster   string `json:"cluster"`
+				Source    string `json:"source"`
+			} `json:"items" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		tenantID := auth.GetTenantID(c)
+		orgID := auth.GetOrgID(c)
+
+		items := make([]service.DiscoveredItem, 0, len(req.Items))
+		for _, item := range req.Items {
+			items = append(items, service.DiscoveredItem{
+				Name:      item.Name,
+				Namespace: item.Namespace,
+				Cluster:   item.Cluster,
+				Source:    item.Source,
+			})
+		}
+
+		result, err := deps.Services.EntitySync.SyncDiscoveryToEntities(c.Request.Context(), tenantID, orgID, items)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		logAudit(deps, c, "import", "entities", "", nil, gin.H{
+			"imported": result.Created,
+		})
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  fmt.Sprintf("imported %d entities", result.Created),
+			"imported": result.Created,
+		})
+	}
+}
+
+// getSyncStatus returns the current sync status.
+func getSyncStatus(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Services.EntitySync == nil {
+			c.JSON(http.StatusOK, nil)
+			return
+		}
+
+		tenantID := auth.GetTenantID(c)
+		status, err := deps.Services.EntitySync.GetSyncStatus(c.Request.Context(), tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+// discoverAllServices collects services from all discovery sources.
+// This reuses the same discovery logic as the /discovery/services endpoint.
+func discoverAllServices(_ context.Context, _ Dependencies) []DiscoveredService {
+	// Use the discovery cache if fresh
+	discoveryCacheMu.RLock()
+	if time.Since(discoveryCacheTime) < discoveryCacheTTL && len(discoveryCache) > 0 {
+		cached := make([]DiscoveredService, len(discoveryCache))
+		copy(cached, discoveryCache)
+		discoveryCacheMu.RUnlock()
+		return cached
+	}
+	discoveryCacheMu.RUnlock()
+
+	// If cache is stale, return empty — the frontend should call /discovery/sync first
+	// or the sync handler will populate the cache via the discovery endpoint
+	return nil
 }

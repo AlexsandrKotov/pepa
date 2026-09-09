@@ -16,6 +16,7 @@ import (
 	"github.com/pepa/pepa/internal/api/rest"
 	"github.com/pepa/pepa/internal/bootstrap"
 	"github.com/pepa/pepa/internal/database"
+	"github.com/pepa/pepa/internal/gitops"
 	rbacengine "github.com/pepa/pepa/internal/rbac/engine"
 	"github.com/pepa/pepa/internal/security"
 	"github.com/pepa/pepa/internal/service"
@@ -120,8 +121,8 @@ func main() {
 
 	// AI manager is initialized by bootstrap; available as comp.AIManager
 
-	// Initialize HTTP router
-	router, shutdownRouter := rest.NewRouter(rest.Dependencies{
+	// Build dependencies struct
+	deps := rest.Dependencies{
 		Config: comp.Config,
 		DB:     comp.DB,
 		Repos: &rest.Repositories{
@@ -162,6 +163,7 @@ func main() {
 			NotificationRule: comp.NotificationRuleRepo,
 			NotificationLog:  comp.NotificationLogRepo,
 			GitOpsBinding:    comp.GitOpsBindingRepo,
+			DriftSchedule:    comp.DriftScheduleRepo,
 		},
 		Services: &rest.Services{
 			Deployment: func() *service.DeploymentService {
@@ -198,6 +200,8 @@ func main() {
 				}
 				return d
 			}(),
+			EntitySync: service.NewEntitySyncService(comp.EntityRepo),
+			ScorecardEval: service.NewScorecardEvalService(comp.ScorecardRepo, comp.EntityRepo),
 		},
 		PluginMgr:        comp.PluginMgr,
 		ProviderRegistry: comp.ProviderRegistry,
@@ -212,7 +216,28 @@ func main() {
 		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo, comp.ScanIgnoreRepo),
 		Version:          version,
 		BuildTime:        buildTime,
-	})
+	}
+
+	// Initialize drift detection scheduler
+	driftDetectFn := rest.BuildDriftDetectionFunc(deps)
+	driftScheduler := gitops.NewDriftScheduler(comp.DriftScheduleRepo, driftDetectFn)
+	driftScheduler.SetAlertFunc(rest.BuildDriftAlertFunc(deps))
+	deps.DriftScheduler = driftScheduler
+
+	// Start drift scheduler in background
+	go driftScheduler.Start(rootCtx)
+	slog.Info("drift detection scheduler started")
+
+	// Initialize security scan scheduler
+	scanScheduler := security.NewScheduler(comp.SecurityScanRepo, deps.Scanner)
+	deps.ScanScheduler = scanScheduler
+
+	// Start scan scheduler in background
+	go scanScheduler.Start(rootCtx)
+	slog.Info("security scan scheduler started")
+
+	// Initialize HTTP router
+	router, shutdownRouter := rest.NewRouter(deps)
 
 	// Create HTTP server
 	srv := &http.Server{
@@ -235,6 +260,12 @@ func main() {
 
 	<-rootCtx.Done()
 	slog.Info("shutting down gracefully")
+
+	// Stop drift detection scheduler
+	driftScheduler.Stop()
+
+	// Stop security scan scheduler
+	scanScheduler.Stop()
 
 	// Write shutdown audit event
 	writeSystemAuditEvent(comp, "shutdown", "system", nil)

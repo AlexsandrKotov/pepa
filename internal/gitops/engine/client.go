@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -313,15 +314,7 @@ func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSumma
 		var items []map[string]interface{}
 		if err := json.Unmarshal(resp.Output, &items); err == nil {
 			for _, item := range items {
-				allApps = append(allApps, AppSummary{
-					Name:         getStringFromMap(item, "name"),
-					Namespace:    getStringFromMap(item, "namespace"),
-					EngineType:   "fluxcd",
-					Health:       getStringFromMap(item, "health"),
-					SyncStatus:   getStringFromMap(item, "sync_status"),
-					Revision:     getStringFromMap(item, "revision"),
-					ConnectionID: creds.ConnectionID.String(),
-				})
+				allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
 			}
 		}
 	}
@@ -332,20 +325,53 @@ func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSumma
 		var items []map[string]interface{}
 		if err := json.Unmarshal(resp.Output, &items); err == nil {
 			for _, item := range items {
-				allApps = append(allApps, AppSummary{
-					Name:         getStringFromMap(item, "name"),
-					Namespace:    getStringFromMap(item, "namespace"),
-					EngineType:   "fluxcd",
-					Health:       getStringFromMap(item, "health"),
-					SyncStatus:   getStringFromMap(item, "sync_status"),
-					Revision:     getStringFromMap(item, "revision"),
-					ConnectionID: creds.ConnectionID.String(),
-				})
+				allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
 			}
 		}
 	}
 
 	return allApps, nil
+}
+
+// fluxItemToAppSummary converts a FluxCD plugin list output item to an AppSummary.
+// The plugin returns "ready" (True/False/Unknown) and "suspended" (bool) instead of
+// the "health"/"sync_status" fields the ArgoCD plugin provides, so we map them here.
+func fluxItemToAppSummary(item map[string]interface{}, connID string) AppSummary {
+	ready := getStringFromMap(item, "ready")
+	suspended, _ := item["suspended"].(bool)
+
+	health, syncStatus := fluxReadyToHealthSync(ready, suspended)
+
+	return AppSummary{
+		Name:         getStringFromMap(item, "name"),
+		Namespace:    getStringFromMap(item, "namespace"),
+		EngineType:   "fluxcd",
+		Health:       health,
+		SyncStatus:   syncStatus,
+		Revision:     getStringFromMap(item, "revision"),
+		ConnectionID: connID,
+	}
+}
+
+// fluxReadyToHealthSync maps the FluxCD plugin "ready" condition and "suspended"
+// flag to the health/sync_status vocabulary used by AppSummary.
+//
+//	ready="True"  + not suspended → healthy  / synced
+//	ready="False…" + not suspended → degraded / out_of_sync
+//	any            + suspended     → suspended / synced
+//	otherwise                      → unknown  / unknown
+func fluxReadyToHealthSync(ready string, suspended bool) (health, syncStatus string) {
+	if suspended {
+		return "suspended", "synced"
+	}
+	switch {
+	case ready == "True":
+		return "healthy", "synced"
+	case strings.HasPrefix(ready, "False"):
+		return "degraded", "out_of_sync"
+	default:
+		return "unknown", "unknown"
+	}
 }
 
 // Get returns detailed information about a specific application.

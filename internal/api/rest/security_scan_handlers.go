@@ -423,6 +423,9 @@ func createScanSchedule(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
+		if deps.ScanScheduler != nil {
+			deps.ScanScheduler.Reload()
+		}
 		c.JSON(http.StatusCreated, schedule)
 	}
 }
@@ -489,6 +492,9 @@ func updateScanSchedule(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
+		if deps.ScanScheduler != nil {
+			deps.ScanScheduler.Reload()
+		}
 		c.JSON(http.StatusOK, existing)
 	}
 }
@@ -508,6 +514,9 @@ func deleteScanSchedule(deps Dependencies) gin.HandlerFunc {
 		if err := deps.Repos.SecurityScan.DeleteScanSchedule(c.Request.Context(), id, tenantID); err != nil {
 			respondInternalError(c, err)
 			return
+		}
+		if deps.ScanScheduler != nil {
+			deps.ScanScheduler.Reload()
 		}
 		c.JSON(http.StatusNoContent, nil)
 	}

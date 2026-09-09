@@ -899,6 +899,18 @@ export const entities = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  deleteRelationship: (relId: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/entities/relationships/${relId}`, { method: 'DELETE' }),
+  // Sync / import
+  sync: () =>
+    fetchAPI<{ message: string; synced: number; created: number; updated: number }>('/api/v1/entities/sync', { method: 'POST' }),
+  syncStatus: () =>
+    fetchAPI<{ last_synced_at: string | null; status: string; total_entities: number; synced_entities: number } | null>('/api/v1/entities/sync/status'),
+  importDiscovery: (items: Array<{ name: string; namespace: string; cluster: string; source: string }>) =>
+    fetchAPI<{ message: string; imported: number }>('/api/v1/entities/import-discovery', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
 };
 
 export const entityTypes = {
@@ -2287,6 +2299,25 @@ export const gitops = {
     fetchAPI<{ cluster_id: string; scope_path: string }>(`/api/v1/gitops/repos/${id}/mapping`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteMapping: (id: string) =>
     fetchAPI<{ message: string }>(`/api/v1/gitops/repos/${id}/mapping`, { method: 'DELETE' }),
+  // Drift detection schedules
+  listDriftSchedules: () =>
+    fetchAPI<{ schedules: DriftSchedule[] }>(`/api/v1/gitops/drift-schedules`),
+  getDriftSchedule: (id: string) =>
+    fetchAPI<DriftSchedule>(`/api/v1/gitops/drift-schedules/${id}`),
+  createDriftSchedule: (data: CreateDriftScheduleInput) =>
+    fetchAPI<DriftSchedule>(`/api/v1/gitops/drift-schedules`, { method: 'POST', body: JSON.stringify(data) }),
+  updateDriftSchedule: (id: string, data: Partial<CreateDriftScheduleInput>) =>
+    fetchAPI<DriftSchedule>(`/api/v1/gitops/drift-schedules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteDriftSchedule: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/gitops/drift-schedules/${id}`, { method: 'DELETE' }),
+  runDriftSchedule: (id: string) =>
+    fetchAPI<DriftRunResult>(`/api/v1/gitops/drift-schedules/${id}/run`, { method: 'POST' }),
+  listDriftLogs: (limit?: number) => {
+    const params = new URLSearchParams();
+    if (limit) params.set('limit', String(limit));
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return fetchAPI<{ logs: DriftDetectionLog[] }>(`/api/v1/gitops/drift-logs${qs}`);
+  },
   // Tracking (SSE URL helper — use EventSource on client)
   trackURL: (repoId: string, commitSHA: string) =>
     `${getBase()}/api/v1/gitops/repos/${repoId}/track/${commitSHA}`,
@@ -3860,6 +3891,73 @@ export interface GitopsDriftResult {
   entries: GitopsDriftEntry[];
   summary: GitopsDriftSummary;
   scanned_at: string;
+}
+
+// ── Drift Detection Schedules ────────────────────────────────────
+
+export interface DriftSchedule {
+  id: string;
+  tenant_id: string;
+  repo_id: string;
+  cluster_id: string;
+  scope_path?: string;
+  name: string;
+  description?: string;
+  cron_expression: string;
+  enabled: boolean;
+  alert_on_drift: boolean;
+  alert_severity_threshold: string;
+  last_run_at?: string;
+  last_run_status?: string;
+  last_drift_count: number;
+  next_run_at?: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  repo_name?: string;
+  cluster_name?: string;
+}
+
+export interface CreateDriftScheduleInput {
+  repo_id: string;
+  cluster_id: string;
+  scope_path?: string;
+  name: string;
+  description?: string;
+  cron_expression?: string;
+  enabled?: boolean;
+  alert_on_drift?: boolean;
+  alert_severity_threshold?: string;
+}
+
+export interface DriftRunResult {
+  message: string;
+  drift_count: number;
+  critical_count: number;
+  warning_count: number;
+  info_count: number;
+  details?: Record<string, unknown>;
+}
+
+export interface DriftDetectionLog {
+  id: string;
+  tenant_id: string;
+  schedule_id?: string;
+  repo_id: string;
+  cluster_id: string;
+  scope_path?: string;
+  triggered_by: string;
+  status: string;
+  drift_count: number;
+  critical_count: number;
+  warning_count: number;
+  info_count: number;
+  drift_details?: Record<string, unknown>;
+  started_at: string;
+  completed_at?: string;
+  error_message?: string;
+  repo_name?: string;
+  cluster_name?: string;
 }
 
 // ── Service Blueprints ──────────────────────────────────────────

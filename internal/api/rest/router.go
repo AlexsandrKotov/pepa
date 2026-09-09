@@ -72,6 +72,7 @@ type Repositories struct {
 	NotificationRule *repository.NotificationRuleRepository
 	NotificationLog  *repository.NotificationLogRepository
 	GitOpsBinding    *repository.GitOpsBindingRepository
+	DriftSchedule    *gitops.DriftScheduleRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -92,6 +93,8 @@ type Dependencies struct {
 	Storage          storage.Storage
 	LoginLimiter     *auth.LoginRateLimiter
 	Scanner          *security.Scanner
+	DriftScheduler   *gitops.DriftScheduler
+	ScanScheduler    *security.Scheduler
 	Version          string
 	BuildTime        string
 }
@@ -102,6 +105,8 @@ type Services struct {
 	ServiceDeployment      *service.ServiceDeploymentService
 	Connection             *service.ConnectionService
 	NotificationDispatcher *service.NotificationDispatcher
+	EntitySync             *service.EntitySyncService
+	ScorecardEval          *service.ScorecardEvalService
 }
 
 // NewRouter creates and configures the Gin router with all routes.

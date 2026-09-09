@@ -25,9 +25,12 @@ log() {
 # Matches both "Downloading DB" (fresh download) and "Skipping" (already cached).
 try_download() {
   local flag="$1" repo="$2"
-  output=$(trivy --cache-dir "$CACHE_DIR" image --download-db-only --no-progress "$flag" "$repo" alpine:latest 2>&1) && rc=0 || rc=$?
+  # Java DB requires its own download flag; --download-db-only ignores --java-db-repository.
+  local dl_flag="--download-db-only"
+  [ "$flag" = "--java-db-repository" ] && dl_flag="--download-java-db-only"
+  output=$(trivy --cache-dir "$CACHE_DIR" image "$dl_flag" --no-progress "$flag" "$repo" alpine:latest 2>&1) && rc=0 || rc=$?
   if [ $rc -eq 0 ]; then
-    echo "$output" | grep -qE "Downloading DB|Skipping|up to date" && return 0
+    echo "$output" | grep -qE "Downloading|Skipping|up to date" && return 0
     # If trivy exited 0 but no matching output, still consider it success
     return 0
   fi

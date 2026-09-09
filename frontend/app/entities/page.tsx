@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { entities, type Entity } from '@/lib/api';
+import { entities, discovery, scorecards, type Entity, type DiscoveredService, type ScorecardResult } from '@/lib/api';
+import { Toast } from '@/components/Interactive';
 import { useDebounce } from '@/hooks/useDebounce';
 import Pagination from '@/components/Pagination';
 import ConceptHelp from '@/components/ConceptHelp';
@@ -36,7 +37,15 @@ function EntitiesList() {
   const [page, setPage] = useState(1);
   const [perPage] = useState(20);
   const [total, setTotal] = useState(0);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const debouncedSearch = useDebounce(search, 300);
+
+  // Sync status
+  const [syncStatus, setSyncStatus] = useState<{ last_synced_at: string | null; status: string } | null>(null);
+  // Scorecard levels per entity
+  const [entityLevels, setEntityLevels] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setPage(1);
@@ -60,7 +69,45 @@ function EntitiesList() {
 
   useEffect(() => {
     loadData();
+    // Load sync status
+    entities.syncStatus().then(setSyncStatus).catch(() => {});
   }, [loadData]);
+
+  // Fetch scorecard levels for loaded entities
+  useEffect(() => {
+    if (items.length === 0) return;
+    const levels: Record<string, string> = {};
+    const fetchLevels = async () => {
+      for (const ent of items) {
+        try {
+          const data = await scorecards.entityScores(ent.id);
+          const scores = data.scores || [];
+          if (scores.length > 0) {
+            // Use the best level (highest score)
+            const levelOrder: Record<string, number> = { platinum: 4, gold: 3, silver: 2, bronze: 1 };
+            const best = scores.reduce((a: ScorecardResult, b: ScorecardResult) => (levelOrder[b.level] || 0) > (levelOrder[a.level] || 0) ? b : a);
+            levels[ent.id] = best.level;
+          }
+        } catch { /* ignore */ }
+      }
+      setEntityLevels(levels);
+    };
+    fetchLevels();
+  }, [items]);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const result = await entities.sync();
+      setToast({ message: `Sync complete: ${result.created} created, ${result.updated} updated`, type: 'success' });
+      await loadData();
+      entities.syncStatus().then(setSyncStatus).catch(() => {});
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Sync failed', type: 'error' });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const statusBadge = (status: string) => {
     switch (status) {
@@ -70,109 +117,336 @@ function EntitiesList() {
     }
   };
 
+  const sourceLabel = (ent: Entity) => {
+    if (ent.external_id) {
+      const source = ent.external_id.split(':')[0];
+      return source;
+    }
+    return 'manual';
+  };
+
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
       <div className="px-6 py-6 space-y-6">
-      <div className="page-animate">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="page-title-modern">Entities</h1>
-              <ConceptHelp term="entity" />
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+        {/* Import modal */}
+        {showImport && (
+          <ImportDiscoveryModal
+            onClose={() => setShowImport(false)}
+            onImported={() => { setShowImport(false); loadData(); }}
+          />
+        )}
+
+        {/* Header */}
+        <div className="page-animate">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="page-title-modern">Entities</h1>
+                <ConceptHelp term="entity" />
+              </div>
+              <p className="page-subtitle-modern">
+                All platform entities — services, resources, and components
+                {syncStatus?.last_synced_at && (
+                  <span className="ml-2 text-[11px] text-[var(--text-tertiary)]">
+                    Last sync: {new Date(syncStatus.last_synced_at).toLocaleString()}
+                  </span>
+                )}
+              </p>
             </div>
-            <p className="page-subtitle-modern">All platform entities — services, resources, and components</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="btn btn-secondary"
+                title="Sync entities from connected clusters and services"
+              >
+                <svg className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {syncing ? 'Syncing...' : 'Sync'}
+              </button>
+              <button onClick={() => setShowImport(true)} className="btn btn-secondary">
+                Import from Discovery
+              </button>
+              <Link href="/entities/new" className="btn btn-primary">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Create Entity
+              </Link>
+            </div>
           </div>
-          <a href="/services/new" className="btn btn-primary">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Register Service
-          </a>
         </div>
-      </div>
 
-      {/* Filters */}
-      <div className="flex gap-3 page-animate-up page-delay-1">
-        <input
-          type="text"
-          placeholder="Search entities..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="input flex-[3]"
-        />
-        <select
-          value={typeFilter}
-          onChange={e => setTypeFilter(e.target.value)}
-          className="input flex-1 min-w-[140px]"
-        >
-          <option value="">All types</option>
-          <option value="service">Service</option>
-          <option value="resource">Resource</option>
-          <option value="team">Team</option>
-          <option value="user">User</option>
-        </select>
-      </div>
+        {/* Filters */}
+        <div className="flex gap-3 page-animate-up page-delay-1">
+          <input
+            type="text"
+            placeholder="Search entities..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="input flex-[3]"
+          />
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            className="input flex-1 min-w-[140px]"
+          >
+            <option value="">All types</option>
+            <option value="service">Service</option>
+            <option value="resource">Resource</option>
+            <option value="team">Team</option>
+            <option value="environment">Environment</option>
+            <option value="api_endpoint">API Endpoint</option>
+          </select>
+        </div>
 
-      {/* List */}
-      {loading ? (
-        <div className="card card-body text-center py-12" style={{ borderRadius: '12px' }}>
-          <div className="flex items-center justify-center gap-2 text-[var(--text-tertiary)]">
-            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <p className="text-[13px]">Loading entities...</p>
+        {/* List */}
+        {loading ? (
+          <div className="card card-body text-center py-12" style={{ borderRadius: '12px' }}>
+            <div className="flex items-center justify-center gap-2 text-[var(--text-tertiary)]">
+              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <p className="text-[13px]">Loading entities...</p>
+            </div>
           </div>
-        </div>
-      ) : items.length === 0 ? (
-        <div className="card card-body text-center py-12">
-          <div className="text-4xl mb-3 opacity-30">📦</div>
-          <p className="text-[13px] text-[var(--text-secondary)] mb-1">No entities found</p>
-          <p className="text-[12px] text-[var(--text-tertiary)] mb-4">
-            Entities represent services, teams, and infrastructure in your catalog.<br />
-            Register your first service to get started, or import from connected tools.
-          </p>
-          <div className="flex gap-2 justify-center">
-            <a href="/services/new" className="btn btn-primary">Register Service</a>
-            <a href="/connections" className="btn btn-secondary">Connect Tools</a>
+        ) : items.length === 0 ? (
+          <div className="card card-body text-center py-12" style={{ borderRadius: '12px' }}>
+            <div className="text-4xl mb-3 opacity-30">📦</div>
+            <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">No entities found</p>
+            <p className="text-[12px] text-[var(--text-tertiary)] mb-4">
+              Entities represent services, teams, and infrastructure in your catalog.<br />
+              Create manually, import from Discovery, or sync from connected clusters.
+            </p>
+            <div className="flex gap-2 justify-center">
+              <Link href="/entities/new" className="btn btn-primary">Create Entity</Link>
+              <button onClick={() => setShowImport(true)} className="btn btn-secondary">Import from Discovery</button>
+              <button onClick={handleSync} disabled={syncing} className="btn btn-secondary">
+                {syncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="card" style={{ borderRadius: '12px' }}>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Entity</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Sync</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map(ent => (
-                  <tr key={ent.id}>
-                    <td>
-                      <Link href={`/entities?id=${ent.id}`} className="font-medium text-[var(--text-primary)] hover:text-[var(--accent)]">
-                        {ent.name}
-                      </Link>
-                      {ent.description && (
-                        <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{ent.description}</p>
-                      )}
-                    </td>
-                    <td><span className="badge badge-default">{ent.type_key}</span></td>
-                    <td><span className={`badge ${statusBadge(ent.status)}`}>{ent.status}</span></td>
-                    <td><span className="text-[12px] text-[var(--text-secondary)]">{ent.sync_status || '-'}</span></td>
-                    <td className="text-[12px] text-[var(--text-tertiary)]">{new Date(ent.updated_at).toLocaleDateString()}</td>
+        ) : (
+          <div className="card" style={{ borderRadius: '12px' }}>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Entity</th>
+                    <th>Type</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Score</th>
+                    <th>Updated</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {items.map(ent => (
+                    <tr key={ent.id}>
+                      <td>
+                        <Link href={`/entities?id=${ent.id}`} className="font-medium text-[var(--text-primary)] hover:text-[var(--accent)]">
+                          {ent.name}
+                        </Link>
+                        {ent.description && (
+                          <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{ent.description}</p>
+                        )}
+                      </td>
+                      <td><span className="badge badge-default">{ent.type_key}</span></td>
+                      <td>
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded ${
+                          sourceLabel(ent) === 'manual' ? 'bg-slate-500/10 text-slate-500' :
+                          sourceLabel(ent) === 'argocd' ? 'bg-indigo-500/10 text-indigo-500' :
+                          sourceLabel(ent) === 'fluxcd' ? 'bg-purple-500/10 text-purple-500' :
+                          sourceLabel(ent) === 'docker' || sourceLabel(ent) === 'docker-container' ? 'bg-cyan-500/10 text-cyan-600' :
+                          'bg-emerald-500/10 text-emerald-600'
+                        }`}>
+                          {sourceLabel(ent)}
+                        </span>
+                      </td>
+                      <td><span className={`badge ${statusBadge(ent.status)}`}>{ent.status}</span></td>
+                      <td>
+                        {entityLevels[ent.id] ? (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                            entityLevels[ent.id] === 'platinum' ? 'bg-indigo-500/10 text-indigo-500' :
+                            entityLevels[ent.id] === 'gold' ? 'bg-amber-500/10 text-amber-600' :
+                            entityLevels[ent.id] === 'silver' ? 'bg-slate-500/10 text-slate-500' :
+                            'bg-orange-500/10 text-orange-600'
+                          }`}>
+                            {entityLevels[ent.id]}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-[var(--text-tertiary)]">—</span>
+                        )}
+                      </td>
+                      <td className="text-[12px] text-[var(--text-tertiary)]">{new Date(ent.updated_at).toLocaleDateString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination page={page} perPage={perPage} total={total} onPageChange={setPage} />
           </div>
-          <Pagination page={page} perPage={perPage} total={total} onPageChange={setPage} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Import from Discovery Modal ────────────────────────────────
+
+function ImportDiscoveryModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [discovered, setDiscovered] = useState<DiscoveredService[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [sourceFilter, setSourceFilter] = useState('');
+
+  useEffect(() => {
+    discovery.services()
+      .then(data => setDiscovered(data.services || []))
+      .catch(() => setDiscovered([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const toggleSelect = (index: number) => {
+    const next = new Set(selected);
+    if (next.has(index)) next.delete(index); else next.add(index);
+    setSelected(next);
+  };
+
+  const selectAll = () => {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map((_, i) => i)));
+    }
+  };
+
+  const filtered = sourceFilter
+    ? discovered.filter(s => s.source === sourceFilter)
+    : discovered;
+
+  const handleImport = async () => {
+    const items = Array.from(selected).map(i => {
+      const svc = filtered[i];
+      return { name: svc.name, namespace: svc.namespace, cluster: svc.cluster, source: svc.source };
+    });
+    if (items.length === 0) return;
+
+    setImporting(true);
+    try {
+      const result = await entities.importDiscovery(items);
+      setToast({ message: `Imported ${result.imported} entities`, type: 'success' });
+      setTimeout(onImported, 800);
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Import failed', type: 'error' });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const sourceBadge = (source: string) => {
+    const colors: Record<string, string> = {
+      argocd: 'bg-indigo-500/10 text-indigo-500',
+      fluxcd: 'bg-purple-500/10 text-purple-500',
+      pepa: 'bg-emerald-500/10 text-emerald-600',
+      docker: 'bg-cyan-500/10 text-cyan-600',
+      'docker-container': 'bg-cyan-500/10 text-cyan-600',
+    };
+    return colors[source] || 'bg-slate-500/10 text-slate-500';
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="card w-full max-w-3xl max-h-[80vh] flex flex-col" style={{ borderRadius: '12px' }} onClick={e => e.stopPropagation()}>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+        <div className="card-header flex items-center justify-between shrink-0">
+          <span className="text-[14px] font-medium text-[var(--text-primary)]">Import from Discovery</span>
+          <button onClick={onClose} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-[14px]">✕</button>
         </div>
-      )}
+
+        <div className="card-body flex-1 overflow-y-auto space-y-3">
+          {loading ? (
+            <div className="text-center py-8 text-[13px] text-[var(--text-tertiary)]">Scanning clusters for services...</div>
+          ) : discovered.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-[13px] text-[var(--text-secondary)] mb-1">No services discovered</p>
+              <p className="text-[12px] text-[var(--text-tertiary)]">Connect a cluster or add services to see discovered resources here.</p>
+            </div>
+          ) : (
+            <>
+              {/* Filters */}
+              <div className="flex items-center gap-2">
+                <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)} className="input flex-1">
+                  <option value="">All sources</option>
+                  <option value="argocd">ArgoCD</option>
+                  <option value="fluxcd">FluxCD</option>
+                  <option value="pepa">PEPA</option>
+                  <option value="docker">Docker</option>
+                </select>
+                <button onClick={selectAll} className="btn btn-secondary btn-sm text-[11px]">
+                  {selected.size === filtered.length ? 'Deselect All' : 'Select All'}
+                </button>
+              </div>
+
+              {/* Services list */}
+              <div className="space-y-1">
+                {filtered.map((svc, i) => (
+                  <label
+                    key={`${svc.cluster}-${svc.namespace}-${svc.name}-${i}`}
+                    className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${
+                      selected.has(i) ? 'border-[var(--accent)] bg-[var(--accent)]/5' : 'border-[var(--border-light)] hover:border-[var(--border)]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(i)}
+                      onChange={() => toggleSelect(i)}
+                      className="rounded"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-medium text-[var(--text-primary)] truncate">{svc.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${sourceBadge(svc.source)}`}>{svc.source}</span>
+                      </div>
+                      <div className="text-[11px] text-[var(--text-tertiary)]">
+                        {svc.cluster} / {svc.namespace}
+                        {svc.image && <span className="ml-2 font-mono">{svc.image.split('/').pop()?.split(':')[0]}</span>}
+                      </div>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      svc.health === 'healthy' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'
+                    }`}>
+                      {svc.health || svc.status}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="card-header flex items-center justify-between shrink-0 border-t border-[var(--border-light)]">
+          <span className="text-[12px] text-[var(--text-tertiary)]">
+            {selected.size} of {filtered.length} selected
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
+            <button
+              onClick={handleImport}
+              disabled={selected.size === 0 || importing}
+              className="btn btn-primary btn-sm"
+            >
+              {importing ? 'Importing...' : `Import ${selected.size > 0 ? `${selected.size} items` : ''}`}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

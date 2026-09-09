@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/gitops"
 	"github.com/pepa/pepa/internal/gitops/engine"
 	"github.com/pepa/pepa/internal/repository"
@@ -77,6 +79,15 @@ func registerGitOpsRoutes(r *gin.RouterGroup, deps Dependencies) {
 		// Per-repo cluster & scope mapping for drift detection
 		wf.PUT("/repos/:id/mapping", gitopsUpdateMapping(deps))
 		wf.DELETE("/repos/:id/mapping", gitopsDeleteMapping(deps))
+
+		// Drift detection schedules (cron-based)
+		wf.GET("/drift-schedules", gitopsListDriftSchedules(deps))
+		wf.POST("/drift-schedules", gitopsCreateDriftSchedule(deps))
+		wf.GET("/drift-schedules/:id", gitopsGetDriftSchedule(deps))
+		wf.PUT("/drift-schedules/:id", gitopsUpdateDriftSchedule(deps))
+		wf.DELETE("/drift-schedules/:id", gitopsDeleteDriftSchedule(deps))
+		wf.POST("/drift-schedules/:id/run", gitopsRunDriftSchedule(deps))
+		wf.GET("/drift-logs", gitopsListDriftLogs(deps))
 	}
 }
 
@@ -2429,5 +2440,520 @@ func gitopsListOverlays(deps Dependencies) gin.HandlerFunc {
 		sort.Strings(overlays)
 
 		c.JSON(http.StatusOK, gin.H{"overlays": overlays})
+	}
+}
+
+// ── Drift Schedule Handlers ─────────────────────────────────────────
+
+// gitopsListDriftSchedules returns all drift schedules for the tenant.
+func gitopsListDriftSchedules(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		schedules, err := deps.Repos.DriftSchedule.List(ctx, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if schedules == nil {
+			schedules = []gitops.DriftSchedule{}
+		}
+		c.JSON(http.StatusOK, gin.H{"schedules": schedules})
+	}
+}
+
+// gitopsGetDriftSchedule returns a single drift schedule.
+func gitopsGetDriftSchedule(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+			return
+		}
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		schedule, err := deps.Repos.DriftSchedule.Get(ctx, id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, schedule)
+	}
+}
+
+// gitopsCreateDriftSchedule creates a new drift detection schedule.
+func gitopsCreateDriftSchedule(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+		if deps.Repos.GitopsRepo == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "gitops repository not available"})
+			return
+		}
+		if deps.Repos.Cluster == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "cluster repository not available"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		var req struct {
+			RepoID               string  `json:"repo_id" binding:"required"`
+			ClusterID            string  `json:"cluster_id" binding:"required"`
+			ScopePath            *string `json:"scope_path"`
+			Name                 string  `json:"name" binding:"required"`
+			Description          *string `json:"description"`
+			CronExpression       string  `json:"cron_expression"`
+			Enabled              bool    `json:"enabled"`
+			AlertOnDrift         bool    `json:"alert_on_drift"`
+			AlertSeverityThreshold string `json:"alert_severity_threshold"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		repoID, err := uuid.Parse(req.RepoID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo_id"})
+			return
+		}
+		clusterID, err := uuid.Parse(req.ClusterID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cluster_id"})
+			return
+		}
+
+		// Validate repo exists
+		if _, err := deps.Repos.GitopsRepo.Get(ctx, repoID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "gitops repository not found"})
+			return
+		}
+		// Validate cluster exists
+		if _, err := deps.Repos.Cluster.Get(ctx, clusterID, tenantID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cluster not found"})
+			return
+		}
+
+		cronExpr := req.CronExpression
+		if cronExpr == "" {
+			cronExpr = "0 */6 * * *"
+		}
+
+		alertThreshold := req.AlertSeverityThreshold
+		if alertThreshold == "" {
+			alertThreshold = "warning"
+		}
+
+		nextRun := gitops.InitNextRun(cronExpr)
+		userID := auth.GetUserID(c)
+
+		schedule := &gitops.DriftSchedule{
+			TenantID:             tenantID,
+			RepoID:               repoID,
+			ClusterID:            clusterID,
+			ScopePath:            req.ScopePath,
+			Name:                 req.Name,
+			Description:          req.Description,
+			CronExpression:       cronExpr,
+			Enabled:              req.Enabled,
+			AlertOnDrift:         req.AlertOnDrift,
+			AlertSeverityThreshold: alertThreshold,
+			NextRunAt:            &nextRun,
+			CreatedBy:            userID,
+		}
+
+		if err := deps.Repos.DriftSchedule.Create(ctx, schedule); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		// Signal the scheduler to reload
+		if deps.DriftScheduler != nil {
+			deps.DriftScheduler.Reload()
+		}
+
+		c.JSON(http.StatusCreated, schedule)
+	}
+}
+
+// gitopsUpdateDriftSchedule updates an existing drift schedule.
+func gitopsUpdateDriftSchedule(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		existing, err := deps.Repos.DriftSchedule.Get(ctx, id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		var req struct {
+			RepoID               *string `json:"repo_id"`
+			ClusterID            *string `json:"cluster_id"`
+			ScopePath            *string `json:"scope_path"`
+			Name                 *string `json:"name"`
+			Description          *string `json:"description"`
+			CronExpression       *string `json:"cron_expression"`
+			Enabled              *bool   `json:"enabled"`
+			AlertOnDrift         *bool   `json:"alert_on_drift"`
+			AlertSeverityThreshold *string `json:"alert_severity_threshold"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if req.RepoID != nil {
+			repoID, parseErr := uuid.Parse(*req.RepoID)
+			if parseErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo_id"})
+				return
+			}
+			existing.RepoID = repoID
+		}
+		if req.ClusterID != nil {
+			clusterID, parseErr := uuid.Parse(*req.ClusterID)
+			if parseErr != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cluster_id"})
+				return
+			}
+			existing.ClusterID = clusterID
+		}
+		if req.ScopePath != nil {
+			existing.ScopePath = req.ScopePath
+		}
+		if req.Name != nil {
+			existing.Name = *req.Name
+		}
+		if req.Description != nil {
+			existing.Description = req.Description
+		}
+		if req.CronExpression != nil {
+			existing.CronExpression = *req.CronExpression
+			nextRun := gitops.InitNextRun(existing.CronExpression)
+			existing.NextRunAt = &nextRun
+		}
+		if req.Enabled != nil {
+			existing.Enabled = *req.Enabled
+			if existing.Enabled && existing.NextRunAt == nil {
+				nextRun := gitops.InitNextRun(existing.CronExpression)
+				existing.NextRunAt = &nextRun
+			}
+		}
+		if req.AlertOnDrift != nil {
+			existing.AlertOnDrift = *req.AlertOnDrift
+		}
+		if req.AlertSeverityThreshold != nil {
+			existing.AlertSeverityThreshold = *req.AlertSeverityThreshold
+		}
+
+		if err := deps.Repos.DriftSchedule.Update(ctx, existing); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		if deps.DriftScheduler != nil {
+			deps.DriftScheduler.Reload()
+		}
+
+		c.JSON(http.StatusOK, existing)
+	}
+}
+
+// gitopsDeleteDriftSchedule deletes a drift schedule.
+func gitopsDeleteDriftSchedule(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		if err := deps.Repos.DriftSchedule.Delete(ctx, id, tenantID); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		if deps.DriftScheduler != nil {
+			deps.DriftScheduler.Reload()
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "drift schedule deleted"})
+	}
+}
+
+// gitopsRunDriftSchedule triggers a manual drift detection run for a schedule.
+func gitopsRunDriftSchedule(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+		if deps.DriftScheduler == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift scheduler not available"})
+			return
+		}
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid schedule ID"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		schedule, err := deps.Repos.DriftSchedule.Get(ctx, id, tenantID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Run drift detection synchronously (the handler has a long write timeout)
+		outcome, detectErr := deps.DriftScheduler.RunManualDrift(ctx, *schedule)
+
+		if detectErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":       detectErr.Error(),
+				"drift_count": outcome.DriftCount,
+			})
+			return
+		}
+
+		// Publish drift detected event for alerting
+		if schedule.AlertOnDrift && outcome.DriftCount > 0 {
+			publishDriftAlertEvent(deps, schedule, outcome)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":        "drift detection completed",
+			"drift_count":    outcome.DriftCount,
+			"critical_count": outcome.CriticalCount,
+			"warning_count":  outcome.WarningCount,
+			"info_count":     outcome.InfoCount,
+			"details":        outcome.DriftDetails,
+		})
+	}
+}
+
+// gitopsListDriftLogs returns drift detection log entries.
+func gitopsListDriftLogs(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.DriftSchedule == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "drift schedule repository not available"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		tenantID := auth.GetTenantID(c)
+
+		limit := 50
+		if l := c.Query("limit"); l != "" {
+			if parsed, parseErr := strconv.Atoi(l); parseErr == nil && parsed > 0 && parsed <= 200 {
+				limit = parsed
+			}
+		}
+
+		logs, err := deps.Repos.DriftSchedule.ListLogs(ctx, tenantID, limit)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if logs == nil {
+			logs = []gitops.DriftDetectionLog{}
+		}
+		c.JSON(http.StatusOK, gin.H{"logs": logs})
+	}
+}
+
+// publishDriftAlertEvent publishes a drift.detected event to the event bus for notification routing.
+func publishDriftAlertEvent(deps Dependencies, schedule *gitops.DriftSchedule, outcome gitops.DriftDetectionOutcome) {
+	if deps.EventBus == nil {
+		return
+	}
+
+	_ = deps.EventBus.Publish(events.Event{
+		Type:     "drift.detected",
+		TenantID: schedule.TenantID.String(),
+		EntityID: schedule.ID.String(),
+		Payload: map[string]interface{}{
+			"schedule_id":    schedule.ID.String(),
+			"schedule_name":  schedule.Name,
+			"repo_id":        schedule.RepoID.String(),
+			"repo_name":      schedule.RepoName,
+			"cluster_id":     schedule.ClusterID.String(),
+			"cluster_name":   schedule.ClusterName,
+			"drift_count":    outcome.DriftCount,
+			"critical_count": outcome.CriticalCount,
+			"warning_count":  outcome.WarningCount,
+			"info_count":     outcome.InfoCount,
+			"severity":       severityFromCounts(outcome.CriticalCount, outcome.WarningCount, outcome.InfoCount),
+			"details":        outcome.DriftDetails,
+			"url":            "/gitops/drift",
+		},
+	})
+}
+
+// severityFromCounts derives an overall severity label from drift counts.
+func severityFromCounts(critical, warning, info int) string {
+	if critical > 0 {
+		return "critical"
+	}
+	if warning > 0 {
+		return "warning"
+	}
+	if info > 0 {
+		return "info"
+	}
+	return "info"
+}
+
+// BuildDriftDetectionFunc creates a DriftDetectionFunc callback for the scheduler.
+// It captures the necessary dependencies to perform drift detection outside of HTTP context.
+func BuildDriftDetectionFunc(deps Dependencies) gitops.DriftDetectionFunc {
+	return func(ctx context.Context, schedule gitops.DriftSchedule) (gitops.DriftDetectionOutcome, error) {
+		if deps.Repos.GitopsRepo == nil || deps.Repos.Cluster == nil {
+			return gitops.DriftDetectionOutcome{}, fmt.Errorf("required repositories not available")
+		}
+
+		// Get the GitOps repo
+		repo, err := deps.Repos.GitopsRepo.Get(ctx, schedule.RepoID)
+		if err != nil {
+			return gitops.DriftDetectionOutcome{}, fmt.Errorf("get repo: %w", err)
+		}
+
+		// Resolve connection token if linked
+		tenantID := schedule.TenantID
+		resolveConnectionToken(ctx, deps, repo, schedule.CreatedBy, tenantID)
+
+		// Scan Git repo to get desired state
+		var gitResources []gitops.Resource
+		if repo.ScanStatus == "ready" {
+			scanner := gitops.NewScanner("")
+			scanCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			result, scanErr := scanner.Scan(scanCtx, repo)
+			if scanErr != nil {
+				return gitops.DriftDetectionOutcome{}, fmt.Errorf("git scan failed: %w", scanErr)
+			}
+			gitResources = result.Resources
+		}
+
+		// Filter by scope path if specified
+		if schedule.ScopePath != nil && *schedule.ScopePath != "" {
+			var filtered []gitops.Resource
+			for _, r := range gitResources {
+				if strings.HasPrefix(r.FilePath, *schedule.ScopePath) {
+					filtered = append(filtered, r)
+				}
+			}
+			gitResources = filtered
+		}
+
+		// Get the target cluster
+		cl, err := deps.Repos.Cluster.Get(ctx, schedule.ClusterID, tenantID)
+		if err != nil {
+			return gitops.DriftDetectionOutcome{}, fmt.Errorf("get cluster: %w", err)
+		}
+
+		if !cl.HasKubeconfig {
+			return gitops.DriftDetectionOutcome{}, fmt.Errorf("cluster %s has no kubeconfig", cl.Name)
+		}
+
+		// Query live resources from the cluster
+		liveResources, err := queryLiveResourcesForEngine(ctx, deps, cl, repo.EngineType)
+		if err != nil {
+			return gitops.DriftDetectionOutcome{}, fmt.Errorf("query live resources: %w", err)
+		}
+
+		liveRes := toLiveResources(liveResources)
+
+		// Run drift detection
+		driftResult := gitops.DetectDrift(repo, gitResources, liveRes)
+		driftResult.ClusterID = cl.ID.String()
+		driftResult.ClusterName = cl.Name
+
+		// Build outcome
+		outcome := gitops.DriftDetectionOutcome{
+			DriftCount:    len(driftResult.Entries),
+			CriticalCount: driftResult.Summary.Critical,
+			WarningCount:  driftResult.Summary.Warning,
+			InfoCount:     driftResult.Summary.Info,
+			DriftDetails: map[string]interface{}{
+				"repo_id":        driftResult.RepoID,
+				"repo_name":      driftResult.RepoName,
+				"cluster_id":     driftResult.ClusterID,
+				"cluster_name":   driftResult.ClusterName,
+				"total_compared": driftResult.Summary.TotalCompared,
+				"entries":        driftResult.Entries,
+			},
+		}
+
+		return outcome, nil
+	}
+}
+
+// BuildDriftAlertFunc creates a DriftAlertFunc callback for the scheduler.
+// It publishes drift.detected events to the event bus for notification routing.
+func BuildDriftAlertFunc(deps Dependencies) gitops.DriftAlertFunc {
+	return func(schedule gitops.DriftSchedule, outcome gitops.DriftDetectionOutcome) {
+		if deps.EventBus == nil {
+			return
+		}
+
+		_ = deps.EventBus.Publish(events.Event{
+			Type:     "drift.detected",
+			TenantID: schedule.TenantID.String(),
+			EntityID: schedule.ID.String(),
+			Payload: map[string]interface{}{
+				"schedule_id":    schedule.ID.String(),
+				"schedule_name":  schedule.Name,
+				"repo_id":        schedule.RepoID.String(),
+				"repo_name":      schedule.RepoName,
+				"cluster_id":     schedule.ClusterID.String(),
+				"cluster_name":   schedule.ClusterName,
+				"drift_count":    outcome.DriftCount,
+				"critical_count": outcome.CriticalCount,
+				"warning_count":  outcome.WarningCount,
+				"info_count":     outcome.InfoCount,
+				"severity":       severityFromCounts(outcome.CriticalCount, outcome.WarningCount, outcome.InfoCount),
+				"details":        outcome.DriftDetails,
+				"url":            "/gitops/drift",
+			},
+		})
 	}
 }

@@ -474,7 +474,11 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		return mapToAny(aggregateSummary), aggregateFull, nil
 	}
 
-	// Single image scan
+	// Single image scan — apply a timeout so a hung image pull can't block forever.
+	scanTimeout := 10 * time.Minute
+	singleCtx, singleCancel := context.WithTimeout(ctx, scanTimeout)
+	defer singleCancel()
+
 	args := []string{
 		scanType,
 		"--format", "json",
@@ -493,7 +497,6 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		if err != nil {
 			slog.Warn("failed to get ignore file content", "target_id", target.ID, "error", err)
 		} else if ignoreContent != "" {
-			// Write to temp file
 			tmpFile, err := os.CreateTemp("", "trivyignore-*.txt")
 			if err != nil {
 				slog.Warn("failed to create temp ignore file", "error", err)
@@ -507,7 +510,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 					ignoreFilePath = tmpFile.Name()
 					args = append(args, "--ignorefile", ignoreFilePath)
 					slog.Info("using ignore file for scan", "ignore_file", ignoreFilePath, "target_id", target.ID)
-					defer func() { _ = os.Remove(ignoreFilePath) }() // Clean up after scan
+					defer func() { _ = os.Remove(ignoreFilePath) }()
 				}
 			}
 		}
@@ -515,7 +518,6 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 
 	// VEX document for false-positive filtering (OpenVEX/CycloneDX format)
 	if vexPath != "" {
-		// Check if VEX file exists
 		if _, err := os.Stat(vexPath); err == nil {
 			args = append(args, "--vex", vexPath)
 			slog.Info("using VEX document for scan", "vex_path", vexPath)
@@ -525,9 +527,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	}
 	args = append(args, imageRef)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
-	// Kill the entire process group on cancellation to prevent child processes
-	// (e.g. image pull helpers) from keeping pipes open and blocking cmd.Run() forever.
+	cmd := exec.CommandContext(singleCtx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
@@ -551,9 +551,12 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		}
 	}
 
-	slog.Info("running trivy scan", "target", target.TargetRef, "scan_type", scanType)
+	slog.Info("running trivy scan", "target", target.TargetRef, "scan_type", scanType, "timeout", scanTimeout)
 
 	if err := cmd.Run(); err != nil {
+		if singleCtx.Err() == context.DeadlineExceeded {
+			return nil, nil, fmt.Errorf("trivy scan timed out after %s", scanTimeout)
+		}
 		// Trivy returns exit code 0 even with vulnerabilities found
 		// Only fail on actual errors (non-zero exit with no JSON output)
 		if stdout.Len() == 0 {
@@ -1255,16 +1258,24 @@ func (s *Scanner) DownloadDB(ctx context.Context) error {
 	return nil
 }
 
-// runTrivyDBDownload executes a single trivy --download-db-only command.
+// runTrivyDBDownload executes a single trivy DB download command:
+// --download-db-only for trivy-db or --download-java-db-only for trivy-java-db.
 func (s *Scanner) runTrivyDBDownload(ctx context.Context, cacheDir string, repoFlag, repoValue string) error {
 	// Use a timeout to prevent hanging indefinitely
 	dlCtx, dlCancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer dlCancel()
 
+	// The Java DB requires its own download flag: --download-db-only silently
+	// ignores --java-db-repository and exits 0 without downloading anything.
+	downloadFlag := "--download-db-only"
+	if repoFlag == "--java-db-repository" {
+		downloadFlag = "--download-java-db-only"
+	}
+
 	args := []string{
 		"--cache-dir", cacheDir,
 		"image",
-		"--download-db-only",
+		downloadFlag,
 		"--no-progress",
 		repoFlag, repoValue,
 		"alpine:latest",

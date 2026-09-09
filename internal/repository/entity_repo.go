@@ -158,6 +158,71 @@ func (r *EntityRepository) Get(ctx context.Context, id, tenantID uuid.UUID) (*mo
 	return e, nil
 }
 
+// GetByExternalID returns an entity by its external_id, type_key, and tenant_id.
+func (r *EntityRepository) GetByExternalID(ctx context.Context, externalID, typeKey string, tenantID uuid.UUID) (*models.Entity, error) {
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+
+	query := `
+		SELECT id, type_id, type_key, name, description, external_id,
+		       tenant_id, organization_id, metadata, status, status_detail,
+		       plugin_name, sync_status, last_synced_at,
+		       created_by, updated_by, created_at, updated_at, deleted_at
+		FROM entities WHERE external_id = $1 AND type_key = $2 AND deleted_at IS NULL`
+	args := []interface{}{externalID, typeKey}
+	if tenantID != uuid.Nil {
+		query += " AND tenant_id = $3"
+		args = append(args, tenantID)
+	}
+
+	e := &models.Entity{}
+	var typeID, orgID uuid.UUID
+	var tenantIDScan uuid.UUID
+	var createdBy, updatedBy uuid.NullUUID
+	var statusDetail, pluginName, externalIDScan sql.NullString
+	var lastSyncedAt sql.NullTime
+	var metadata, embedding sql.NullString
+
+	err := r.pool.QueryRow(ctx, query, args...).Scan(
+		&e.ID, &typeID, &e.TypeKey, &e.Name, &e.Description, &externalIDScan,
+		&tenantIDScan, &orgID, &metadata, &e.Status, &statusDetail,
+		&pluginName, &e.SyncStatus, &lastSyncedAt,
+		&createdBy, &updatedBy, &e.CreatedAt, &e.UpdatedAt, &e.DeletedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("entity not found by external_id: %s", externalID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get entity by external_id: %w", err)
+	}
+	e.TypeID = typeID
+	e.TenantID = tenantIDScan
+	e.OrganizationID = orgID
+	if externalIDScan.Valid {
+		e.ExternalID = externalIDScan.String
+	}
+	if metadata.Valid {
+		e.Metadata = json.RawMessage(metadata.String)
+	}
+	if statusDetail.Valid {
+		e.StatusDetail = statusDetail.String
+	}
+	if pluginName.Valid {
+		e.PluginName = pluginName.String
+	}
+	if lastSyncedAt.Valid {
+		e.LastSyncedAt = &lastSyncedAt.Time
+	}
+	if createdBy.Valid {
+		e.CreatedBy = &createdBy.UUID
+	}
+	if updatedBy.Valid {
+		e.UpdatedBy = &updatedBy.UUID
+	}
+	_ = embedding
+	return e, nil
+}
+
 // Create inserts a new entity.
 func (r *EntityRepository) Create(ctx context.Context, req models.CreateEntityRequest, tenantID, orgID uuid.UUID, userID *uuid.UUID) (*models.Entity, error) {
 	id := uuid.New()
