@@ -340,7 +340,7 @@ export default function PipelineBuilderPage() {
                   onClick={() => setGroupsExpanded(!groupsExpanded)}
                   className="card-header w-full !flex-row !items-center !justify-between"
                 >
-                  <h2 className="text-[13px] font-medium text-[var(--text-primary)]">📂 Blueprint Groups</h2>
+                  <h2 className="text-[13px] font-medium text-[var(--text-primary)]">📂 Stacks</h2>
                   <span className="text-[11px] text-[var(--text-tertiary)]">{groupsExpanded ? '▾' : '▸'} {groups.length}</span>
                 </button>
                 {groupsExpanded && (
@@ -367,7 +367,7 @@ export default function PipelineBuilderPage() {
 
             {/* Individual Blueprints */}
             <div className="card-header">
-              <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Available Blueprints</h2>
+              <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Available Templates</h2>
               <span className="text-[11px] text-[var(--text-tertiary)]">{blueprints.length}</span>
             </div>
             <div className="p-3 space-y-2">

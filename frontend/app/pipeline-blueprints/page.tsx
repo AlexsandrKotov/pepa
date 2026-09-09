@@ -7,7 +7,7 @@ import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
 import GearIcon from '@/components/GearIcon';
 import GitRepoPicker from '@/components/GitRepoPicker';
-import { helmRepositories, registryRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup, type RegistryRepository } from '@/lib/api';
+import { helmRepositories, registryRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, clusters, deployments, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup, type RegistryRepository, type Cluster } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
 
 const categoryIcons: Record<string, React.ReactNode> = {
@@ -48,6 +48,14 @@ export default function PipelineBlueprintsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Quick Deploy modal state
+  const [deployBp, setDeployBp] = useState<ServiceBlueprint | null>(null);
+  const [clusterList, setClusterList] = useState<Cluster[]>([]);
+  const [deployClusterId, setDeployClusterId] = useState('');
+  const [deployNamespace, setDeployNamespace] = useState('default');
+  const [deploying, setDeploying] = useState(false);
+  const [deployResult, setDeployResult] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEscapeKey(() => {
     if (showForm) { setShowForm(false); setEditing(null); }
   }, showForm);
@@ -57,6 +65,7 @@ export default function PipelineBlueprintsPage() {
     helmRepositories.list().then(res => setHelmRepos(res.helm_repositories || [])).catch(() => {});
         registryRepositories.list().then(res => setRegistryRepos(res.registry_repositories || [])).catch(() => {});
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
+    clusters.list().then(res => setClusterList(res.clusters || [])).catch(() => {});
   }, []);
 
   // Auto-open edit modal when navigated with ?edit=<id>
@@ -204,6 +213,45 @@ export default function PipelineBlueprintsPage() {
     }
   };
 
+  const openDeployModal = (bp: ServiceBlueprint) => {
+    setDeployBp(bp);
+    setDeployClusterId(clusterList.length > 0 ? clusterList[0].id : '');
+    setDeployNamespace(bp.namespace || 'default');
+    setDeployResult(null);
+  };
+
+  const handleDeploy = async () => {
+    if (!deployBp) return;
+    setDeploying(true);
+    setDeployResult(null);
+    try {
+      await deployments.create({
+        gitlab_project_name: deployBp.name,
+        target_cluster_id: deployClusterId || undefined,
+        target_namespace: deployNamespace,
+        deploy_type: deployBp.source_type === 'docker_compose' ? 'docker_compose' : 'helm',
+        replicas: deployBp.replicas,
+        strategy: 'rolling',
+        spec: {
+          image: deployBp.image,
+          chart_url: deployBp.chart_url,
+          chart_name: deployBp.chart_name,
+          chart_version: deployBp.chart_version,
+          values_yaml: deployBp.values_yaml,
+          cpu: deployBp.cpu,
+          memory: deployBp.memory,
+          ports: deployBp.ports,
+        },
+        status: 'pending',
+        timeout_seconds: 300,
+      });
+      setDeployResult({ ok: true, text: `Deployment of "${deployBp.name}" created successfully!` });
+    } catch (e: unknown) {
+      setDeployResult({ ok: false, text: e instanceof Error ? e.message : 'Deploy failed' });
+    }
+    setDeploying(false);
+  };
+
   const filtered = search
     ? blueprints.filter(b =>
         b.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -222,7 +270,7 @@ export default function PipelineBlueprintsPage() {
       <div className="page-animate flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="page-title-modern">Pipeline Blueprints</h1>
+            <h1 className="page-title-modern">Templates</h1>
             <ConceptHelp term="blueprint" />
           </div>
           <p className="page-subtitle-modern">Pre-configured service templates for deployment pipelines</p>
@@ -374,6 +422,7 @@ export default function PipelineBlueprintsPage() {
                 )}
               </div>
               <div className="flex gap-2 pt-3 border-t border-[var(--border-light)]">
+                <button onClick={() => openDeployModal(bp)} className="text-[11px] px-2.5 py-1 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 rounded-lg transition-colors font-medium">Deploy</button>
                 {bp.is_system ? (
                   <>
                     <span className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-500 rounded-lg font-medium">System</span>
@@ -399,7 +448,7 @@ export default function PipelineBlueprintsPage() {
           <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)] shrink-0">
               <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
-                {editing ? 'Edit Blueprint' : 'New Blueprint'}
+                {editing ? 'Edit Template' : 'New Template'}
               </h2>
               <button onClick={() => setShowForm(false)} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
             </div>
@@ -1102,7 +1151,7 @@ export default function PipelineBlueprintsPage() {
                 disabled={!form.name.trim() || (form.source_type === 'container' ? !form.image.trim() : form.source_type === 'docker_compose' ? (composeSource === 'yaml' ? !form.compose_yaml.trim() : composeSource === 'folder' ? !form.compose_folder_path.trim() : !form.compose_git_url.trim()) : (!form.chart_url.trim() && !form.helm_repo_id))}
                 className="btn btn-primary"
               >
-                {editing ? 'Save Changes' : 'Create Blueprint'}
+                {editing ? 'Save Changes' : 'Create Template'}
               </button>
             </div>
           </div>
@@ -1112,14 +1161,75 @@ export default function PipelineBlueprintsPage() {
       {/* Delete Confirmation */}
       <ConfirmModal
         open={!!deleteConfirm}
-        title="Delete this blueprint?"
-        description="This blueprint will be permanently removed. This action cannot be undone."
+        title="Delete this template?"
+        description="This template will be permanently removed. This action cannot be undone."
         confirmLabel="Delete"
         variant="danger"
         loading={deleting}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteConfirm(null)}
       />
+
+      {/* Quick Deploy Modal */}
+      {deployBp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setDeployBp(null)} />
+          <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
+              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                Deploy: {deployBp.name}
+              </h2>
+              <button onClick={() => setDeployBp(null)} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-xl">&times;</button>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              {deployResult && (
+                <div className={`rounded-lg border p-3 text-[12px] ${deployResult.ok ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-red-500/10 border-red-500/20 text-red-500'}`}>
+                  {deployResult.text}
+                </div>
+              )}
+              <div>
+                <label className="label">Target Cluster</label>
+                <select
+                  value={deployClusterId}
+                  onChange={e => setDeployClusterId(e.target.value)}
+                  className="input"
+                >
+                  <option value="">No cluster (local)</option>
+                  {clusterList.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Namespace</label>
+                <input
+                  type="text"
+                  value={deployNamespace}
+                  onChange={e => setDeployNamespace(e.target.value)}
+                  className="input"
+                  placeholder="default"
+                />
+              </div>
+              <div className="text-[11px] text-[var(--text-tertiary)] space-y-1">
+                <p>Source: <span className="font-mono text-[var(--text-secondary)]">{deployBp.source_type}</span></p>
+                {deployBp.image && <p>Image: <span className="font-mono text-[var(--text-secondary)]">{deployBp.image}</span></p>}
+                {deployBp.chart_name && <p>Chart: <span className="font-mono text-[var(--text-secondary)]">{deployBp.chart_name} {deployBp.chart_version}</span></p>}
+                <p>Resources: {deployBp.cpu} / {deployBp.memory} x {deployBp.replicas}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border)]">
+              <button onClick={() => setDeployBp(null)} className="btn btn-secondary">Cancel</button>
+              <button
+                onClick={handleDeploy}
+                disabled={deploying}
+                className="btn btn-primary"
+              >
+                {deploying ? 'Deploying...' : 'Deploy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

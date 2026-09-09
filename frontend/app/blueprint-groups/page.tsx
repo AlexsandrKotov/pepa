@@ -188,12 +188,12 @@ export default function BlueprintGroupsPage() {
         {/* Header */}
         <div className="page-animate flex items-center justify-between">
           <div>
-            <h1 className="page-title-modern">Blueprint Groups</h1>
-            <p className="page-subtitle-modern">Organize blueprints into deployable groups with custom ordering</p>
+            <h1 className="page-title-modern">Stacks</h1>
+            <p className="page-subtitle-modern">Organize templates into deployable stacks with custom ordering</p>
           </div>
           <div className="flex gap-2">
             <Link href="/pipeline-blueprints" className="btn btn-secondary text-[12px]">
-              ← All Blueprints
+              ← All Templates
             </Link>
             <button onClick={openCreate} className="btn btn-primary">
               + New Group
@@ -432,7 +432,7 @@ export default function BlueprintGroupsPage() {
         <ConfirmModal
           open={!!deleteConfirm}
           title="Delete this group?"
-          description="Blueprints will become ungrouped. This action cannot be undone."
+          description="Templates will become ungrouped. This action cannot be undone."
           confirmLabel="Delete"
           variant="danger"
           loading={deleting}

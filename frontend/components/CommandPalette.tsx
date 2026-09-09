@@ -28,7 +28,7 @@ const pages: PaletteItem[] = [
   { id: 'export', label: 'Export', description: 'Export services, workflows, entities', href: '/export', icon: 'gitlab', category: 'Administration' },
   { id: 'pipelines', label: 'Pipelines', description: 'CI/CD pipeline sources and providers', href: '/pipelines', icon: 'cicd', category: 'Delivery' },
   { id: 'pipeline-builder', label: 'Pipeline Builder', description: 'Compose deployment pipelines', href: '/pipeline-builder', icon: 'plugin', category: 'Delivery' },
-  { id: 'pipeline-blueprints', label: 'Blueprints', description: 'Service blueprints for pipelines', href: '/pipeline-blueprints', icon: 'plugin', category: 'Delivery' },
+  { id: 'pipeline-blueprints', label: 'Templates', description: 'Service templates', href: '/pipeline-blueprints', icon: 'plugin', category: 'Delivery' },
   { id: 'cicd', label: 'CI/CD Providers', description: 'CI/CD system connections', href: '/pipelines?tab=providers', icon: 'cicd', category: 'Delivery' },
   { id: 'deployments', label: 'Deployments', description: 'GitOps deployments', href: '/deployments', icon: 'argocd', category: 'Delivery' },
   { id: 'environments', label: 'Environments', description: 'Deployment environments', href: '/environments', icon: 'discovery', category: 'Delivery' },

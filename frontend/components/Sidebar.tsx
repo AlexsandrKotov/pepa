@@ -102,8 +102,8 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
         items: [
           { href: '/pipelines', label: 'Runs', permission: 'pipelines' },
           { href: '/pipeline-builder', label: 'Builder', permission: 'pipelines' },
-          { href: '/pipeline-blueprints', label: 'Blueprints', permission: 'pipelines' },
-          { href: '/blueprint-groups', label: 'Blueprint Groups', permission: 'pipelines' },
+          { href: '/pipeline-blueprints', label: 'Templates', permission: 'pipelines' },
+          { href: '/blueprint-groups', label: 'Stacks', permission: 'pipelines' },
         ],
       },
       {
