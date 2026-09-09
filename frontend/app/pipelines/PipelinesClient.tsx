@@ -55,7 +55,6 @@ const ENGINE_TYPE_INFO: Record<string, { icon: string; label: string; color: str
   github_actions: { icon: 'github', label: 'GitHub Actions', color: 'text-[var(--text-primary)]', bgColor: 'bg-[var(--border-light)]', borderColor: 'border-[var(--border)]', description: 'CI/CD workflows from GitHub repositories' },
   ansible: { icon: 'ansible', label: 'Ansible', color: 'text-emerald-600', bgColor: 'bg-emerald-500/10', borderColor: 'border-emerald-500/20', description: 'Playbooks via repository or local path' },
   terraform: { icon: 'terraform', label: 'Terraform', color: 'text-purple-500', bgColor: 'bg-purple-500/10', borderColor: 'border-purple-500/20', description: 'Infrastructure stacks via repository or local path' },
-  trivy: { icon: 'trivy', label: 'Trivy Scanner', color: 'text-cyan-600', bgColor: 'bg-cyan-500/10', borderColor: 'border-cyan-500/20', description: 'Security vulnerability scanning for images and code' },
 };
 
 const PROVIDER_STATUS_COLORS: Record<string, string> = {

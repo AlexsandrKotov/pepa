@@ -156,6 +156,13 @@ func (c *Client) HelmDeploy(ctx context.Context, spec HelmSpec) (*DeployResult, 
 // runHelm executes a helm CLI command.
 func (c *Client) runHelm(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "helm", args...) //nolint:gosec // #nosec // G204: helm is an admin-configured binary
+	// Force Helm directories to /tmp so the CLI works inside read-only containers
+	// where $HOME/.config is not writable.
+	cmd.Env = append(os.Environ(),
+		"HELM_CONFIG_HOME=/tmp/helm/config",
+		"HELM_CACHE_HOME=/tmp/helm/cache",
+		"HELM_DATA_HOME=/tmp/helm/data",
+	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -270,6 +277,11 @@ func (c *Client) HelmTemplate(ctx context.Context, spec HelmSpec) (string, error
 	}
 
 	cmd := exec.CommandContext(ctx, "helm", args...) //nolint:gosec // #nosec // G204: helm is an admin-configured binary
+	cmd.Env = append(os.Environ(),
+		"HELM_CONFIG_HOME=/tmp/helm/config",
+		"HELM_CACHE_HOME=/tmp/helm/cache",
+		"HELM_DATA_HOME=/tmp/helm/data",
+	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
