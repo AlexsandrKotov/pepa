@@ -230,7 +230,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   // Check deployment windows on load
   useEffect(() => {
     devops.checkWindow({ environment: windowCheckEnv }).then(setWindowCheck).catch(() => {});
-  }, [windowCheckEnv]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [windowCheckEnv]);
 
   // Lazy-load Helm repos only when user selects Helm deploy type
   const helmReposLoaded = useRef(false);

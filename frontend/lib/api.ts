@@ -1814,6 +1814,7 @@ export interface Connection {
   last_check_at?: string;
   labels: Record<string, string>;
   notes: string;
+  fallback_to_admin?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1842,7 +1843,7 @@ export const connections = {
   delete: (id: string) =>
     fetchAPI<{ message: string }>(`/api/v1/connections/${id}`, { method: 'DELETE' }),
   test: (id: string) =>
-    fetchAPI<{ status: string; message: string; type: string; name: string }>(`/api/v1/connections/${id}/test`, { method: 'POST' }),
+    fetchAPI<{ status: string; message: string; type: string; name: string; credential_source?: string }>(`/api/v1/connections/${id}/test`, { method: 'POST' }),
   browse: (id: string, resource?: string, params?: Record<string, string>) => {
     const qs = new URLSearchParams();
     if (resource) qs.set('resource', resource);

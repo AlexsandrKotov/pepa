@@ -8,6 +8,7 @@ import { friendlyError } from '@/lib/errors';
 import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/VaultInput';
 import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
+import { usePermission } from '@/hooks/usePermission';
 
 const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; color: string; description: string; requiredPlugins?: string[] }[] = [
   { type: 'git', label: 'Git', icon: 'git', color: '#F05032', description: 'GitHub, GitLab, Gitea, Bitbucket, local' },
@@ -86,6 +87,9 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   const [defaultAIProvider, setDefaultAIProvider] = useState('');
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
+  const { isAdmin, hasPermission } = usePermission();
+  const canCreate = isAdmin || hasPermission('connections', 'create');
+  const canDelete = isAdmin || hasPermission('connections', 'delete');
 
   // Fetch connections client-side (server-side has no auth token)
   useEffect(() => {
@@ -145,7 +149,11 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
       const result = await connectionsAPI.test(id);
       setConnections(prev => prev.map(c => c.id === id ? { ...c, status: result.status } : c));
       const ok = result.status === 'connected' || result.status === 'ok' || result.status === 'healthy';
-      setFeedback({ ok, text: ok ? `Connection works: ${result.message}` : `Test failed: ${result.message}` });
+      const srcLabel = result.credential_source === 'user' ? ' (your credentials)'
+        : result.credential_source === 'shared' ? ' (shared credentials)'
+        : result.credential_source === 'admin' ? ' (admin credentials)'
+        : '';
+      setFeedback({ ok, text: ok ? `Connection works: ${result.message}${srcLabel}` : `Test failed: ${result.message}` });
     } catch (err) {
       const fe = friendlyError(err);
       setFeedback({ ok: false, text: `Test failed: ${fe.message}`, hint: fe.hint });
@@ -213,13 +221,15 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
             <p className="page-subtitle-modern">Manage external services and integrations</p>
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="btn btn-primary"
-              data-tour="connections-add"
-            >
-              + Add Connection
-            </button>
+            {canCreate && (
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="btn btn-primary"
+                data-tour="connections-add"
+              >
+                + Add Connection
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -254,12 +264,16 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
           <div className="mb-4 opacity-20"><BrandIcon name="plugin" size={48} /></div>
           <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">No connections yet</h3>
           <p className="text-[var(--text-secondary)] mb-6">Connect your first service to get started</p>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="btn btn-primary"
-          >
-            Add Connection
-          </button>
+          {canCreate ? (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="btn btn-primary"
+            >
+              Add Connection
+            </button>
+          ) : (
+            <p className="text-sm text-[var(--text-tertiary)]">Ask your administrator to add connections</p>
+          )}
         </div>
       ) : (
         <div className="space-y-8">
@@ -313,6 +327,11 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
                       <span className="text-xs text-[var(--text-tertiary)]">
                         {conn.last_check_at ? `Last check: ${new Date(conn.last_check_at).toLocaleString()}` : 'Never tested'}
                       </span>
+                      {!isAdmin && (
+                        <span className={`text-xs ${conn.fallback_to_admin !== false ? 'text-amber-600' : 'text-red-500'}`}>
+                          {conn.fallback_to_admin !== false ? 'Admin fallback' : 'Personal cred. required'}
+                        </span>
+                      )}
                       <div className="flex gap-2">
                         {group.type === 'ai' && !isDefaultAI && connProvider && (
                           <button
@@ -331,12 +350,14 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
                         >
                           {testing === conn.id ? 'Testing...' : 'Test'}
                         </button>
-                        <button
-                          onClick={(e) => { e.preventDefault(); setDeleteTarget(conn); }}
-                          className="text-xs text-red-500 hover:text-red-400"
-                        >
-                          Delete
-                        </button>
+                        {canDelete && (
+                          <button
+                            onClick={(e) => { e.preventDefault(); setDeleteTarget(conn); }}
+                            className="text-xs text-red-500 hover:text-red-400"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </div>
                   </Link>
@@ -409,6 +430,7 @@ function AddConnectionModal({
   const [notes, setNotes] = useState('');
   const [labels, setLabels] = useState('');
   const [config, setConfig] = useState<Record<string, string>>({});
+  const [fallbackToAdmin, setFallbackToAdmin] = useState(true);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -426,6 +448,7 @@ function AddConnectionModal({
       notes,
       labels: parsedLabels,
       config,
+      fallback_to_admin: fallbackToAdmin,
     });
   };
 
@@ -1176,6 +1199,22 @@ function AddConnectionModal({
             />
             <p className="text-xs text-[var(--text-tertiary)] mt-1">Comma-separated key=value pairs</p>
           </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="fallback_to_admin"
+              checked={fallbackToAdmin}
+              onChange={e => setFallbackToAdmin(e.target.checked)}
+              className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+            />
+            <label htmlFor="fallback_to_admin" className="text-sm text-[var(--text-secondary)]">
+              Allow admin credential fallback
+            </label>
+          </div>
+          <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+            When enabled, users without personal credentials will use the admin connection credentials. When disabled, users must add their own credentials to use this connection.
+          </p>
 
           <div>
             <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Notes</label>

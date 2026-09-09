@@ -172,7 +172,7 @@ export default function GitOpsBindingsPage() {
           </svg>
           <h3 className="mt-2 text-lg font-medium text-gray-900 dark:text-white">No bindings</h3>
           <p className="mt-2 text-gray-500 dark:text-gray-400">
-            Click "Auto-Discover" to find and bind GitOps applications
+            Click &ldquo;Auto-Discover&rdquo; to find and bind GitOps applications
           </p>
         </div>
       ) : (

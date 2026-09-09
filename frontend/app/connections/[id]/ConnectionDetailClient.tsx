@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
+import { usePermission } from '@/hooks/usePermission';
 
 const TYPE_INFO: Record<string, { icon: string; label: string; color: string }> = {
   git: { icon: 'git', label: 'Git', color: '#F05032' },
@@ -34,6 +35,9 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const { isAdmin, hasPermission } = usePermission();
+  const canUpdate = isAdmin || hasPermission('connections', 'update');
+  const canDelete = isAdmin || hasPermission('connections', 'delete');
 
   // Fetch connection client-side (server-side has no auth token)
   useEffect(() => {
@@ -90,7 +94,11 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
       const result = await connectionsAPI.test(conn.id);
       setConn(prev => prev ? { ...prev, status: result.status, last_check_at: new Date().toISOString() } : prev);
       const ok = result.status === 'connected' || result.status === 'ok' || result.status === 'healthy';
-      setFeedback({ ok, text: result.message || (ok ? 'Connection test passed' : 'Connection test failed') });
+      const srcLabel = result.credential_source === 'user' ? ' (your credentials)'
+        : result.credential_source === 'shared' ? ' (shared credentials)'
+        : result.credential_source === 'admin' ? ' (admin credentials)'
+        : '';
+      setFeedback({ ok, text: (ok ? 'Connection test passed' : 'Connection test failed') + ': ' + result.message + srcLabel });
     } catch (err) {
       setFeedback({ ok: false, text: `Test failed: ${err instanceof Error ? err.message : 'Unknown error'}` });
     } finally {
@@ -188,7 +196,7 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
                 <BrandIcon name={typeInfo.icon} size={28} style={{ color: typeInfo.color }} />
               </div>
               <div>
-                {editing ? (
+                {editing && canUpdate ? (
                   <input
                     type="text"
                     value={editData.name}
@@ -214,35 +222,39 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
               >
                 {testing ? 'Testing...' : 'Test Connection'}
               </button>
-              {editing ? (
-                <>
+              {canUpdate && (
+                editing ? (
+                  <>
+                    <button
+                      onClick={handleSave}
+                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setEditing(false)}
+                      className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--bg)] transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
                   <button
-                    onClick={handleSave}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => setEditing(false)}
+                    onClick={() => setEditing(true)}
                     className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--bg)] transition-colors"
                   >
-                    Cancel
+                    Edit
                   </button>
-                </>
-              ) : (
+                )
+              )}
+              {canDelete && (
                 <button
-                  onClick={() => setEditing(true)}
-                  className="px-4 py-2 border border-[var(--border)] rounded-lg hover:bg-[var(--bg)] transition-colors"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="px-4 py-2 border border-red-500/20 text-red-500 rounded-lg hover:bg-red-500/10 transition-colors"
                 >
-                  Edit
+                  Delete
                 </button>
               )}
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="px-4 py-2 border border-red-500/20 text-red-500 rounded-lg hover:bg-red-500/10 transition-colors"
-              >
-                Delete
-              </button>
             </div>
           </div>
         </div>
@@ -250,7 +262,7 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
         <div className="p-6 space-y-6">
           <div>
             <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-2">Description</h3>
-            {editing ? (
+            {editing && canUpdate ? (
               <textarea
                 value={editData.description}
                 onChange={e => setEditData({ ...editData, description: e.target.value })}
@@ -300,7 +312,7 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
 
           <div>
             <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-2">Notes</h3>
-            {editing ? (
+            {editing && canUpdate ? (
               <textarea
                 value={editData.notes}
                 onChange={e => setEditData({ ...editData, notes: e.target.value })}
@@ -326,6 +338,16 @@ export default function ConnectionDetailClient({ connectionId }: { connectionId:
                 <div>
                   <span className="text-[var(--text-tertiary)]">Last tested:</span>{' '}
                   <span className="text-[var(--text-primary)]">{new Date(conn.last_check_at).toLocaleString()}</span>
+                </div>
+              )}
+              {!isAdmin && (
+                <div>
+                  <span className="text-[var(--text-tertiary)]">Credential policy:</span>{' '}
+                  <span className={conn.fallback_to_admin !== false ? 'text-amber-600' : 'text-red-500'}>
+                    {conn.fallback_to_admin !== false
+                      ? 'Admin fallback (uses admin creds if no personal cred)'
+                      : 'Personal credential required'}
+                  </span>
                 </div>
               )}
             </div>

@@ -614,7 +614,7 @@ func (e *Engine) EnsureBasePermissions(ctx context.Context, tenantID uuid.UUID) 
 			}
 		case "developer":
 			// Developer gets CRUD on core resources
-			devResources := []string{"entities", "services", "deployments", "workflows", "pipelines", "connections", "credentials"}
+			devResources := []string{"entities", "services", "deployments", "workflows", "pipelines"}
 			for _, res := range devResources {
 				for _, act := range []string{"create", "read", "update"} {
 					if _, err := e.db.Exec(ctx, `
@@ -626,8 +626,32 @@ func (e *Engine) EnsureBasePermissions(ctx context.Context, tenantID uuid.UUID) 
 					}
 				}
 			}
+			// Developer: read-only on connections (admin manages connections;
+			// developers use them via personal credentials in user_credentials).
+			for _, act := range []string{"read"} {
+				if _, err := e.db.Exec(ctx, `
+					INSERT INTO permissions (role_id, resource, action, effect)
+					VALUES ($1, $2, $3, 'allow')
+					ON CONFLICT DO NOTHING
+				`, r.ID, "connections", act); err != nil {
+					return fmt.Errorf("ensure developer permission connections/%s: %w", act, err)
+				}
+			}
+			// Developer: full CRUD on personal credentials
+			for _, act := range []string{"create", "read", "update", "delete"} {
+				if _, err := e.db.Exec(ctx, `
+					INSERT INTO permissions (role_id, resource, action, effect)
+					VALUES ($1, $2, $3, 'allow')
+					ON CONFLICT DO NOTHING
+				`, r.ID, "credentials", act); err != nil {
+					return fmt.Errorf("ensure developer permission credentials/%s: %w", act, err)
+				}
+			}
 			// Read-only on remaining resources
 			for _, res := range allResources {
+				if res == "connections" || res == "credentials" {
+					continue // already handled above
+				}
 				if _, err := e.db.Exec(ctx, `
 					INSERT INTO permissions (role_id, resource, action, effect)
 					VALUES ($1, $2, 'read', 'allow')

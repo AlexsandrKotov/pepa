@@ -362,6 +362,24 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Resolve per-user credentials before testing so the test reflects
+		// the caller's identity, not the admin's.
+		credSource := string(CredentialSourceAdmin)
+		userID := auth.GetUserID(c)
+		if userID != nil {
+			provName, provURLKey := testProviderInfo(conn.Type, conn.Config)
+			if provName != "" {
+				resolved, resErr := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, provName, provURLKey)
+				if resErr == nil && resolved != nil {
+					// Override config with resolved (user/shared) credentials
+					for k, v := range resolved.Config {
+						conn.Config[k] = v
+					}
+					credSource = string(resolved.Source)
+				}
+			}
+		}
+
 		// Test connection based on type with real validation
 		var status, message string
 
@@ -475,10 +493,11 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		_ = deps.Repos.Connection.Update(c.Request.Context(), conn)
 
 		c.JSON(http.StatusOK, gin.H{
-			"status":  status,
-			"message": message,
-			"type":    conn.Type,
-			"name":    conn.Name,
+			"status":            status,
+			"message":           message,
+			"type":              conn.Type,
+			"name":              conn.Name,
+			"credential_source": credSource,
 		})
 	}
 }
@@ -648,33 +667,28 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		// Try user's personal credential first (so browsing uses their identity)
+		// Resolve credentials: user personal → shared → admin fallback
 		userID := auth.GetUserID(c)
-		if userID != nil && deps.DB != nil {
-			providerURL := connConfig["url"]
-			if providerURL == "" {
-				// Try to extract from repo_url or other fields
-				providerURL = connConfig["repo_url"]
-			}
-			if providerURL != "" {
-				provName := pluginName
-				if provName == "git" {
-					provName = connConfig["provider"]
-				}
-				if provName == "" {
-					provName = "gitlab" // default
-				}
-				token, username, email, err := GetUserCredential(c.Request.Context(), deps, *userID, provName, providerURL)
-				if err == nil && token != "" {
-					connConfig["token"] = token
-					if username != "" {
-						connConfig["username"] = username
-					}
-					if email != "" {
-						connConfig["email"] = email
-					}
-					slog.Info("using personal credential for user on", "id", userID, "id", providerURL)
-				}
+		credSource := string(CredentialSourceAdmin)
+		providerURL := connConfig["url"]
+		if providerURL == "" {
+			providerURL = connConfig["repo_url"]
+		}
+		provName := pluginName
+		if provName == "git" {
+			provName = connConfig["provider"]
+		}
+		if provName == "" {
+			provName = "gitlab" // default
+		}
+		if userID != nil && providerURL != "" {
+			resolved, err := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, provName, "url")
+			if err == nil && resolved != nil {
+				connConfig = resolved.Config
+				credSource = string(resolved.Source)
+			} else if !conn.FallbackToAdmin {
+				c.JSON(http.StatusForbidden, gin.H{"error": "no personal credential and admin fallback is disabled for this connection"})
+				return
 			}
 		}
 
@@ -708,10 +722,10 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 		// Parse and return the output
 		var result interface{}
 		if err := json.Unmarshal(resp.GetOutput(), &result); err != nil {
-			c.JSON(http.StatusOK, gin.H{"raw": string(resp.GetOutput())})
+			c.JSON(http.StatusOK, gin.H{"resource": resource, "raw": string(resp.GetOutput()), "credential_source": credSource})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"resource": resource, "data": result})
+		c.JSON(http.StatusOK, gin.H{"resource": resource, "data": result, "credential_source": credSource})
 	}
 }
 
@@ -792,32 +806,28 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		// Try user's personal credential first (so actions use their identity)
+		// Resolve credentials: user personal → shared → admin fallback
 		userID := auth.GetUserID(c)
-		if userID != nil && deps.DB != nil {
-			providerURL := connConfig["url"]
-			if providerURL == "" {
-				providerURL = connConfig["repo_url"]
-			}
-			if providerURL != "" {
-				provName := pluginName
-				if provName == "git" {
-					provName = connConfig["provider"]
-				}
-				if provName == "" {
-					provName = "gitlab" // default
-				}
-				token, username, email, err := GetUserCredential(c.Request.Context(), deps, *userID, provName, providerURL)
-				if err == nil && token != "" {
-					connConfig["token"] = token
-					if username != "" {
-						connConfig["username"] = username
-					}
-					if email != "" {
-						connConfig["email"] = email
-					}
-					slog.Info("using personal credential for user on", "id", userID, "id", providerURL)
-				}
+		credSource := string(CredentialSourceAdmin)
+		providerURL := connConfig["url"]
+		if providerURL == "" {
+			providerURL = connConfig["repo_url"]
+		}
+		provName := pluginName
+		if provName == "git" {
+			provName = connConfig["provider"]
+		}
+		if provName == "" {
+			provName = "gitlab" // default
+		}
+		if userID != nil && providerURL != "" {
+			resolved, err := ResolveConnectionCredential(c.Request.Context(), deps, conn, userID, provName, "url")
+			if err == nil && resolved != nil {
+				connConfig = resolved.Config
+				credSource = string(resolved.Source)
+			} else if !conn.FallbackToAdmin {
+				c.JSON(http.StatusForbidden, gin.H{"error": "no personal credential and admin fallback is disabled for this connection"})
+				return
 			}
 		}
 
@@ -837,10 +847,30 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 
 		var result interface{}
 		if err := json.Unmarshal(resp.GetOutput(), &result); err != nil {
-			c.JSON(http.StatusOK, gin.H{"raw": string(resp.GetOutput())})
+			c.JSON(http.StatusOK, gin.H{"resource": req.Resource, "raw": string(resp.GetOutput()), "credential_source": credSource})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"resource": req.Resource, "data": result})
+		c.JSON(http.StatusOK, gin.H{"resource": req.Resource, "data": result, "credential_source": credSource})
+	}
+}
+
+// testProviderInfo returns the provider name and URL config key used for
+// credential resolution during connection testing. Returns ("", "") for types
+// that do not support per-user credential override.
+func testProviderInfo(connType repository.ConnectionType, config map[string]any) (string, string) {
+	switch connType {
+	case repository.ConnectionGit, repository.ConnectionGitLab:
+		provider, _ := config["provider"].(string)
+		if provider == "" {
+			provider = "gitlab"
+		}
+		return provider, "url"
+	case repository.ConnectionJira:
+		return "jira", "url"
+	case repository.ConnectionArgoCD:
+		return "argocd", "server_url"
+	default:
+		return "", ""
 	}
 }
 
