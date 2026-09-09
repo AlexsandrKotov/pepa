@@ -111,10 +111,16 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
       {
         label: 'Releases',
         items: [
+          { href: '/releases', label: 'Active Releases', permission: 'deployments' },
+          { href: '/environments', label: 'Environments', permission: 'environments' },
+        ],
+      },
+      {
+        label: 'Deployments',
+        items: [
           { href: '/deployments', label: 'Deployments', permission: 'deployments' },
           { href: '/deployments/timeline', label: 'Timeline', permission: 'deployments' },
           { href: '/deployments/batch', label: 'Batch Deploy', permission: 'deployments' },
-          { href: '/environments', label: 'Environments', permission: 'environments' },
         ],
       },
       {

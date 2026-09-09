@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/k8s"
 	"github.com/pepa/pepa/internal/repository"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -188,6 +189,10 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 		// Auto-sync: register AI provider connections with the AI manager
 		applyAIConnection(deps, c.Request.Context(), conn)
 
+		// Auto-create a linked cluster for FluxCD/ArgoCD connections with a kubeconfig,
+		// so that GitOps discovery works immediately without manual cluster registration.
+		autoCreateClusterFromConnection(deps, c.Request.Context(), conn)
+
 		logAudit(deps, c, "create", "connection", conn.ID.String(), nil, gin.H{"name": conn.Name, "type": string(conn.Type)})
 		c.JSON(http.StatusCreated, conn)
 	}
@@ -250,6 +255,9 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 
 		// Auto-sync: re-register AI provider connections with the AI manager
 		applyAIConnection(deps, c.Request.Context(), conn)
+
+		// Sync linked cluster when a FluxCD/ArgoCD connection is updated
+		syncClusterFromConnection(deps, c.Request.Context(), conn)
 
 		logAudit(deps, c, "update", "connection", conn.ID.String(), nil, gin.H{"name": conn.Name, "status": conn.Status})
 		c.JSON(http.StatusOK, conn)
@@ -486,6 +494,8 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 				result := deps.Services.Connection.TestSonarQubeConnection(ctx, url, token)
 				status, message = result.Status, result.Message
 			}
+		case repository.ConnectionKubernetes:
+			status, message = testKubernetesConnection(deps, c, conn.Config)
 		case repository.ConnectionArgoCD:
 			status, message = testArgoCDConnection(deps, c, conn.Config)
 		case repository.ConnectionFluxCD:
@@ -528,7 +538,7 @@ func connectionSummary(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Define expected types
-		types := []string{"kubernetes", "gitlab", "git", "jira", "ci", "ai", "storage", "notification", "argocd", "fluxcd"}
+		types := []string{"kubernetes", "gitlab", "git", "jira", "ci", "ai", "storage", "notification", "docker", "proxmox", "vmware", "sonarqube"}
 		summary := make([]gin.H, 0, len(types))
 		for _, t := range types {
 			summary = append(summary, gin.H{
@@ -876,6 +886,8 @@ func testProviderInfo(connType repository.ConnectionType, config map[string]any)
 		return provider, "url"
 	case repository.ConnectionJira:
 		return "jira", "url"
+	case repository.ConnectionKubernetes:
+		return "kubernetes", ""
 	case repository.ConnectionArgoCD:
 		return "argocd", "server_url"
 	default:
@@ -927,10 +939,6 @@ func requiredPluginForConnection(connType string, config map[string]any) string 
 		return "jira"
 	case "proxmox":
 		return "proxmox"
-	case "argocd":
-		return "argocd"
-	case "fluxcd":
-		return "fluxcd"
 	case "notification":
 		provider, _ := config["provider"].(string)
 		switch provider {
@@ -1228,4 +1236,194 @@ func connectionHealthDashboard(deps Dependencies) gin.HandlerFunc {
 			},
 		})
 	}
+}
+
+// autoCreateClusterFromConnection creates a linked cluster entry when a FluxCD or
+// ArgoCD connection is created with a kubeconfig. This enables GitOps discovery
+// to work immediately without requiring the user to manually register the same
+// cluster a second time on the Clusters page.
+func autoCreateClusterFromConnection(deps Dependencies, ctx context.Context, conn *repository.Connection) {
+	if deps.Repos.Cluster == nil {
+		return
+	}
+	// Only auto-create for Kubernetes/GitOps connection types
+	if conn.Type != repository.ConnectionKubernetes && conn.Type != repository.ConnectionFluxCD && conn.Type != repository.ConnectionArgoCD {
+		return
+	}
+	kubeconfig, _ := conn.Config["kubeconfig"].(string)
+	if kubeconfig == "" {
+		return
+	}
+
+	// Parse kubeconfig to extract API server URL and cluster name
+	cfg, err := clientcmd.Load([]byte(kubeconfig))
+	if err != nil {
+		slog.Warn("auto-create cluster: failed to parse kubeconfig", "connection", conn.Name, "error", err)
+		return
+	}
+
+	apiServerURL := ""
+	clusterName := conn.Name
+	// Try current context's cluster first
+	if kubeCtx, ok := cfg.Contexts[cfg.CurrentContext]; ok {
+		if kc, ok := cfg.Clusters[kubeCtx.Cluster]; ok {
+			apiServerURL = kc.Server
+			if clusterName == "" {
+				clusterName = kubeCtx.Cluster
+			}
+		}
+	}
+	// Fallback: first cluster in the kubeconfig
+	if apiServerURL == "" {
+		for name, kc := range cfg.Clusters {
+			apiServerURL = kc.Server
+			if clusterName == conn.Name {
+				clusterName = name
+			}
+			break
+		}
+	}
+
+	// Check if a cluster with this connection_id already exists (avoid duplicates)
+	existing, _ := deps.Repos.Cluster.GetByConnectionID(ctx, conn.ID)
+	if existing != nil {
+		return
+	}
+
+	cluster := &repository.Cluster{
+		TenantID:     conn.TenantID,
+		Name:         clusterName,
+		Description:  fmt.Sprintf("Auto-created from %s connection %q", conn.Type, conn.Name),
+		Environment:  "production",
+		APIServerURL: apiServerURL,
+		Status:       "disconnected",
+		IsActive:     true,
+		ConnectionID: &conn.ID,
+		Labels:       map[string]string{"auto_created": "true", "source_connection": string(conn.Type)},
+	}
+
+	if err := deps.Repos.Cluster.Create(ctx, cluster); err != nil {
+		slog.Warn("auto-create cluster: failed to create cluster", "connection", conn.Name, "error", err)
+		return
+	}
+
+	// Save kubeconfig to the cluster (encrypted)
+	if err := deps.Repos.Cluster.SaveKubeconfig(ctx, cluster.ID, kubeconfig); err != nil {
+		slog.Warn("auto-create cluster: failed to save kubeconfig", "cluster", cluster.Name, "error", err)
+		return
+	}
+
+	// Detect GitOps engines (FluxCD/ArgoCD CRDs)
+	k8sClient, err := k8s.NewClient(kubeconfig)
+	if err != nil {
+		slog.Warn("auto-create cluster: failed to create k8s client", "cluster", cluster.Name, "error", err)
+		return
+	}
+	detectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if engine, err := k8sClient.DetectGitOpsEngine(detectCtx); err == nil {
+		updated := false
+		if engine.FluxCD {
+			cluster.FluxInstalled = true
+			updated = true
+		}
+		if engine.ArgoCD {
+			if cluster.Labels == nil {
+				cluster.Labels = make(map[string]string)
+			}
+			cluster.Labels["argocd_detected"] = "true"
+			updated = true
+		}
+		if updated {
+			_ = deps.Repos.Cluster.Update(ctx, cluster)
+		}
+	}
+
+	slog.Info("auto-created cluster from connection", "cluster", cluster.Name, "connection", conn.Name, "type", string(conn.Type))
+}
+
+// syncClusterFromConnection updates the linked cluster when a FluxCD/ArgoCD
+// connection is updated (e.g., new kubeconfig). If no linked cluster exists,
+// it creates one (same as autoCreateClusterFromConnection).
+func syncClusterFromConnection(deps Dependencies, ctx context.Context, conn *repository.Connection) {
+	if deps.Repos.Cluster == nil {
+		return
+	}
+	if conn.Type != repository.ConnectionKubernetes && conn.Type != repository.ConnectionFluxCD && conn.Type != repository.ConnectionArgoCD {
+		return
+	}
+	kubeconfig, _ := conn.Config["kubeconfig"].(string)
+
+	cluster, _ := deps.Repos.Cluster.GetByConnectionID(ctx, conn.ID)
+	if cluster == nil {
+		// No linked cluster yet — create one if we have a kubeconfig
+		if kubeconfig != "" {
+			autoCreateClusterFromConnection(deps, ctx, conn)
+		}
+		return
+	}
+
+	// Update cluster name and API server URL from connection
+	cluster.Name = conn.Name
+	if kubeconfig != "" {
+		cfg, err := clientcmd.Load([]byte(kubeconfig))
+		if err == nil {
+			if kubeCtx, ok := cfg.Contexts[cfg.CurrentContext]; ok {
+				if kc, ok := cfg.Clusters[kubeCtx.Cluster]; ok {
+					cluster.APIServerURL = kc.Server
+				}
+			}
+		}
+		// Save updated kubeconfig
+		_ = deps.Repos.Cluster.SaveKubeconfig(ctx, cluster.ID, kubeconfig)
+	}
+	_ = deps.Repos.Cluster.Update(ctx, cluster)
+}
+
+// testKubernetesConnection tests connectivity to a Kubernetes cluster via kubeconfig.
+func testKubernetesConnection(deps Dependencies, c *gin.Context, connConfig map[string]any) (string, string) {
+	kubeconfig, _ := connConfig["kubeconfig"].(string)
+	if kubeconfig == "" {
+		return "error", "No kubeconfig configured"
+	}
+	client, err := k8s.NewClient(kubeconfig)
+	if err != nil {
+		return "error", fmt.Sprintf("Failed to parse kubeconfig: %v", err)
+	}
+	testCtx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	nodeCount, k8sVersion, err := client.GetClusterInfo(testCtx)
+	if err != nil {
+		return "error", fmt.Sprintf("Cluster unreachable: %v", err)
+	}
+	return "connected", fmt.Sprintf("Connected to Kubernetes %s (%d nodes)", k8sVersion, nodeCount)
+}
+
+// autoCreateConnectionFromCluster creates a linked kubernetes connection when a
+// cluster is given a kubeconfig. This keeps the Clusters page and Connections
+// page in sync — every cluster with a kubeconfig has a matching connection.
+func autoCreateConnectionFromCluster(deps Dependencies, ctx context.Context, cluster *repository.Cluster, kubeconfig string) {
+	if deps.Repos.Connection == nil || kubeconfig == "" {
+		return
+	}
+	// Check if a connection already linked to this cluster exists
+	existing, _ := deps.Repos.Connection.GetByClusterID(ctx, cluster.ID)
+	if existing != nil {
+		return
+	}
+
+	conn := &repository.Connection{
+		TenantID:    cluster.TenantID,
+		Type:        repository.ConnectionKubernetes,
+		Name:        cluster.Name,
+		Description: fmt.Sprintf("Auto-created from cluster %q", cluster.Name),
+		Config:      map[string]any{"kubeconfig": kubeconfig},
+		Status:      "connected",
+		Labels:      map[string]string{"auto_created": "true", "cluster_id": cluster.ID.String()},
+	}
+	if err := deps.Repos.Connection.Create(ctx, conn); err != nil {
+		slog.Warn("auto-create connection: failed", "cluster", cluster.Name, "error", err)
+		return
+	}
+	slog.Info("auto-created kubernetes connection from cluster", "connection", conn.Name, "cluster", cluster.Name)
 }

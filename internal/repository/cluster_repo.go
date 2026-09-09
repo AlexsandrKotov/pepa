@@ -121,6 +121,31 @@ func (r *ClusterRepository) Get(ctx context.Context, id, tenantID uuid.UUID) (*C
 	return &c, nil
 }
 
+// GetByConnectionID returns the cluster linked to a given connection ID, or nil if none exists.
+func (r *ClusterRepository) GetByConnectionID(ctx context.Context, connectionID uuid.UUID) (*Cluster, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, name, COALESCE(description,''), environment, COALESCE(api_server_url,''),
+		       flux_installed, status, node_count, COALESCE(kubernetes_version,''),
+		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       is_active, (kubeconfig_encrypted IS NOT NULL AND kubeconfig_encrypted != ''),
+		       connection_id, last_heartbeat_at, created_at, updated_at
+		FROM clusters WHERE connection_id = $1
+		LIMIT 1
+	`, connectionID)
+
+	var c Cluster
+	if err := row.Scan(&c.ID, &c.TenantID, &c.Name, &c.Description, &c.Environment, &c.APIServerURL,
+		&c.FluxInstalled, &c.Status, &c.NodeCount, &c.KubernetesVersion,
+		&c.Labels, &c.Notes,
+		&c.IsActive, &c.HasKubeconfig, &c.ConnectionID, &c.LastHeartbeatAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get cluster by connection_id: %w", err)
+	}
+	return &c, nil
+}
+
 // Create inserts a new cluster.
 func (r *ClusterRepository) Create(ctx context.Context, c *Cluster) error {
 	c.ID = uuid.New()

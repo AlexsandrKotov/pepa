@@ -214,11 +214,18 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     setLoadingChartValues(false);
   };
 
+  const refreshClusters = async () => {
+    try {
+      const c = await clusters.list();
+      setClusterList(c.clusters || []);
+    } catch { /* ignore */ }
+  };
+
   const refresh = async () => {
     try {
-      const [d, c] = await Promise.all([deployments.list(), clusters.list()]);
-      setDeployList(d.deployments || []);
-      setClusterList(c.clusters || []);
+      const [d, c] = await Promise.allSettled([deployments.list(), clusters.list()]);
+      if (d.status === 'fulfilled') setDeployList(d.value.deployments || []);
+      if (c.status === 'fulfilled') setClusterList(c.value.clusters || []);
       // Load DORA metrics
       deployments.metrics('30d').then(m => setDoraMetrics(m)).catch(() => {});
     } catch { /* ignore */ }
@@ -810,11 +817,21 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
                       <input value={form.target_namespace} onChange={e => setForm({ ...form, target_namespace: e.target.value })} className="input" placeholder="default" />
                     </div>
                     <div>
-                      <label className="label">Target Cluster</label>
+                      <label className="label">
+                        Target Cluster
+                        <button type="button" onClick={refreshClusters} className="ml-1 text-[var(--text-tertiary)] hover:text-[var(--accent)]" title="Refresh clusters">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3" /></svg>
+                        </button>
+                      </label>
                       <select value={selectedClusterId} onChange={e => setSelectedClusterId(e.target.value)} className="input">
                         <option value="">Select cluster...</option>
                         {clusterList.map(c => <option key={c.id} value={c.id}>{c.name} ({c.environment})</option>)}
                       </select>
+                      {clusterList.length === 0 && (
+                        <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                          No clusters found. <Link href="/clusters" className="text-[var(--accent)] hover:underline">Add a cluster</Link>
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">

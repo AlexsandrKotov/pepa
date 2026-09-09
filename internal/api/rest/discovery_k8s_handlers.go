@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -276,6 +277,11 @@ func getDeploymentInfo(ctx context.Context, kubeconfig, namespace, name, cluster
 	if err != nil {
 		return nil, fmt.Errorf("build rest config: %w", err)
 	}
+
+	// Use a short timeout — HelmReleases and other non-Deployment resources
+	// will 404 quickly, but an unreachable API server must not block the UI.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	apiPath := fmt.Sprintf("/apis/apps/v1/namespaces/%s/deployments/%s", namespace, name)
 	body, err := k8sRequestWithBody(ctx, restConfig, "GET", apiPath, "")
@@ -627,46 +633,55 @@ func getDeploymentEvents(ctx context.Context, kubeconfig, namespace, name string
 		return nil, fmt.Errorf("build rest config: %w", err)
 	}
 
-	// Query events for both Deployment and HelmRelease kinds
-	kinds := []string{"Deployment", "HelmRelease"}
+	// Short timeout — an unreachable API server must not block the UI.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Query events by name only (no kind filter) so we capture events for
+	// Deployments, HelmReleases, StatefulSets, Ingresses, Pods, etc.
+	eventsPath := fmt.Sprintf("/api/v1/namespaces/%s/events?fieldSelector=involvedObject.name=%s", namespace, name)
+	body, err := k8sRequestWithBody(ctx, restConfig, "GET", eventsPath, "")
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+
+	var eventsList map[string]interface{}
+	if err := json.Unmarshal(body, &eventsList); err != nil {
+		return nil, fmt.Errorf("decode events: %w", err)
+	}
+
 	var allEvents []map[string]interface{}
 	seen := make(map[string]bool)
 
-	for _, kind := range kinds {
-		eventsPath := fmt.Sprintf("/api/v1/namespaces/%s/events?fieldSelector=involvedObject.name=%s,involvedObject.kind=%s", namespace, name, kind)
-		body, err := k8sRequestWithBody(ctx, restConfig, "GET", eventsPath, "")
-		if err != nil {
-			continue // Kind may not exist, skip silently
-		}
-
-		var eventsList map[string]interface{}
-		if err := json.Unmarshal(body, &eventsList); err != nil {
+	items, _ := eventsList["items"].([]interface{})
+	for _, item := range items {
+		event, _ := item.(map[string]interface{})
+		if event == nil {
 			continue
 		}
-
-		items, _ := eventsList["items"].([]interface{})
-		for _, item := range items {
-			event, _ := item.(map[string]interface{})
-			if event == nil {
-				continue
-			}
-			// Deduplicate by reason+message+timestamp
-			key := fmt.Sprintf("%v|%v|%v", event["reason"], event["message"], event["lastTimestamp"])
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			simplified := map[string]interface{}{
-				"type":           event["type"],
-				"reason":         event["reason"],
-				"message":        event["message"],
-				"count":          event["count"],
-				"lastTimestamp":  event["lastTimestamp"],
-				"firstTimestamp": event["firstTimestamp"],
-			}
-			allEvents = append(allEvents, simplified)
+		// Deduplicate by reason+message+timestamp
+		key := fmt.Sprintf("%v|%v|%v", event["reason"], event["message"], event["lastTimestamp"])
+		if seen[key] {
+			continue
 		}
+		seen[key] = true
+		simplified := map[string]interface{}{
+			"type":           event["type"],
+			"reason":         event["reason"],
+			"message":        event["message"],
+			"count":          event["count"],
+			"lastTimestamp":  event["lastTimestamp"],
+			"firstTimestamp": event["firstTimestamp"],
+		}
+		allEvents = append(allEvents, simplified)
 	}
+
+	// Sort newest-first by lastTimestamp
+	sort.Slice(allEvents, func(i, j int) bool {
+		ti, _ := allEvents[i]["lastTimestamp"].(string)
+		tj, _ := allEvents[j]["lastTimestamp"].(string)
+		return ti > tj // RFC3339 strings sort chronologically
+	})
 
 	return allEvents, nil
 }

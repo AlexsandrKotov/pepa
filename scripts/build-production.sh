@@ -219,7 +219,11 @@ volumes:
     driver: local
   custom-plugins:
     driver: local
+  pepa-token-tmpfs:
+    driver: local
   nginx-logs:
+    driver: local
+  trivy-cache:  # Persistent cache for Trivy vulnerability DB (avoids re-downloading ~1GB on each restart)
     driver: local
 
 # ── Shared environment ──────────────────────────────────────
@@ -316,6 +320,11 @@ services:
     image: ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
     container_name: pepa-api
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    group_add:
+      - "0"
     environment:
       <<: *common-env
       SERVER_PORT: "8080"
@@ -324,6 +333,12 @@ services:
       LOG_LEVEL: info
       CUSTOM_PLUGIN_DIR: /custom-plugins
       CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
+      ANSIBLE_LOCAL_TEMP: /tmp/ansible
+      # Trivy vulnerability scanner cache — mounted as named volume.
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
+      TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+      TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
+      TRIVY_SKIP_DB_UPDATE: "false"
     ports:
       - "${API_PORT:-8088}:8080"
     healthcheck:
@@ -335,7 +350,11 @@ services:
     volumes:
       - ./plugins:/plugins:ro
       - custom-plugins:/custom-plugins
+      - ${HOST_HOME_DIR:-/root}:/host-home:ro
+      - ${HOST_HOME_DIR:-/root}:${HOST_HOME_DIR:-/root}:ro
       - ${MOUNT_DOCK_SOCKET:-/dev/null}:/var/run/docker.sock:ro
+      - pepa-token-tmpfs:/var/run/pepa
+      - trivy-cache:/tmp/trivy-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -344,9 +363,7 @@ services:
     networks:
       - pepa-net
     tmpfs:
-      - /tmp:size=256m,exec
-    security_opt:
-      - no-new-privileges:true
+      - /tmp:size=2g,exec
     deploy:
       resources:
         limits:

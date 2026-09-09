@@ -5,6 +5,7 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { discovery, type DiscoveredService, type DeploymentInfo } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
 import Tabs from '@/components/Tabs';
+import LogViewer from '@/components/LogViewer';
 
 interface ServiceManagementPanelProps {
   service: DiscoveredService;
@@ -21,10 +22,17 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState<string>('');
   const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
+  const [eventsError, setEventsError] = useState<string>('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [logLines, setLogLines] = useState(200);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({
+    images: false,
+    env: false,
+    resources: false,
+  });
 
   // Edit state
   const [editImage, setEditImage] = useState('');
@@ -33,11 +41,16 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
 
   const isMountedRef = useRef(true);
 
+  useEffect(() => {
+    return () => { isMountedRef.current = false; };
+  }, []);
+
   const loadDeployInfo = useCallback(async () => {
     if (isDockerContainer) return; // Not applicable for Docker containers
     setLoading(true);
     try {
       const info = await discovery.k8sGet(service.cluster, service.namespace, service.name);
+      if (!isMountedRef.current) return;
       setDeployInfo(info);
       setEditImage(info.image || '');
       setEditReplicas(info.replicas || 0);
@@ -47,7 +60,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     } catch (err) {
       console.error('Failed to load deployment info:', err);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }, [isDockerContainer, service.cluster, service.namespace, service.name]);
 
@@ -55,33 +68,35 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     loadDeployInfo();
   }, [loadDeployInfo]);
 
-  const loadLogs = useCallback(async () => {
+  const loadLogs = useCallback(async (lines?: number) => {
     setLoading(true);
     try {
+      const count = lines ?? logLines;
       if (isDockerContainer) {
-        const data = await discovery.dockerContainerLogs(service.cluster, service.name, 200);
-        setLogs(data.logs || 'No logs available');
+        const data = await discovery.dockerContainerLogs(service.cluster, service.name, count);
+        if (isMountedRef.current) setLogs(data.logs || 'No logs available');
       } else {
-        const data = await discovery.k8sLogs(service.cluster, service.namespace, service.name, 200);
-        setLogs(data.logs || 'No logs available');
+        const data = await discovery.k8sLogs(service.cluster, service.namespace, service.name, count);
+        if (isMountedRef.current) setLogs(data.logs || 'No logs available');
       }
     } catch (err) {
-      setLogs(`Error loading logs: ${err}`);
+      if (isMountedRef.current) setLogs(`Error loading logs: ${err}`);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
-  }, [isDockerContainer, service.cluster, service.name, service.namespace]);
+  }, [isDockerContainer, service.cluster, service.name, service.namespace, logLines]);
 
   const loadEvents = useCallback(async () => {
     if (isDockerContainer) return; // Not applicable for Docker containers
     setLoading(true);
+    setEventsError('');
     try {
       const data = await discovery.k8sEvents(service.cluster, service.namespace, service.name);
-      setEvents(data.events || []);
+      if (isMountedRef.current) setEvents(data.events || []);
     } catch (err) {
-      console.error('Failed to load events:', err);
+      if (isMountedRef.current) setEventsError(err instanceof Error ? err.message : 'Failed to load events');
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }, [isDockerContainer, service.cluster, service.namespace, service.name]);
 
@@ -179,6 +194,23 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
     setEditEnv(newEnv);
   };
 
+  const toggleSection = (key: string) => setCollapsedSections(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const copyToClipboard = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard.writeText(text).catch(() => {});
+    } else if (typeof document !== 'undefined') {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try { document.execCommand('copy'); } finally { document.body.removeChild(ta); }
+    }
+  };
+
   // ESC to close
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') onClose();
@@ -201,7 +233,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/30 z-[110] transition-opacity" onClick={onClose} />
       {/* Slide-out Panel */}
-      <div className="fixed top-0 right-0 bottom-0 w-full max-w-xl bg-[var(--surface)] border-l border-[var(--border)] z-[120] shadow-2xl flex flex-col animate-slide-in-right">
+      <div className="fixed top-0 right-0 bottom-0 w-full max-w-2xl bg-[var(--surface)] border-l border-[var(--border)] z-[120] shadow-2xl flex flex-col animate-slide-in-right">
         {/* Health indicator bar */}
         <div className={`h-1 w-full ${healthColor}`} />
         {/* Header */}
@@ -339,8 +371,6 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
                 {actionLoading === 'update' ? 'Saving...' : '💾 Save Changes'}
               </button>
             </div>
-          ) : loading && tab === 'overview' ? (
-            <p className="text-[13px] text-[var(--text-secondary)]">Loading...</p>
           ) : tab === 'overview' && isDockerContainer ? (
             <div className="space-y-5">
               {/* Docker Container Info */}
@@ -413,53 +443,103 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
 
               {/* Images */}
               <div>
-                <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Images</h3>
-                <div className="space-y-1">
-                  {(deployInfo.images || [deployInfo.image]).map((img, i) => (
-                    <div key={i} className="text-[11px] font-mono bg-[var(--border-light)] px-3 py-1.5 rounded text-[var(--text-secondary)] truncate">
-                      {img}
-                    </div>
-                  ))}
-                </div>
+                <button
+                  onClick={() => toggleSection('images')}
+                  className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2 hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <svg className={`w-3 h-3 transition-transform ${collapsedSections.images ? '-rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                  Images
+                  <span className="text-[10px] font-normal normal-case text-[var(--text-tertiary)] ml-1">{(deployInfo.images || [deployInfo.image]).length}</span>
+                </button>
+                {!collapsedSections.images && (
+                  <div className="space-y-1">
+                    {(deployInfo.images || [deployInfo.image]).map((img, i) => (
+                      <div key={i} className="group flex items-center gap-2 text-[11px] font-mono bg-[var(--border-light)] px-3 py-1.5 rounded text-[var(--text-secondary)]">
+                        <span className="truncate flex-1">{img}</span>
+                        <button
+                          onClick={() => copyToClipboard(img)}
+                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded hover:bg-[var(--border)] transition-all"
+                          title="Copy image name"
+                        >
+                          <svg className="w-3 h-3 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Environment Variables */}
               {deployInfo.env && Object.keys(deployInfo.env).length > 0 && (
                 <div>
-                  <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Environment Variables</h3>
-                  <div className="bg-[var(--border-light)] rounded-lg overflow-hidden">
-                    {Object.entries(deployInfo.env).map(([key, value]) => (
-                      <div key={key} className="flex border-b border-[var(--border)] last:border-b-0">
-                        <span className="text-[11px] font-mono font-medium text-[var(--text-primary)] px-3 py-1.5 bg-[var(--surface)] border-r border-[var(--border)] min-w-[150px]">{key}</span>
-                        <span className="text-[11px] font-mono text-[var(--text-secondary)] px-3 py-1.5 truncate">{value}</span>
-                      </div>
-                    ))}
-                  </div>
+                  <button
+                    onClick={() => toggleSection('env')}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2 hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    <svg className={`w-3 h-3 transition-transform ${collapsedSections.env ? '-rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                    Environment Variables
+                    <span className="text-[10px] font-normal normal-case text-[var(--text-tertiary)] ml-1">{Object.keys(deployInfo.env).length}</span>
+                  </button>
+                  {!collapsedSections.env && (
+                    <div className="bg-[var(--border-light)] rounded-lg overflow-hidden">
+                      {Object.entries(deployInfo.env).map(([key, value]) => (
+                        <div key={key} className="group flex border-b border-[var(--border)] last:border-b-0">
+                          <span className="text-[11px] font-mono font-medium text-[var(--text-primary)] px-3 py-1.5 bg-[var(--surface)] border-r border-[var(--border)] min-w-[150px]">{key}</span>
+                          <span className="text-[11px] font-mono text-[var(--text-secondary)] px-3 py-1.5 truncate flex-1">{value}</span>
+                          <button
+                            onClick={() => copyToClipboard(`${key}=${value}`)}
+                            className="opacity-0 group-hover:opacity-100 shrink-0 px-2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-all"
+                            title="Copy"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* Resources */}
               {(deployInfo.resource_limits || deployInfo.resource_requests) && (
                 <div>
-                  <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2">Resources</h3>
-                  <div className="grid grid-cols-2 gap-3">
-                    {deployInfo.resource_requests && (
-                      <div className="bg-[var(--border-light)] rounded-lg p-3">
-                        <span className="text-[10px] text-[var(--text-tertiary)] uppercase">Requests</span>
-                        {Object.entries(deployInfo.resource_requests).map(([k, v]) => (
-                          <div key={k} className="text-[11px] font-mono text-[var(--text-secondary)]">{k}: {v}</div>
-                        ))}
-                      </div>
-                    )}
-                    {deployInfo.resource_limits && (
-                      <div className="bg-[var(--border-light)] rounded-lg p-3">
-                        <span className="text-[10px] text-[var(--text-tertiary)] uppercase">Limits</span>
-                        {Object.entries(deployInfo.resource_limits).map(([k, v]) => (
-                          <div key={k} className="text-[11px] font-mono text-[var(--text-secondary)]">{k}: {v}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    onClick={() => toggleSection('resources')}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-2 hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    <svg className={`w-3 h-3 transition-transform ${collapsedSections.resources ? '-rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                    Resources
+                  </button>
+                  {!collapsedSections.resources && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {deployInfo.resource_requests && (
+                        <div className="bg-[var(--border-light)] rounded-lg p-3">
+                          <span className="text-[10px] text-[var(--text-tertiary)] uppercase">Requests</span>
+                          {Object.entries(deployInfo.resource_requests).map(([k, v]) => (
+                            <div key={k} className="text-[11px] font-mono text-[var(--text-secondary)]">{k}: {v}</div>
+                          ))}
+                        </div>
+                      )}
+                      {deployInfo.resource_limits && (
+                        <div className="bg-[var(--border-light)] rounded-lg p-3">
+                          <span className="text-[10px] text-[var(--text-tertiary)] uppercase">Limits</span>
+                          {Object.entries(deployInfo.resource_limits).map(([k, v]) => (
+                            <div key={k} className="text-[11px] font-mono text-[var(--text-secondary)]">{k}: {v}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -503,24 +583,14 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
               )}
             </div>
           ) : tab === 'logs' ? (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-[12px] font-semibold text-[var(--text-secondary)]">Container Logs</h3>
-                <button
-                  onClick={loadLogs}
-                  className="text-[11px] text-[var(--accent)] hover:underline"
-                >
-                  🔄 Refresh
-                </button>
-              </div>
-              {loading ? (
-                <p className="text-[13px] text-[var(--text-secondary)]">Loading logs...</p>
-              ) : (
-                <pre className="bg-[#1e1e2e] text-[#cdd6f4] rounded-lg p-4 text-[11px] font-mono overflow-auto max-h-[500px] whitespace-pre-wrap">
-                  {logs || 'No logs available'}
-                </pre>
-              )}
-            </div>
+            <LogViewer
+              logs={logs}
+              loading={loading}
+              onRefresh={() => loadLogs()}
+              onLineCountChange={(n) => { setLogLines(n); loadLogs(n); }}
+              currentLines={logLines}
+              title="Container Logs"
+            />
           ) : tab === 'events' ? (
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -536,6 +606,10 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
               </div>
               {isDockerContainer ? (
                 <p className="text-[13px] text-[var(--text-tertiary)]">Events are not available for Docker containers</p>
+              ) : eventsError ? (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-[12px] text-red-500">
+                  Failed to load events: {eventsError}
+                </div>
               ) : loading ? (
                 <p className="text-[13px] text-[var(--text-secondary)]">Loading events...</p>
               ) : events.length === 0 ? (

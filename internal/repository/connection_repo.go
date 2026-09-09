@@ -31,8 +31,9 @@ const (
 	ConnectionSecret       ConnectionType = "secret"
 	ConnectionNotification ConnectionType = "notification"
 	ConnectionSonarQube    ConnectionType = "sonarqube"
-	ConnectionArgoCD       ConnectionType = "argocd"
-	ConnectionFluxCD       ConnectionType = "fluxcd"
+	ConnectionKubernetes   ConnectionType = "kubernetes"
+	ConnectionArgoCD       ConnectionType = "argocd"   // legacy — use ConnectionKubernetes for new connections
+	ConnectionFluxCD       ConnectionType = "fluxcd"   // legacy — use ConnectionKubernetes for new connections
 )
 
 // Connection represents an external service connection.
@@ -146,6 +147,47 @@ func (r *ConnectionRepository) Get(ctx context.Context, id uuid.UUID, tenantID u
 			return nil, fmt.Errorf("connection not found: %s", id)
 		}
 		return nil, fmt.Errorf("get connection: %w", err)
+	}
+	if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
+		c.OwnerID = &parsed
+	}
+	_ = json.Unmarshal(configJSON, &c.Config)
+	_ = json.Unmarshal(labelsJSON, &c.Labels)
+	if c.Config == nil {
+		c.Config = map[string]any{}
+	}
+	if c.Labels == nil {
+		c.Labels = map[string]string{}
+	}
+	return &c, nil
+}
+
+// GetByClusterID returns the kubernetes connection linked to a cluster (via labels.cluster_id),
+// or nil if none exists.
+func (r *ConnectionRepository) GetByClusterID(ctx context.Context, clusterID uuid.UUID) (*Connection, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+		       type, name, COALESCE(description,''),
+		       COALESCE(config,'{}'::jsonb), status, last_check_at,
+		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       COALESCE(fallback_to_admin, true),
+		       created_at, updated_at
+		FROM connections
+		WHERE labels->>'cluster_id' = $1
+		LIMIT 1
+	`, clusterID.String())
+
+	var c Connection
+	var configJSON, labelsJSON []byte
+	var ownerIDRaw string
+	if err := row.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
+		&c.Type, &c.Name, &c.Description,
+		&configJSON, &c.Status, &c.LastCheckAt,
+		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get connection by cluster_id: %w", err)
 	}
 	if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
 		c.OwnerID = &parsed

@@ -418,6 +418,33 @@ func buildConfigResolver(comp *bootstrap.Components) workflow.ConfigResolver {
 					}
 				}
 			}
+			// Fallback: for fluxcd/argocd plugins, also check kubernetes connections
+			if len(merged) == 0 && (connType == "fluxcd" || connType == "argocd") {
+				if kConns, err := comp.ConnectionRepo.List(ctx, tenantID, "kubernetes"); err == nil && len(kConns) > 0 {
+					if len(kConns) > 1 {
+						slog.Warn("multiple kubernetes connections; worker config resolver picks first — specify explicit connection for deterministic resolution",
+							"tenant_id", tenantID, "plugin", pluginName, "count", len(kConns))
+					}
+					conn := &kConns[0]
+					decrypted, err := comp.ConnectionRepo.GetDecrypted(ctx, conn.ID, tenantID)
+					if err == nil && decrypted != nil {
+						for k, v := range decrypted.Config {
+							switch val := v.(type) {
+							case string:
+								merged[k] = val
+							case float64:
+								merged[k] = fmt.Sprintf("%v", val)
+							case bool:
+								merged[k] = fmt.Sprintf("%v", val)
+							default:
+								if b, err := json.Marshal(val); err == nil {
+									merged[k] = string(b)
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// 2. Override with plugin's own stored config from DB (decrypted)

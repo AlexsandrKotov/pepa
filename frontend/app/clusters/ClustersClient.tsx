@@ -395,6 +395,11 @@ export default function ClustersClient() {
                         ArgoCD
                       </span>
                     )}
+                    {cluster.labels?.auto_created === 'true' && (
+                      <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" title="Auto-created from a Connection">
+                        🔗 Connection
+                      </span>
+                    )}
                   </div>
                   {cluster.description && (
                     <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate max-w-md">{cluster.description}</p>

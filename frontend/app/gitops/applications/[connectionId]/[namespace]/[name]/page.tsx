@@ -32,6 +32,7 @@ export default function ApplicationDetailPage() {
   const [history, setHistory] = useState<GitOpsHistoryEntry[]>([]);
   const [tree, setTree] = useState<GitOpsResourceNode[]>([]);
   const [events, setEvents] = useState<Record<string, unknown>[]>([]);
+  const [eventsError, setEventsError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<Tab>('overview');
@@ -61,10 +62,15 @@ export default function ApplicationDetailPage() {
         const res = await gitopsApplications.tree(connectionId, namespace, name);
         setTree((res as unknown as { nodes?: GitOpsResourceNode[] })?.nodes || []);
       } else if (t === 'events') {
+        setEventsError('');
         const res = await gitopsApplications.events(connectionId, namespace, name);
         setEvents((res.events || []) as Record<string, unknown>[]);
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      if (t === 'events') {
+        setEventsError(err instanceof Error ? err.message : 'Failed to load events');
+      }
+    }
   }, [connectionId, namespace, name]);
 
   useEffect(() => { loadTab(tab); }, [tab, loadTab]);
@@ -239,7 +245,11 @@ export default function ApplicationDetailPage() {
           </div>
         ) : tab === 'events' ? (
           <div className="card overflow-hidden">
-            {events.length === 0 ? (
+            {eventsError ? (
+              <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-lg m-4 text-[12px] text-red-500">
+                Failed to load events: {eventsError}
+              </div>
+            ) : events.length === 0 ? (
               <div className="p-8 text-center text-[13px] text-[var(--text-tertiary)]">No events found</div>
             ) : (
               <div className="divide-y divide-[var(--border-light)]">

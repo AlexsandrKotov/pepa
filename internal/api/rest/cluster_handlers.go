@@ -92,14 +92,19 @@ func resolveKubeconfigForUser(ctx context.Context, deps Dependencies, cluster *r
 func listClusters(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Cluster == nil {
+			slog.Warn("listClusters: cluster repository not available")
 			c.JSON(http.StatusOK, gin.H{"clusters": []interface{}{}, "total": 0})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
 		items, err := deps.Repos.Cluster.List(c.Request.Context(), tenantID)
 		if err != nil {
+			slog.Error("listClusters: query failed", "tenant_id", tenantID, "error", err)
 			respondInternalError(c, err)
 			return
+		}
+		if len(items) == 0 {
+			slog.Info("listClusters: no clusters found", "tenant_id", tenantID)
 		}
 
 		// Return cached data from DB immediately. Refresh cluster health in background (parallel).
@@ -350,6 +355,14 @@ func deleteCluster(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
+
+		// Clean up auto-created kubernetes connection linked to this cluster
+		if deps.Repos.Connection != nil {
+			if conn, _ := deps.Repos.Connection.GetByClusterID(c.Request.Context(), id); conn != nil {
+				_ = deps.Repos.Connection.Delete(c.Request.Context(), conn.ID)
+			}
+		}
+
 		logAudit(deps, c, "delete", "cluster", id.String(), nil, nil)
 		c.JSON(http.StatusOK, gin.H{"message": "cluster deleted"})
 	}
@@ -463,9 +476,15 @@ func uploadKubeconfig(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Detect GitOps engines (FluxCD/ArgoCD) after saving kubeconfig
+		// Auto-create a linked kubernetes connection so the cluster also appears
+		// in the Connections page without manual duplication.
 		cluster, clusterErr := deps.Repos.Cluster.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if clusterErr == nil && cluster != nil {
+			autoCreateConnectionFromCluster(deps, c.Request.Context(), cluster, req.Kubeconfig)
+		}
+
+		// Detect GitOps engines (FluxCD/ArgoCD) after saving kubeconfig
+		if cluster != nil {
 			detectCtx, detectCancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 			defer detectCancel()
 			if client, clientErr := clusterK8sClient(cluster, req.Kubeconfig); clientErr == nil {

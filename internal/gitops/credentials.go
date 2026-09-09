@@ -70,7 +70,7 @@ func (r *CredentialResolver) ResolveArgo(ctx context.Context, opts ResolveOpts) 
 		if err != nil {
 			return nil, fmt.Errorf("get connection %s: %w", *opts.ConnectionID, err)
 		}
-		if conn.Type != repository.ConnectionArgoCD {
+		if conn.Type != repository.ConnectionArgoCD && conn.Type != repository.ConnectionKubernetes {
 			return nil, fmt.Errorf("connection %s is not an ArgoCD connection (type: %s)", *opts.ConnectionID, conn.Type)
 		}
 		return r.argocredsFromConnection(ctx, conn)
@@ -89,6 +89,17 @@ func (r *CredentialResolver) ResolveArgo(ctx context.Context, opts ResolveOpts) 
 	for i := range conns {
 		if conns[i].Status == "connected" {
 			connected = append(connected, &conns[i])
+		}
+	}
+	// 5b. Also check kubernetes connections (unified type)
+	if len(connected) == 0 {
+		kConns, kErr := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionKubernetes))
+		if kErr == nil {
+			for i := range kConns {
+				if kConns[i].Status == "connected" {
+					connected = append(connected, &kConns[i])
+				}
+			}
 		}
 	}
 	if len(connected) == 0 {
@@ -116,7 +127,7 @@ func (r *CredentialResolver) ResolveFlux(ctx context.Context, opts ResolveOpts) 
 		if err != nil {
 			return nil, fmt.Errorf("get connection %s: %w", *opts.ConnectionID, err)
 		}
-		if conn.Type != repository.ConnectionFluxCD {
+		if conn.Type != repository.ConnectionFluxCD && conn.Type != repository.ConnectionKubernetes {
 			return nil, fmt.Errorf("connection %s is not a FluxCD connection (type: %s)", *opts.ConnectionID, conn.Type)
 		}
 		return r.fluxcredsFromConnection(ctx, conn)
@@ -133,6 +144,17 @@ func (r *CredentialResolver) ResolveFlux(ctx context.Context, opts ResolveOpts) 
 	for i := range conns {
 		if conns[i].Status == "connected" {
 			connected = append(connected, &conns[i])
+		}
+	}
+	// 5b. Also check kubernetes connections (unified type)
+	if len(connected) == 0 {
+		kConns, kErr := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionKubernetes))
+		if kErr == nil {
+			for i := range kConns {
+				if kConns[i].Status == "connected" {
+					connected = append(connected, &kConns[i])
+				}
+			}
 		}
 	}
 	if len(connected) == 0 {

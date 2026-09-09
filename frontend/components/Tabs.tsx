@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect, useCallback, useState, type KeyboardEvent } from 'react';
+import { useRef, useEffect, useCallback, type KeyboardEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import BrandIcon from './BrandIcon';
@@ -21,7 +21,7 @@ export interface TabsProps {
   activeKey: string;
   /** Called when a tab is clicked. Not needed when tabs use `href`. */
   onChange?: (key: string) => void;
-  /** 'underline' = flat border-b accent (default), 'rounded' = rounded-t pill style */
+  /** 'underline' = highlighted pill with accent underline (default), 'rounded' = rounded pill style */
   variant?: 'underline' | 'rounded';
   /** 'md' = default page tabs, 'sm' = compact for panels / modals */
   size?: 'sm' | 'md';
@@ -31,7 +31,8 @@ export interface TabsProps {
 /**
  * Unified tab navigation component used across all pages.
  * Supports icons (BrandIcon), numeric badges, two visual variants,
- * keyboard arrow-key navigation, animated underline indicator, and overflow scrolling.
+ * keyboard arrow-key navigation, and overflow scrolling.
+ * Active tab is highlighted with a translucent background — no JS measurements needed.
  */
 export default function Tabs({
   tabs,
@@ -41,20 +42,12 @@ export default function Tabs({
   size = 'md',
   className = '',
 }: TabsProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const activeRef = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
   const router = useRouter();
-  const [indicator, setIndicator] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+  const activeRef = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
 
-  // Compute indicator position from the active tab element
+  // Focus and scroll-into-view for the active tab (keyboard a11y)
   useEffect(() => {
-    if (activeRef.current && containerRef.current) {
-      const containerRect = containerRef.current.getBoundingClientRect();
-      const tabRect = activeRef.current.getBoundingClientRect();
-      setIndicator({
-        left: tabRect.left - containerRect.left + containerRef.current.scrollLeft,
-        width: tabRect.width,
-      });
+    if (activeRef.current) {
       activeRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
       activeRef.current.focus();
     }
@@ -82,20 +75,19 @@ export default function Tabs({
 
   const isSm = size === 'sm';
   const padX = isSm ? 'px-3' : 'px-4';
-  const padY = isSm ? 'py-1.5' : 'py-2';
+  const padY = isSm ? 'py-1.5' : 'py-2.5';
   const textSize = isSm ? 'text-[12px]' : 'text-[13px]';
 
   const activeClasses = variant === 'rounded'
-    ? 'text-[var(--accent)] bg-[var(--surface)]'
-    : 'text-[var(--accent)]';
+    ? 'text-[var(--accent)] bg-[var(--surface)] shadow-sm'
+    : 'text-[var(--accent)] bg-[var(--accent)]/10 border-b-2 border-[var(--accent)]';
 
   const inactiveClasses = variant === 'rounded'
     ? 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
-    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]';
+    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--accent)]/5 border-b-2 border-transparent';
 
   return (
     <div
-      ref={containerRef}
       role="tablist"
       aria-orientation="horizontal"
       onKeyDown={handleKeyDown}
@@ -103,7 +95,7 @@ export default function Tabs({
     >
       {tabs.map(t => {
         const isActive = t.key === activeKey;
-        const baseClass = `${padX} ${padY} ${textSize} font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 rounded-t ${isActive ? activeClasses : inactiveClasses}`;
+        const baseClass = `${padX} ${padY} ${textSize} font-medium whitespace-nowrap transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]/30 rounded-t-lg ${isActive ? activeClasses : inactiveClasses}`;
 
         const content = (
           <>
@@ -114,7 +106,7 @@ export default function Tabs({
             )}
             <span>{t.label}</span>
             {t.badge !== undefined && t.badge > 0 && (
-              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--border-light)] text-[var(--text-tertiary)]">
+              <span className={`ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'bg-[var(--border-light)] text-[var(--text-tertiary)]'}`}>
                 {t.badge}
               </span>
             )}
@@ -145,18 +137,12 @@ export default function Tabs({
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
             onClick={() => onChange?.(t.key)}
-            className={`${baseClass} inline-flex items-center`}
+            className={`${baseClass} inline-flex items-center ${isActive ? 'font-semibold' : ''}`}
           >
             {content}
           </button>
         );
       })}
-
-      {/* Animated underline indicator */}
-      <span
-        className="absolute bottom-0 h-[2px] bg-[var(--accent)] transition-[left,width] duration-200 ease-out"
-        style={{ left: indicator.left, width: indicator.width }}
-      />
     </div>
   );
 }

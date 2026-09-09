@@ -18,8 +18,7 @@ const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; col
   { type: 'storage', label: 'Storage', icon: 'storage', color: '#F59E0B', description: 'Object storage (S3, MinIO)', requiredPlugins: ['s3'] },
   { type: 'proxmox', label: 'Proxmox VE', icon: 'proxmox', color: '#E57000', description: 'Virtual machines and LXC containers', requiredPlugins: ['proxmox'] },
   { type: 'vmware', label: 'VMware vCenter', icon: 'vmware', color: '#607D8B', description: 'ESXi virtual machines via vCenter', requiredPlugins: ['vmware'] },
-  { type: 'argocd', label: 'ArgoCD', icon: 'argocd', color: '#EF7B4D', description: 'GitOps continuous delivery', requiredPlugins: ['argocd'] },
-  { type: 'fluxcd', label: 'FluxCD', icon: 'fluxcd', color: '#5468D6', description: 'GitOps Kubernetes operator', requiredPlugins: ['fluxcd'] },
+  { type: 'kubernetes', label: 'Kubernetes', icon: 'kubernetes', color: '#326CE5', description: 'Kubernetes cluster kubeconfig for GitOps and service discovery' },
   { type: 'notification', label: 'Notifications', icon: 'slack', color: '#E01E5A', description: 'Email, Webhook, Slack, Telegram, Microsoft Teams' },
   { type: 'sonarqube', label: 'SonarQube', icon: 'sonarqube', color: '#4E9BCD', description: 'Code quality and security analysis', requiredPlugins: ['sonarqube'] },
 ];
@@ -40,6 +39,7 @@ const TYPE_REQUIREMENTS: Record<ConnectionType, string> = {
   storage: 'You need an S3-compatible endpoint plus access/secret keys (AWS S3, MinIO).',
   proxmox: 'You need the Proxmox VE API URL (e.g. https://proxmox.local:8006), an API Token ID (user@realm!tokenname), and the Token Secret. Create an API token in Proxmox under Datacenter → Permissions → API Tokens.',
   vmware: 'You need the vCenter Server URL (e.g. https://vcenter.example.com), a username (e.g. administrator@vsphere.local), and the password. Ensure the account has sufficient privileges to manage virtual machines.',
+  kubernetes: 'Provide a kubeconfig to connect to your Kubernetes cluster. PEPA will auto-detect FluxCD and ArgoCD GitOps engines, discover services, and monitor cluster health.',
   argocd: 'You need your ArgoCD server URL (e.g. https://argocd.example.com) and an auth token with appropriate permissions. Create a token in ArgoCD under Settings → Accounts. Alternatively, provide a kubeconfig for CRD mode.',
   fluxcd: 'You need a kubeconfig with permissions to manage FluxCD resources (Kustomization, HelmRelease, GitRepository). FluxCD operates in CRD mode only.',
   notification: 'Configure a notification service to receive deployment alerts and workflow notifications. Choose Email (SMTP server), Webhook (any HTTP endpoint), Slack (webhook URL or bot token), Telegram (bot token + chat ID), or Microsoft Teams (incoming webhook URL).',
@@ -68,6 +68,7 @@ const VAULT_FIELDS: Record<string, string[]> = {
   storage: ['access_key', 'secret_key'],
   proxmox: ['token_secret', 'ssh_private_key'],
   vmware: ['password'],
+  kubernetes: ['kubeconfig'],
   argocd: ['auth_token'],
   fluxcd: ['kubeconfig'],
   notification: ['bot_token', 'webhook_url'],
@@ -936,59 +937,53 @@ function AddConnectionModal({
             </>
           )}
 
-          {selectedType === 'argocd' && (
+          {(selectedType === 'kubernetes' || selectedType === 'argocd' || selectedType === 'fluxcd') && (
             <>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">ArgoCD Server URL</label>
-                <input
-                  type="url"
-                  value={config.server_url || ''}
-                  onChange={e => setConfig({ ...config, server_url: e.target.value })}
-                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
-                  placeholder="https://argocd.example.com"
+              {selectedType === 'argocd' && (
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">ArgoCD Server URL</label>
+                  <input
+                    type="url"
+                    value={config.server_url || ''}
+                    onChange={e => setConfig({ ...config, server_url: e.target.value })}
+                    className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                    placeholder="https://argocd.example.com"
+                  />
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">The base URL of your ArgoCD server. Leave empty for CRD mode (kubeconfig only).</p>
+                </div>
+              )}
+              {(selectedType === 'argocd' || selectedType === 'kubernetes') && (
+                <VaultInput
+                  label="Auth Token"
+                  field="auth_token"
+                  value={config.auth_token || ''}
+                  onChange={v => setConfig({ ...config, auth_token: v })}
+                  vaultRef={vaultRefs.auth_token}
+                  onOpenVault={onOpenVaultPicker}
+                  onRemoveVault={onRemoveVault}
+                  placeholder="Optional API token"
                 />
-                <p className="text-xs text-[var(--text-tertiary)] mt-1">The base URL of your ArgoCD server. Leave empty for CRD mode (kubeconfig only).</p>
-              </div>
-              <VaultInput
-                label="Auth Token"
-                field="auth_token"
-                value={config.auth_token || ''}
-                onChange={v => setConfig({ ...config, auth_token: v })}
-                vaultRef={vaultRefs.auth_token}
-                onOpenVault={onOpenVaultPicker}
-                onRemoveVault={onRemoveVault}
-                placeholder="ArgoCD API token"
-              />
-              <p className="text-xs text-[var(--text-tertiary)] -mt-2">
-                Create a token in ArgoCD under Settings → Accounts. Required for REST API mode.
-              </p>
+              )}
+              {selectedType === 'argocd' && (
+                <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+                  Create a token in ArgoCD under Settings → Accounts. Required for REST API mode.
+                </p>
+              )}
               <div>
-                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Kubeconfig (CRD mode)</label>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Kubeconfig {selectedType === 'kubernetes' ? '*' : '(CRD mode)'}</label>
                 <textarea
                   value={config.kubeconfig || ''}
                   onChange={e => setConfig({ ...config, kubeconfig: e.target.value })}
-                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent font-mono text-xs"
-                  placeholder="apiVersion: v1&#10;kind: Config&#10;..."
-                  rows={4}
-                />
-                <p className="text-xs text-[var(--text-tertiary)] mt-1">Provide a kubeconfig for CRD mode (direct Kubernetes API access). Leave Server URL empty to use CRD mode exclusively.</p>
-              </div>
-            </>
-          )}
-
-          {selectedType === 'fluxcd' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Kubeconfig *</label>
-                <textarea
-                  value={config.kubeconfig || ''}
-                  onChange={e => setConfig({ ...config, kubeconfig: e.target.value })}
-                  required
+                  required={selectedType === 'kubernetes'}
                   className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent font-mono text-xs"
                   placeholder="apiVersion: v1&#10;kind: Config&#10;..."
                   rows={6}
                 />
-                <p className="text-xs text-[var(--text-tertiary)] mt-1">FluxCD operates in CRD mode only. Provide a kubeconfig with permissions to manage FluxCD resources (Kustomization, HelmRelease, GitRepository).</p>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  {selectedType === 'kubernetes'
+                    ? 'Provide a kubeconfig to connect to your Kubernetes cluster. PEPA will auto-detect FluxCD and ArgoCD GitOps engines.'
+                    : 'Provide a kubeconfig for CRD mode (direct Kubernetes API access). Leave Server URL empty to use CRD mode exclusively.'}
+                </p>
               </div>
             </>
           )}

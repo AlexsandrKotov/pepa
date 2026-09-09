@@ -7,10 +7,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/gitops"
 	"github.com/pepa/pepa/internal/provider"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Client provides a unified interface for GitOps engine operations.
@@ -498,16 +503,18 @@ func (c *Client) History(ctx context.Context, ref AppRef) ([]HistoryEntry, error
 		}
 	}
 
-	// Try FluxCD
+	// Try FluxCD — attempt both Kustomization and HelmRelease kinds
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
-		params := map[string]interface{}{"name": ref.AppName, "namespace": ref.Namespace, "kind": "Kustomization"}
-		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "history", mustMarshal(params), config)
-		if err == nil && resp.Success {
-			var entries []HistoryEntry
-			if json.Unmarshal(resp.Output, &entries) == nil {
-				return entries, nil
+		for _, kind := range []string{"Kustomization", "HelmRelease"} {
+			params := map[string]interface{}{"name": ref.AppName, "namespace": ref.Namespace, "kind": kind}
+			resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "history", mustMarshal(params), config)
+			if err == nil && resp.Success {
+				var entries []HistoryEntry
+				if json.Unmarshal(resp.Output, &entries) == nil && len(entries) > 0 {
+					return entries, nil
+				}
 			}
 		}
 	}
@@ -542,17 +549,18 @@ func (c *Client) ResourceTree(ctx context.Context, ref AppRef) ([]ResourceNode, 
 		}
 	}
 
-	// Try FluxCD
+	// Try FluxCD — attempt both Kustomization and HelmRelease kinds
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
-		params := map[string]interface{}{"name": ref.AppName, "namespace": ref.Namespace, "kind": "Kustomization"}
-		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "resource_tree", mustMarshal(params), config)
-		if err == nil && resp.Success {
-			// FluxCD returns []ResourceNode directly
-			var nodes []ResourceNode
-			if json.Unmarshal(resp.Output, &nodes) == nil && len(nodes) > 0 {
-				return nodes, nil
+		for _, kind := range []string{"Kustomization", "HelmRelease"} {
+			params := map[string]interface{}{"name": ref.AppName, "namespace": ref.Namespace, "kind": kind}
+			resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "resource_tree", mustMarshal(params), config)
+			if err == nil && resp.Success {
+				var nodes []ResourceNode
+				if json.Unmarshal(resp.Output, &nodes) == nil && len(nodes) > 0 {
+					return nodes, nil
+				}
 			}
 		}
 	}
@@ -580,18 +588,20 @@ func (c *Client) Refresh(ctx context.Context, ref AppRef, hard bool) error {
 		}
 	}
 
-	// Try FluxCD — trigger reconcile annotation
+	// Try FluxCD — trigger reconcile for both Kustomization and HelmRelease
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
-		params := map[string]interface{}{
+		baseParams := map[string]interface{}{
 			"name":      ref.AppName,
 			"namespace": ref.Namespace,
-			"kind":      "Kustomization",
 		}
-		_, err := c.registry.ExecuteAction(ctx, "fluxcd", "reconcile_kustomization", mustMarshal(params), config)
-		if err == nil {
-			return nil
+		// Try reconcile_kustomization first, then reconcile_helmrelease
+		for _, action := range []string{"reconcile_kustomization", "reconcile_helmrelease"} {
+			_, err := c.registry.ExecuteAction(ctx, "fluxcd", action, mustMarshal(baseParams), config)
+			if err == nil {
+				return nil
+			}
 		}
 	}
 
@@ -623,20 +633,21 @@ func (c *Client) Sync(ctx context.Context, ref AppRef, opts SyncOptions) error {
 		return fmt.Errorf("argocd sync failed: %w", err)
 	}
 
-	// Try FluxCD — trigger reconcile
+	// Try FluxCD — trigger reconcile for both Kustomization and HelmRelease
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
-		params := map[string]interface{}{
+		baseParams := map[string]interface{}{
 			"name":      ref.AppName,
 			"namespace": ref.Namespace,
-			"kind":      "Kustomization",
 		}
-		_, err := c.registry.ExecuteAction(ctx, "fluxcd", "reconcile_kustomization", mustMarshal(params), config)
-		if err == nil {
-			return nil
+		for _, action := range []string{"reconcile_kustomization", "reconcile_helmrelease"} {
+			_, err := c.registry.ExecuteAction(ctx, "fluxcd", action, mustMarshal(baseParams), config)
+			if err == nil {
+				return nil
+			}
 		}
-		return fmt.Errorf("fluxcd reconcile failed: %w", err)
+		return fmt.Errorf("fluxcd reconcile failed for %s", ref)
 	}
 
 	return fmt.Errorf("sync not available for %s", ref)
@@ -702,7 +713,7 @@ func (c *Client) SetAutoSync(ctx context.Context, ref AppRef, enabled bool, prun
 		}
 	}
 
-	// Try FluxCD — use suspend/resume
+	// Try FluxCD — use suspend/resume for both resource types
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
@@ -710,14 +721,16 @@ func (c *Client) SetAutoSync(ctx context.Context, ref AppRef, enabled bool, prun
 		if !enabled {
 			action = "suspend"
 		}
-		params := map[string]interface{}{
-			"name":      ref.AppName,
-			"namespace": ref.Namespace,
-			"kind":      "Kustomization",
-		}
-		_, err := c.registry.ExecuteAction(ctx, "fluxcd", action, mustMarshal(params), config)
-		if err == nil {
-			return nil
+		for _, resource := range []string{"kustomization", "helmrelease"} {
+			params := map[string]interface{}{
+				"name":      ref.AppName,
+				"namespace": ref.Namespace,
+				"resource":  resource,
+			}
+			_, err := c.registry.ExecuteAction(ctx, "fluxcd", action, mustMarshal(params), config)
+			if err == nil {
+				return nil
+			}
 		}
 	}
 
@@ -744,18 +757,20 @@ func (c *Client) Terminate(ctx context.Context, ref AppRef) error {
 		}
 	}
 
-	// Try FluxCD — suspend reconciliation
+	// Try FluxCD — suspend reconciliation for both resource types
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
-		params := map[string]interface{}{
-			"name":      ref.AppName,
-			"namespace": ref.Namespace,
-			"kind":      "Kustomization",
-		}
-		_, err := c.registry.ExecuteAction(ctx, "fluxcd", "suspend", mustMarshal(params), config)
-		if err == nil {
-			return nil
+		for _, resource := range []string{"kustomization", "helmrelease"} {
+			params := map[string]interface{}{
+				"name":      ref.AppName,
+				"namespace": ref.Namespace,
+				"resource":  resource,
+			}
+			_, err := c.registry.ExecuteAction(ctx, "fluxcd", "suspend", mustMarshal(params), config)
+			if err == nil {
+				return nil
+			}
 		}
 	}
 
@@ -763,6 +778,9 @@ func (c *Client) Terminate(ctx context.Context, ref AppRef) error {
 }
 
 // Events returns Kubernetes events for an application.
+// It tries the engine-specific plugin actions first (ArgoCD, FluxCD), then
+// falls back to a direct K8s API query so events are returned for any
+// resource type regardless of the GitOps engine.
 func (c *Client) Events(ctx context.Context, ref AppRef) ([]map[string]interface{}, error) {
 	// Try ArgoCD
 	creds, err := c.credResolver.ResolveArgo(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
@@ -788,14 +806,14 @@ func (c *Client) Events(ctx context.Context, ref AppRef) ([]map[string]interface
 		}
 	}
 
-	// Try FluxCD
+	// Try FluxCD – query events by name only (no kind filter) so we capture
+	// events for HelmReleases, Kustomizations, and any other involved object.
 	creds2, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{ConnectionID: &ref.ConnectionID, TenantID: ref.TenantID})
 	if err == nil {
 		config := map[string]string{"kubeconfig": creds2.Kubeconfig}
 		params := map[string]interface{}{
 			"name":      ref.AppName,
 			"namespace": ref.Namespace,
-			"kind":      "Kustomization",
 		}
 		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "events", mustMarshal(params), config)
 		if err == nil && resp.Success {
@@ -806,7 +824,76 @@ func (c *Client) Events(ctx context.Context, ref AppRef) ([]map[string]interface
 		}
 	}
 
+	// Fallback: direct K8s API query using kubeconfig from either engine.
+	// This ensures events are returned for any resource kind (Ingress,
+	// Service, StatefulSet, etc.) regardless of the GitOps engine type.
+	var kubeconfig string
+	if creds != nil {
+		kubeconfig = creds.Kubeconfig
+	} else if creds2 != nil {
+		kubeconfig = creds2.Kubeconfig
+	}
+	if kubeconfig != "" {
+		if events, err := c.getK8sEventsDirect(ctx, kubeconfig, ref.Namespace, ref.AppName); err == nil && len(events) > 0 {
+			return events, nil
+		}
+	}
+
 	return []map[string]interface{}{}, nil
+}
+
+// getK8sEventsDirect queries the Kubernetes API directly for events related
+// to a named resource (no kind filter). Results are sorted newest-first.
+func (c *Client) getK8sEventsDirect(ctx context.Context, kubeconfig, namespace, name string) ([]map[string]interface{}, error) {
+	// Short timeout — an unreachable API server must not block the UI.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	restConfig, err := clientcmd.NewClientConfigFromBytes([]byte(kubeconfig))
+	if err != nil {
+		return nil, fmt.Errorf("parse kubeconfig: %w", err)
+	}
+	config, err := restConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("build rest config: %w", err)
+	}
+	config.TLSClientConfig.Insecure = true
+	config.TLSClientConfig.CAData = nil
+	config.TLSClientConfig.CAFile = ""
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("create clientset: %w", err)
+	}
+
+	eventList, err := clientset.CoreV1().Events(namespace).List(ctx, metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("involvedObject.name=%s", name),
+		Limit:         100,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+
+	events := make([]map[string]interface{}, 0, len(eventList.Items))
+	for _, e := range eventList.Items {
+		events = append(events, map[string]interface{}{
+			"type":           e.Type,
+			"reason":         e.Reason,
+			"message":        e.Message,
+			"count":          e.Count,
+			"lastTimestamp":  e.LastTimestamp.Time,
+			"firstTimestamp": e.FirstTimestamp.Time,
+		})
+	}
+
+	// Sort newest-first by lastTimestamp
+	sort.Slice(events, func(i, j int) bool {
+		ti, _ := events[i]["lastTimestamp"].(time.Time)
+		tj, _ := events[j]["lastTimestamp"].(time.Time)
+		return ti.After(tj)
+	})
+
+	return events, nil
 }
 
 // SyncOptions specifies options for a sync operation.
