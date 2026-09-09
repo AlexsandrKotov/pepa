@@ -10,20 +10,6 @@ import (
 	"github.com/pepa/pepa/internal/provider"
 )
 
-// fluxcdPluginAvailable checks if a FluxCD plugin is registered and enabled.
-func fluxcdPluginAvailable(deps Dependencies) bool {
-	if deps.ProviderRegistry == nil {
-		return false
-	}
-	plugins := deps.ProviderRegistry.GetByType("cd_engine")
-	for _, p := range plugins {
-		if p.Name == "fluxcd" && p.Enabled {
-			return true
-		}
-	}
-	return false
-}
-
 // fluxcdPluginExecute executes an action via the FluxCD plugin if available.
 // Returns (result, true, nil) if plugin handled it.
 // Returns (nil, false, nil) if plugin not available (caller should fallback).
