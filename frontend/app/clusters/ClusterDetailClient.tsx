@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { clusters, Cluster, ClusterHealth, ClusterNode, K8sNamespace, K8sResource, FluxResource, ArgoResource } from '@/lib/api';
 import { Toast } from '@/components/Interactive';
+import Tabs from '@/components/Tabs';
 
 export default function ClusterDetailPage() {
   const searchParams = useSearchParams();
@@ -19,7 +20,15 @@ export default function ClusterDetailPage() {
   const [argoResources, setArgoResources] = useState<ArgoResource[]>([]);
   const [gitops, setGitops] = useState<{ fluxcd: boolean; argocd: boolean; flux_count: number; argo_count: number } | null>(null);
   const [selectedNs, setSelectedNs] = useState<string>('');
-  const [tab, setTab] = useState<'overview' | 'nodes' | 'resources' | 'flux' | 'argocd' | 'kubeconfig'>('overview');
+  const [tab, setTab] = useState<'overview' | 'nodes' | 'resources' | 'flux' | 'argocd' | 'kubeconfig'>(
+    (searchParams.get('tab') as 'overview' | 'nodes' | 'resources' | 'flux' | 'argocd' | 'kubeconfig') || 'overview'
+  );
+  const handleTabChange = useCallback((key: string) => {
+    setTab(key as typeof tab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
   const [loading, setLoading] = useState(true);
   const [tabLoading, setTabLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -282,13 +291,13 @@ export default function ClusterDetailPage() {
   };
 
   const tabs = [
-    { id: 'overview' as const, label: 'Overview' },
+    { id: 'overview' as const, label: 'Overview', icon: 'dashboard' },
     ...(cluster.has_kubeconfig ? [
-      { id: 'nodes' as const, label: 'Nodes' },
-      { id: 'resources' as const, label: 'Resources' },
-      ...(gitops?.fluxcd ? [{ id: 'flux' as const, label: `FluxCD (${gitops.flux_count})` }] : []),
-      ...(gitops?.argocd ? [{ id: 'argocd' as const, label: `ArgoCD (${gitops.argo_count})` }] : []),
-      { id: 'kubeconfig' as const, label: 'Kubeconfig' },
+      { id: 'nodes' as const, label: 'Nodes', icon: 'proxmox', badge: nodes.length || undefined },
+      { id: 'resources' as const, label: 'Resources', icon: 'storage' },
+      ...(gitops?.fluxcd ? [{ id: 'flux' as const, label: `FluxCD`, icon: 'fluxcd', badge: gitops.flux_count || undefined }] : []),
+      ...(gitops?.argocd ? [{ id: 'argocd' as const, label: `ArgoCD`, icon: 'argocd', badge: gitops.argo_count || undefined }] : []),
+      { id: 'kubeconfig' as const, label: 'Kubeconfig', icon: 'key' },
     ] : []),
   ];
 
@@ -490,21 +499,11 @@ export default function ClusterDetailPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-[var(--border)]">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-[12px] font-medium border-b-2 transition-colors outline-none ${
-              tab === t.id
-                ? 'border-[var(--accent)] text-[var(--accent)]'
-                : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        activeKey={tab}
+        onChange={handleTabChange}
+        tabs={tabs.map(t => ({ key: t.id, label: t.label, icon: t.icon, badge: t.badge }))}
+      />
 
       {/* Overview Tab */}
       {tab === 'overview' && (

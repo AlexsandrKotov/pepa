@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { discovery, type DiscoveredService, type DeploymentInfo } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
+import Tabs from '@/components/Tabs';
 
 interface ServiceManagementPanelProps {
   service: DiscoveredService;
@@ -13,7 +14,8 @@ interface ServiceManagementPanelProps {
 
 export default function ServiceManagementPanel({ service, onClose, onUpdate }: ServiceManagementPanelProps) {
   useEscapeKey(onClose);
-  const [tab, setTab] = useState<'overview' | 'logs' | 'events' | 'edit'>('overview');
+  const [tab, setTab] = useState<'overview' | 'logs' | 'events'>('overview');
+  const [editMode, setEditMode] = useState(false);
   const isDockerContainer = service.source === 'docker-container' || service.source === 'docker';
   const [deployInfo, setDeployInfo] = useState<DeploymentInfo | null>(null);
   const [loading, setLoading] = useState(false);
@@ -219,6 +221,17 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {!isDockerContainer && (
+              <button
+                onClick={() => { setEditMode(!editMode); if (!editMode) setTab('overview'); }}
+                className={`p-1.5 rounded-lg transition-colors ${editMode ? 'text-[var(--accent)] bg-[var(--accent)]/10' : 'text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--border-light)]'}`}
+                title={editMode ? 'Cancel editing' : 'Edit Service'}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => window.open(`/services?q=${encodeURIComponent(service.name)}`, '_blank')}
               className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--border-light)] rounded-lg transition-colors"
@@ -244,21 +257,89 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
         )}
 
         {/* Tabs */}
-        <div className="flex gap-0.5 px-5 pt-2 border-b border-[var(--border)] shrink-0">
-          {(['overview', 'logs', 'events', 'edit'] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-3 py-2 text-[12px] font-medium transition-colors ${tab === t ? 'text-[var(--accent)] border-b-2 border-[var(--accent)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
-            >
-              {t === 'overview' ? 'Overview' : t === 'logs' ? 'Logs' : t === 'events' ? 'Events' : 'Edit'}
-            </button>
-          ))}
+        <div className="px-5 pt-2 shrink-0">
+          <Tabs
+            activeKey={tab}
+            onChange={(k) => setTab(k as typeof tab)}
+            size="sm"
+            variant="rounded"
+            tabs={[
+              { key: 'overview', label: 'Overview', icon: 'discovery' },
+              { key: 'logs', label: 'Logs', icon: 'document' },
+              { key: 'events', label: 'Events', icon: 'lightning' },
+            ]}
+          />
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-5">
-          {loading && tab === 'overview' ? (
+          {editMode && isDockerContainer ? (
+            <p className="text-[13px] text-[var(--text-tertiary)]">Editing is not available for Docker containers. Use Docker Compose to manage container configuration.</p>
+          ) : editMode && deployInfo ? (
+            <div className="space-y-5">
+              {/* Image */}
+              <div>
+                <label className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1 block">Container Image</label>
+                <input
+                  type="text"
+                  value={editImage}
+                  onChange={e => setEditImage(e.target.value)}
+                  className="input text-[12px] font-mono w-full"
+                  placeholder="e.g., nginx:1.25"
+                />
+              </div>
+
+              {/* Replicas */}
+              <div>
+                <label className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1 block">Replicas</label>
+                <input
+                  type="number"
+                  value={editReplicas}
+                  onChange={e => setEditReplicas(parseInt(e.target.value) || 0)}
+                  min={0}
+                  className="input text-[12px] w-32"
+                />
+              </div>
+
+              {/* Environment Variables */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Environment Variables</label>
+                  <button onClick={addEnvVar} className="text-[11px] text-[var(--accent)] hover:underline">+ Add</button>
+                </div>
+                <div className="space-y-2">
+                  {editEnv.map((env, idx) => (
+                    <div key={idx} className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={env.key}
+                        onChange={e => updateEnvVar(idx, 'key', e.target.value)}
+                        placeholder="KEY"
+                        className="input text-[11px] font-mono flex-1"
+                      />
+                      <input
+                        type="text"
+                        value={env.value}
+                        onChange={e => updateEnvVar(idx, 'value', e.target.value)}
+                        placeholder="value"
+                        className="input text-[11px] font-mono flex-1"
+                      />
+                      <button onClick={() => removeEnvVar(idx)} className="text-red-500 hover:text-red-400 text-sm">&times;</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save button */}
+              <button
+                onClick={handleUpdate}
+                disabled={actionLoading === 'update'}
+                className="btn btn-primary disabled:opacity-50"
+              >
+                {actionLoading === 'update' ? 'Saving...' : '💾 Save Changes'}
+              </button>
+            </div>
+          ) : loading && tab === 'overview' ? (
             <p className="text-[13px] text-[var(--text-secondary)]">Loading...</p>
           ) : tab === 'overview' && isDockerContainer ? (
             <div className="space-y-5">
@@ -478,72 +559,6 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
                 </div>
               )}
             </div>
-          ) : tab === 'edit' && deployInfo ? (
-            <div className="space-y-5">
-              {/* Image */}
-              <div>
-                <label className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1 block">Container Image</label>
-                <input
-                  type="text"
-                  value={editImage}
-                  onChange={e => setEditImage(e.target.value)}
-                  className="input text-[12px] font-mono w-full"
-                  placeholder="e.g., nginx:1.25"
-                />
-              </div>
-
-              {/* Replicas */}
-              <div>
-                <label className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-1 block">Replicas</label>
-                <input
-                  type="number"
-                  value={editReplicas}
-                  onChange={e => setEditReplicas(parseInt(e.target.value) || 0)}
-                  min={0}
-                  className="input text-[12px] w-32"
-                />
-              </div>
-
-              {/* Environment Variables */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Environment Variables</label>
-                  <button onClick={addEnvVar} className="text-[11px] text-[var(--accent)] hover:underline">+ Add</button>
-                </div>
-                <div className="space-y-2">
-                  {editEnv.map((env, idx) => (
-                    <div key={idx} className="flex gap-2 items-center">
-                      <input
-                        type="text"
-                        value={env.key}
-                        onChange={e => updateEnvVar(idx, 'key', e.target.value)}
-                        placeholder="KEY"
-                        className="input text-[11px] font-mono flex-1"
-                      />
-                      <input
-                        type="text"
-                        value={env.value}
-                        onChange={e => updateEnvVar(idx, 'value', e.target.value)}
-                        placeholder="value"
-                        className="input text-[11px] font-mono flex-1"
-                      />
-                      <button onClick={() => removeEnvVar(idx)} className="text-red-500 hover:text-red-400 text-sm">&times;</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Save button */}
-              <button
-                onClick={handleUpdate}
-                disabled={actionLoading === 'update'}
-                className="btn btn-primary disabled:opacity-50"
-              >
-                {actionLoading === 'update' ? 'Saving...' : '💾 Save Changes'}
-              </button>
-            </div>
-          ) : tab === 'edit' && isDockerContainer ? (
-            <p className="text-[13px] text-[var(--text-tertiary)]">Editing is not available for Docker containers. Use Docker Compose to manage container configuration.</p>
           ) : null}
         </div>
       </div>

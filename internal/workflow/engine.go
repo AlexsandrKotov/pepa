@@ -19,6 +19,9 @@ import (
 	"github.com/pepa/pepa/pkg/utils"
 )
 
+// ConfigResolver resolves plugin configuration from connections and vault.
+type ConfigResolver func(ctx context.Context, pluginName string, tenantID uuid.UUID) map[string]string
+
 // Engine executes workflow DAGs step by step.
 type Engine struct {
 	workflowRepo       *repository.WorkflowRepository
@@ -27,6 +30,7 @@ type Engine struct {
 	deploymentService  *service.DeploymentService
 	eventBus           *events.Bus
 	providerRegistry   *provider.Registry
+	ConfigResolver     ConfigResolver
 }
 
 // NewEngine creates a new workflow execution engine.
@@ -415,9 +419,15 @@ func (e *Engine) executePluginAction(ctx context.Context, step *models.StepSpec,
 
 	slog.Info("Step : plugin= action= params=", "name", step.Name, "name", pluginName, "name", actionName, "arg4", redactParams(step.Params))
 
+	// Resolve plugin config from connections/vault if resolver is available.
+	var config map[string]string
+	if e.ConfigResolver != nil {
+		config = e.ConfigResolver(ctx, pluginName, tenantID)
+	}
+
 	// Try real plugin dispatch via provider registry
 	if e.providerRegistry != nil {
-		resp, err := e.providerRegistry.ExecuteAction(ctx, pluginName, actionName, step.Params, nil)
+		resp, err := e.providerRegistry.ExecuteAction(ctx, pluginName, actionName, step.Params, config)
 		if err == nil && resp.Success {
 			slog.Info("Step : plugin action succeeded ( bytes output)", "name", step.Name, "name", pluginName, "name", actionName, "count", len(resp.Output))
 			return json.RawMessage(resp.Output), nil
@@ -425,8 +435,7 @@ func (e *Engine) executePluginAction(ctx context.Context, step *models.StepSpec,
 		if err != nil {
 			slog.Info("Step : plugin dispatch to failed: (falling back to simulated)", "name", step.Name, "name", pluginName, "error", err)
 		} else {
-			// The engine does not pass connection config, so an unconfigured
-			// plugin (e.g. Slack without webhook) must not break the pipeline.
+			// The plugin reported failure — log but do not silently succeed.
 			slog.Info("Step : plugin action reported failure: (falling back to simulated)", "name", step.Name, "name", pluginName, "name", actionName, "error", resp.Error)
 		}
 	}

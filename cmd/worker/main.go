@@ -61,6 +61,9 @@ func main() {
 	// Initialize workflow engine
 	wfEngine := workflow.NewEngine(comp.WorkflowRepo, comp.EntityRepo, comp.DeploymentRepo, deploymentSvc, comp.EventBus, comp.ProviderRegistry)
 
+	// Wire up config resolver so plugin actions get real credentials.
+	wfEngine.ConfigResolver = buildConfigResolver(comp)
+
 	// Context for graceful shutdown (derived from rootCtx)
 	ctx, cancel := context.WithCancel(rootCtx)
 	defer cancel()
@@ -359,5 +362,87 @@ func runDelayedJobPromoter(ctx context.Context, jobQueue *queue.Queue) {
 				slog.Error("delayed job promoter error", "error", err)
 			}
 		}
+	}
+}
+
+// pluginToConnType maps plugin names to the connection type that provides their credentials.
+var pluginToConnType = map[string]string{
+	"gitlab":    "gitlab",
+	"github":    "git",
+	"jira":      "jira",
+	"bitbucket": "git",
+	"gitea":     "git",
+	"fluxcd":    "fluxcd",
+	"argocd":    "argocd",
+	"proxmox":   "proxmox",
+	"vmware":    "vmware",
+}
+
+// buildConfigResolver creates a ConfigResolver that resolves plugin config from connections.
+func buildConfigResolver(comp *bootstrap.Components) workflow.ConfigResolver {
+	return func(ctx context.Context, pluginName string, tenantID uuid.UUID) map[string]string {
+		merged := make(map[string]string)
+
+		// 1. Pull from matching connection (single source of truth)
+		if connType, ok := pluginToConnType[pluginName]; ok && comp.ConnectionRepo != nil {
+			if conns, err := comp.ConnectionRepo.List(ctx, tenantID, connType); err == nil && len(conns) > 0 {
+				var conn *repository.Connection
+				if connType == "git" {
+					for i := range conns {
+						if provider, _ := conns[i].Config["provider"].(string); provider == pluginName {
+							conn = &conns[i]
+							break
+						}
+					}
+				} else if len(conns) > 0 {
+					conn = &conns[0]
+				}
+				if conn != nil {
+					// Decrypt and extract config values.
+					decrypted, err := comp.ConnectionRepo.GetDecrypted(ctx, conn.ID, tenantID)
+					if err == nil && decrypted != nil {
+						for k, v := range decrypted.Config {
+							switch val := v.(type) {
+							case string:
+								merged[k] = val
+							case float64:
+								merged[k] = fmt.Sprintf("%v", val)
+							case bool:
+								merged[k] = fmt.Sprintf("%v", val)
+							default:
+								if b, err := json.Marshal(val); err == nil {
+									merged[k] = string(b)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Override with plugin's own stored config from DB (decrypted)
+		if comp.PluginRepo != nil {
+			if p, err := comp.PluginRepo.GetByNameDecrypted(ctx, pluginName); err == nil && p != nil && len(p.Config) > 0 {
+				var raw map[string]interface{}
+				if json.Unmarshal(p.Config, &raw) == nil {
+					for k, v := range raw {
+						switch val := v.(type) {
+						case string:
+							merged[k] = val
+						case float64:
+							merged[k] = fmt.Sprintf("%v", val)
+						case bool:
+							merged[k] = fmt.Sprintf("%v", val)
+						default:
+							if b, err := json.Marshal(val); err == nil {
+								merged[k] = string(b)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		return merged
 	}
 }

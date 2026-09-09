@@ -385,6 +385,12 @@ export default function GitOpsPage() {
           <p className="page-subtitle-modern">Bind manifest repositories to discover and manage FluxCD and ArgoCD resources</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => router.push('/gitops/applications')} className="btn btn-secondary text-[12px]">
+            Applications
+          </button>
+          <button onClick={() => router.push('/gitops/bindings')} className="btn btn-secondary text-[12px]">
+            Bindings
+          </button>
           <button onClick={() => router.push('/gitops/drift')} className="btn btn-secondary text-[12px]">
             Drift Detection
           </button>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { services, discovery, type Service, type DiscoveredService } from '@/lib/api';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -9,6 +9,7 @@ import dynamic from 'next/dynamic';
 import ConfirmModal from '@/components/ConfirmModal';
 import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
+import Tabs from '@/components/Tabs';
 import ServiceDetailClient from './ServiceDetailClient';
 
 const ServiceManagementPanel = dynamic(() => import('@/components/ServiceManagementPanel'), { ssr: false });
@@ -32,6 +33,8 @@ export default function ServicesPage() {
 }
 
 function ServicesList() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [servicesList, setServicesList] = useState<Service[]>([]);
   const [discoveredServices, setDiscoveredServices] = useState<DiscoveredService[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,13 +42,24 @@ function ServicesList() {
   const [statusFilter, setStatusFilter] = useState('');
   const [clusterFilter, setClusterFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [viewMode, setViewMode] = useState<'table' | 'cards' | 'cluster'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [sortKey, setSortKey] = useState<string>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [managingService, setManagingService] = useState<DiscoveredService | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [healthFilter, setHealthFilter] = useState('');
   const [clusters, setClusters] = useState<Record<string, number>>({});
+
+  type ServiceTab = 'all' | 'problems' | 'sources' | 'clusters';
+  const [serviceTab, setServiceTab] = useState<ServiceTab>(
+    (searchParams.get('tab') as ServiceTab) || 'all'
+  );
+  const handleServiceTabChange = useCallback((tab: string) => {
+    setServiceTab(tab as ServiceTab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', tab);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
 
 
   const debouncedSearch = useDebounce(search, 300);
@@ -227,6 +241,22 @@ function ServicesList() {
     return grouped;
   }, [sortedServices]);
 
+  // Group by source
+  const groupedBySource = useMemo(() => {
+    const grouped: Record<string, DiscoveredService[]> = {};
+    for (const svc of sortedServices) {
+      const src = svc.source || 'unknown';
+      if (!grouped[src]) grouped[src] = [];
+      grouped[src].push(svc);
+    }
+    return grouped;
+  }, [sortedServices]);
+
+  // Problem services (degraded, failed, unknown health)
+  const problemServices = useMemo(() => {
+    return sortedServices.filter(s => s.health === 'degraded' || s.health === 'failed' || s.health === 'unknown');
+  }, [sortedServices]);
+
   // Health summary
   const healthCounts = useMemo(() => {
     const counts = { healthy: 0, degraded: 0, progressing: 0, failed: 0, unknown: 0 };
@@ -274,6 +304,19 @@ function ServicesList() {
           </Link>
         </div>
       </div>
+
+      {/* Tabs */}
+      <Tabs
+        activeKey={serviceTab}
+        onChange={handleServiceTabChange}
+        tabs={[
+          { key: 'all', label: 'All Services', icon: 'services', badge: totalServices || undefined },
+          { key: 'problems', label: 'Problems', icon: 'alert', badge: problemServices.length || undefined },
+          { key: 'sources', label: 'By Source', icon: 'plugin', badge: Object.keys(groupedBySource).length || undefined },
+          { key: 'clusters', label: 'By Cluster', icon: 'kubernetes', badge: infraCount || undefined },
+        ]}
+        className="page-animate-up"
+      />
 
       {/* Running Services Section */}
       <div className="space-y-4 page-animate-up page-delay-1">
@@ -354,7 +397,8 @@ function ServicesList() {
         </div>
       )}
 
-      {/* Toolbar: Search + View Mode + Sort */}
+      {/* Toolbar: Search + View Mode + Sort — only on all/problems tabs */}
+      {(serviceTab === 'all' || serviceTab === 'problems') && (
       <div className="space-y-3">
         <div className="flex flex-wrap gap-3 items-center">
           {/* Search */}
@@ -380,13 +424,13 @@ function ServicesList() {
 
           {/* View mode switcher */}
           <div className="flex items-center rounded-lg border border-[var(--border)] overflow-hidden">
-            {(['table', 'cards', 'cluster'] as const).map(mode => (
+            {(['table', 'cards'] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setViewMode(mode)}
                 className={`px-3 py-1.5 text-[11px] font-medium transition-colors outline-none ${viewMode === mode ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--border-light)]'}`}
               >
-                {mode === 'table' ? 'Table' : mode === 'cards' ? 'Cards' : 'By Cluster'}
+                {mode === 'table' ? 'Table' : 'Cards'}
               </button>
             ))}
           </div>
@@ -494,6 +538,7 @@ function ServicesList() {
           )}
         </div>
       </div>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -506,13 +551,94 @@ function ServicesList() {
             <p className="text-[13px]">Loading services...</p>
           </div>
         </div>
-      ) : sortedServices.length === 0 ? (
+      ) : serviceTab === 'sources' ? (
+        /* GROUPED BY SOURCE */
+        <div className="space-y-6">
+          {Object.entries(groupedBySource).map(([src, srcServices]) => (
+            <div key={src}>
+              <div className="flex items-center gap-2 mb-3">
+                <BrandIcon name={src === 'pepa' ? 'argocd' : src === 'docker' || src === 'docker-container' ? 'docker' : src} size={16} />
+                <h2 className="text-[14px] font-semibold text-[var(--text-primary)] capitalize">{src}</h2>
+                <span className="text-[11px] text-[var(--text-tertiary)] bg-[var(--border-light)] px-2 py-0.5 rounded">{srcServices.length} services</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {srcServices.map((svc, idx) => {
+                  const hbc = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'progressing' ? 'bg-blue-500' : svc.health === 'failed' ? 'bg-red-500' : 'bg-gray-300';
+                  return (
+                    <div key={`${svc.source}-${svc.name}-${idx}`} className="card group cursor-pointer hover:border-[var(--accent)]/40 hover:shadow-sm transition-all" onClick={() => setManagingService(svc)}>
+                      <div className={`h-0.5 w-full rounded-t-md ${hbc}`} />
+                      <div className="card-body py-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${hbc}`} />
+                            <div className="min-w-0">
+                              <h3 className="text-[13px] font-medium text-[var(--text-primary)] truncate">{svc.name}</h3>
+                              <div className="text-[11px] text-[var(--text-tertiary)]">{svc.cluster || 'default'} / {svc.namespace}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px]">
+                          <span className={`font-medium ${svc.status === 'running' || svc.status === 'active' ? 'text-green-600' : 'text-[var(--text-secondary)]'}`}>{svc.status}</span>
+                          <span className="text-[var(--text-tertiary)]">{svc.replicas > 0 ? `${svc.ready_replicas}/${svc.replicas}` : '-'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : serviceTab === 'clusters' ? (
+        /* GROUPED BY CLUSTER */
+        <div className="space-y-6">
+          {Object.entries(groupedByCluster).map(([clusterName, clusterServices]) => (
+            <div key={clusterName}>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent)]" />
+                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">{clusterName}</h2>
+                <span className="text-[11px] text-[var(--text-tertiary)] bg-[var(--border-light)] px-2 py-0.5 rounded">{clusterServices.length} services</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {clusterServices.map((svc, idx) => {
+                  const hbc = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'progressing' ? 'bg-blue-500' : svc.health === 'failed' ? 'bg-red-500' : 'bg-gray-300';
+                  return (
+                    <div key={`${svc.source}-${svc.name}-${idx}`} className="card group cursor-pointer hover:border-[var(--accent)]/40 hover:shadow-sm transition-all" onClick={() => setManagingService(svc)}>
+                      <div className={`h-0.5 w-full rounded-t-md ${hbc}`} />
+                      <div className="card-body py-3 space-y-2">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${hbc}`} />
+                            <div className="min-w-0">
+                              <h3 className="text-[13px] font-medium text-[var(--text-primary)] truncate">{svc.name}</h3>
+                              <div className="text-[11px] text-[var(--text-tertiary)]">{svc.namespace}</div>
+                            </div>
+                          </div>
+                          {sourceBadge(svc.source)}
+                        </div>
+                        <div className="flex items-center gap-3 text-[11px]">
+                          <span className={`font-medium ${svc.status === 'running' || svc.status === 'active' ? 'text-green-600' : 'text-[var(--text-secondary)]'}`}>{svc.status}</span>
+                          <span className="text-[var(--text-tertiary)]">{svc.replicas > 0 ? `${svc.ready_replicas}/${svc.replicas}` : '-'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (serviceTab === 'problems' ? problemServices.length === 0 : sortedServices.length === 0) ? (
         <div className="card card-body text-center py-12">
-          {hasActiveFilters ? (
+          {hasActiveFilters || serviceTab === 'problems' ? (
             <>
-              <p className="text-[13px] text-[var(--text-secondary)] mb-1">No services match your filters</p>
-              <p className="text-[12px] text-[var(--text-tertiary)] mb-4">Try adjusting your search or filters</p>
-              <button onClick={() => { setStatusFilter(''); setClusterFilter(''); setSourceFilter(''); setSearch(''); setHealthFilter(''); }} className="btn btn-secondary">Clear all filters</button>
+              <p className="text-[13px] text-[var(--text-secondary)] mb-1">
+                {serviceTab === 'problems' ? 'No services with issues — all healthy!' : 'No services match your filters'}
+              </p>
+              <p className="text-[12px] text-[var(--text-tertiary)] mb-4">
+                {serviceTab === 'problems' ? 'Keep up the good work.' : 'Try adjusting your search or filters'}
+              </p>
+              {hasActiveFilters && <button onClick={() => { setStatusFilter(''); setClusterFilter(''); setSourceFilter(''); setSearch(''); setHealthFilter(''); }} className="btn btn-secondary">Clear all filters</button>}
             </>
           ) : (
             <>
@@ -546,7 +672,7 @@ function ServicesList() {
                 </tr>
               </thead>
               <tbody>
-                {sortedServices.map((svc, idx) => {
+                {(serviceTab === 'problems' ? problemServices : sortedServices).map((svc, idx) => {
                   const healthDot = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'failed' ? 'bg-red-500' : svc.health === 'suspended' ? 'bg-orange-500' : 'bg-gray-400';
                   const isPepa = svc.source === 'pepa';
                   return (
@@ -596,10 +722,10 @@ function ServicesList() {
             </table>
           </div>
         </div>
-      ) : viewMode === 'cards' ? (
+      ) : (
         /* CARDS VIEW */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {sortedServices.map((svc, idx) => {
+          {(serviceTab === 'problems' ? problemServices : sortedServices).map((svc, idx) => {
             const hbc = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'progressing' ? 'bg-blue-500' : svc.health === 'failed' ? 'bg-red-500' : 'bg-gray-300';
             return (
               <div key={`${svc.source}-${svc.name}-${idx}`} className="card group cursor-pointer hover:border-[var(--accent)]/40 hover:shadow-sm transition-all" onClick={() => setManagingService(svc)}>
@@ -638,45 +764,6 @@ function ServicesList() {
               </div>
             );
           })}
-        </div>
-      ) : (
-        /* GROUPED BY CLUSTER VIEW */
-        <div className="space-y-6">
-          {Object.entries(groupedByCluster).map(([clusterName, clusterServices]) => (
-            <div key={clusterName}>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent)]" />
-                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">{clusterName}</h2>
-                <span className="text-[11px] text-[var(--text-tertiary)] bg-[var(--border-light)] px-2 py-0.5 rounded">{clusterServices.length} services</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {clusterServices.map((svc, idx) => {
-                  const hbc = svc.health === 'healthy' ? 'bg-green-500' : svc.health === 'degraded' ? 'bg-yellow-500' : svc.health === 'progressing' ? 'bg-blue-500' : svc.health === 'failed' ? 'bg-red-500' : 'bg-gray-300';
-                  return (
-                    <div key={`${svc.source}-${svc.name}-${idx}`} className="card group cursor-pointer hover:border-[var(--accent)]/40 hover:shadow-sm transition-all" onClick={() => setManagingService(svc)}>
-                      <div className={`h-0.5 w-full rounded-t-md ${hbc}`} />
-                      <div className="card-body py-3 space-y-2">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className={`w-2 h-2 rounded-full shrink-0 ${hbc}`} />
-                            <div className="min-w-0">
-                              <h3 className="text-[13px] font-medium text-[var(--text-primary)] truncate">{svc.name}</h3>
-                              <div className="text-[11px] text-[var(--text-tertiary)]">{svc.namespace}</div>
-                            </div>
-                          </div>
-                          {sourceBadge(svc.source)}
-                        </div>
-                        <div className="flex items-center gap-3 text-[11px]">
-                          <span className={`font-medium ${svc.status === 'running' || svc.status === 'active' ? 'text-green-600' : 'text-[var(--text-secondary)]'}`}>{svc.status}</span>
-                          <span className="text-[var(--text-tertiary)]">{svc.replicas > 0 ? `${svc.ready_replicas}/${svc.replicas}` : '-'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
         </div>
       )}
 

@@ -78,6 +78,7 @@ type Components struct {
 	DevOpsRepo          *repository.DevOpsRepository
 	NotificationRuleRepo *repository.NotificationRuleRepository
 	NotificationLogRepo  *repository.NotificationLogRepository
+	GitOpsBindingRepo    *repository.GitOpsBindingRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -345,6 +346,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		DevOpsRepo:          repository.NewDevOpsRepository(db),
 		NotificationRuleRepo: repository.NewNotificationRuleRepository(db),
 		NotificationLogRepo:  repository.NewNotificationLogRepository(db),
+		GitOpsBindingRepo:    repository.NewGitOpsBindingRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry
@@ -481,20 +483,21 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 
 	// Register agent tools (gives AI access to PEPA data)
 	ai.RegisterAgentTools(aiManager.ToolRegistry(), &ai.AgentDeps{
-		ServiceRepo:     c.ServiceRepo,
-		DeploymentRepo:  c.DeploymentRepo,
-		ClusterRepo:     c.ClusterRepo,
-		PipelineSource:  c.PipelineSourceRepo,
-		PipelineRun:     c.PipelineRunRepo,
-		WorkflowRepo:    c.WorkflowRepo,
-		EnvironmentRepo: c.EnvironmentRepo,
-		ConnectionRepo:  c.ConnectionRepo,
-		PluginRepo:      c.PluginRepo,
-		EntityRepo:      c.EntityRepo,
-		JiraRepo:        c.JiraRepo,
-		DockerHostRepo:  c.DockerHostRepo,
-		DBPool:          c.DB.Pool,
-		TenantID:        uuid.MustParse(database.DefaultTenantID),
+		ServiceRepo:       c.ServiceRepo,
+		DeploymentRepo:    c.DeploymentRepo,
+		ClusterRepo:       c.ClusterRepo,
+		PipelineSource:    c.PipelineSourceRepo,
+		PipelineRun:       c.PipelineRunRepo,
+		WorkflowRepo:      c.WorkflowRepo,
+		EnvironmentRepo:   c.EnvironmentRepo,
+		ConnectionRepo:    c.ConnectionRepo,
+		PluginRepo:        c.PluginRepo,
+		EntityRepo:        c.EntityRepo,
+		JiraRepo:          c.JiraRepo,
+		DockerHostRepo:    c.DockerHostRepo,
+		GitOpsBindingRepo: c.GitOpsBindingRepo,
+		DBPool:            c.DB.Pool,
+		TenantID:          uuid.MustParse(database.DefaultTenantID),
 	})
 	slog.Info("AI manager initialized", "tools", len(aiManager.ToolRegistry().List()))
 

@@ -16,6 +16,7 @@ import PipelineGraph from '@/components/pipeline/PipelineGraph';
 import ToastContainer from '@/components/ToastContainer';
 import { useToast } from '@/hooks/useToast';
 import ConfirmModal from '@/components/ConfirmModal';
+import Tabs from '@/components/Tabs';
 
 // ── Constants ──────────────────────────────────────────────
 
@@ -800,22 +801,19 @@ function PipelinesClientContent({
 
         {/* Tabs */}
         <div className="border-b border-[var(--border)] page-animate-up page-delay-1">
-          <div className="flex gap-1">
-            <button
-              onClick={() => setActiveTab('engines')}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'engines' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}
-            >
-              Engines
-              {sources.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-[var(--border-light)] rounded-full">{sources.length}</span>}
-            </button>
-            <button
-              onClick={() => setActiveTab('providers')}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${activeTab === 'providers' ? 'border-blue-600 text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-secondary)]'}`}
-            >
-              Providers
-              {connections.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-xs bg-[var(--border-light)] rounded-full">{connections.length}</span>}
-            </button>
-          </div>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(k) => {
+              setActiveTab(k as 'engines' | 'providers');
+              const params = new URLSearchParams(searchParams.toString());
+              params.set('tab', k);
+              router.replace(`?${params.toString()}`, { scroll: false });
+            }}
+            tabs={[
+              { key: 'engines', label: 'Engines', icon: 'cicd', badge: sources.length || undefined },
+              { key: 'providers', label: 'Providers', icon: 'plugin', badge: connections.length || undefined },
+            ]}
+          />
         </div>
 
         {/* ── Engines Tab ──────────────────────────────────── */}

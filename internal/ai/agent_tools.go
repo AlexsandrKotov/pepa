@@ -16,20 +16,21 @@ import (
 
 // AgentDeps holds the repositories the agent tools need.
 type AgentDeps struct {
-	ServiceRepo     *repository.ServiceRepository
-	DeploymentRepo  *repository.DeploymentRepository
-	ClusterRepo     *repository.ClusterRepository
-	PipelineSource  *repository.PipelineSourceRepository
-	PipelineRun     *repository.PipelineRunRepository
-	WorkflowRepo    *repository.WorkflowRepository
-	EnvironmentRepo *repository.EnvironmentRepository
-	ConnectionRepo  *repository.ConnectionRepository
-	PluginRepo      *repository.PluginRepository
-	EntityRepo      *repository.EntityRepository
-	JiraRepo        *repository.JiraRepository
-	DockerHostRepo  *repository.DockerHostRepository
-	DBPool          *pgxpool.Pool
-	TenantID        uuid.UUID
+	ServiceRepo       *repository.ServiceRepository
+	DeploymentRepo    *repository.DeploymentRepository
+	ClusterRepo       *repository.ClusterRepository
+	PipelineSource    *repository.PipelineSourceRepository
+	PipelineRun       *repository.PipelineRunRepository
+	WorkflowRepo      *repository.WorkflowRepository
+	EnvironmentRepo   *repository.EnvironmentRepository
+	ConnectionRepo    *repository.ConnectionRepository
+	PluginRepo        *repository.PluginRepository
+	EntityRepo        *repository.EntityRepository
+	JiraRepo          *repository.JiraRepository
+	DockerHostRepo    *repository.DockerHostRepository
+	GitOpsBindingRepo *repository.GitOpsBindingRepository
+	DBPool            *pgxpool.Pool
+	TenantID          uuid.UUID
 }
 
 // RegisterAgentTools registers all PEPA data-access tools into the registry.
@@ -62,6 +63,10 @@ func RegisterAgentTools(reg *ToolRegistry, deps *AgentDeps) {
 	reg.Register(&createEnvironmentTool{deps: deps})
 	reg.Register(&createEntityTool{deps: deps})
 	reg.Register(&restartDockerServiceTool{deps: deps})
+
+	// GitOps tools
+	reg.Register(&listGitOpsBindingsTool{deps: deps})
+	reg.Register(&getGitOpsSuggestionsTool{deps: deps})
 	reg.Register(&stopDockerServiceTool{deps: deps})
 	reg.Register(&startDockerServiceTool{deps: deps})
 	reg.Register(&refreshDockerServiceTool{deps: deps})
@@ -1619,5 +1624,114 @@ func (t *deployBlueprintToDockerTool) Execute(ctx context.Context, params json.R
 		"status":         "deployed",
 	}
 	out, _ := json.Marshal(result)
+	return string(out), nil
+}
+
+// ── GitOps Tools ─────────────────────────────────────────────
+
+type listGitOpsBindingsTool struct{ deps *AgentDeps }
+
+func (t *listGitOpsBindingsTool) Definition() ToolDefinition {
+	return ToolDefinition{
+		Name:        "list_gitops_bindings",
+		Description: "List GitOps application bindings (mappings between services and ArgoCD/FluxCD applications). Returns name, engine_type, app_name, namespace, environment, auto_bound status.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"engine_type":{"type":"string","description":"Filter by engine: argocd or fluxcd"}},"required":[]}`),
+	}
+}
+func (t *listGitOpsBindingsTool) Execute(ctx context.Context, params json.RawMessage) (string, error) {
+	if t.deps.GitOpsBindingRepo == nil {
+		return "[]", nil
+	}
+	bindings, err := t.deps.GitOpsBindingRepo.List(ctx, t.deps.TenantID)
+	if err != nil {
+		return "", err
+	}
+
+	var p struct {
+		EngineType string `json:"engine_type"`
+	}
+	_ = json.Unmarshal(params, &p)
+
+	// Filter by engine type if specified
+	if p.EngineType != "" {
+		var filtered []*repository.GitOpsBinding
+		for _, b := range bindings {
+			if b.EngineType == p.EngineType {
+				filtered = append(filtered, b)
+			}
+		}
+		bindings = filtered
+	}
+
+	out, _ := json.Marshal(bindings)
+	return string(out), nil
+}
+
+type getGitOpsSuggestionsTool struct{ deps *AgentDeps }
+
+func (t *getGitOpsSuggestionsTool) Definition() ToolDefinition {
+	return ToolDefinition{
+		Name:        "get_gitops_suggestions",
+		Description: "Get AI-powered suggestions for GitOps improvements. Returns recommendations for auto-sync, drift remediation, and deployment optimization.",
+		Parameters:  json.RawMessage(`{"type":"object","properties":{},"required":[]}`),
+	}
+}
+func (t *getGitOpsSuggestionsTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	var suggestions []map[string]interface{}
+
+	// Check bindings status
+	if t.deps.GitOpsBindingRepo != nil {
+		bindings, err := t.deps.GitOpsBindingRepo.List(ctx, t.deps.TenantID)
+		if err == nil {
+			if len(bindings) == 0 {
+				suggestions = append(suggestions, map[string]interface{}{
+					"type":        "binding",
+					"priority":    "high",
+					"title":       "No GitOps bindings configured",
+					"description": "Run Auto-Discover to find and bind ArgoCD/FluxCD applications to your services.",
+					"action":      "Go to GitOps Bindings page and run Auto-Discover",
+				})
+			}
+
+			// Check for manually bound apps
+			manualCount := 0
+			for _, b := range bindings {
+				if !b.AutoBound {
+					manualCount++
+				}
+			}
+			if manualCount > 0 {
+				suggestions = append(suggestions, map[string]interface{}{
+					"type":        "optimization",
+					"priority":    "medium",
+					"title":       fmt.Sprintf("%d manually configured bindings", manualCount),
+					"description": "Consider running Auto-Discover to verify these bindings match actual GitOps applications.",
+					"action":      "Run Auto-Discover from GitOps Bindings page",
+				})
+			}
+		}
+	}
+
+	// General suggestions
+	suggestions = append(suggestions, map[string]interface{}{
+		"type":        "best_practice",
+		"priority":    "info",
+		"title":       "Enable auto-sync for production apps",
+		"description": "For production applications, consider enabling auto-sync with prune and self-heal to ensure cluster state matches Git.",
+		"action":      "Configure auto-sync in Application detail page",
+	})
+
+	suggestions = append(suggestions, map[string]interface{}{
+		"type":        "best_practice",
+		"priority":    "info",
+		"title":       "Set up drift detection",
+		"description": "Enable drift detection to get alerts when cluster state diverges from Git.",
+		"action":      "Configure drift detection in GitOps settings",
+	})
+
+	out, _ := json.Marshal(map[string]interface{}{
+		"suggestions": suggestions,
+		"total":       len(suggestions),
+	})
 	return string(out), nil
 }

@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { audit, listUsers, type AuditEntry, type SSHCommandEntry, type PluginActionEntry } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
+import Tabs from '@/components/Tabs';
 
 type Tab = 'audit' | 'plugin-actions' | 'ssh-commands';
 
@@ -188,7 +190,16 @@ export default function AuditPage() {
 }
 
 function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: boolean }) {
-  const [tab, setTab] = useState<Tab>('audit');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'audit');
+
+  const handleTabChange = useCallback((key: string) => {
+    setTab(key as Tab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
 
   // ── Audit state ──
   const [items, setItems] = useState<AuditEntry[]>([]);
@@ -337,27 +348,18 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
         </div>
 
         {/* ── Tabs ── */}
-        <div className="page-animate-up page-delay-1 flex items-center gap-1 border-b border-[var(--border-light)]">
-          <button onClick={() => setTab('audit')}
-            className={`px-4 py-2 text-[13px] font-medium border-b-2 transition-colors ${tab === 'audit' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}>
-            Audit Log
-            {total > 0 && <span className="ml-2 text-[11px] bg-[var(--border-light)] px-1.5 py-0.5 rounded-full">{total}</span>}
-          </button>
-          {hasPluginActivityPerm && (
-            <>
-              <button onClick={() => setTab('plugin-actions')}
-                className={`px-4 py-2 text-[13px] font-medium border-b-2 transition-colors ${tab === 'plugin-actions' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}>
-                Plugin Actions
-                {pluginActionsTotal > 0 && <span className="ml-2 text-[11px] bg-[var(--border-light)] px-1.5 py-0.5 rounded-full">{pluginActionsTotal}</span>}
-              </button>
-              <button onClick={() => setTab('ssh-commands')}
-                className={`px-4 py-2 text-[13px] font-medium border-b-2 transition-colors ${tab === 'ssh-commands' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}>
-                SSH Commands
-                {sshTotal > 0 && <span className="ml-2 text-[11px] bg-[var(--border-light)] px-1.5 py-0.5 rounded-full">{sshTotal}</span>}
-              </button>
-            </>
-          )}
-        </div>
+        <Tabs
+          activeKey={tab}
+          onChange={handleTabChange}
+          tabs={[
+            { key: 'audit', label: 'Audit Log', icon: 'dashboard', badge: total || undefined },
+            ...(hasPluginActivityPerm ? [
+              { key: 'plugin-actions' as const, label: 'Plugin Actions', icon: 'plugin', badge: pluginActionsTotal || undefined },
+              { key: 'ssh-commands' as const, label: 'SSH Commands', icon: 'terminal', badge: sshTotal || undefined },
+            ] : []),
+          ]}
+          className="page-animate-up page-delay-1"
+        />
 
         {/* ═══════════ AUDIT LOG TAB ═══════════ */}
         {tab === 'audit' && (

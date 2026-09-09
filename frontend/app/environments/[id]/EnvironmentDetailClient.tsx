@@ -1,7 +1,9 @@
 'use client';
 import { useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { environments, type Environment, type EnvironmentContents, type EnvVariable, type EnvCompareEntry } from '@/lib/api';
+import Tabs from '@/components/Tabs';
 
 interface Props {
   environment: Environment;
@@ -13,11 +15,20 @@ interface Props {
 type Tab = 'clusters' | 'deployments' | 'variables' | 'compare';
 
 export default function EnvironmentDetailClient({ environment: initialEnv, contents, variables: initialVars, allEnvironments }: Props) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [env] = useState<Environment>(initialEnv);
   const [contentsData] = useState<EnvironmentContents | null>(contents);
   const [vars, setVars] = useState<EnvVariable[]>(initialVars);
-  const [tab, setTab] = useState<Tab>('clusters');
+  const [tab, setTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'clusters');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const handleTabChange = useCallback((key: string) => {
+    setTab(key as Tab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
 
   // Compare state
   const [compareTarget, setCompareTarget] = useState('');
@@ -77,11 +88,11 @@ export default function EnvironmentDetailClient({ environment: initialEnv, conte
   const deployments = contentsData?.deployments || [];
   const summary = contentsData?.summary || { cluster_count: clusters.length, deployment_count: deployments.length, variable_count: vars.length };
 
-  const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: 'clusters', label: 'Clusters', count: summary.cluster_count },
-    { key: 'deployments', label: 'Deployments', count: summary.deployment_count },
-    { key: 'variables', label: 'Variables', count: vars.length },
-    { key: 'compare', label: 'Compare' },
+  const tabs = [
+    { key: 'clusters' as Tab, label: 'Clusters', icon: 'kubernetes', badge: summary.cluster_count || undefined },
+    { key: 'deployments' as Tab, label: 'Deployments', icon: 'cicd', badge: summary.deployment_count || undefined },
+    { key: 'variables' as Tab, label: 'Variables', icon: 'vault', badge: vars.length || undefined },
+    { key: 'compare' as Tab, label: 'Compare', icon: 'discovery' },
   ];
 
   const otherEnvs = allEnvironments.filter(e => e.id !== env.id);
@@ -145,24 +156,11 @@ export default function EnvironmentDetailClient({ environment: initialEnv, conte
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 border-b border-[var(--border)] pb-0">
-          {tabs.map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-4 py-2 text-[12px] font-medium rounded-t-lg transition-colors relative ${
-                tab === t.key
-                  ? 'text-[var(--accent)] border-b-2 border-[var(--accent)]'
-                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-              }`}
-            >
-              {t.label}
-              {t.count !== undefined && t.count > 0 && (
-                <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--bg)] text-[var(--text-tertiary)]">{t.count}</span>
-              )}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          activeKey={tab}
+          onChange={handleTabChange}
+          tabs={tabs}
+        />
 
         {/* Tab Content */}
         {tab === 'clusters' && (

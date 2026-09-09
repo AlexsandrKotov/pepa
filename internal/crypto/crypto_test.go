@@ -216,9 +216,9 @@ func TestDecryptInvalidFormat(t *testing.T) {
 
 func TestEncryptNoMasterKey(t *testing.T) {
 	// Clear all key sources
-	os.Unsetenv("ENCRYPTION_KEY")
-	os.Unsetenv("AUTH_JWT_SECRET")
-	os.Unsetenv("JWT_SECRET")
+	_ = os.Unsetenv("ENCRYPTION_KEY")
+	_ = os.Unsetenv("AUTH_JWT_SECRET")
+	_ = os.Unsetenv("JWT_SECRET")
 
 	_, err := Encrypt("test")
 	if err == nil {

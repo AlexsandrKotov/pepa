@@ -992,7 +992,7 @@ func testArgoCDConnection(deps Dependencies, c *gin.Context, connConfig map[stri
 		if err != nil {
 			return "error", fmt.Sprintf("Failed to connect: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			return "connected", "Successfully connected to ArgoCD"
 		}

@@ -5,20 +5,11 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { securityScan, devops, connections, registryRepositories, type ScanTarget, type ScanRun, type ScanSchedule, type SecurityDashboard, type ScannerType, type TargetType, type CompliancePolicy, type SecurityFinding, type SecurityFindingSummary, type RegistryRepository, type Connection } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import BrandIcon from '@/components/BrandIcon';
+import Tabs from '@/components/Tabs';
 import ConfirmModal from '@/components/ConfirmModal';
 import GitRepoPicker, { type GitRepoPickerValue } from '@/components/GitRepoPicker';
 
 type TabKey = 'overview' | 'targets' | 'scans' | 'reports' | 'schedules' | 'compliance' | 'findings';
-
-const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: 'overview', label: 'Overview', icon: 'dashboard' },
-  { key: 'targets', label: 'Scan Targets', icon: 'trivy' },
-  { key: 'scans', label: 'Scan Results', icon: 'cicd' },
-  { key: 'compliance', label: 'Compliance', icon: 'vault' },
-  { key: 'findings', label: 'Findings', icon: 'discovery' },
-  { key: 'reports', label: 'Reports', icon: 'sonarqube' },
-  { key: 'schedules', label: 'Schedules', icon: 'prometheus' },
-];
 
 const SCANNER_COLORS: Record<string, string> = {
   trivy: '#0080FF',
@@ -127,22 +118,19 @@ export default function SecurityClient() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-[var(--border)]">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => handleTabChange(tab.key)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-              activeTab === tab.key
-                ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)] border-b-2 border-blue-500'
-                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]/50'
-            }`}
-          >
-            <span className="mr-2"><BrandIcon name={tab.icon} size={16} /></span>
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        activeKey={activeTab}
+        onChange={(k) => handleTabChange(k as TabKey)}
+        tabs={[
+          { key: 'overview', label: 'Overview', icon: 'dashboard', badge: scans.filter(s => s.status === 'running').length || undefined },
+          { key: 'targets', label: 'Scan Targets', icon: 'trivy', badge: targets.length || undefined },
+          { key: 'scans', label: 'Scan Results', icon: 'cicd', badge: scans.length || undefined },
+          { key: 'compliance', label: 'Compliance', icon: 'vault' },
+          { key: 'findings', label: 'Findings', icon: 'discovery', badge: findingSummary?.total || undefined },
+          { key: 'reports', label: 'Reports', icon: 'sonarqube' },
+          { key: 'schedules', label: 'Schedules', icon: 'prometheus', badge: schedules.length || undefined },
+        ]}
+      />
 
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm">

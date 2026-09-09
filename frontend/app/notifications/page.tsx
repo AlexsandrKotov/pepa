@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import DOMPurify from 'dompurify';
 import {
   notifications,
@@ -14,6 +15,7 @@ import {
   type ProviderPreview,
 } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
+import Tabs from '@/components/Tabs';
 
 type Tab = 'overview' | 'rules' | 'history';
 
@@ -26,8 +28,22 @@ export default function NotificationsPage() {
 }
 
 function NotificationsContent() {
-  const [tab, setTab] = useState<Tab>('overview');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'overview');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [rulesCount, setRulesCount] = useState(0);
+
+  useEffect(() => {
+    notifications.listRules().then(r => setRulesCount(r.total ?? r.rules.length)).catch(() => {});
+  }, []);
+
+  const handleTabChange = useCallback((key: string) => {
+    setTab(key as Tab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -44,27 +60,18 @@ function NotificationsContent() {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-1 border-b border-[var(--border)] mb-6">
-        {([
-          { id: 'overview' as Tab, label: 'Overview' },
-          { id: 'rules' as Tab, label: 'Routing Rules' },
-          { id: 'history' as Tab, label: 'Delivery History' },
-        ]).map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-              tab === t.id
-                ? 'text-[var(--accent)] border-b-2 border-[var(--accent)] bg-[var(--surface)]'
-                : 'text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-hover)]'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        activeKey={tab}
+        onChange={handleTabChange}
+        tabs={[
+          { key: 'overview', label: 'Overview', icon: 'dashboard' },
+          { key: 'rules', label: 'Routing Rules', icon: 'list', badge: rulesCount || undefined },
+          { key: 'history', label: 'Delivery History', icon: 'refresh' },
+        ]}
+        className="mb-6"
+      />
 
-      {tab === 'overview' && <OverviewTab showToast={showToast} onSwitchTab={setTab} />}
+      {tab === 'overview' && <OverviewTab showToast={showToast} onSwitchTab={(t) => handleTabChange(t)} />}
       {tab === 'rules' && <RulesTab showToast={showToast} />}
       {tab === 'history' && <HistoryTab />}
 

@@ -71,6 +71,7 @@ type Repositories struct {
 	DevOps          *repository.DevOpsRepository
 	NotificationRule *repository.NotificationRuleRepository
 	NotificationLog  *repository.NotificationLogRepository
+	GitOpsBinding    *repository.GitOpsBindingRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -249,6 +250,8 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerServiceRoutes(v1, deps)
 		registerCatalogRoutes(v1, deps)
 		registerGitOpsRoutes(v1, deps)
+		registerGitOpsApplicationRoutes(v1, deps)
+		registerGitOpsBindingRoutes(v1, deps)
 		registerSettingsRoutes(v1, deps)
 		registerEnvironmentRoutes(v1, deps)
 		registerMarketplaceRoutes(v1, deps)

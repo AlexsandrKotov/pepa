@@ -1,22 +1,30 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
+import Tabs from '@/components/Tabs';
 
 const tabs = [
-  { href: '/settings', label: 'General' },
-  { href: '/settings/authentication', label: 'Authentication' },
-  { href: '/settings/workspaces', label: 'Workspaces' },
-  { href: '/settings/users', label: 'Users' },
-  { href: '/settings/teams', label: 'Teams' },
-  { href: '/settings/observability', label: 'Observability' },
+  { key: 'general', label: 'General', href: '/settings', icon: 'settings' },
+  { key: 'auth', label: 'Authentication', href: '/settings/authentication', icon: 'shield' },
+  { key: 'organization', label: 'Organization', href: '/settings/users', icon: 'users' },
+  { key: 'observability', label: 'Observability', href: '/settings/observability', icon: 'chart' },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { isAdmin, hasPermission, loading } = usePermission();
+
+  // Determine active tab from pathname
+  const activeKey = (() => {
+    if (pathname === '/settings') return 'general';
+    if (pathname.startsWith('/settings/authentication')) return 'auth';
+    if (pathname.startsWith('/settings/users') || pathname.startsWith('/settings/teams')) return 'organization';
+    if (pathname.startsWith('/settings/observability')) return 'observability';
+    if (pathname.startsWith('/settings/workspaces')) return 'general';
+    return 'general';
+  })();
 
   if (loading) {
     return (
@@ -37,26 +45,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         <p className="page-subtitle-modern">Configure platform, workspaces, and users</p>
       </div>
 
-      <div className="flex gap-1 border-b border-[var(--border)] overflow-x-auto">
-        {tabs.map(t => {
-          const active = t.href === '/settings'
-            ? pathname === '/settings'
-            : pathname === t.href || pathname.startsWith(t.href + '/');
-          return (
-            <Link
-              key={t.href}
-              href={t.href}
-              className={`px-4 py-2 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap ${
-                active
-                  ? 'border-[var(--accent)] text-[var(--accent)]'
-                  : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              {t.label}
-            </Link>
-          );
-        })}
-      </div>
+      <Tabs tabs={tabs} activeKey={activeKey} />
 
       {children}
     </div>

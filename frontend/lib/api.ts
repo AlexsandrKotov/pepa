@@ -4962,3 +4962,141 @@ export const notifications = {
   stats: () => fetchAPI<{ stats: NotificationStats[] }>('/api/v1/notifications/stats'),
 };
 
+// ── GitOps Applications API ──────────────────────────────────
+
+export interface GitOpsAppSummary {
+  name: string;
+  namespace: string;
+  engine_type: 'argocd' | 'fluxcd';
+  health: string;
+  sync_status: string;
+  revision: string;
+  environment?: string;
+  project?: string;
+  labels?: Record<string, string>;
+  connection_id?: string;
+}
+
+export interface GitOpsAppDetail extends GitOpsAppSummary {
+  capabilities: {
+    diff: boolean;
+    history: string;
+    resource_tree: boolean;
+    events: boolean;
+    logs: boolean;
+    refresh: boolean;
+    auto_sync: boolean;
+    projects: boolean;
+  };
+  operation_state?: { phase: string; message?: string };
+  source?: { repo_url: string; path?: string; target_revision: string };
+  destination?: { server?: string; namespace: string };
+  interval?: string;
+  suspend?: boolean;
+}
+
+export interface GitOpsHistoryEntry {
+  id: number;
+  revision: string;
+  deployed_at: string;
+  status: string;
+  message?: string;
+}
+
+export interface GitOpsResourceNode {
+  kind: string;
+  name: string;
+  namespace: string;
+  uid: string;
+  health?: string;
+  status?: string;
+  children?: GitOpsResourceNode[];
+}
+
+export const gitopsApplications = {
+  list: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ applications: GitOpsAppSummary[]; total: number }>(`/api/v1/gitops/applications${qs}`);
+  },
+
+  get: (connectionId: string, namespace: string, name: string) =>
+    fetchAPI<GitOpsAppDetail>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}`),
+
+  history: (connectionId: string, namespace: string, name: string) =>
+    fetchAPI<{ history: GitOpsHistoryEntry[]; total: number }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/history`),
+
+  tree: (connectionId: string, namespace: string, name: string) =>
+    fetchAPI<GitOpsResourceNode>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/tree`),
+
+  events: (connectionId: string, namespace: string, name: string) =>
+    fetchAPI<{ events: unknown[]; total: number }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/events`),
+
+  refresh: (connectionId: string, namespace: string, name: string, hard = false) =>
+    fetchAPI<{ status: string; message: string }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/refresh?hard=${hard}`, { method: 'POST' }),
+
+  sync: (connectionId: string, namespace: string, name: string, opts?: Record<string, unknown>) =>
+    fetchAPI<{ status: string; message: string }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/sync`, { method: 'POST', body: JSON.stringify(opts || {}) }),
+
+  rollback: (connectionId: string, namespace: string, name: string, historyId: number) =>
+    fetchAPI<{ status: string; message: string }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/rollback`, { method: 'POST', body: JSON.stringify({ history_id: historyId }) }),
+
+  terminate: (connectionId: string, namespace: string, name: string) =>
+    fetchAPI<{ status: string; message: string }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/terminate`, { method: 'POST' }),
+
+  setAutoSync: (connectionId: string, namespace: string, name: string, enabled: boolean, prune = false, selfHeal = false) =>
+    fetchAPI<{ status: string; message: string }>(`/api/v1/gitops/applications/${connectionId}/${namespace}/${name}/auto-sync`, { method: 'POST', body: JSON.stringify({ enabled, prune, self_heal: selfHeal }) }),
+};
+
+// ── GitOps Bindings ──────────────────────────────────────────
+
+export interface GitOpsBinding {
+  id: string;
+  tenant_id: string;
+  service_id?: string;
+  entity_id?: string;
+  name: string;
+  repo_id?: string;
+  cluster_id?: string;
+  argo_connection_id?: string;
+  engine_type: 'argocd' | 'fluxcd';
+  app_name: string;
+  app_namespace: string;
+  app_project?: string;
+  environment?: string;
+  manifest_path?: string;
+  update_strategy: string;
+  update_path?: string;
+  verify_url?: string;
+  auto_bound: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiscoveredApp {
+  connection_id: string;
+  connection_name: string;
+  app: GitOpsAppSummary;
+  bound: boolean;
+  binding_id?: string;
+}
+
+export const gitopsBindings = {
+  list: () =>
+    fetchAPI<{ bindings: GitOpsBinding[]; total: number }>('/api/v1/gitops/bindings'),
+
+  get: (id: string) =>
+    fetchAPI<GitOpsBinding>(`/api/v1/gitops/bindings/${id}`),
+
+  create: (data: Partial<GitOpsBinding>) =>
+    fetchAPI<GitOpsBinding>('/api/v1/gitops/bindings', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: string, data: Partial<GitOpsBinding>) =>
+    fetchAPI<GitOpsBinding>(`/api/v1/gitops/bindings/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  delete: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/gitops/bindings/${id}`, { method: 'DELETE' }),
+
+  discover: () =>
+    fetchAPI<{ discovered: DiscoveredApp[]; total: number; newly_bound: number }>('/api/v1/gitops/bindings/discover', { method: 'POST' }),
+};
+

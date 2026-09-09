@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { vault, devops, type VaultPath, type VaultEngine, type VaultConfig, type VaultStatus, type VaultACLEntry, type SecretRotation } from '@/lib/api';
 import { listUsers, listTeams, getMe, type User, type Team } from '@/lib/api';
@@ -7,6 +8,7 @@ import PermissionGuard from '@/components/PermissionGuard';
 import { usePermission } from '@/hooks/usePermission';
 import GearIcon from '@/components/GearIcon';
 import ConfirmModal from '@/components/ConfirmModal';
+import Tabs from '@/components/Tabs';
 
 interface Props {
   initialPaths?: VaultPath[];
@@ -24,7 +26,22 @@ export default function VaultClient({ initialPaths, initialEngines }: Props) {
 function VaultClientContent({ initialPaths, initialEngines }: Props) {
   const { hasPermission } = usePermission();
   const canManageACL = hasPermission('vault', 'create');
-  const [tab, setTab] = useState<'secrets' | 'access' | 'rotation'>('secrets');
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const initialTab = (() => {
+    const t = searchParams.get('tab') as 'secrets' | 'access' | 'rotation' | null;
+    if (t === 'access' && !canManageACL) return 'secrets';
+    return t && ['secrets', 'access', 'rotation'].includes(t) ? t : 'secrets';
+  })();
+  const [tab, setTab] = useState<'secrets' | 'access' | 'rotation'>(initialTab);
+
+  const handleTabChange = useCallback((key: string) => {
+    if (key === 'access' && !canManageACL) return;
+    setTab(key as typeof tab);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('tab', key);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router, canManageACL]);
   const [paths, setPaths] = useState<VaultPath[]>(initialPaths ?? []);
   const [engines, setEngines] = useState<VaultEngine[]>(initialEngines ?? []);
   const [currentPrefix, setCurrentPrefix] = useState('');
@@ -61,6 +78,14 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
       revealTimers.forEach(t => clearTimeout(t));
     };
   }, []);
+
+  // Lazy-load rotations when the Rotation tab is first opened
+  useEffect(() => {
+    if (tab === 'rotation' && rotations.length === 0) {
+      devops.listRotations().then(setRotations).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   // Fetch initial data client-side when no SSR data is provided
   useEffect(() => {
@@ -301,37 +326,16 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
       </div>
 
       {/* Tab navigation */}
-      <div className="flex gap-1 border-b border-[var(--border)] page-animate-up page-delay-1">
-        <button
-          onClick={() => setTab('secrets')}
-          className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
-            tab === 'secrets' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          Secrets
-          {paths.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--border-light)] rounded-full">{paths.length}</span>}
-        </button>
-        {canManageACL && (
-          <button
-            onClick={() => setTab('access')}
-            className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
-              tab === 'access' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            Access Control
-            {aclEntries.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--border-light)] rounded-full">{aclEntries.length}</span>}
-          </button>
-        )}
-        <button
-          onClick={() => { setTab('rotation'); if (rotations.length === 0) devops.listRotations().then(setRotations).catch(() => {}); }}
-          className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors ${
-            tab === 'rotation' ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          Rotation
-          {rotations.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-[var(--border-light)] rounded-full">{rotations.length}</span>}
-        </button>
-      </div>
+      <Tabs
+        activeKey={tab}
+        onChange={handleTabChange}
+        tabs={[
+          { key: 'secrets', label: 'Secrets', icon: 'vault', badge: paths.length || undefined },
+          ...(canManageACL ? [{ key: 'access', label: 'Access Control', icon: 'users', badge: aclEntries.length || undefined }] : []),
+          { key: 'rotation', label: 'Rotation', icon: 'refresh', badge: rotations.length || undefined },
+        ]}
+        className="page-animate-up page-delay-1"
+      />
 
       {/* Configuration panel */}
       {showConfig && (
@@ -592,7 +596,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
       )}
 
       {/* ── Access Control Tab ───────────────────────────────── */}
-      {tab === 'access' && (
+      {canManageACL && tab === 'access' && (
         <div className="page-animate-up page-delay-2">
           <VaultACLPanel
             entries={aclEntries}

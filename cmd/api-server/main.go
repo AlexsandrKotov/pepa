@@ -161,6 +161,7 @@ func main() {
 			DevOps:           comp.DevOpsRepo,
 			NotificationRule: comp.NotificationRuleRepo,
 			NotificationLog:  comp.NotificationLogRepo,
+			GitOpsBinding:    comp.GitOpsBindingRepo,
 		},
 		Services: &rest.Services{
 			Deployment: func() *service.DeploymentService {

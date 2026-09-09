@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/gitops"
+	"github.com/pepa/pepa/internal/gitops/engine"
 	"github.com/pepa/pepa/internal/repository"
 	"gopkg.in/yaml.v3"
 )
@@ -450,6 +451,7 @@ func verifyWorkflowDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
+		tenantID := getTenantID(c)
 		d, err := deps.Repos.Deployment.Get(ctx, id)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
@@ -460,8 +462,44 @@ func verifyWorkflowDeployment(deps Dependencies) gin.HandlerFunc {
 		checks := []gin.H{
 			{"name": "deployment-exists", "status": "passed", "message": "Deployment record found"},
 			{"name": "status-check", "status": checkStatus(d.Status), "message": fmt.Sprintf("Deployment status: %s", d.Status)},
-			{"name": "image-pull", "status": "passed", "message": fmt.Sprintf("Image %s available", d.ImageTag)},
-			{"name": "health-check", "status": checkHealth(d.Status), "message": healthMessage(d.Status)},
+		}
+
+		// Try to get real health from GitOps engine if binding exists
+		var realHealthStatus string
+		var realHealthMessage string
+		if deps.Repos.GitOpsBinding != nil {
+			// Try to find binding by deployment's project name
+			binding, err := deps.Repos.GitOpsBinding.FindByDeploymentName(ctx, d.GitlabProjectName, tenantID.String())
+			if err == nil && binding != nil && binding.ArgoConnectionID != nil {
+				// Use engine client to get real health
+				engineClient := newEngineClient(deps)
+				connUUID, _ := uuid.Parse(binding.ArgoConnectionID.String())
+				ref := engine.AppRef{
+					ConnectionID: connUUID,
+					AppName:      binding.AppName,
+					Namespace:    binding.AppNamespace,
+					TenantID:     tenantID,
+				}
+				detail, err := engineClient.Get(ctx, ref)
+				if err == nil && detail != nil {
+					realHealthStatus = detail.Health
+					realHealthMessage = fmt.Sprintf("Real health from %s: %s (sync: %s, revision: %s)", binding.EngineType, detail.Health, detail.SyncStatus, detail.Revision)
+					checks = append(checks, gin.H{
+						"name":    "gitops-health",
+						"status":  mapHealthToStatus(detail.Health),
+						"message": realHealthMessage,
+					})
+				}
+			}
+		}
+
+		// Fallback to status-based health if no real health available
+		if realHealthStatus == "" {
+			checks = append(checks, gin.H{
+				"name":    "health-check",
+				"status":  checkHealth(d.Status),
+				"message": healthMessage(d.Status),
+			})
 		}
 
 		allPassed := true
@@ -483,6 +521,20 @@ func verifyWorkflowDeployment(deps Dependencies) gin.HandlerFunc {
 			"checks":              checks,
 			"verified_at":         time.Now().UTC().Format(time.RFC3339),
 		})
+	}
+}
+
+// mapHealthToStatus converts GitOps health status to verification status.
+func mapHealthToStatus(health string) string {
+	switch health {
+	case "Healthy", "healthy":
+		return "passed"
+	case "Degraded", "degraded", "Failed", "failed":
+		return "failed"
+	case "Progressing", "progressing", "Syncing":
+		return "warning"
+	default:
+		return "warning"
 	}
 }
 

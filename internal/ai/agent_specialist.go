@@ -141,7 +141,7 @@ func filterToolsForSpecialist(base *ToolRegistry, specialist SpecialistType) *To
 	// Define which tool categories each specialist gets
 	allowedPrefixes := map[SpecialistType][]string{
 		SpecialistSRE:     {"get_services", "get_deployments", "get_pipeline", "get_entities", "get_docker"},
-		SpecialistDevOps:  {"get_services", "get_deployments", "get_pipeline", "get_clusters", "get_environments", "get_helm", "get_docker", "get_gitops"},
+		SpecialistDevOps:  {"get_services", "get_deployments", "get_pipeline", "get_clusters", "get_environments", "get_helm", "get_docker", "get_gitops", "list_gitops_bindings", "get_gitops_suggestions"},
 		SpecialistSecurity: {"get_services", "get_entities", "get_vault", "get_audit", "get_roles"},
 		SpecialistDoc:     {"get_services", "get_entities", "get_pipeline", "search_knowledge"},
 		SpecialistCost:    {"get_services", "get_clusters", "get_docker", "get_environments"},

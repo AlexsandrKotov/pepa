@@ -353,6 +353,97 @@ const BRAND_ICONS: Record<string, React.ReactNode> = {
       <path d="M17 8H7v2h4v8h2v-8h4V8z" fill="#FFFFFF" />
     </>
   ),
+
+  // Settings — gear/cog in slate
+  settings: (
+    <>
+      <path d="M12 15.5A3.5 3.5 0 118.5 12 3.5 3.5 0 0112 15.5z" fill="none" stroke="#64748B" strokeWidth="1.5" />
+      <path d="M19.14 13.14a1.28 1.28 0 00.26 1.4l.04.04a1.69 1.69 0 11-2.39 2.39l-.04-.04a1.28 1.28 0 00-1.4-.26 1.28 1.28 0 00-.77 1.17v.12a1.69 1.69 0 11-3.38 0v-.06a1.28 1.28 0 00-.84-1.17 1.28 1.28 0 00-1.4.26l-.04.04a1.69 1.69 0 11-2.39-2.39l.04-.04a1.28 1.28 0 00.26-1.4 1.28 1.28 0 00-1.17-.77H5.84a1.69 1.69 0 110-3.38h.06a1.28 1.28 0 001.17-.84 1.28 1.28 0 00-.26-1.4l-.04-.04a1.69 1.69 0 112.39-2.39l.04.04a1.28 1.28 0 001.4.26h.06a1.28 1.28 0 00.77-1.17V4.84a1.69 1.69 0 113.38 0v.06a1.28 1.28 0 00.77 1.17 1.28 1.28 0 001.4-.26l.04-.04a1.69 1.69 0 112.39 2.39l-.04.04a1.28 1.28 0 00-.26 1.4v.06a1.28 1.28 0 001.17.77h.12a1.69 1.69 0 110 3.38h-.06a1.28 1.28 0 00-1.17.77z" fill="none" stroke="#64748B" strokeWidth="1.5" />
+    </>
+  ),
+
+  // Shield — security shield in blue
+  shield: (
+    <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5zm0 2.18l7 3.82v5c0 4.52-3.13 8.69-7 9.93-3.87-1.24-7-5.41-7-9.93V8l7-3.82z" fill="#3B82F6" />
+  ),
+
+  // Users — two people in blue
+  users: (
+    <>
+      <path d="M9 11a4 4 0 100-8 4 4 0 000 8z" fill="#3B82F6" />
+      <path d="M1 19c0-3.31 3.58-6 8-6s8 2.69 8 6" fill="#3B82F6" opacity="0.7" />
+      <path d="M15 7a3 3 0 100 6 3 3 0 000-6z" fill="#3B82F6" opacity="0.5" />
+      <path d="M23 19c0-2.21-1.79-4.27-4.5-5.28" fill="none" stroke="#3B82F6" strokeWidth="1.5" opacity="0.5" />
+    </>
+  ),
+
+  // Chart — bar chart in teal
+  chart: (
+    <>
+      <rect x="3" y="12" width="4" height="9" rx="0.5" fill="#14B8A6" />
+      <rect x="10" y="6" width="4" height="15" rx="0.5" fill="#14B8A6" opacity="0.7" />
+      <rect x="17" y="3" width="4" height="18" rx="0.5" fill="#14B8A6" opacity="0.5" />
+    </>
+  ),
+
+  // Alert — warning triangle in amber
+  alert: (
+    <>
+      <path d="M12 2L1 21h22L12 2z" fill="#F59E0B" />
+      <path d="M12 9v5" stroke="#FFF" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="16.5" r="1" fill="#FFF" />
+    </>
+  ),
+
+  // Document — page/file in blue-gray
+  document: (
+    <>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" fill="#94A3B8" />
+      <path d="M14 2v6h6" fill="#CBD5E1" />
+      <path d="M8 13h8M8 17h5" stroke="#FFF" strokeWidth="1.2" strokeLinecap="round" />
+    </>
+  ),
+
+  // Lightning — bolt in yellow
+  lightning: (
+    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="#EAB308" />
+  ),
+
+  // Terminal — command prompt in green
+  terminal: (
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" fill="#1E293B" />
+      <path d="M6 9l4 3-4 3" fill="none" stroke="#22C55E" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M13 17h5" stroke="#22C55E" strokeWidth="1.8" strokeLinecap="round" />
+    </>
+  ),
+
+  // Key — key icon in amber
+  key: (
+    <>
+      <circle cx="8" cy="15" r="5" fill="none" stroke="#D97706" strokeWidth="1.8" />
+      <path d="M12 11l8-8" stroke="#D97706" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M17 6l3 3M15 8l2 2" stroke="#D97706" strokeWidth="1.5" strokeLinecap="round" />
+    </>
+  ),
+
+  // Refresh — circular arrows in blue
+  refresh: (
+    <>
+      <path d="M3 12a9 9 0 0115.36-6.36L21 3v6h-6l2.64-2.64" fill="none" stroke="#3B82F6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M21 12a9 9 0 01-15.36 6.36L3 21v-6h6l-2.64 2.64" fill="none" stroke="#3B82F6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+
+  // List — horizontal lines/bullet list in slate
+  list: (
+    <>
+      <path d="M8 6h13M8 12h13M8 18h13" stroke="#64748B" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="4" cy="6" r="1.5" fill="#64748B" />
+      <circle cx="4" cy="12" r="1.5" fill="#64748B" />
+      <circle cx="4" cy="18" r="1.5" fill="#64748B" />
+    </>
+  ),
 };
 
 /**
