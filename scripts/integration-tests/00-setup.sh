@@ -170,7 +170,7 @@ if command -v docker &>/dev/null; then
         log_info "Starting Vault dev container..."
         docker run -d --name pepa-vault \
             -p 8200:8200 \
-            -e VAULT_DEV_ROOT_TOKEN_ID=pepa-vault-token \
+            -e VAULT_DEV_ROOT_TOKEN_ID=test-root-token-123 \
             -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
             hashicorp/vault:latest 2>/dev/null || log_warn "Could not start Vault container"
         sleep 2
@@ -220,7 +220,7 @@ if [[ "$bootstrap_needed" == "true" ]]; then
         log_info "Activating bootstrap..."
         activate_resp=$(curl -s -w "\n%{http_code}" -X POST "${PEPA_URL}/api/v1/auth/bootstrap/activate" \
             -H "Content-Type: application/json" \
-            -d "{\"token\":\"${bootstrap_token}\",\"username\":\"admin\",\"password\":\"admin123\",\"email\":\"admin@pepa.local\"}")
+            -d "{\"token\":\"${bootstrap_token}\",\"username\":\"admin\",\"password\":\"Admin123!\",\"email\":\"admin@local\"}")
         activate_code=$(echo "$activate_resp" | tail -1)
         if [[ "$activate_code" == "200" ]]; then
             log_info "Bootstrap activated successfully"
@@ -236,7 +236,7 @@ fi
 
 # Login to get JWT token
 log_step "Logging in to PEPA"
-pepa_login "admin" "admin123"
+pepa_login "admin@local" "Admin123!"
 
 if [[ -n "${PEPA_TOKEN:-}" ]]; then
     log_info "PEPA login successful — token acquired"

@@ -40,7 +40,7 @@ log_test_start "1.2" "Activate bootstrap token"
 needs_bootstrap=$(jq -r '.needs_bootstrap // .needsBootstrap // false' "$TMP/1.1_status.json" 2>/dev/null)
 if [[ "$needs_bootstrap" == "true" && -n "$BOOTSTRAP_TOKEN" ]]; then
     pepa_api POST "/auth/bootstrap/activate" \
-        "{\"token\":\"${BOOTSTRAP_TOKEN}\",\"username\":\"admin\",\"password\":\"admin123\",\"email\":\"admin@pepa.local\"}" \
+        "{\"token\":\"${BOOTSTRAP_TOKEN}\",\"username\":\"admin\",\"password\":\"Admin123!\",\"email\":\"admin@local\"}" \
         "$TMP/1.2_activate.json" "$TMP/1.2_code.txt"
     if assert_http_success "$TMP/1.2_code.txt" "1.2 bootstrap activate"; then
         log_test_pass "1.2" "Bootstrap activated"
@@ -56,12 +56,13 @@ fi
 # ---------------------------------------------------------------------------
 log_test_start "1.3" "Login with initial admin"
 pepa_api POST "/auth/login" \
-    '{"username":"admin","password":"admin123"}' \
+    '{"email":"admin@local","password":"Admin123!"}' \
     "$TMP/1.3_login.json" "$TMP/1.3_code.txt"
 if assert_http_success "$TMP/1.3_code.txt" "1.3 login"; then
     ADMIN_JWT=$(jq -r '.token // .access_token // .jwt // empty' "$TMP/1.3_login.json" 2>/dev/null)
     if [[ -n "$ADMIN_JWT" ]]; then
         export PEPA_TOKEN="$ADMIN_JWT"
+        echo "$PEPA_TOKEN" > "${RESULTS_DIR}/pepa_token"
         log_test_pass "1.3" "Login successful, JWT acquired"
     else
         log_test_fail "1.3" "Login returned 200 but no JWT found"
@@ -76,9 +77,9 @@ fi
 log_test_start "1.4" "Get current user (GET /auth/me)"
 pepa_api GET "/auth/me" "" "$TMP/1.4_me.json" "$TMP/1.4_code.txt"
 if assert_http_success "$TMP/1.4_code.txt" "1.4 get current user"; then
-    assert_json_field "$TMP/1.4_me.json" ".username" "admin" "1.4 username=admin" && \
+    assert_json_field "$TMP/1.4_me.json" ".user.email" "admin@local" "1.4 email=admin@local" && \
         log_test_pass "1.4" "Current user is admin" || \
-        log_test_fail "1.4" "Username mismatch"
+        log_test_fail "1.4" "User email mismatch"
 else
     log_test_fail "1.4" "GET /auth/me failed"
 fi
@@ -106,7 +107,7 @@ fi
 # ---------------------------------------------------------------------------
 log_test_start "1.6" "Reset own password (POST /auth/me/reset-password)"
 pepa_api POST "/auth/me/reset-password" \
-    '{"old_password":"admin123","new_password":"newpass456"}' \
+    '{"current_password":"Admin123!","new_password":"NewPass456!"}' \
     "$TMP/1.6_resetpw.json" "$TMP/1.6_code.txt"
 if assert_http_success "$TMP/1.6_code.txt" "1.6 reset password"; then
     log_test_pass "1.6" "Password reset successful"
@@ -119,7 +120,7 @@ fi
 # ---------------------------------------------------------------------------
 log_test_start "1.7" "Login after password reset"
 pepa_api POST "/auth/login" \
-    '{"username":"admin","password":"newpass456"}' \
+    '{"email":"admin@local","password":"NewPass456!"}' \
     "$TMP/1.7_login2.json" "$TMP/1.7_code.txt"
 if assert_http_success "$TMP/1.7_code.txt" "1.7 login with new password"; then
     ADMIN_JWT=$(jq -r '.token // .access_token // .jwt // empty' "$TMP/1.7_login2.json" 2>/dev/null)
@@ -129,7 +130,7 @@ else
     log_test_fail "1.7" "Login with new password failed"
     # Reset password back for subsequent tests
     pepa_api POST "/auth/me/reset-password" \
-        '{"old_password":"newpass456","new_password":"admin123"}' \
+        '{"current_password":"NewPass456!","new_password":"Admin123!"}' \
         "$TMP/1.7_resetback.json" "$TMP/1.7_resetback_code.txt" 2>/dev/null
 fi
 
@@ -138,7 +139,7 @@ fi
 # ---------------------------------------------------------------------------
 log_test_start "1.8" "Admin: create user (POST /auth/users)"
 pepa_api POST "/auth/users" \
-    '{"username":"testdev","password":"testpass123","email":"dev@pepa.local","role":2}' \
+    '{"name":"Test Developer","password":"TestDev123!","email":"testdev@pepa.local"}' \
     "$TMP/1.8_create_user.json" "$TMP/1.8_code.txt"
 if assert_http_status "$TMP/1.8_code.txt" "201" "1.8 create user"; then
     TEST_USER_ID=$(jq -r '.id // .user_id // empty' "$TMP/1.8_create_user.json" 2>/dev/null)
@@ -153,7 +154,7 @@ fi
 log_test_start "1.9" "Admin: list users (GET /auth/users)"
 pepa_api GET "/auth/users" "" "$TMP/1.9_users.json" "$TMP/1.9_code.txt"
 if assert_http_success "$TMP/1.9_code.txt" "1.9 list users"; then
-    assert_json_field_exists "$TMP/1.9_users.json" ".[0].id // .users[0].id // .data[0].id" "1.9 has users" && \
+    assert_json_field_exists "$TMP/1.9_users.json" ".users[0].id" "1.9 has users" && \
         log_test_pass "1.9" "Users listed" || \
         log_test_fail "1.9" "No users in response"
 else
@@ -198,7 +199,7 @@ fi
 log_test_start "1.12" "Admin: reset user password"
 if [[ -n "$TEST_USER_ID" ]]; then
     pepa_api POST "/auth/users/${TEST_USER_ID}/reset-password" \
-        '{"new_password":"resetpass789"}' \
+        '{"new_password":"ResetPass789!"}' \
         "$TMP/1.12_resetpw.json" "$TMP/1.12_code.txt"
     if assert_http_success "$TMP/1.12_code.txt" "1.12 reset user password"; then
         log_test_pass "1.12" "User password reset"
@@ -265,8 +266,8 @@ else
 fi
 
 # Re-login for subsequent tests
-pepa_login "admin" "admin123" 2>/dev/null || \
-    pepa_login "admin" "newpass456" 2>/dev/null || \
+pepa_login "admin@local" "Admin123!" 2>/dev/null || \
+pepa_login "admin@local" "NewPass456!" 2>/dev/null || \
     log_warn "Could not re-login after logout test"
 
 # ---------------------------------------------------------------------------

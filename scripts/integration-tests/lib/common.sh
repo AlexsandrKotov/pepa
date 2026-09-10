@@ -16,13 +16,15 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-PEPA_API_URL="${PEPA_API_URL:-http://localhost:8088}"
-PEPA_ADMIN_USER="${PEPA_ADMIN_USER:-admin@pepa.local}"
-PEPA_ADMIN_PASSWORD="${PEPA_ADMIN_PASSWORD:-TestAdmin123!}"
+# PEPA_URL is used by test scripts; PEPA_API_URL is the base for pepa_api()
+PEPA_URL="${PEPA_URL:-http://localhost:8088}"
+PEPA_API_URL="${PEPA_API_URL:-${PEPA_URL}}"
+PEPA_ADMIN_USER="${PEPA_ADMIN_USER:-admin@local}"
+PEPA_ADMIN_PASSWORD="${PEPA_ADMIN_PASSWORD:-Admin123!}"
 PEPA_TOKEN="${PEPA_TOKEN:-}"
 GITEA_URL="${GITEA_URL:-http://localhost:3001}"
 GITEA_ADMIN_USER="${GITEA_ADMIN_USER:-pepa}"
-GITEA_ADMIN_PASSWORD="${GITEA_ADMIN_PASSWORD:-pepa12345}"
+GITEA_ADMIN_PASSWORD="${GITEA_ADMIN_PASSWORD:-PepaTest2026!}"
 GITEA_TOKEN="${GITEA_TOKEN:-}"
 K3D_PRIMARY="${K3D_PRIMARY:-pepa-test-primary}"
 K3D_SECONDARY="${K3D_SECONDARY:-pepa-test-secondary}"
@@ -184,12 +186,20 @@ log_test_junit() {
 
 # ── PEPA API helpers ──────────────────────────────────────────────────────────
 
-# pepa_api GET /api/v1/clusters
-# pepa_api POST /api/v1/connections '{"name":"test"}'
+# pepa_api METHOD PATH [DATA] [OUT_JSON_FILE] [OUT_CODE_FILE]
+# When called with 5 args, writes JSON body to OUT_JSON_FILE and HTTP code to OUT_CODE_FILE.
+# When called with 2-3 args, sets global API_RESPONSE and API_STATUS.
 pepa_api() {
     local method="$1"
     local path="$2"
     local data="${3:-}"
+    local out_json="${4:-}"
+    local out_code="${5:-}"
+
+    # Auto-prepend /api/v1 if path doesn't already start with it
+    if [[ "$path" != /api/v1* ]]; then
+        path="/api/v1${path}"
+    fi
     local url="${PEPA_API_URL}${path}"
 
     local curl_args=(
@@ -208,14 +218,22 @@ pepa_api() {
     fi
 
     local response
-    response=$(curl "${curl_args[@]}" "$url" 2>>"$LOG_FILE")
+    response=$(curl "${curl_args[@]}" "$url" 2>>"$LOG_FILE") || true
 
     local http_code
     http_code=$(echo "$response" | tail -1)
     local body
     body=$(echo "$response" | sed '$d')
 
-    # Return both body and status code via global variables
+    # If output files specified (5-arg mode), write to files
+    if [[ -n "$out_json" && "$out_json" != "/dev/null" ]]; then
+        echo "$body" > "$out_json" 2>/dev/null || true
+    fi
+    if [[ -n "$out_code" && "$out_code" != "/dev/null" ]]; then
+        echo "$http_code" > "$out_code" 2>/dev/null || true
+    fi
+
+    # Always set global variables for backward compatibility
     API_RESPONSE="$body"
     API_STATUS="$http_code"
 }
@@ -347,9 +365,12 @@ require_cmd() {
     fi
 }
 
-# Check all prerequisites
+# Check all prerequisites (pass command names as args, or uses defaults if none given)
 check_prerequisites() {
-    local cmds=("k3d" "kubectl" "helm" "curl" "jq" "git")
+    local cmds=("$@")
+    if [[ ${#cmds[@]} -eq 0 ]]; then
+        cmds=("k3d" "kubectl" "helm" "curl" "jq" "git")
+    fi
     local missing=()
     for cmd in "${cmds[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
@@ -360,7 +381,7 @@ check_prerequisites() {
         log_fail "Missing prerequisites: ${missing[*]}"
         return 1
     fi
-    log_ok "All prerequisites satisfied"
+    log_ok "All prerequisites satisfied (${cmds[*]})"
 }
 
 # Cleanup handler for EXIT trap

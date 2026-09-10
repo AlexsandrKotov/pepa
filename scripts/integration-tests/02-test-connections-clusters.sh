@@ -34,6 +34,11 @@ PRIMARY_KUBECONFIG_DATA=$(cat "$PRIMARY_KUBECONFIG" 2>/dev/null | base64 | tr -d
 # Track created resources for cleanup
 CONN_IDS=()
 CLUSTER_IDS=()
+CONN1_ID=""
+CONN2_ID=""
+CLUSTER1_ID=""
+CLUSTER2_ID=""
+CASCADE_CONN_ID=""
 
 cleanup_phase() {
     log_info "Cleaning up Phase 2 resources..."
@@ -69,9 +74,9 @@ log_test_start "2.2" "Verify auto-created cluster from connection"
 sleep 2  # Wait for async cluster creation
 pepa_api GET "/clusters" "" "$TMP/2.2_clusters.json" "$TMP/2.2_code.txt"
 if assert_http_success "$TMP/2.2_code.txt" "2.2 list clusters"; then
-    cluster_name=$(jq -r '.[].name // .data[].name // .clusters[].name' "$TMP/2.2_clusters.json" 2>/dev/null | grep -i "primary\|test" | head -1)
+    cluster_name=$(jq -r '.[].name // .data[].name // .clusters[].name' "$TMP/2.2_clusters.json" 2>/dev/null | grep -i "primary\|test" | head -1 || true)
     if [[ -n "$cluster_name" ]]; then
-        CLUSTER1_ID=$(jq -r ".[] | select(.name | test(\"primary|test\";\"i\")) | .id" "$TMP/2.2_clusters.json" 2>/dev/null | head -1)
+        CLUSTER1_ID=$(jq -r ".[] | select(.name | test(\"primary|test\";\"i\")) | .id" "$TMP/2.2_clusters.json" 2>/dev/null | head -1 || true)
         [[ -n "$CLUSTER1_ID" ]] && CLUSTER_IDS+=("$CLUSTER1_ID")
         log_test_pass "2.2" "Auto-created cluster found: $cluster_name"
     else

@@ -8,7 +8,7 @@
 
 : "${GITEA_URL:=http://localhost:3001}"
 : "${GITEA_ADMIN_USER:=pepa}"
-: "${GITEA_ADMIN_PASS:=pepa}"
+: "${GITEA_ADMIN_PASS:=PepaTest2026!}"
 : "${GITEA_ORG:=pepa-test}"
 : "${GITEA_TOKEN_FILE:=/tmp/gitea_token}"
 
