@@ -97,3 +97,9 @@ docs/diagrams/
 
 # Qoder / tool plans
 .qoder/
+
+# Integration test results and temporary data
+scripts/integration-tests/results/
+scripts/integration-tests/tmp/
+scripts/integration-tests/*.log
+scripts/integration-tests/kubeconfig-*

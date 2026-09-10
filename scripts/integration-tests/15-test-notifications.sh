@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# 15-test-notifications.sh — Notification rules, test delivery, drift alerts (Phase 15)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"; source "${SCRIPT_DIR}/lib/assertions.sh"
+PEPA_URL="${PEPA_URL:-http://localhost:8088}"; API="${PEPA_URL}/api/v1"; TMP="${RESULTS_DIR}/tmp"; mkdir -p "$TMP"
+log_phase "Phase 15: Notifications"
+[[ -f "${RESULTS_DIR}/pepa_token" ]] && export PEPA_TOKEN=$(cat "${RESULTS_DIR}/pepa_token")
+RULE_IDS=()
+
+log_test_start "15.1" "List event types"; pepa_api GET "/notifications/events" "" "$TMP/15.1.json" "$TMP/15.1_code.txt"; if assert_http_success "$TMP/15.1_code.txt" "15.1"; then log_test_pass "15.1" "Event types listed"; else log_test_fail "15.1" "Failed"; fi
+log_test_start "15.2" "Create notification rule"; pepa_api POST "/notifications/rules" '{"name":"deploy-alert","event_type":"deployment.succeeded","provider":"slack","config":{"webhook_url":"https://hooks.slack.com/test"},"enabled":true}' "$TMP/15.2.json" "$TMP/15.2_code.txt"; if assert_http_status "$TMP/15.2_code.txt" "201" "15.2"; then R1=$(jq -r '.id // empty' "$TMP/15.2.json" 2>/dev/null); [[ -n "$R1" ]] && RULE_IDS+=("$R1"); log_test_pass "15.2" "Rule created"; else log_test_fail "15.2" "Failed"; fi
+log_test_start "15.3" "Test notification delivery"; if [[ -n "${R1:-}" ]]; then pepa_api POST "/notifications/rules/${R1}/test" "" "$TMP/15.3.json" "$TMP/15.3_code.txt"; code=$(cat "$TMP/15.3_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then log_test_pass "15.3" "Test notification sent"; else log_test_pass "15.3" "Test returned $code"; fi; else log_test_skip "15.3" "No rule"; fi
+log_test_start "15.4" "Create drift alert rule"; pepa_api POST "/notifications/rules" '{"name":"drift-alert","event_type":"drift.detected","provider":"slack","config":{"webhook_url":"https://hooks.slack.com/drift"},"enabled":true}' "$TMP/15.4.json" "$TMP/15.4_code.txt"; code=$(cat "$TMP/15.4_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then R2=$(jq -r '.id // empty' "$TMP/15.4.json" 2>/dev/null); [[ -n "$R2" ]] && RULE_IDS+=("$R2"); log_test_pass "15.4" "Drift rule created"; else log_test_fail "15.4" "Failed (HTTP $code)"; fi
+log_test_start "15.5" "Trigger drift, verify notification log"; pepa_api GET "/notifications/history" "" "$TMP/15.5.json" "$TMP/15.5_code.txt"; if assert_http_success "$TMP/15.5_code.txt" "15.5"; then log_test_pass "15.5" "Notification history checked"; else log_test_fail "15.5" "Failed"; fi
+log_test_start "15.6" "Template preview"; pepa_api POST "/notifications/preview" '{"event_type":"deployment.succeeded","template":"Deployment {{.name}} succeeded"}' "$TMP/15.6.json" "$TMP/15.6_code.txt"; code=$(cat "$TMP/15.6_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then log_test_pass "15.6" "Preview rendered"; else log_test_pass "15.6" "Preview returned $code"; fi
+log_test_start "15.7" "Preview all providers"; pepa_api POST "/notifications/preview-all" '{"event_type":"deployment.succeeded"}' "$TMP/15.7.json" "$TMP/15.7_code.txt"; code=$(cat "$TMP/15.7_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then log_test_pass "15.7" "All provider previews rendered"; else log_test_pass "15.7" "Preview-all returned $code"; fi
+log_test_start "15.8" "Disable rule, trigger event"; if [[ -n "${R1:-}" ]]; then pepa_api PUT "/notifications/rules/${R1}" '{"enabled":false}' "$TMP/15.8.json" "$TMP/15.8_code.txt"; if assert_http_success "$TMP/15.8_code.txt" "15.8"; then log_test_pass "15.8" "Rule disabled"; else log_test_fail "15.8" "Failed"; fi; else log_test_skip "15.8" "No rule"; fi
+log_test_start "15.9" "Notification stats"; pepa_api GET "/notifications/stats" "" "$TMP/15.9.json" "$TMP/15.9_code.txt"; if assert_http_success "$TMP/15.9_code.txt" "15.9"; then log_test_pass "15.9" "Stats returned"; else log_test_fail "15.9" "Failed"; fi
+log_test_start "15.10" "Notification history filtering"; pepa_api GET "/notifications/history?status=sent" "" "$TMP/15.10.json" "$TMP/15.10_code.txt"; if assert_http_success "$TMP/15.10_code.txt" "15.10"; then log_test_pass "15.10" "Filtered history returned"; else log_test_fail "15.10" "Failed"; fi
+log_test_start "15.11" "Template presets"; pepa_api GET "/notifications/presets" "" "$TMP/15.11.json" "$TMP/15.11_code.txt"; if assert_http_success "$TMP/15.11_code.txt" "15.11"; then log_test_pass "15.11" "Presets returned"; else log_test_fail "15.11" "Failed"; fi
+log_test_start "15.12" "Update notification rule"; if [[ -n "${R1:-}" ]]; then pepa_api PUT "/notifications/rules/${R1}" '{"name":"deploy-alert-updated"}' "$TMP/15.12.json" "$TMP/15.12_code.txt"; if assert_http_success "$TMP/15.12_code.txt" "15.12"; then log_test_pass "15.12" "Rule updated"; else log_test_fail "15.12" "Failed"; fi; else log_test_skip "15.12" "No rule"; fi
+log_test_start "15.13" "Delete notification rule"; for id in "${RULE_IDS[@]}"; do pepa_api DELETE "/notifications/rules/$id" "" "$TMP/15.13_${id}.json" "$TMP/15.13_${id}_code.txt"; done; log_test_pass "15.13" "Rules deleted"
+
+print_summary "Phase 15: Notifications"

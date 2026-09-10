@@ -1,0 +1,34 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: multi-env-test
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - cluster: staging
+            namespace: pepa-test
+          - cluster: production
+            namespace: pepa-prod
+  template:
+    metadata:
+      name: "multi-env-{{cluster}}"
+      labels:
+        app.kubernetes.io/managed-by: pepa
+    spec:
+      project: default
+      source:
+        repoURL: http://gitea:3000/pepa-test/multi-env-manifests
+        targetRevision: main
+        path: "overlays/{{cluster}}"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

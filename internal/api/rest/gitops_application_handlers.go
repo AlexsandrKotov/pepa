@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/gitops"
 	"github.com/pepa/pepa/internal/gitops/engine"
 )
@@ -51,14 +52,9 @@ func parseAppRef(c *gin.Context) (engine.AppRef, bool) {
 }
 
 // getTenantID extracts the tenant ID from the Gin context.
+// Delegates to auth.GetTenantID which reads the verified JWT claim.
 func getTenantID(c *gin.Context) uuid.UUID {
-	if tid, exists := c.Get("tenant_id"); exists {
-		if id, ok := tid.(uuid.UUID); ok {
-			return id
-		}
-	}
-	// Fallback to default tenant
-	return uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	return auth.GetTenantID(c)
 }
 
 // listGitOpsApplications lists all GitOps applications from both engines.

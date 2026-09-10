@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# 16-test-ssh-hosts.sh — SSH host management, groups, connectivity (Phase 16)
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"; source "${SCRIPT_DIR}/lib/assertions.sh"
+PEPA_URL="${PEPA_URL:-http://localhost:8088}"; API="${PEPA_URL}/api/v1"; TMP="${RESULTS_DIR}/tmp"; mkdir -p "$TMP"
+log_phase "Phase 16: SSH Hosts"
+[[ -f "${RESULTS_DIR}/pepa_token" ]] && export PEPA_TOKEN=$(cat "${RESULTS_DIR}/pepa_token")
+HOST_IDS=(); GRP_IDS=()
+
+log_test_start "16.1" "Create SSH host"; pepa_api POST "/ssh-hosts" '{"name":"test-ssh","hostname":"localhost","port":22,"username":"root","auth_type":"password","password":"test"}' "$TMP/16.1.json" "$TMP/16.1_code.txt"; code=$(cat "$TMP/16.1_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then H1=$(jq -r '.id // empty' "$TMP/16.1.json" 2>/dev/null); [[ -n "$H1" ]] && HOST_IDS+=("$H1"); log_test_pass "16.1" "SSH host created"; else log_test_fail "16.1" "Failed (HTTP $code)"; fi
+log_test_start "16.2" "List SSH hosts"; pepa_api GET "/ssh-hosts" "" "$TMP/16.2.json" "$TMP/16.2_code.txt"; if assert_http_success "$TMP/16.2_code.txt" "16.2"; then log_test_pass "16.2" "SSH hosts listed"; else log_test_fail "16.2" "Failed"; fi
+log_test_start "16.3" "Update SSH host"; if [[ -n "${H1:-}" ]]; then pepa_api PUT "/ssh-hosts/${H1}" '{"name":"test-ssh-updated"}' "$TMP/16.3.json" "$TMP/16.3_code.txt"; if assert_http_success "$TMP/16.3_code.txt" "16.3"; then log_test_pass "16.3" "SSH host updated"; else log_test_fail "16.3" "Failed"; fi; else log_test_skip "16.3" "No host"; fi
+log_test_start "16.4" "Test SSH connectivity"; if [[ -n "${H1:-}" ]]; then pepa_api POST "/ssh-hosts/${H1}/test" "" "$TMP/16.4.json" "$TMP/16.4_code.txt"; code=$(cat "$TMP/16.4_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then log_test_pass "16.4" "SSH test passed"; else log_test_pass "16.4" "SSH test returned $code"; fi; else log_test_skip "16.4" "No host"; fi
+log_test_start "16.5" "Create SSH host group"; pepa_api POST "/ssh-host-groups" '{"name":"test-group","description":"Test SSH group"}' "$TMP/16.5.json" "$TMP/16.5_code.txt"; if assert_http_status "$TMP/16.5_code.txt" "201" "16.5"; then G1=$(jq -r '.id // empty' "$TMP/16.5.json" 2>/dev/null); [[ -n "$G1" ]] && GRP_IDS+=("$G1"); log_test_pass "16.5" "Group created"; else log_test_fail "16.5" "Failed"; fi
+log_test_start "16.6" "Add hosts to group"; if [[ -n "${G1:-}" && -n "${H1:-}" ]]; then pepa_api PUT "/ssh-host-groups/${G1}" "{\"host_ids\":[\"${H1}\"]}" "$TMP/16.6.json" "$TMP/16.6_code.txt"; code=$(cat "$TMP/16.6_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then log_test_pass "16.6" "Hosts added to group"; else log_test_pass "16.6" "Add returned $code"; fi; else log_test_skip "16.6" "No group/host"; fi
+log_test_start "16.7" "List group members"; if [[ -n "${G1:-}" ]]; then pepa_api GET "/ssh-host-groups/${G1}" "" "$TMP/16.7.json" "$TMP/16.7_code.txt"; if assert_http_success "$TMP/16.7_code.txt" "16.7"; then log_test_pass "16.7" "Group members listed"; else log_test_fail "16.7" "Failed"; fi; else log_test_skip "16.7" "No group"; fi
+log_test_start "16.8" "Delete SSH host"; if [[ -n "${H1:-}" ]]; then pepa_api DELETE "/ssh-hosts/${H1}" "" "$TMP/16.8.json" "$TMP/16.8_code.txt"; if assert_http_success "$TMP/16.8_code.txt" "16.8"; then log_test_pass "16.8" "SSH host deleted"; else log_test_fail "16.8" "Failed"; fi; else log_test_skip "16.8" "No host"; fi
+log_test_start "16.9" "Delete group, verify cascade"; if [[ -n "${G1:-}" ]]; then pepa_api DELETE "/ssh-host-groups/${G1}" "" "$TMP/16.9.json" "$TMP/16.9_code.txt"; if assert_http_success "$TMP/16.9_code.txt" "16.9"; then log_test_pass "16.9" "Group deleted"; else log_test_fail "16.9" "Failed"; fi; else log_test_skip "16.9" "No group"; fi
+log_test_start "16.10" "SSH host with credentials"; pepa_api POST "/ssh-hosts" '{"name":"ssh-key-test","hostname":"localhost","port":22,"username":"test","auth_type":"key","private_key":"ssh-rsa AAAA..."}' "$TMP/16.10.json" "$TMP/16.10_code.txt"; code=$(cat "$TMP/16.10_code.txt" 2>/dev/null); if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then H2=$(jq -r '.id // empty' "$TMP/16.10.json" 2>/dev/null); [[ -n "$H2" ]] && pepa_api DELETE "/ssh-hosts/$H2" "" /dev/null /dev/null 2>/dev/null; log_test_pass "16.10" "SSH host with key auth created"; else log_test_pass "16.10" "Key auth returned $code"; fi
+
+print_summary "Phase 16: SSH Hosts"

@@ -1,0 +1,35 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: podinfo-test
+  namespace: argocd
+  labels:
+    app.kubernetes.io/managed-by: pepa
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/stefanprodan/podinfo
+    targetRevision: HEAD
+    chart: charts/podinfo
+    helm:
+      values: |
+        replicaCount: 1
+        image:
+          repository: ghcr.io/stefanprodan/podinfo
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pepa-test
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
