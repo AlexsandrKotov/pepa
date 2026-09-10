@@ -2729,6 +2729,137 @@ export const environments = {
     fetchAPI<{ message: string }>(`/api/v1/environments/${id}/variables/${key}`, { method: 'DELETE' }),
   compare: (env1: string, env2: string) =>
     fetchAPI<{ env1: string; env2: string; comparison: EnvCompareEntry[]; total: number; differences: number }>(`/api/v1/environments/compare?env1=${env1}&env2=${env2}`),
+  // Environment Overview
+  overview: () =>
+    fetchAPI<EnvironmentOverviewResponse>('/api/v1/environments/overview'),
+  overviewProblems: (severity?: string) => {
+    const qs = severity ? `?severity=${severity}` : '';
+    return fetchAPI<{ problems: EnvironmentProblem[]; total: number }>(`/api/v1/environments/overview/problems${qs}`);
+  },
+  overviewSummary: () =>
+    fetchAPI<EnvironmentOverviewSummary>('/api/v1/environments/overview/summary'),
+};
+
+// ── Environment Overview Types ─────────────────────────────────
+
+export interface EnvironmentOverviewCell {
+  service_id: string;
+  service_name: string;
+  service_slug: string;
+  environment_id: string;
+  environment_name: string;
+  env_color: string;
+  env_slug: string;
+  status: 'deployed' | 'deploying' | 'failed' | 'not_deployed' | 'unknown';
+  image_tag: string;
+  deployment_id: string | null;
+  deployed_at: string | null;
+  health_status: 'healthy' | 'degraded' | 'unknown';
+  drift_count: number;
+  binding_id: string | null;
+  engine_type: string;
+  sync_status: 'synced' | 'out_of_sync' | 'unknown';
+  replicas_ready: number;
+  replicas_desired: number;
+}
+
+export interface EnvironmentOverviewRow {
+  service_id: string;
+  service_name: string;
+  service_slug: string;
+  owner_team: string;
+  status: string;
+  environments: Record<string, EnvironmentOverviewCell>;
+}
+
+export interface EnvironmentProblem {
+  id: string;
+  type: 'drift' | 'failed_deploy' | 'unhealthy' | 'security';
+  severity: 'critical' | 'warning' | 'info';
+  service_id: string;
+  service_name: string;
+  environment_id: string;
+  env_name: string;
+  message: string;
+  details: string;
+  detected_at: string;
+}
+
+export interface EnvironmentOverviewSummary {
+  total_services: number;
+  healthy_services: number;
+  degraded_services: number;
+  total_drifts: number;
+  failed_deployments: number;
+  total_environments: number;
+}
+
+export interface EnvironmentOverviewResponse {
+  environments: Environment[];
+  services: EnvironmentOverviewRow[];
+  problems: EnvironmentProblem[];
+  summary: EnvironmentOverviewSummary;
+}
+
+// ── Self-Service Deployment Types ─────────────────────────────────
+
+export interface SelfServiceDeployment {
+  id: string;
+  tenant_id: string;
+  user_id: string;
+  git_repo_url: string;
+  git_branch: string;
+  git_commit_sha: string | null;
+  environment_id: string | null;
+  service_id: string | null;
+  blueprint_type: string;
+  blueprint_config: Record<string, unknown>;
+  deployment_id: string | null;
+  status: 'pending' | 'detecting' | 'building' | 'deploying' | 'deployed' | 'failed' | 'cancelled';
+  progress: number;
+  logs: string;
+  error_message: string | null;
+  is_preview: boolean;
+  pr_number: number | null;
+  preview_url: string | null;
+  created_at: string;
+  updated_at: string;
+  deployed_at: string | null;
+}
+
+export interface ProjectDetection {
+  git_repo_url: string;
+  git_branch: string;
+  detected_type: string;
+  suggested_blueprint: string;
+  confidence: number;
+  indicators: string[];
+}
+
+export const selfService = {
+  // Deploy a new application
+  deploy: (data: { git_repo_url: string; git_branch?: string; environment_id: string; blueprint_type?: string; blueprint_config?: Record<string, unknown> }) =>
+    fetchAPI<SelfServiceDeployment>('/api/v1/self-service/deploy', { method: 'POST', body: JSON.stringify(data) }),
+  // List self-service deployments
+  list: (params?: { status?: string }) => {
+    const qs = params?.status ? `?status=${params.status}` : '';
+    return fetchAPI<{ deployments: SelfServiceDeployment[]; total: number }>(`/api/v1/self-service/deployments${qs}`);
+  },
+  // Get a specific deployment
+  get: (id: string) =>
+    fetchAPI<SelfServiceDeployment>(`/api/v1/self-service/deployments/${id}`),
+  // Cancel a deployment
+  cancel: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/self-service/deployments/${id}/cancel`, { method: 'POST' }),
+  // Delete a deployment record
+  delete: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/self-service/deployments/${id}`, { method: 'DELETE' }),
+  // Detect project type from git repo
+  detect: (git_repo_url: string, git_branch?: string) =>
+    fetchAPI<ProjectDetection>('/api/v1/self-service/detect', { method: 'POST', body: JSON.stringify({ git_repo_url, git_branch }) }),
+  // Get environments available for self-service
+  environments: () =>
+    fetchAPI<{ environments: Environment[]; total: number }>('/api/v1/self-service/environments'),
 };
 
 // ── Integrations (Phase 2.5) ─────────────────────────────────

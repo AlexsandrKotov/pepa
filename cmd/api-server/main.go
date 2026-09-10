@@ -164,6 +164,8 @@ func main() {
 			NotificationLog:  comp.NotificationLogRepo,
 			GitOpsBinding:    comp.GitOpsBindingRepo,
 			DriftSchedule:    comp.DriftScheduleRepo,
+			EnvironmentOverview: comp.EnvironmentOverviewRepo,
+			SelfService:      comp.SelfServiceRepo,
 		},
 		Services: &rest.Services{
 			Deployment: func() *service.DeploymentService {

@@ -10,6 +10,7 @@ const tabs = [
   { key: 'general', label: 'General', href: '/settings', icon: 'settings' },
   { key: 'auth', label: 'Authentication', href: '/settings/authentication', icon: 'shield' },
   { key: 'organization', label: 'Organization', href: '/settings/users', icon: 'users' },
+  { key: 'workspaces', label: 'Workspaces', href: '/settings/workspaces', icon: 'workspace' },
   { key: 'observability', label: 'Observability', href: '/settings/observability', icon: 'chart' },
 ];
 
@@ -23,7 +24,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     if (pathname.startsWith('/settings/authentication')) return 'auth';
     if (pathname.startsWith('/settings/users') || pathname.startsWith('/settings/teams')) return 'organization';
     if (pathname.startsWith('/settings/observability')) return 'observability';
-    if (pathname.startsWith('/settings/workspaces')) return 'general';
+    if (pathname.startsWith('/settings/workspaces')) return 'workspaces';
     return 'general';
   })();
 

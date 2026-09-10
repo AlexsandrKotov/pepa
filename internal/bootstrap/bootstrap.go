@@ -80,6 +80,8 @@ type Components struct {
 	NotificationLogRepo  *repository.NotificationLogRepository
 	GitOpsBindingRepo    *repository.GitOpsBindingRepository
 	DriftScheduleRepo    *gitops.DriftScheduleRepository
+	EnvironmentOverviewRepo *repository.EnvironmentOverviewRepository
+	SelfServiceRepo      *repository.SelfServiceDeploymentRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -349,6 +351,8 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		NotificationLogRepo:  repository.NewNotificationLogRepository(db),
 		GitOpsBindingRepo:    repository.NewGitOpsBindingRepository(db.Pool),
 		DriftScheduleRepo:    gitops.NewDriftScheduleRepository(db),
+		EnvironmentOverviewRepo: repository.NewEnvironmentOverviewRepository(db.Pool),
+		SelfServiceRepo:      repository.NewSelfServiceDeploymentRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry

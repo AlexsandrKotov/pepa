@@ -61,7 +61,7 @@ export default function PipelineBlueprintsPage() {
   }, showForm);
 
   useEffect(() => {
-    blueprintsAPI.list({ type: 'user' }).then(res => setBlueprints(res.blueprints || [])).catch(() => {});
+    blueprintsAPI.list().then(res => setBlueprints(res.blueprints || [])).catch(() => {});
     helmRepositories.list().then(res => setHelmRepos(res.helm_repositories || [])).catch(() => {});
         registryRepositories.list().then(res => setRegistryRepos(res.registry_repositories || [])).catch(() => {});
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});

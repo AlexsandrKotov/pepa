@@ -449,13 +449,58 @@ func registerEnvironmentRoutes(r *gin.RouterGroup, deps Dependencies) {
 			}
 
 			// Get service deployments in this environment
-			deployments, err := deps.Repos.Service.ListDeploymentsByEnvironment(c.Request.Context(), tenantID, env.Slug)
+			serviceDeployments, err := deps.Repos.Service.ListDeploymentsByEnvironment(c.Request.Context(), tenantID, env.Slug)
 			if err != nil {
 				respondInternalError(c, err)
 				return
 			}
-			if deployments == nil {
-				deployments = []models.ServiceDeployment{}
+			if serviceDeployments == nil {
+				serviceDeployments = []models.ServiceDeployment{}
+			}
+
+			// Also get GitOps workflow deployments by stage matching environment slug
+			var gitopsDeployments []gin.H
+			if deps.Repos.Deployment != nil {
+				allDeployments, err := deps.Repos.Deployment.List(c.Request.Context(), tenantID)
+				if err == nil {
+					for _, d := range allDeployments {
+						if d.Stage == env.Slug {
+							gitopsDeployments = append(gitopsDeployments, gin.H{
+								"id":               d.ID,
+								"project_name":     d.GitlabProjectName,
+								"image_tag":        d.ImageTag,
+								"image_repository": d.ImageRepository,
+								"status":           d.Status,
+								"stage":            d.Stage,
+								"team_name":        d.TeamName,
+								"namespace":        d.TargetNamespace,
+								"created_at":       d.CreatedAt,
+								"updated_at":       d.UpdatedAt,
+								"type":             "gitops",
+							})
+						}
+					}
+				}
+			}
+			if gitopsDeployments == nil {
+				gitopsDeployments = []gin.H{}
+			}
+
+			// Combine both deployment types
+			combinedDeployments := make([]interface{}, 0, len(serviceDeployments)+len(gitopsDeployments))
+			for _, sd := range serviceDeployments {
+				combinedDeployments = append(combinedDeployments, gin.H{
+					"id":           sd.ID,
+					"service_id":   sd.ServiceID,
+					"image_tag":    sd.ImageTag,
+					"status":       sd.Status,
+					"environment":  sd.Environment,
+					"created_at":   sd.DeployedAt,
+					"type":         "docker",
+				})
+			}
+			for _, gd := range gitopsDeployments {
+				combinedDeployments = append(combinedDeployments, gd)
 			}
 
 			// Get variable count
@@ -479,12 +524,12 @@ func registerEnvironmentRoutes(r *gin.RouterGroup, deps Dependencies) {
 			c.JSON(http.StatusOK, gin.H{
 				"environment": env,
 				"clusters":    envClusters,
-				"deployments": deployments,
+				"deployments": combinedDeployments,
 				"gitops_bindings": gitopsBindings,
 				"variables_count": varCount,
 				"summary": gin.H{
 					"cluster_count":   len(envClusters),
-					"deployment_count": len(deployments),
+					"deployment_count": len(combinedDeployments),
 					"binding_count":   len(gitopsBindings),
 					"variable_count":  varCount,
 				},

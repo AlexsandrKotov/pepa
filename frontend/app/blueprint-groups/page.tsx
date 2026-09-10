@@ -32,7 +32,7 @@ export default function BlueprintGroupsPage() {
 
   const load = () => {
     blueprintGroupsAPI.list().then(res => setGroups(res.groups || [])).catch(() => {});
-    blueprintsAPI.list({ type: 'user' }).then(res => setAllBlueprints(res.blueprints || [])).catch(() => {});
+    blueprintsAPI.list().then(res => setAllBlueprints(res.blueprints || [])).catch(() => {});
   };
 
   useEffect(() => { load(); }, []);

@@ -69,6 +69,7 @@ var rbacResourceMap = map[string]string{
 	"deployment-audit":   "audit",
 	"pre-deploy-gate":    "deployments",
 	"notifications":      "notifications",
+	"self-service":       "self_service",
 }
 
 // rbacSkipPrefixes are paths that only require authentication, not a

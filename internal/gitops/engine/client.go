@@ -320,7 +320,7 @@ func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSumma
 		}
 
 		// List Kustomizations
-		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "list_kustomizations", nil, config)
+		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "list_kustomizations", []byte("{}"), config)
 		if err != nil {
 			slog.Warn("listFluxApps: list_kustomizations plugin error", "connection_id", creds.ConnectionID, "error", err)
 		} else if !resp.Success {
@@ -336,7 +336,7 @@ func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSumma
 		}
 
 		// List HelmReleases
-		resp, err = c.registry.ExecuteAction(ctx, "fluxcd", "list_helmreleases", nil, config)
+		resp, err = c.registry.ExecuteAction(ctx, "fluxcd", "list_helmreleases", []byte("{}"), config)
 		if err != nil {
 			slog.Warn("listFluxApps: list_helmreleases plugin error", "connection_id", creds.ConnectionID, "error", err)
 		} else if !resp.Success {
@@ -394,6 +394,32 @@ func fluxReadyToHealthSync(ready string, suspended bool) (health, syncStatus str
 	default:
 		return "unknown", "unknown"
 	}
+}
+
+// extractFluxHealth extracts health, sync status, and revision from a FluxCD
+// plugin get_kustomization/get_helmrelease response (flattenFluxResource output).
+// The response has status.conditions[] with type/status fields.
+func extractFluxHealth(raw map[string]interface{}) (health, syncStatus, revision string) {
+	// Extract revision from status.lastAppliedRevision
+	if status, ok := raw["status"].(map[string]interface{}); ok {
+		if rev, ok := status["lastAppliedRevision"].(string); ok {
+			revision = rev
+		}
+		// Extract Ready condition
+		if conditions, ok := status["conditions"].([]interface{}); ok {
+			for _, c := range conditions {
+				if cm, ok := c.(map[string]interface{}); ok {
+					if cm["type"] == "Ready" {
+						readyStatus, _ := cm["status"].(string)
+						suspended, _ := raw["spec"].(map[string]interface{})["suspend"].(bool)
+						h, s := fluxReadyToHealthSync(readyStatus, suspended)
+						return h, s, revision
+					}
+				}
+			}
+		}
+	}
+	return "unknown", "unknown", revision
 }
 
 // Get returns detailed information about a specific application.
@@ -457,14 +483,20 @@ func (c *Client) getArgoApp(ctx context.Context, ref AppRef) (*AppDetail, error)
 		}
 	}
 
+	// The ArgoCD plugin returns health/sync/revision nested inside "status"
+	statusMap := map[string]interface{}{}
+	if s, ok := raw["status"].(map[string]interface{}); ok {
+		statusMap = s
+	}
+
 	return &AppDetail{
 		AppSummary: AppSummary{
 			Name:       ref.AppName,
 			Namespace:  ref.Namespace,
 			EngineType: "argocd",
-			Health:     getStringFromMap(raw, "health"),
-			SyncStatus: getStringFromMap(raw, "syncStatus"),
-			Revision:   getStringFromMap(raw, "revision"),
+			Health:     getStringFromMap(statusMap, "health"),
+			SyncStatus: getStringFromMap(statusMap, "syncStatus"),
+			Revision:   getStringFromMap(statusMap, "revision"),
 		},
 		Capabilities: caps,
 	}, nil
@@ -498,11 +530,12 @@ func (c *Client) getFluxApp(ctx context.Context, ref AppRef) (*AppDetail, error)
 				Diff: false, History: "partial", ResourceTree: true,
 				Events: true, Logs: true, Refresh: true, AutoSync: true, Projects: false,
 			}
+			health, syncStatus, revision := extractFluxHealth(raw)
 			return &AppDetail{
 				AppSummary: AppSummary{
 					Name: ref.AppName, Namespace: ref.Namespace,
-					EngineType: "fluxcd", Health: getStringFromMap(raw, "health"),
-					SyncStatus: getStringFromMap(raw, "sync_status"), Revision: getStringFromMap(raw, "revision"),
+					EngineType: "fluxcd", Health: health,
+					SyncStatus: syncStatus, Revision: revision,
 				},
 				Capabilities: caps,
 			}, nil
@@ -518,11 +551,12 @@ func (c *Client) getFluxApp(ctx context.Context, ref AppRef) (*AppDetail, error)
 				Diff: false, History: "partial", ResourceTree: true,
 				Events: true, Logs: true, Refresh: true, AutoSync: true, Projects: false,
 			}
+			health, syncStatus, revision := extractFluxHealth(raw)
 			return &AppDetail{
 				AppSummary: AppSummary{
 					Name: ref.AppName, Namespace: ref.Namespace,
-					EngineType: "fluxcd", Health: getStringFromMap(raw, "health"),
-					SyncStatus: getStringFromMap(raw, "sync_status"), Revision: getStringFromMap(raw, "revision"),
+					EngineType: "fluxcd", Health: health,
+					SyncStatus: syncStatus, Revision: revision,
 				},
 				Capabilities: caps,
 			}, nil

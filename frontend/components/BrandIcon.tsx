@@ -445,6 +445,16 @@ const BRAND_ICONS: Record<string, React.ReactNode> = {
       <circle cx="4" cy="18" r="1.5" fill="#64748B" />
     </>
   ),
+
+  // Workspace — grid layout in indigo
+  workspace: (
+    <>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" fill="#6366F1" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" fill="#818CF8" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" fill="#818CF8" />
+      <rect x="14" y="14" width="7" height="7" rx="1.5" fill="#6366F1" />
+    </>
+  ),
 };
 
 /**

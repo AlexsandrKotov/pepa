@@ -73,6 +73,8 @@ type Repositories struct {
 	NotificationLog  *repository.NotificationLogRepository
 	GitOpsBinding    *repository.GitOpsBindingRepository
 	DriftSchedule    *gitops.DriftScheduleRepository
+	EnvironmentOverview *repository.EnvironmentOverviewRepository
+	SelfService      *repository.SelfServiceDeploymentRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
