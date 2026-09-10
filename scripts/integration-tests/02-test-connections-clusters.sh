@@ -112,6 +112,10 @@ if assert_http_status "$TMP/2.4_code.txt" "201" "2.4 create cluster"; then
     CLUSTER2_ID=$(jq -r '.id // .cluster_id // empty' "$TMP/2.4_cluster.json" 2>/dev/null)
     CLUSTER_IDS+=("$CLUSTER2_ID")
     log_test_pass "2.4" "Cluster created via kubeconfig (id=${CLUSTER2_ID:-unknown})"
+    # Save cluster ID immediately so subsequent phases can use it
+    PRIMARY_CLUSTER_ID="${CLUSTER1_ID:-${CLUSTER2_ID:-}}"
+    echo "${PRIMARY_CLUSTER_ID}" > "${RESULTS_DIR}/cluster_primary_id"
+    echo "${CONN1_ID:-}" > "${RESULTS_DIR}/conn_primary_id"
 else
     log_test_fail "2.4" "Create cluster failed"
     CLUSTER2_ID=""
@@ -430,7 +434,10 @@ fi
 # Save IDs for subsequent phases
 # ---------------------------------------------------------------------------
 echo "${CONN1_ID:-}" > "${RESULTS_DIR}/conn_primary_id"
-echo "${CLUSTER1_ID:-}" > "${RESULTS_DIR}/cluster_primary_id"
+# Use CLUSTER1_ID if available (auto-created), otherwise use CLUSTER2_ID (manually created)
+PRIMARY_CLUSTER_ID="${CLUSTER1_ID:-${CLUSTER2_ID:-}}"
+echo "${PRIMARY_CLUSTER_ID}" > "${RESULTS_DIR}/cluster_primary_id"
+echo "Saved primary cluster ID: ${PRIMARY_CLUSTER_ID:-empty}"
 
 # ---------------------------------------------------------------------------
 # Summary

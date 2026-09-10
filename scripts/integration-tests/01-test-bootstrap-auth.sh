@@ -137,9 +137,10 @@ fi
 # ---------------------------------------------------------------------------
 # 1.8 Admin: create user
 # ---------------------------------------------------------------------------
+UNIQUE_TS=$(date +%s)
 log_test_start "1.8" "Admin: create user (POST /auth/users)"
 pepa_api POST "/auth/users" \
-    '{"name":"Test Developer","password":"TestDev123!","email":"testdev@pepa.local"}' \
+    "{\"name\":\"Test Developer\",\"password\":\"TestDev123!\",\"email\":\"testdev-${UNIQUE_TS}@pepa.local\"}" \
     "$TMP/1.8_create_user.json" "$TMP/1.8_code.txt"
 if assert_http_status "$TMP/1.8_code.txt" "201" "1.8 create user"; then
     TEST_USER_ID=$(jq -r '.id // .user_id // empty' "$TMP/1.8_create_user.json" 2>/dev/null)
@@ -181,8 +182,9 @@ fi
 # ---------------------------------------------------------------------------
 log_test_start "1.11" "Admin: update user (PUT /auth/users/:id)"
 if [[ -n "$TEST_USER_ID" ]]; then
+    UNIQUE_TS=$(date +%s)
     pepa_api PUT "/auth/users/${TEST_USER_ID}" \
-        '{"email":"dev-updated@pepa.local"}' \
+        "{\"email\":\"dev-updated-${UNIQUE_TS}@pepa.local\"}" \
         "$TMP/1.11_update.json" "$TMP/1.11_code.txt"
     if assert_http_success "$TMP/1.11_code.txt" "1.11 update user"; then
         log_test_pass "1.11" "User updated"
@@ -199,7 +201,7 @@ fi
 log_test_start "1.12" "Admin: reset user password"
 if [[ -n "$TEST_USER_ID" ]]; then
     pepa_api POST "/auth/users/${TEST_USER_ID}/reset-password" \
-        '{"new_password":"ResetPass789!"}' \
+        '{"password":"ResetPass789!"}' \
         "$TMP/1.12_resetpw.json" "$TMP/1.12_code.txt"
     if assert_http_success "$TMP/1.12_code.txt" "1.12 reset user password"; then
         log_test_pass "1.12" "User password reset"
@@ -265,9 +267,9 @@ else
     log_test_fail "1.16" "Logout failed"
 fi
 
-# Re-login for subsequent tests
-pepa_login "admin@local" "Admin123!" 2>/dev/null || \
+# Re-login for subsequent tests (password was changed to NewPass456! by test 1.6)
 pepa_login "admin@local" "NewPass456!" 2>/dev/null || \
+pepa_login "admin@local" "Admin123!" 2>/dev/null || \
     log_warn "Could not re-login after logout test"
 
 # ---------------------------------------------------------------------------

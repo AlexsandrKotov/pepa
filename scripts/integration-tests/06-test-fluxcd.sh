@@ -39,7 +39,7 @@ log_test_start "6.1" "Register GitOps repo (engine_type=fluxcd)"
 pepa_api POST "/gitops/repos" \
     "{
         \"name\": \"fluxcd-test-repo\",
-        \"url\": \"http://gitea:3000/${GITEA_ORG}/fluxcd-manifests\",
+        \"repo_url\": \"http://gitea:3000/${GITEA_ORG}/fluxcd-manifests\",
         \"branch\": \"main\",
         \"engine_type\": \"fluxcd\",
         \"cluster_id\": \"${CLUSTER_ID}\",

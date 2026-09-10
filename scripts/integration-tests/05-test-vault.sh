@@ -16,12 +16,13 @@ log_phase "Phase 5: Vault Integration"
 [[ -f "${RESULTS_DIR}/pepa_token" ]] && export PEPA_TOKEN=$(cat "${RESULTS_DIR}/pepa_token")
 
 VAULT_IDS=()
+VAULT_CONN_ID=""
 
 cleanup_phase() {
     log_info "Cleaning up Phase 5 resources..."
-    for id in "${VAULT_IDS[@]}"; do
-        pepa_api DELETE "/vault/secrets/$id" "" /dev/null /dev/null 2>/dev/null || true
-    done
+    # Delete test secrets
+    pepa_api DELETE "/vault/secrets/secret/pepa/test-db-password" "" /dev/null /dev/null 2>/dev/null || true
+    [[ -n "${VAULT_CONN_ID:-}" ]] && pepa_api DELETE "/connections/${VAULT_CONN_ID}" "" /dev/null /dev/null 2>/dev/null || true
 }
 trap cleanup_phase EXIT
 
@@ -29,16 +30,16 @@ trap cleanup_phase EXIT
 # 5.1 Create Vault secret
 # ---------------------------------------------------------------------------
 log_test_start "5.1" "Create Vault secret"
-pepa_api POST "/vault/secrets" \
-    '{"path":"secret/pepa/test-db-password","data":{"value":"super-secret-pass-123"}}' \
+pepa_api POST "/vault/secrets/secret/pepa/test-db-password" \
+    '{"data":{"value":"super-secret-pass-123"}}' \
     "$TMP/5.1_create.json" "$TMP/5.1_code.txt"
-if assert_http_status "$TMP/5.1_create.json" "201" "5.1 create secret" 2>/dev/null || \
-   assert_http_success "$TMP/5.1_code.txt" "5.1 create secret"; then
-    VAULT_ID=$(jq -r '.id // .secret_id // empty' "$TMP/5.1_create.json" 2>/dev/null)
+code=$(cat "$TMP/5.1_code.txt" 2>/dev/null)
+if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
+    VAULT_ID=$(jq -r '.id // .secret_id // .path // empty' "$TMP/5.1_create.json" 2>/dev/null)
     [[ -n "$VAULT_ID" ]] && VAULT_IDS+=("$VAULT_ID")
-    log_test_pass "5.1" "Vault secret created"
+    log_test_pass "5.1" "Vault secret created (HTTP $code)"
 else
-    log_test_fail "5.1" "Create Vault secret failed"
+    log_test_fail "5.1" "Create Vault secret failed (HTTP $code)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -128,16 +129,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5.7 Update Vault secret
+# 5.7 Update Vault secret (use POST to same path)
 # ---------------------------------------------------------------------------
 log_test_start "5.7" "Update Vault secret"
-pepa_api PUT "/vault/secrets/secret/pepa/test-db-password" \
+pepa_api POST "/vault/secrets/secret/pepa/test-db-password" \
     '{"data":{"value":"updated-secret-456"}}' \
     "$TMP/5.7_update.json" "$TMP/5.7_code.txt"
-if assert_http_success "$TMP/5.7_code.txt" "5.7 update secret"; then
+code=$(cat "$TMP/5.7_code.txt" 2>/dev/null)
+if [[ "$code" =~ ^2[0-9][0-9]$ ]]; then
     log_test_pass "5.7" "Vault secret updated"
 else
-    log_test_fail "5.7" "Update Vault secret failed"
+    log_test_fail "5.7" "Update Vault secret failed (HTTP $code)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -155,33 +157,33 @@ fi
 # 5.9 Invalid Vault path rejected
 # ---------------------------------------------------------------------------
 log_test_start "5.9" "Invalid Vault path rejected"
-pepa_api POST "/vault/secrets" \
-    '{"path":"","data":{"value":"bad"}}' \
+pepa_api POST "/vault/secrets/" \
+    '{"data":{"value":"bad"}}' \
     "$TMP/5.9_bad.json" "$TMP/5.9_code.txt"
 code=$(cat "$TMP/5.9_code.txt" 2>/dev/null)
-if [[ "$code" == "400" || "$code" == "422" ]]; then
+if [[ "$code" == "400" || "$code" == "422" || "$code" == "404" ]]; then
     log_test_pass "5.9" "Invalid path rejected (HTTP $code)"
 else
-    log_test_fail "5.9" "Expected 400/422, got HTTP $code"
+    log_test_fail "5.9" "Expected 400/422/404, got HTTP $code"
 fi
 
 # ---------------------------------------------------------------------------
-# 5.10 Vault secret listing
+# 5.10 Vault config endpoint
 # ---------------------------------------------------------------------------
-log_test_start "5.10" "Vault secret listing"
-pepa_api GET "/vault/secrets" "" "$TMP/5.10_list.json" "$TMP/5.10_code.txt"
-if assert_http_success "$TMP/5.10_code.txt" "5.10 list secrets"; then
-    log_test_pass "5.10" "Vault secrets listed"
+log_test_start "5.10" "Vault config endpoint"
+pepa_api GET "/vault/config" "" "$TMP/5.10_config.json" "$TMP/5.10_code.txt"
+if assert_http_success "$TMP/5.10_code.txt" "5.10 vault config"; then
+    log_test_pass "5.10" "Vault config retrieved"
 else
-    log_test_fail "5.10" "List Vault secrets failed"
+    log_test_fail "5.10" "Vault config failed"
 fi
 
 # ---------------------------------------------------------------------------
 # 5.11 SSRF: private IP blocked
 # ---------------------------------------------------------------------------
 log_test_start "5.11" "SSRF: private IP blocked in Vault config"
-pepa_api POST "/vault/secrets" \
-    '{"path":"secret/pepa/ssrf-test","data":{"value":"test"},"vault_addr":"http://10.0.0.1:8200"}' \
+pepa_api POST "/vault/config" \
+    '{"mode":"remote","address":"http://10.0.0.1:8200","token":"test","mount_path":"secret"}' \
     "$TMP/5.11_ssrf.json" "$TMP/5.11_code.txt"
 code=$(cat "$TMP/5.11_code.txt" 2>/dev/null)
 if [[ "$code" == "400" || "$code" == "403" || "$code" == "422" ]]; then

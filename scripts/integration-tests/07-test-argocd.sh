@@ -173,7 +173,7 @@ log_test_start "7.7" "Register GitOps repo (engine_type=argocd)"
 pepa_api POST "/gitops/repos" \
     "{
         \"name\": \"argocd-test-repo\",
-        \"url\": \"http://gitea:3000/${GITEA_ORG}/argocd-manifests\",
+        \"repo_url\": \"http://gitea:3000/${GITEA_ORG}/argocd-manifests\",
         \"branch\": \"main\",
         \"engine_type\": \"argocd\",
         \"cluster_id\": \"${CLUSTER_ID}\",
