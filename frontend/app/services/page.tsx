@@ -30,7 +30,6 @@ export default function ServicesPage() {
 
 function ServicesList() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [servicesList, setServicesList] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
