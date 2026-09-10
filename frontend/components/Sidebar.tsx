@@ -178,11 +178,6 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
     adminOnly: true,
     items: [
       { href: '/settings', label: 'Settings', permission: 'settings', adminOnly: true },
-      { href: '/settings/authentication', label: 'Authentication', permission: 'settings', adminOnly: true },
-      { href: '/settings/users', label: 'Users', permission: 'settings', adminOnly: true },
-      { href: '/settings/teams', label: 'Teams', permission: 'settings', adminOnly: true },
-      { href: '/settings/workspaces', label: 'Workspaces', permission: 'settings', adminOnly: true },
-      { href: '/settings/observability', label: 'Observability', permission: 'settings', adminOnly: true },
       { href: '/roles', label: 'Roles', permission: 'roles', adminOnly: true },
       { href: '/audit', label: 'Audit Log', permission: 'audit', adminOnly: true },
       { href: '/notifications', label: 'Notifications', permission: 'notifications', adminOnly: true },
