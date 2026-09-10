@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multi-env-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: multi-env-app
+  template:
+    metadata:
+      labels:
+        app: multi-env-app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: multi-env-app
+spec:
+  selector:
+    app: multi-env-app
+  ports:
+    - port: 80
+      targetPort: 80

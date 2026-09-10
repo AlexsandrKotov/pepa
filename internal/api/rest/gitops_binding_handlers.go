@@ -144,7 +144,7 @@ type discoveredApp struct {
 	BindingID      *uuid.UUID       `json:"binding_id,omitempty"`
 }
 
-// listGitOpsBindings returns all bindings for the tenant.
+// listGitOpsBindings returns all bindings for the tenant with joined environment info.
 func listGitOpsBindings(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
@@ -155,7 +155,7 @@ func listGitOpsBindings(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		bindings, err := deps.Repos.GitOpsBinding.List(ctx, tenantID)
+		bindings, err := deps.Repos.GitOpsBinding.ListWithEnvironment(ctx, tenantID)
 		if err != nil {
 			respondInternalError(c, err)
 			return
@@ -218,6 +218,7 @@ func createGitOpsBinding(deps Dependencies) gin.HandlerFunc {
 			AppNamespace     string     `json:"app_namespace" binding:"required"`
 			AppProject       *string    `json:"app_project"`
 			Environment      *string    `json:"environment"`
+			EnvironmentID    *uuid.UUID `json:"environment_id"`
 			ManifestPath     *string    `json:"manifest_path"`
 			UpdateStrategy   string     `json:"update_strategy"`
 			UpdatePath       *string    `json:"update_path"`
@@ -247,6 +248,7 @@ func createGitOpsBinding(deps Dependencies) gin.HandlerFunc {
 			AppNamespace:     req.AppNamespace,
 			AppProject:       req.AppProject,
 			Environment:      req.Environment,
+			EnvironmentID:    req.EnvironmentID,
 			ManifestPath:     req.ManifestPath,
 			UpdateStrategy:   strategy,
 			UpdatePath:       req.UpdatePath,
@@ -288,21 +290,23 @@ func updateGitOpsBinding(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name             string     `json:"name"`
-			ServiceID        *uuid.UUID `json:"service_id"`
-			EntityID         *uuid.UUID `json:"entity_id"`
-			RepoID           *uuid.UUID `json:"repo_id"`
-			ClusterID        *uuid.UUID `json:"cluster_id"`
-			ArgoConnectionID *uuid.UUID `json:"argo_connection_id"`
-			EngineType       string     `json:"engine_type"`
-			AppName          string     `json:"app_name"`
-			AppNamespace     string     `json:"app_namespace"`
-			AppProject       *string    `json:"app_project"`
-			Environment      *string    `json:"environment"`
-			ManifestPath     *string    `json:"manifest_path"`
-			UpdateStrategy   string     `json:"update_strategy"`
-			UpdatePath       *string    `json:"update_path"`
-			VerifyURL        *string    `json:"verify_url"`
+			Name              string     `json:"name"`
+			ServiceID         *uuid.UUID `json:"service_id"`
+			EntityID          *uuid.UUID `json:"entity_id"`
+			RepoID            *uuid.UUID `json:"repo_id"`
+			ClusterID         *uuid.UUID `json:"cluster_id"`
+			ArgoConnectionID  *uuid.UUID `json:"argo_connection_id"`
+			EngineType        string     `json:"engine_type"`
+			AppName           string     `json:"app_name"`
+			AppNamespace      string     `json:"app_namespace"`
+			AppProject        *string    `json:"app_project"`
+			Environment       *string    `json:"environment"`
+			EnvironmentID     *uuid.UUID `json:"environment_id"`
+			ClearEnvironment  bool       `json:"clear_environment"`
+			ManifestPath      *string    `json:"manifest_path"`
+			UpdateStrategy    string     `json:"update_strategy"`
+			UpdatePath        *string    `json:"update_path"`
+			VerifyURL         *string    `json:"verify_url"`
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -341,8 +345,16 @@ func updateGitOpsBinding(deps Dependencies) gin.HandlerFunc {
 		if req.AppProject != nil {
 			existing.AppProject = req.AppProject
 		}
-		if req.Environment != nil {
-			existing.Environment = req.Environment
+		if req.ClearEnvironment {
+			existing.Environment = nil
+			existing.EnvironmentID = nil
+		} else {
+			if req.Environment != nil {
+				existing.Environment = req.Environment
+			}
+			if req.EnvironmentID != nil {
+				existing.EnvironmentID = req.EnvironmentID
+			}
 		}
 		if req.ManifestPath != nil {
 			existing.ManifestPath = req.ManifestPath
@@ -399,12 +411,76 @@ func strPtr(s string) *string {
 	return &s
 }
 
+// listBindingsByEnvironment returns all bindings for a specific environment.
+func listBindingsByEnvironment(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		tenantID := getTenantID(c)
+
+		envID, err := uuid.Parse(c.Param("envId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid environment ID"})
+			return
+		}
+
+		if deps.Repos.GitOpsBinding == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "binding repository not available"})
+			return
+		}
+
+		bindings, err := deps.Repos.GitOpsBinding.FindByEnvironment(ctx, envID, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"bindings": bindings,
+			"total":    len(bindings),
+		})
+	}
+}
+
+// listBindingsByService returns all bindings for a specific service.
+func listBindingsByService(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		tenantID := getTenantID(c)
+
+		serviceID, err := uuid.Parse(c.Param("serviceId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service ID"})
+			return
+		}
+
+		if deps.Repos.GitOpsBinding == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "binding repository not available"})
+			return
+		}
+
+		bindings, err := deps.Repos.GitOpsBinding.FindByService(ctx, serviceID, tenantID)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"bindings": bindings,
+			"total":    len(bindings),
+		})
+	}
+}
+
 // registerGitOpsBindingRoutes registers all GitOps binding routes.
 func registerGitOpsBindingRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 	bindings := v1.Group("/gitops/bindings")
 	{
 		// Discovery
 		bindings.POST("/discover", discoverGitOpsApplications(deps))
+
+		// By environment / service (before /:id to avoid route conflict)
+		bindings.GET("/by-environment/:envId", listBindingsByEnvironment(deps))
+		bindings.GET("/by-service/:serviceId", listBindingsByService(deps))
 
 		// CRUD
 		bindings.GET("", listGitOpsBindings(deps))

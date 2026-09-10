@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { gitopsApplications, type GitOpsAppSummary } from '@/lib/api';
+import { gitopsApplications, environments, gitopsBindings, type GitOpsAppSummary, type Environment, type GitOpsBinding } from '@/lib/api';
 import BrandIcon from '@/components/BrandIcon';
 import Link from 'next/link';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -86,6 +86,9 @@ export default function GitOpsApplicationsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionConfirm, setActionConfirm] = useState<{ app: GitOpsAppSummary; action: string } | null>(null);
   const [actionResult, setActionResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [envs, setEnvs] = useState<Environment[]>([]);
+  const [bindings, setBindings] = useState<GitOpsBinding[]>([]);
+  const [envFilter, setEnvFilter] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -100,6 +103,21 @@ export default function GitOpsApplicationsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load environments and bindings for env filter
+  useEffect(() => {
+    environments.list().then(r => setEnvs(r.environments || [])).catch(() => {});
+    gitopsBindings.list().then(r => setBindings(r.bindings || [])).catch(() => {});
+  }, []);
+
+  // Build a lookup from app (connection_id+namespace+name) to binding
+  const bindingLookup = useCallback((app: GitOpsAppSummary): GitOpsBinding | undefined => {
+    return bindings.find(b =>
+      b.app_name === app.name &&
+      b.app_namespace === app.namespace &&
+      b.argo_connection_id === app.connection_id
+    );
+  }, [bindings]);
 
   // Auto-refresh for progressing apps
   useEffect(() => {
@@ -120,6 +138,10 @@ export default function GitOpsApplicationsPage() {
     }
     if (healthFilter && normalizeHealth(a.health) !== healthFilter) return false;
     if (engineFilter && a.engine_type !== engineFilter) return false;
+    if (envFilter) {
+      const binding = bindingLookup(a);
+      if (!binding || binding.environment_id !== envFilter) return false;
+    }
     return true;
   });
 
@@ -221,19 +243,25 @@ export default function GitOpsApplicationsPage() {
             placeholder="Search applications..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="input flex-1 max-w-xs"
+            className="input flex-[3] min-w-0"
           />
-          <select value={healthFilter} onChange={e => setHealthFilter(e.target.value)} className="input w-40">
+          <select value={healthFilter} onChange={e => setHealthFilter(e.target.value)} className="input flex-1 min-w-[120px]">
             <option value="">All health</option>
             <option value="healthy">Healthy</option>
             <option value="progressing">Progressing</option>
             <option value="degraded">Degraded</option>
             <option value="suspended">Suspended</option>
           </select>
-          <select value={engineFilter} onChange={e => setEngineFilter(e.target.value)} className="input w-40">
+          <select value={engineFilter} onChange={e => setEngineFilter(e.target.value)} className="input flex-1 min-w-[120px]">
             <option value="">All engines</option>
             <option value="argocd">ArgoCD</option>
             <option value="fluxcd">FluxCD</option>
+          </select>
+          <select value={envFilter} onChange={e => setEnvFilter(e.target.value)} className="input flex-1 min-w-[120px]">
+            <option value="">All environments</option>
+            {envs.map(env => (
+              <option key={env.id} value={env.id}>{env.name}</option>
+            ))}
           </select>
         </div>
 
@@ -332,13 +360,28 @@ export default function GitOpsApplicationsPage() {
                         </span>
                       </td>
                       <td className="!px-2 !py-2.5">
-                        {app.environment ? (
-                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--bg)] text-[var(--text-secondary)] font-medium">
-                            {app.environment}
-                          </span>
-                        ) : (
-                          <span className="text-[11px] text-[var(--text-tertiary)]">&mdash;</span>
-                        )}
+                        {(() => {
+                          const binding = bindingLookup(app);
+                          if (binding?.env_name && binding?.env_color) {
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium"
+                                style={{ backgroundColor: binding.env_color + '20', color: binding.env_color }}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: binding.env_color }} />
+                                {binding.env_name}
+                              </span>
+                            );
+                          }
+                          if (app.environment) {
+                            return (
+                              <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--bg)] text-[var(--text-secondary)] font-medium">
+                                {app.environment}
+                              </span>
+                            );
+                          }
+                          return <span className="text-[11px] text-[var(--text-tertiary)]">&mdash;</span>;
+                        })()}
                       </td>
                       <td className="!px-2 !py-2.5" onClick={e => e.stopPropagation()}>
                         <div className="flex gap-1 flex-wrap">

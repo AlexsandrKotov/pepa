@@ -12,7 +12,7 @@ interface Props {
   allEnvironments: Array<{ id: string; name: string; slug: string; color: string }>;
 }
 
-type Tab = 'clusters' | 'deployments' | 'variables' | 'compare';
+type Tab = 'clusters' | 'deployments' | 'gitops' | 'variables' | 'compare';
 
 export default function EnvironmentDetailClient({ environment: initialEnv, contents, variables: initialVars, allEnvironments }: Props) {
   const searchParams = useSearchParams();
@@ -86,11 +86,13 @@ export default function EnvironmentDetailClient({ environment: initialEnv, conte
 
   const clusters = contentsData?.clusters || [];
   const deployments = contentsData?.deployments || [];
-  const summary = contentsData?.summary || { cluster_count: clusters.length, deployment_count: deployments.length, variable_count: vars.length };
+  const gitopsBindings = contentsData?.gitops_bindings || [];
+  const summary = contentsData?.summary || { cluster_count: clusters.length, deployment_count: deployments.length, binding_count: gitopsBindings.length, variable_count: vars.length };
 
   const tabs = [
     { key: 'clusters' as Tab, label: 'Clusters', icon: 'kubernetes', badge: summary.cluster_count || undefined },
     { key: 'deployments' as Tab, label: 'Deployments', icon: 'cicd', badge: summary.deployment_count || undefined },
+    { key: 'gitops' as Tab, label: 'GitOps', icon: 'gitops', badge: gitopsBindings.length || undefined },
     { key: 'variables' as Tab, label: 'Variables', icon: 'vault', badge: vars.length || undefined },
     { key: 'compare' as Tab, label: 'Compare', icon: 'discovery' },
   ];
@@ -136,7 +138,7 @@ export default function EnvironmentDetailClient({ environment: initialEnv, conte
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="card card-body">
             <p className="text-[11px] text-[var(--text-tertiary)] mb-1">Clusters</p>
             <p className="text-[20px] font-semibold text-[var(--text-primary)]">{summary.cluster_count}</p>
@@ -144,6 +146,10 @@ export default function EnvironmentDetailClient({ environment: initialEnv, conte
           <div className="card card-body">
             <p className="text-[11px] text-[var(--text-tertiary)] mb-1">Deployments</p>
             <p className="text-[20px] font-semibold text-[var(--text-primary)]">{summary.deployment_count}</p>
+          </div>
+          <div className="card card-body">
+            <p className="text-[11px] text-[var(--text-tertiary)] mb-1">GitOps Apps</p>
+            <p className="text-[20px] font-semibold text-[var(--text-primary)]">{gitopsBindings.length}</p>
           </div>
           <div className="card card-body">
             <p className="text-[11px] text-[var(--text-tertiary)] mb-1">Variables</p>
@@ -215,6 +221,40 @@ export default function EnvironmentDetailClient({ environment: initialEnv, conte
                     }`}>{dep.status}</span>
                   </div>
                 </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === 'gitops' && (
+          <div className="space-y-3">
+            {gitopsBindings.length === 0 ? (
+              <div className="card card-body text-center py-8">
+                <p className="text-[13px] text-[var(--text-tertiary)] mb-2">No GitOps applications in this environment</p>
+                <Link href="/gitops/bindings" className="text-[12px] text-[var(--accent)] hover:underline">
+                  Go to Bindings &rarr;
+                </Link>
+              </div>
+            ) : (
+              gitopsBindings.map(b => (
+                <Link key={b.id} href={`/gitops/applications/${b.argo_connection_id}/${b.app_namespace}/${b.app_name}`} className="card modern-card-hover block">
+                  <div className="card-body flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 text-[10px] font-medium rounded ${
+                        b.engine_type === 'argocd' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+                      }`}>
+                        {b.engine_type}
+                      </span>
+                      <div>
+                        <p className="text-[13px] font-medium text-[var(--text-primary)]">{b.app_name}</p>
+                        <p className="text-[11px] text-[var(--text-tertiary)]">{b.app_namespace} &middot; {b.update_strategy}</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--bg)] text-[var(--text-tertiary)]">
+                      {b.auto_bound ? 'auto' : 'manual'}
+                    </span>
+                  </div>
+                </Link>
               ))
             )}
           </div>

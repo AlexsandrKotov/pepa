@@ -4,7 +4,7 @@
 #   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #   source "$SCRIPT_DIR/lib/common.sh"
 
-set -euo pipefail
+set -uo pipefail  # Don't use -e; we handle errors manually via test tracking
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -31,6 +31,7 @@ K3D_SECONDARY="${K3D_SECONDARY:-pepa-test-secondary}"
 TEST_NAMESPACE="${TEST_NAMESPACE:-pepa-test}"
 RESULTS_DIR="${RESULTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/results}"
 TMP_DIR="${TMP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tmp}"
+TMP="${TMP:-$TMP_DIR}"  # Alias for convenience
 LOG_FILE="${RESULTS_DIR}/test-$(date +%Y%m%d-%H%M%S).log"
 
 # Counters
@@ -249,27 +250,41 @@ pepa_login() {
     local user="${1:-$PEPA_ADMIN_USER}"
     local pass="${2:-$PEPA_ADMIN_PASSWORD}"
 
-    pepa_api POST "/api/v1/auth/login" "{\"email\":\"$user\",\"password\":\"$pass\"}"
-
-    if [[ "$API_STATUS" == "200" ]]; then
-        # Token may be in JSON body or cookie
-        PEPA_TOKEN=$(echo "$API_RESPONSE" | jq -r '.token // .access_token // empty' 2>/dev/null || true)
-        if [[ -z "$PEPA_TOKEN" ]]; then
-            # Try to extract from Set-Cookie header (re-request with -v)
-            local cookies
-            cookies=$(curl -s -D - -X POST \
-                -H "Content-Type: application/json" \
-                -d "{\"email\":\"$user\",\"password\":\"$pass\"}" \
-                "${PEPA_API_URL}/api/v1/auth/login" 2>/dev/null | grep -i 'set-cookie' || true)
-            PEPA_TOKEN=$(echo "$cookies" | grep -oP 'pepa_token=\K[^;]+' || true)
+    _pepa_login_attempt() {
+        local u="$1" p="$2"
+        pepa_api POST "/api/v1/auth/login" "{\"email\":\"$u\",\"password\":\"$p\"}"
+        if [[ "$API_STATUS" == "200" ]]; then
+            PEPA_TOKEN=$(echo "$API_RESPONSE" | jq -r '.token // .access_token // empty' 2>/dev/null || true)
+            if [[ -z "$PEPA_TOKEN" ]]; then
+                local cookies
+                cookies=$(curl -s -D - -X POST \
+                    -H "Content-Type: application/json" \
+                    -d "{\"email\":\"$u\",\"password\":\"$p\"}" \
+                    "${PEPA_API_URL}/api/v1/auth/login" 2>/dev/null | grep -i 'set-cookie' || true)
+                PEPA_TOKEN=$(echo "$cookies" | grep -oP 'pepa_token=\K[^;]+' || true)
+            fi
+            if [[ -n "$PEPA_TOKEN" ]]; then
+                export PEPA_TOKEN
+                log_info "Logged in as $u (token: ${PEPA_TOKEN:0:20}...)"
+                return 0
+            fi
         fi
-        export PEPA_TOKEN
-        log_info "Logged in as $user (token: ${PEPA_TOKEN:0:20}...)"
-        return 0
-    else
-        log_fail "Login failed: HTTP $API_STATUS — $API_RESPONSE"
         return 1
+    }
+
+    if _pepa_login_attempt "$user" "$pass"; then
+        return 0
     fi
+    # Try fallback passwords from previous test runs
+    for fallback in "Admin123!" "NewPass456!"; do
+        if [[ "$pass" != "$fallback" ]]; then
+            if _pepa_login_attempt "$user" "$fallback"; then
+                return 0
+            fi
+        fi
+    done
+    log_fail "Login failed: tried all passwords"
+    return 1
 }
 
 # ── kubectl helpers ───────────────────────────────────────────────────────────
@@ -347,6 +362,171 @@ k3d_cluster_exists() {
 k3d_get_kubeconfig() {
     local cluster="$1"
     k3d kubeconfig get "$cluster" 2>/dev/null
+}
+
+# ── FluxCD CLI helpers ───────────────────────────────────────────────────────
+
+# flux_cli SUBCOMMAND... — run flux CLI against the primary cluster
+flux_cli() {
+    flux --context "k3d-$K3D_PRIMARY" "$@"
+}
+
+# flux_cli_secondary SUBCOMMAND... — run flux CLI against the secondary cluster
+flux_cli_secondary() {
+    flux --context "k3d-$K3D_SECONDARY" "$@"
+}
+
+# Install FluxCD into a cluster
+flux_install() {
+    local cluster="${1:-$K3D_PRIMARY}"
+    log_info "Installing FluxCD into cluster '$cluster'..."
+    flux --context "k3d-$cluster" install 2>>"$LOG_FILE"
+}
+
+# Wait for FluxCD HelmRelease to be ready
+wait_for_flux_helmrelease() {
+    local name="$1" namespace="${2:-pepa-e2e}" cluster="${3:-$K3D_PRIMARY}" timeout="${4:-120}"
+    log_info "Waiting for FluxCD HelmRelease '$name' in '$namespace' (${timeout}s)..."
+    local elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        local ready
+        ready=$(kubectl --context "k3d-$cluster" get helmrelease "$name" -n "$namespace" \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+        if [[ "$ready" == "True" ]]; then
+            log_ok "HelmRelease '$name' is Ready (${elapsed}s)"
+            return 0
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    log_fail "Timeout waiting for HelmRelease '$name' after ${timeout}s"
+    return 1
+}
+
+# Wait for FluxCD Kustomization to be ready
+wait_for_flux_kustomization() {
+    local name="$1" namespace="${2:-pepa-e2e}" cluster="${3:-$K3D_PRIMARY}" timeout="${4:-120}"
+    log_info "Waiting for FluxCD Kustomization '$name' in '$namespace' (${timeout}s)..."
+    local elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        local ready
+        ready=$(kubectl --context "k3d-$cluster" get kustomization "$name" -n "$namespace" \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+        if [[ "$ready" == "True" ]]; then
+            log_ok "Kustomization '$name' is Ready (${elapsed}s)"
+            return 0
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    log_fail "Timeout waiting for Kustomization '$name' after ${timeout}s"
+    return 1
+}
+
+# Force FluxCD reconciliation
+flux_reconcile_helmrelease() {
+    local name="$1" namespace="${2:-pepa-e2e}" cluster="${3:-$K3D_PRIMARY}"
+    flux --context "k3d-$cluster" reconcile helmrelease "$name" -n "$namespace" 2>>"$LOG_FILE"
+}
+
+flux_reconcile_kustomization() {
+    local name="$1" namespace="${2:-pepa-e2e}" cluster="${3:-$K3D_PRIMARY}"
+    flux --context "k3d-$cluster" reconcile kustomization "$name" -n "$namespace" 2>>"$LOG_FILE"
+}
+
+# Suspend/Resume FluxCD resources
+flux_suspend_helmrelease() {
+    local name="$1" namespace="${2:-pepa-e2e}" cluster="${3:-$K3D_PRIMARY}"
+    flux --context "k3d-$cluster" suspend helmrelease "$name" -n "$namespace" 2>>"$LOG_FILE"
+}
+
+flux_resume_helmrelease() {
+    local name="$1" namespace="${2:-pepa-e2e}" cluster="${3:-$K3D_PRIMARY}"
+    flux --context "k3d-$cluster" resume helmrelease "$name" -n "$namespace" 2>>"$LOG_FILE"
+}
+
+# ── ArgoCD CLI helpers ───────────────────────────────────────────────────────
+
+# ArgoCD server address (in-cluster or port-forwarded)
+ARGOCD_SERVER="${ARGOCD_SERVER:-localhost:8090}"
+ARGOCD_ADMIN_PASS="${ARGOCD_ADMIN_PASS:-}"
+
+# argocd_cli SUBCOMMAND... — run argocd CLI
+argocd_cli() {
+    argocd --server "$ARGOCD_SERVER" --insecure --grpc-web "$@"
+}
+
+# Login to ArgoCD
+argocd_login() {
+    local user="${1:-admin}" pass="${2:-$ARGOCD_ADMIN_PASS}"
+    if [[ -z "$pass" ]]; then
+        # Get admin password from k8s secret
+        pass=$(k8s "$K3D_PRIMARY" -n argocd get secret argocd-initial-admin-secret \
+            -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+    fi
+    if [[ -z "$pass" ]]; then
+        log_warn "Cannot determine ArgoCD admin password"
+        return 1
+    fi
+    ARGOCD_ADMIN_PASS="$pass"
+    argocd login "$ARGOCD_SERVER" --username "$user" --password "$pass" --insecure --grpc-web --plaintext 2>>"$LOG_FILE"
+}
+
+# Wait for ArgoCD Application to be Synced+Healthy
+wait_for_argocd_app() {
+    local name="$1" timeout="${2:-120}"
+    log_info "Waiting for ArgoCD app '$name' to be Synced+Healthy (${timeout}s)..."
+    local elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        local health sync
+        health=$(argocd app get "$name" --insecure --grpc-web --plaintext -o json 2>/dev/null \
+            | jq -r '.status.health.status // empty' 2>/dev/null || echo "")
+        sync=$(argocd app get "$name" --insecure --grpc-web --plaintext -o json 2>/dev/null \
+            | jq -r '.status.sync.status // empty' 2>/dev/null || echo "")
+        if [[ "$health" == "Healthy" && "$sync" == "Synced" ]]; then
+            log_ok "ArgoCD app '$name' is Synced+Healthy (${elapsed}s)"
+            return 0
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    log_fail "Timeout waiting for ArgoCD app '$name' after ${timeout}s"
+    return 1
+}
+
+# Sync ArgoCD application
+argocd_sync() {
+    local name="$1"
+    argocd app sync "$name" --insecure --grpc-web --plaintext 2>>"$LOG_FILE"
+}
+
+# Force ArgoCD app refresh
+argocd_refresh() {
+    local name="$1"
+    argocd app get "$name" --refresh --insecure --grpc-web --plaintext 2>>"$LOG_FILE"
+}
+
+# ── Namespace-per-environment helpers ─────────────────────────────────────────
+
+E2E_NAMESPACE="${E2E_NAMESPACE:-pepa-e2e}"
+E2E_DEV_NS="pepa-e2e-dev"
+E2E_TESTING_NS="pepa-e2e-testing"
+E2E_STAGING_NS="pepa-e2e-staging"
+
+setup_e2e_namespaces() {
+    local cluster="${1:-$K3D_PRIMARY}"
+    for ns in "$E2E_NAMESPACE" "$E2E_DEV_NS" "$E2E_TESTING_NS" "$E2E_STAGING_NS"; do
+        k8s "$cluster" create namespace "$ns" --dry-run=client -o yaml | k8s "$cluster" apply -f - 2>/dev/null
+    done
+    log_info "E2E namespaces created in cluster '$cluster'"
+}
+
+cleanup_e2e_namespaces() {
+    local cluster="${1:-$K3D_PRIMARY}"
+    for ns in "$E2E_NAMESPACE" "$E2E_DEV_NS" "$E2E_TESTING_NS" "$E2E_STAGING_NS"; do
+        k8s "$cluster" delete namespace "$ns" --ignore-not-found=true --wait=false 2>/dev/null || true
+    done
+    log_info "E2E namespaces cleanup initiated in cluster '$cluster'"
 }
 
 # ── Misc helpers ──────────────────────────────────────────────────────────────

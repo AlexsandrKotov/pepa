@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { services, discovery, clusters as clustersApi, environments as environmentsApi, type Service, type ServiceDeployment, type Cluster, type Environment } from '@/lib/api';
+import { services, discovery, clusters as clustersApi, environments as environmentsApi, gitopsBindings, type Service, type ServiceDeployment, type Cluster, type Environment, type GitOpsBinding } from '@/lib/api';
 
 export default function ServiceDetailPage() {
   const searchParams = useSearchParams();
@@ -23,6 +23,7 @@ export default function ServiceDetailPage() {
   const [logs, setLogs] = useState('');
   const [envList, setEnvList] = useState<Environment[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [bindings, setBindings] = useState<GitOpsBinding[]>([]);
 
   useEscapeKey(() => {
     if (showDeleteConfirm && !deleting) setShowDeleteConfirm(false);
@@ -43,6 +44,9 @@ export default function ServiceDetailPage() {
       ]);
       setClusterList(clData.clusters || []);
       setEnvList(envData.environments || []);
+
+      // Load GitOps bindings for this service
+      gitopsBindings.byService(serviceId).then(r => setBindings(r.bindings || [])).catch(() => {});
     } catch (err) {
       console.error('Failed to load service:', err);
     } finally {
@@ -491,6 +495,62 @@ export default function ServiceDetailPage() {
                 </pre>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* GitOps Bindings */}
+      {bindings.length > 0 && (
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="text-[13px] font-medium text-[var(--text-primary)]">GitOps Bindings</h2>
+            <span className="text-[11px] text-[var(--text-tertiary)]">{bindings.length} binding{bindings.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div className="card-body">
+            <div className="space-y-3">
+              {bindings.map(b => {
+                const engineLabel = b.engine_type === 'fluxcd' ? 'FluxCD' : 'ArgoCD';
+                const engineStyle = b.engine_type === 'fluxcd' ? 'bg-purple-500/15 text-purple-600' : 'bg-orange-500/15 text-orange-600';
+                const appLink = b.argo_connection_id && b.app_namespace && b.app_name
+                  ? `/gitops/applications/${b.argo_connection_id}/${b.app_namespace}/${b.app_name}`
+                  : null;
+                return (
+                  <div key={b.id} className="flex items-center justify-between p-3 border border-[var(--border-light)] rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${engineStyle}`}>{engineLabel}</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          {appLink ? (
+                            <Link href={appLink} className="text-[12px] font-medium text-[var(--accent)] hover:underline">{b.app_name}</Link>
+                          ) : (
+                            <span className="text-[12px] font-medium text-[var(--text-primary)]">{b.app_name}</span>
+                          )}
+                          <span className="text-[10px] text-[var(--text-tertiary)]">{b.app_namespace}</span>
+                        </div>
+                        {b.env_name && (
+                          <span
+                            className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-medium"
+                            style={{ backgroundColor: (b.env_color || '#6b7280') + '20', color: b.env_color || '#6b7280' }}
+                          >
+                            {b.env_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {b.argo_connection_id && b.app_namespace && b.app_name && (
+                        <Link
+                          href={`/gitops/applications/${b.argo_connection_id}/${b.app_namespace}/${b.app_name}`}
+                          className="text-[11px] px-2 py-1 border border-[var(--border)] rounded text-[var(--text-secondary)] hover:bg-[var(--border-light)] transition-colors"
+                        >
+                          Open →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

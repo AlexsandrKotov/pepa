@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { gitopsApplications, type GitOpsAppDetail, type GitOpsHistoryEntry, type GitOpsResourceNode } from '@/lib/api';
+import Link from 'next/link';
+import { gitopsApplications, gitopsBindings, gitops, type GitOpsAppDetail, type GitOpsHistoryEntry, type GitOpsResourceNode, type GitOpsBinding } from '@/lib/api';
 
 function healthBadge(health: string) {
   const styles: Record<string, string> = {
@@ -19,7 +20,7 @@ function syncBadge(status: string) {
   return <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${styles[status] || styles.Unknown}`}>{status || 'Unknown'}</span>;
 }
 
-type Tab = 'overview' | 'tree' | 'history' | 'events';
+type Tab = 'overview' | 'tree' | 'history' | 'events' | 'values';
 
 export default function ApplicationDetailPage() {
   const params = useParams();
@@ -39,6 +40,17 @@ export default function ApplicationDetailPage() {
   const [actionLoading, setActionLoading] = useState('');
   const [actionResult, setActionResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
+  // Values editing state
+  const [binding, setBinding] = useState<GitOpsBinding | null>(null);
+  const [valuesYaml, setValuesYaml] = useState('');
+  const [originalYaml, setOriginalYaml] = useState('');
+  const [resourceFilePath, setResourceFilePath] = useState('');
+  const [diff, setDiff] = useState('');
+  const [commitMsg, setCommitMsg] = useState('');
+  const [valuesLoading, setValuesLoading] = useState(false);
+  const [valuesSaving, setValuesSaving] = useState(false);
+  const [valuesError, setValuesError] = useState('');
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -52,6 +64,93 @@ export default function ApplicationDetailPage() {
   }, [connectionId, namespace, name]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Find binding for this app (to get repo_id for editing)
+  useEffect(() => {
+    gitopsBindings.list().then(res => {
+      const b = (res.bindings || []).find(b =>
+        b.app_name === name && b.app_namespace === namespace && b.argo_connection_id === connectionId
+      );
+      if (b) setBinding(b);
+    }).catch(() => {});
+  }, [name, namespace, connectionId]);
+
+  // Load values YAML when switching to values tab
+  const loadValues = useCallback(async () => {
+    if (!binding?.repo_id) return;
+    setValuesLoading(true);
+    setValuesError('');
+    try {
+      const resources = await gitops.listResources(binding.repo_id);
+      const resource = (resources.resources || []).find((r: { name: string }) => r.name === name);
+      const filePath = (resource as { file_path?: string })?.file_path || binding.manifest_path || '';
+      setResourceFilePath(filePath);
+      if (resource?.values) {
+        const yaml = typeof resource.values === 'string' ? resource.values : JSON.stringify(resource.values, null, 2);
+        setValuesYaml(yaml);
+        setOriginalYaml(yaml);
+      } else if (filePath) {
+        setValuesYaml(`# File: ${filePath}\n# Edit values and commit to trigger reconciliation\n`);
+        setOriginalYaml('');
+      } else {
+        setValuesYaml('# No values content available for this resource\n');
+        setOriginalYaml('');
+      }
+    } catch (err) {
+      setValuesError(err instanceof Error ? err.message : 'Failed to load values');
+    }
+    setValuesLoading(false);
+  }, [binding, name]);
+
+  const handlePreviewDiff = async () => {
+    if (!binding?.repo_id || !resourceFilePath) return;
+    setValuesError('');
+    try {
+      const resourceId = name;
+      const res = await gitops.previewDiff(binding.repo_id, resourceId, {
+        full_yaml: valuesYaml,
+        file_path: resourceFilePath,
+      });
+      setDiff(res.diff || 'No changes detected');
+    } catch (err) {
+      setValuesError(err instanceof Error ? err.message : 'Failed to preview diff');
+    }
+  };
+
+  const handleCommit = async () => {
+    if (!binding?.repo_id || !resourceFilePath) return;
+    setValuesSaving(true);
+    setValuesError('');
+    try {
+      const resourceId = name;
+      const res = await gitops.editValues(binding.repo_id, resourceId, {
+        full_yaml: valuesYaml,
+        file_path: resourceFilePath,
+        commit_message: commitMsg || undefined,
+      });
+      setActionResult({ ok: true, msg: `Committed ${res.commit_sha?.substring(0, 8) || ''} to ${res.branch || 'branch'}${res.mr_needed ? ' (MR created)' : ''}` });
+      setOriginalYaml(valuesYaml);
+      setDiff('');
+      setCommitMsg('');
+    } catch (err) {
+      setValuesError(err instanceof Error ? err.message : 'Failed to commit');
+    }
+    setValuesSaving(false);
+  };
+
+  const handleSuggestCommit = async () => {
+    if (!binding?.repo_id || !resourceFilePath) return;
+    try {
+      const resourceId = name;
+      const res = await gitops.suggestCommitMessage(binding.repo_id, resourceId, {
+        resource_kind: binding.engine_type === 'fluxcd' ? 'HelmRelease' : 'Application',
+        resource_name: name,
+        file_path: resourceFilePath,
+        changes: valuesYaml !== originalYaml ? valuesYaml : undefined,
+      });
+      if (res.suggested_message) setCommitMsg(res.suggested_message);
+    } catch { /* ignore */ }
+  };
 
   const loadTab = useCallback(async (t: Tab) => {
     try {
@@ -143,8 +242,8 @@ export default function ApplicationDetailPage() {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-[var(--border)]">
-          {(['overview', 'tree', 'history', 'events'] as Tab[]).map(t => (
-            <button key={t} onClick={() => setTab(t)}
+          {(['overview', 'tree', 'history', 'events', 'values'] as Tab[]).map(t => (
+            <button key={t} onClick={() => { setTab(t); if (t === 'values') loadValues(); }}
               className={`px-4 py-2 text-[12px] font-medium rounded-t-lg transition-colors ${tab === t ? 'bg-[var(--bg)] text-[var(--accent)] border-b-2 border-[var(--accent)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
             </button>
@@ -265,6 +364,85 @@ export default function ApplicationDetailPage() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        ) : tab === 'values' ? (
+          <div className="space-y-4">
+            {!binding?.repo_id ? (
+              <div className="card card-body text-center py-8">
+                <p className="text-[13px] text-[var(--text-tertiary)] mb-2">No GitOps repository linked to this application</p>
+                <p className="text-[12px] text-[var(--text-tertiary)]">
+                  Create a <Link href="/gitops/bindings" className="text-[var(--accent)] hover:underline">binding</Link> with a repository to enable values editing
+                </p>
+              </div>
+            ) : valuesLoading ? (
+              <div className="card card-body text-center py-8">
+                <p className="text-[13px] text-[var(--text-tertiary)]">Loading values...</p>
+              </div>
+            ) : (
+              <>
+                {valuesError && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-[12px] text-red-500">{valuesError}</div>
+                )}
+                {/* YAML Editor */}
+                <div className="card overflow-hidden">
+                  <div className="card-header flex items-center justify-between">
+                    <h3 className="text-[13px] font-medium text-[var(--text-primary)]">Values</h3>
+                    <div className="flex gap-2">
+                      <button onClick={handlePreviewDiff} disabled={valuesYaml === originalYaml}
+                        className="btn btn-secondary text-[11px] disabled:opacity-50">
+                        Preview Diff
+                      </button>
+                      <button onClick={handleSuggestCommit}
+                        className="btn btn-secondary text-[11px]">
+                        Suggest Message
+                      </button>
+                    </div>
+                  </div>
+                  <div className="card-body p-0">
+                    <textarea
+                      value={valuesYaml}
+                      onChange={e => setValuesYaml(e.target.value)}
+                      className="w-full min-h-[300px] p-4 font-mono text-[12px] bg-[var(--bg)] text-[var(--text-primary)] border-0 resize-y focus:outline-none focus:ring-0"
+                      spellCheck={false}
+                      placeholder="# Edit values YAML here..."
+                    />
+                  </div>
+                </div>
+
+                {/* Diff Preview */}
+                {diff && (
+                  <div className="card overflow-hidden">
+                    <div className="card-header">
+                      <h3 className="text-[13px] font-medium text-[var(--text-primary)]">Diff Preview</h3>
+                    </div>
+                    <div className="card-body p-0">
+                      <pre className="p-4 text-[11px] font-mono overflow-x-auto bg-[var(--bg)] text-[var(--text-secondary)] whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                        {diff}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+
+                {/* Commit Section */}
+                <div className="card">
+                  <div className="card-body flex gap-3 items-end">
+                    <div className="flex-1">
+                      <label className="text-[11px] text-[var(--text-tertiary)] block mb-1">Commit Message</label>
+                      <input
+                        value={commitMsg}
+                        onChange={e => setCommitMsg(e.target.value)}
+                        placeholder="Update values for..."
+                        className="input text-[12px] w-full"
+                      />
+                    </div>
+                    <button onClick={handleCommit} disabled={valuesSaving || valuesYaml === originalYaml}
+                      className="btn btn-primary text-[11px] disabled:opacity-50">
+                      {valuesSaving ? 'Committing...' : 'Commit & Push'}
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         ) : null}

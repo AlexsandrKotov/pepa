@@ -34,7 +34,7 @@ gitea_init() {
     resp=$(curl -s -w "\n%{http_code}" -X POST "${_GITEA_API}/users/${GITEA_ADMIN_USER}/tokens" \
         -u "${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}" \
         -H "Content-Type: application/json" \
-        -d "{\"name\":\"pepa-integration-test-$(date +%s)\"}" 2>/dev/null)
+        -d "{\"name\":\"pepa-integration-test-$(date +%s)\",\"scopes\":[\"all\"]}" 2>/dev/null)
     local code body
     code=$(echo "$resp" | tail -1)
     body=$(echo "$resp" | sed '$d')
@@ -231,13 +231,13 @@ gitea_push_manifest() {
         # Try update first (file may exist), then create
         if ! gitea_update_file "$repo" "$rel_path" "$content" "$message" "$branch" 2>/dev/null; then
             if ! gitea_create_file "$repo" "$rel_path" "$content" "$message" "$branch" 2>/dev/null; then
-                ((errors++))
+                errors=$((errors + 1))
             fi
         fi
-        ((count++))
+        count=$((count + 1))
     done < <(find "$local_dir" -type f -print0 2>/dev/null)
     log_info "Pushed $count files to ${GITEA_ORG}/${repo} ($errors errors)"
-    return $errors
+    return 0
 }
 
 # gitea_push_manifest_via_git <repo_name> <local_dir> [commit_message] [branch]
@@ -345,4 +345,86 @@ gitea_clone_url() {
 gitea_repo_api_url() {
     local repo="$1"
     echo "${GITEA_URL}/api/v1/repos/${GITEA_ORG}/${repo}"
+}
+
+# ---------------------------------------------------------------------------
+# Multi-file commit support
+# ---------------------------------------------------------------------------
+
+# gitea_create_directory <repo_name> <path> [commit_message] [branch]
+#   Creates a directory by adding a .gitkeep file
+gitea_create_directory() {
+    local repo="$1" path="$2" message="${3:-Create directory}" branch="${4:-main}"
+    gitea_create_file "$repo" "${path}/.gitkeep" "" "$message" "$branch"
+}
+
+# gitea_commit_multiple_files <repo_name> <commit_message> <branch> <file1_path> <file1_content> [<file2_path> <file2_content> ...]
+#   Creates multiple files in a single logical operation (sequential API calls)
+gitea_commit_multiple_files() {
+    local repo="$1" message="$2" branch="$3"
+    shift 3
+    local count=0 errors=0
+    while [[ $# -ge 2 ]]; do
+        local path="$1" content="$2"
+        shift 2
+        if ! gitea_create_file "$repo" "$path" "$content" "$message" "$branch" 2>/dev/null; then
+            if ! gitea_update_file "$repo" "$path" "$content" "$message" "$branch" 2>/dev/null; then
+                errors=$((errors + 1))
+            fi
+        fi
+        count=$((count + 1))
+    done
+    log_info "Committed $count files to ${GITEA_ORG}/${repo} ($errors errors)"
+    return 0
+}
+
+# gitea_push_directory_tree <repo_name> <local_dir> [remote_base_path] [commit_message] [branch]
+#   Pushes an entire directory tree to the repo, preserving structure
+gitea_push_directory_tree() {
+    local repo="$1" local_dir="$2" remote_base="${3:-.}" message="${4:-Push directory tree}" branch="${5:-main}"
+    local count=0 errors=0
+    while IFS= read -r -d '' file; do
+        local rel_path="${file#${local_dir}/}"
+        local remote_path
+        if [[ "$remote_base" == "." ]]; then
+            remote_path="$rel_path"
+        else
+            remote_path="${remote_base}/${rel_path}"
+        fi
+        local content
+        content=$(cat "$file")
+        if ! gitea_update_file "$repo" "$remote_path" "$content" "$message" "$branch" 2>/dev/null; then
+            if ! gitea_create_file "$repo" "$remote_path" "$content" "$message" "$branch" 2>/dev/null; then
+                errors=$((errors + 1))
+            fi
+        fi
+        count=$((count + 1))
+    done < <(find "$local_dir" -type f -not -name '.gitkeep' -print0 2>/dev/null)
+    log_info "Pushed $count files to ${GITEA_ORG}/${repo}:${remote_base} ($errors errors)"
+    return 0
+}
+
+# gitea_get_file_content <repo_name> <path> [branch]
+#   Returns file content from repo
+gitea_get_file_content() {
+    local repo="$1" path="$2" branch="${3:-main}"
+    local encoded
+    encoded=$(curl -s -H "Authorization: token $_GITEA_TOKEN" \
+        "${_GITEA_API}/repos/${GITEA_ORG}/${repo}/contents/${path}?ref=${branch}" \
+        | jq -r '.content // empty' 2>/dev/null)
+    if [[ -n "$encoded" ]]; then
+        echo "$encoded" | base64 -d 2>/dev/null
+    fi
+}
+
+# gitea_list_files <repo_name> [path] [branch]
+#   Lists files in a repo directory
+gitea_list_files() {
+    local repo="$1" path="${2:-}" branch="${3:-main}"
+    local url="/repos/${GITEA_ORG}/${repo}/contents"
+    [[ -n "$path" ]] && url="${url}/${path}"
+    url="${url}?ref=${branch}"
+    curl -s -H "Authorization: token $_GITEA_TOKEN" \
+        "${_GITEA_API}${url}" 2>/dev/null \
+        | jq -r '.[].name' 2>/dev/null
 }

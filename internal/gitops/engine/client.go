@@ -312,16 +312,23 @@ func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSumma
 	}
 
 	var allApps []AppSummary
+	slog.Info("listFluxApps: resolved credentials", "count", len(allCreds))
 	for _, creds := range allCreds {
+		slog.Info("listFluxApps: trying connection", "connection_id", creds.ConnectionID, "kubeconfig_len", len(creds.Kubeconfig))
 		config := map[string]string{
 			"kubeconfig": creds.Kubeconfig,
 		}
 
 		// List Kustomizations
 		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "list_kustomizations", nil, config)
-		if err == nil && resp.Success {
+		if err != nil {
+			slog.Warn("listFluxApps: list_kustomizations plugin error", "connection_id", creds.ConnectionID, "error", err)
+		} else if !resp.Success {
+			slog.Warn("listFluxApps: list_kustomizations failed", "connection_id", creds.ConnectionID, "error", resp.Error)
+		} else {
 			var items []map[string]interface{}
 			if err := json.Unmarshal(resp.Output, &items); err == nil {
+				slog.Info("listFluxApps: kustomizations found", "count", len(items))
 				for _, item := range items {
 					allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
 				}
@@ -330,9 +337,14 @@ func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSumma
 
 		// List HelmReleases
 		resp, err = c.registry.ExecuteAction(ctx, "fluxcd", "list_helmreleases", nil, config)
-		if err == nil && resp.Success {
+		if err != nil {
+			slog.Warn("listFluxApps: list_helmreleases plugin error", "connection_id", creds.ConnectionID, "error", err)
+		} else if !resp.Success {
+			slog.Warn("listFluxApps: list_helmreleases failed", "connection_id", creds.ConnectionID, "error", resp.Error)
+		} else {
 			var items []map[string]interface{}
 			if err := json.Unmarshal(resp.Output, &items); err == nil {
+				slog.Info("listFluxApps: helmreleases found", "count", len(items))
 				for _, item := range items {
 					allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
 				}

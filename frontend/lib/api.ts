@@ -2688,10 +2688,12 @@ export interface EnvironmentContents {
     pods_total: number;
     created_at: string;
   }>;
+  gitops_bindings?: GitOpsBinding[];
   variables_count: number;
   summary: {
     cluster_count: number;
     deployment_count: number;
+    binding_count?: number;
     variable_count: number;
   };
 }
@@ -5233,6 +5235,7 @@ export interface GitOpsBinding {
   app_namespace: string;
   app_project?: string;
   environment?: string;
+  environment_id?: string;
   manifest_path?: string;
   update_strategy: string;
   update_path?: string;
@@ -5240,6 +5243,10 @@ export interface GitOpsBinding {
   auto_bound: boolean;
   created_at: string;
   updated_at: string;
+  // Joined environment info (from ListWithEnvironment)
+  env_name?: string;
+  env_slug?: string;
+  env_color?: string;
 }
 
 export interface DiscoveredApp {
@@ -5260,7 +5267,7 @@ export const gitopsBindings = {
   create: (data: Partial<GitOpsBinding>) =>
     fetchAPI<GitOpsBinding>('/api/v1/gitops/bindings', { method: 'POST', body: JSON.stringify(data) }),
 
-  update: (id: string, data: Partial<GitOpsBinding>) =>
+  update: (id: string, data: Partial<GitOpsBinding> & { clear_environment?: boolean }) =>
     fetchAPI<GitOpsBinding>(`/api/v1/gitops/bindings/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   delete: (id: string) =>
@@ -5268,5 +5275,11 @@ export const gitopsBindings = {
 
   discover: () =>
     fetchAPI<{ discovered: DiscoveredApp[]; total: number; newly_bound: number }>('/api/v1/gitops/bindings/discover', { method: 'POST' }),
+
+  byService: (serviceId: string) =>
+    fetchAPI<{ bindings: GitOpsBinding[]; total: number }>(`/api/v1/gitops/bindings/by-service/${serviceId}`),
+
+  byEnvironment: (envId: string) =>
+    fetchAPI<{ bindings: GitOpsBinding[]; total: number }>(`/api/v1/gitops/bindings/by-environment/${envId}`),
 };
 

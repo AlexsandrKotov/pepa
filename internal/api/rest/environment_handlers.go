@@ -461,14 +461,31 @@ func registerEnvironmentRoutes(r *gin.RouterGroup, deps Dependencies) {
 			// Get variable count
 			varCount, _ := deps.Repos.EnvVariable.CountByEnvID(c.Request.Context(), id)
 
+			// Get GitOps bindings for this environment
+			var gitopsBindings []repository.GitOpsBinding
+			if deps.Repos.GitOpsBinding != nil {
+				bindings, err := deps.Repos.GitOpsBinding.FindByEnvironment(c.Request.Context(), id, tenantID)
+				if err == nil && bindings != nil {
+					gitopsBindings = make([]repository.GitOpsBinding, len(bindings))
+					for i, b := range bindings {
+						gitopsBindings[i] = *b
+					}
+				}
+			}
+			if gitopsBindings == nil {
+				gitopsBindings = []repository.GitOpsBinding{}
+			}
+
 			c.JSON(http.StatusOK, gin.H{
 				"environment": env,
 				"clusters":    envClusters,
 				"deployments": deployments,
+				"gitops_bindings": gitopsBindings,
 				"variables_count": varCount,
 				"summary": gin.H{
 					"cluster_count":   len(envClusters),
 					"deployment_count": len(deployments),
+					"binding_count":   len(gitopsBindings),
 					"variable_count":  varCount,
 				},
 			})

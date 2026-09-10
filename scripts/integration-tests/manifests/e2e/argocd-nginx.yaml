@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: http://gitea:3000/pepa-test/argocd-manifests.git
+    targetRevision: HEAD
+    path: ./nginx
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pepa-e2e
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
