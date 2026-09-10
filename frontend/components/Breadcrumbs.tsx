@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 
 // Map path segments to human-readable names
 const segmentNames: Record<string, string> = {
-  'services': 'Services',
+  'services': 'Service Catalog',
+  'workloads': 'Workloads',
   'connections': 'Connections',
   'deployments': 'Deployments',
   'clusters': 'Clusters',

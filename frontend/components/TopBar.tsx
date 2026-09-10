@@ -27,7 +27,7 @@ const pageNames: Record<string, string> = {
   '/marketplace': 'Marketplace',
   '/workflows/designer': 'Workflow Designer',
   '/setup': 'Setup Wizard',
-  '/services': 'Services',
+  '/services': 'Service Catalog',
   '/security': 'Security',
   '/policies': 'Policies',
   '/analytics': 'Analytics',
@@ -694,7 +694,8 @@ function TopBar() {
               {[
                 { href: '/', label: 'Dashboard', icon: '🏠' },
                 { href: '/services/new', label: 'Deploy', icon: '🚀' },
-                { href: '/services', label: 'Services', icon: '📦' },
+                { href: '/services', label: 'Service Catalog', icon: '📦' },
+                { href: '/workloads', label: 'Workloads', icon: '📦' },
                 { href: '/connections', label: 'Connections', icon: '🔗', adminOnly: true, permission: 'connections' },
                 { href: '/deployments', label: 'Deployments', icon: '🚀' },
                 { href: '/clusters', label: 'Clusters', icon: '☸️', adminOnly: true, permission: 'clusters' },

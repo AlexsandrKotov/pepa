@@ -86,10 +86,18 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
     title: 'Catalog',
     icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4',
     items: [
-      { href: '/services', label: 'Services', permission: null },
+      { href: '/services', label: 'Service Catalog', permission: null },
       { href: '/entities', label: 'Entities', permission: 'entities' },
       { href: '/scorecards', label: 'Scorecards', permission: 'scorecards' },
       { href: '/discovery', label: 'Discovery', permission: 'discovery' },
+    ],
+  },
+  {
+    title: 'Workloads',
+    icon: 'M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m4-4v-2m0 10v2',
+    items: [
+      { href: '/workloads', label: 'All Workloads', permission: null },
+      { href: '/docker-services', label: 'Docker Services', permission: 'docker' },
     ],
   },
   {
@@ -107,23 +115,18 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
         ],
       },
       {
-        label: 'Releases',
-        items: [
-          { href: '/releases', label: 'Active Releases', permission: 'deployments' },
-          { href: '/environments', label: 'Environments', permission: 'environments' },
-        ],
-      },
-      {
         label: 'Deployments',
         items: [
           { href: '/deployments', label: 'Deployments', permission: 'deployments' },
           { href: '/deployments/timeline', label: 'Timeline', permission: 'deployments' },
+          { href: '/environments', label: 'Environments', permission: 'environments' },
         ],
       },
       {
         label: 'GitOps',
         items: [
           { href: '/gitops', label: 'Overview', permission: 'gitops' },
+          { href: '/gitops/applications', label: 'Applications', permission: 'gitops' },
           { href: '/gitops/drift', label: 'Drift Detection', permission: 'gitops' },
         ],
       },
@@ -141,7 +144,6 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
     items: [
       { href: '/clusters', label: 'Clusters', permission: 'clusters', adminOnly: true },
       { href: '/docker-hosts', label: 'Docker Hosts', permission: 'docker', adminOnly: true },
-      { href: '/docker-services', label: 'Containers', permission: 'docker' },
       { href: '/helm-repositories', label: 'Helm Repos', permission: 'helm', adminOnly: true },
       { href: '/registry-repositories', label: 'Registry Repos', permission: 'registry', adminOnly: true },
     ],
