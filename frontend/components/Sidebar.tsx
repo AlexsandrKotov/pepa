@@ -241,14 +241,18 @@ function NavItem({ item, active, collapsed }: { item: { href: string; label: str
     <Link
       href={item.href}
       prefetch={true}
-      className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
+      className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
         active
-          ? 'bg-white/10 text-white shadow-sm'
-          : 'text-white/40 hover:text-white/80 hover:bg-white/[0.04]'
+          ? 'bg-white/10 text-white'
+          : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
       }`}
       title={collapsed ? item.label : undefined}
     >
-      <svg className={`w-[17px] h-[17px] shrink-0 ${active ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      {/* Active indicator — left accent bar */}
+      {active && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-white/80" />
+      )}
+      <svg className={`w-[17px] h-[17px] shrink-0 transition-colors ${active ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
       </svg>
       {!collapsed && <span className="truncate">{item.label}</span>}
@@ -309,13 +313,13 @@ function CollapsibleSection({ section, collapsed, expandedSections, toggleSectio
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
+                        className={`relative flex items-center gap-2 pl-4 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
                           itemActive
                             ? 'bg-white/10 text-white font-medium'
-                            : 'text-white/30 hover:text-white/70 hover:bg-white/[0.04]'
+                            : 'text-white/30 hover:text-white/70 hover:bg-white/[0.06]'
                         }`}
                       >
-                        {itemActive && <span className="w-1 h-1 rounded-full bg-[var(--accent)] shrink-0" />}
+                        {itemActive && <span className="absolute left-1 top-1/2 -translate-y-1/2 w-[3px] h-3 rounded-r-full bg-white/60" />}
                         <span className="truncate">{item.label}</span>
                       </Link>
                     );
@@ -330,13 +334,13 @@ function CollapsibleSection({ section, collapsed, expandedSections, toggleSectio
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
+                  className={`relative flex items-center gap-2 pl-4 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
                     itemActive
                       ? 'bg-white/10 text-white font-medium'
-                      : 'text-white/30 hover:text-white/70 hover:bg-white/[0.04]'
+                      : 'text-white/30 hover:text-white/70 hover:bg-white/[0.06]'
                   }`}
                 >
-                  {itemActive && <span className="w-1 h-1 rounded-full bg-[var(--accent)] shrink-0" />}
+                  {itemActive && <span className="absolute left-1 top-1/2 -translate-y-1/2 w-[3px] h-3 rounded-r-full bg-white/60" />}
                   <span className="truncate">{item.label}</span>
                 </Link>
               );

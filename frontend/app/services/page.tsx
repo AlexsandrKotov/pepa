@@ -11,6 +11,7 @@ import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
 import Tabs from '@/components/Tabs';
 import ServiceDetailClient from './ServiceDetailClient';
+import { SkeletonTable } from '@/components/Skeleton';
 
 const ServiceManagementPanel = dynamic(() => import('@/components/ServiceManagementPanel'), { ssr: false });
 
@@ -343,7 +344,7 @@ function ServicesList() {
                 <button
                   onClick={() => setHealthFilter(healthFilter === 'healthy' ? '' : 'healthy')}
                   className={`h-full transition-opacity ${healthFilter && healthFilter !== 'healthy' ? 'opacity-30' : 'opacity-100'}`}
-                  style={{ width: `${(healthCounts.healthy / totalServices) * 100}%`, background: '#22c55e' }}
+                  style={{ width: `${(healthCounts.healthy / totalServices) * 100}%`, background: 'var(--success)' }}
                   title={`${healthCounts.healthy} healthy`}
                 />
               )}
@@ -351,7 +352,7 @@ function ServicesList() {
                 <button
                   onClick={() => setHealthFilter(healthFilter === 'degraded' ? '' : 'degraded')}
                   className={`h-full transition-opacity ${healthFilter && healthFilter !== 'degraded' ? 'opacity-30' : 'opacity-100'}`}
-                  style={{ width: `${(healthCounts.degraded / totalServices) * 100}%`, background: '#eab308' }}
+                  style={{ width: `${(healthCounts.degraded / totalServices) * 100}%`, background: 'var(--warning)' }}
                   title={`${healthCounts.degraded} degraded`}
                 />
               )}
@@ -359,7 +360,7 @@ function ServicesList() {
                 <button
                   onClick={() => setHealthFilter(healthFilter === 'progressing' ? '' : 'progressing')}
                   className={`h-full transition-opacity ${healthFilter && healthFilter !== 'progressing' ? 'opacity-30' : 'opacity-100'}`}
-                  style={{ width: `${(healthCounts.progressing / totalServices) * 100}%`, background: '#3b82f6' }}
+                  style={{ width: `${(healthCounts.progressing / totalServices) * 100}%`, background: 'var(--info)' }}
                   title={`${healthCounts.progressing} progressing`}
                 />
               )}
@@ -367,7 +368,7 @@ function ServicesList() {
                 <button
                   onClick={() => setHealthFilter(healthFilter === 'failed' ? '' : 'failed')}
                   className={`h-full transition-opacity ${healthFilter && healthFilter !== 'failed' ? 'opacity-30' : 'opacity-100'}`}
-                  style={{ width: `${(healthCounts.failed / totalServices) * 100}%`, background: '#ef4444' }}
+                  style={{ width: `${(healthCounts.failed / totalServices) * 100}%`, background: 'var(--danger)' }}
                   title={`${healthCounts.failed} failed`}
                 />
               )}
@@ -375,7 +376,7 @@ function ServicesList() {
                 <button
                   onClick={() => setHealthFilter(healthFilter === 'unknown' ? '' : 'unknown')}
                   className={`h-full transition-opacity ${healthFilter && healthFilter !== 'unknown' ? 'opacity-30' : 'opacity-100'}`}
-                  style={{ width: `${(healthCounts.unknown / totalServices) * 100}%`, background: '#9ca3af' }}
+                  style={{ width: `${(healthCounts.unknown / totalServices) * 100}%`, background: 'var(--text-tertiary)' }}
                   title={`${healthCounts.unknown} unknown`}
                 />
               )}
@@ -545,15 +546,7 @@ function ServicesList() {
 
       {/* Content */}
       {loading ? (
-        <div className="card card-body text-center py-12">
-          <div className="flex items-center justify-center gap-2 text-[var(--text-tertiary)]">
-            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <p className="text-[13px]">Loading services...</p>
-          </div>
-        </div>
+        <SkeletonTable rows={6} cols={5} />
       ) : serviceTab === 'sources' ? (
         /* GROUPED BY SOURCE */
         <div className="space-y-6">

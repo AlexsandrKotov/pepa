@@ -72,19 +72,19 @@ export default function Breadcrumbs() {
   });
 
   return (
-    <nav className="flex items-center gap-1.5 text-[12px] text-[#a3a3a3] mb-4">
-      <Link href="/" className="hover:text-[#525252] transition-colors">
+    <nav className="flex items-center gap-1.5 text-[12px] text-[var(--text-tertiary)] mb-4">
+      <Link href="/" className="hover:text-[var(--text-secondary)] transition-colors">
         Dashboard
       </Link>
       {crumbs.map((crumb, idx) => (
         <span key={crumb.href} className="flex items-center gap-1.5">
-          <svg className="w-3 h-3 text-[#d4d4d4]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-3 h-3 text-[var(--border)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
           {crumb.isLast ? (
-            <span className="text-[#525252] font-medium truncate max-w-[160px]">{crumb.label}</span>
+            <span className="text-[var(--text-secondary)] font-semibold truncate max-w-[160px]">{crumb.label}</span>
           ) : (
-            <Link href={crumb.href} className="hover:text-[#525252] transition-colors truncate max-w-[160px]">
+            <Link href={crumb.href} className="hover:text-[var(--text-secondary)] transition-colors truncate max-w-[160px]">
               {crumb.label}
             </Link>
           )}

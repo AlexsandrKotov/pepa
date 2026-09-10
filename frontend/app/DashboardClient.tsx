@@ -25,6 +25,7 @@ import { useSmartActions } from '@/hooks/useSmartActions';
 import BrandIcon from '@/components/BrandIcon';
 import { useDashboardProfile, PROFILE_CONFIGS, type DashboardProfile } from '@/hooks/useDashboardProfile';
 import { usePermission } from '@/hooks/usePermission';
+import { SkeletonDashboard } from '@/components/Skeleton';
 
 // ── Data types ───────────────────────────────────────────────
 
@@ -147,7 +148,9 @@ function ProfileSelector({ current, onChange }: { current: DashboardProfile; onC
 
 function WelcomeBanner({ userName, onDismiss }: { userName: string; onDismiss: () => void }) {
   return (
-    <div className="dash-animate-in card overflow-hidden relative">
+    <div className="dash-animate-in card overflow-hidden relative card-hover">
+      {/* Gradient accent line at top */}
+      <div className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: 'linear-gradient(90deg, var(--accent), #8b5cf6, #10b981)' }} />
       <div className="absolute inset-0 opacity-[0.03]" style={{ background: 'radial-gradient(circle at 30% 50%, var(--accent), transparent 70%)' }} />
       <div className="relative px-5 py-4 flex items-center justify-between gap-4">
         <div>
@@ -155,7 +158,7 @@ function WelcomeBanner({ userName, onDismiss }: { userName: string; onDismiss: (
           <p className="text-[12px] text-[var(--text-secondary)]">Get started by setting up your first connection, or explore the platform.</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <Link href="/get-started" className="px-3.5 py-1.5 text-[12px] font-medium bg-[var(--accent)] text-white rounded-lg hover:opacity-85 transition-opacity">
+          <Link href="/get-started" className="btn btn-primary btn-sm">
             Guided Tour
           </Link>
           <button onClick={onDismiss} className="px-2 py-1.5 text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
@@ -275,14 +278,8 @@ export default function DashboardClient() {
 
   if (loading || !data) {
     return (
-      <div className="space-y-8 dash-mesh-bg -mx-6 -my-6 px-6 py-6 min-h-[calc(100vh-48px)] flex items-center justify-center">
-        <div className="flex items-center gap-3 text-[var(--text-tertiary)]">
-          <svg className="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-          <p className="text-[14px]">Loading dashboard...</p>
-        </div>
+      <div className="dash-mesh-bg -mx-6 -my-6 px-6 py-6 min-h-[calc(100vh-48px)]">
+        <SkeletonDashboard />
       </div>
     );
   }
@@ -312,14 +309,14 @@ export default function DashboardClient() {
 
   // Build dynamic stat cards based on profile
   const statCardDefs: Record<string, { href: string; icon: React.ReactNode; label: string; value: number; subtitle?: string; subtitleColor?: string; iconBg: string; child?: React.ReactNode }> = {
-    services: { href: '/services', icon: <BrandIcon name="services" size={20} />, label: 'Services', value: serviceTotal, subtitle: serviceTotal > 0 ? `${serviceList.filter(s => s.status === 'active').length} active` : undefined, subtitleColor: 'text-emerald-600', iconBg: 'bg-cyan-500/10' },
-    clusters: { href: '/clusters', icon: <BrandIcon name="kubernetes" size={20} />, label: 'Clusters', value: clusterList.length, subtitle: clusterList.length > 0 ? `${activeClusters} active` : undefined, subtitleColor: 'text-emerald-600', iconBg: 'bg-emerald-500/10' },
-    deployments: { href: '/deployments', icon: <BrandIcon name="argocd" size={20} />, label: 'Deployments', value: deploymentList.length, subtitle: deploymentList.length > 0 ? `${deploySuccessRate}% success` : undefined, subtitleColor: deploySuccessRate >= 80 ? 'text-emerald-600' : 'text-amber-600', iconBg: 'bg-violet-500/10' },
-    pipelines: { href: '/pipelines', icon: <BrandIcon name="cicd" size={20} />, label: 'Pipelines', value: pipelineSourceList.length, iconBg: 'bg-amber-500/10', child: <Link href="/pipeline-builder" className="text-[11px] font-medium text-[var(--accent)] hover:underline">Build &rarr;</Link> },
-    connections: { href: '/connections', icon: <BrandIcon name="plugin" size={20} />, label: 'Connections', value: connList.length, iconBg: 'bg-blue-500/10' },
-    environments: { href: '/environments', icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" /></svg>, label: 'Environments', value: envList.length, iconBg: 'bg-teal-500/10' },
-    'docker-containers': { href: '/docker-services', icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg>, label: 'Containers', value: runningContainers, subtitle: `${dockerServiceList.length} services`, iconBg: 'bg-sky-500/10' },
-    'gitops-repos': { href: '/gitops', icon: <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.99 8.99 0 017.843 4.582M12 3a8.99 8.99 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>, label: 'GitOps Repos', value: gitopsRepos.length, iconBg: 'bg-orange-500/10' },
+    services: { href: '/services', icon: <BrandIcon name="services" size={20} style={{ fill: 'white' }} />, label: 'Services', value: serviceTotal, subtitle: serviceTotal > 0 ? `${serviceList.filter(s => s.status === 'active').length} active` : undefined, subtitleColor: 'text-emerald-600', iconBg: 'bg-cyan-500/80' },
+    clusters: { href: '/clusters', icon: <BrandIcon name="kubernetes" size={20} style={{ fill: 'white' }} />, label: 'Clusters', value: clusterList.length, subtitle: clusterList.length > 0 ? `${activeClusters} active` : undefined, subtitleColor: 'text-emerald-600', iconBg: 'bg-emerald-500/80' },
+    deployments: { href: '/deployments', icon: <BrandIcon name="argocd" size={20} style={{ fill: 'white' }} />, label: 'Deployments', value: deploymentList.length, subtitle: deploymentList.length > 0 ? `${deploySuccessRate}% success` : undefined, subtitleColor: deploySuccessRate >= 80 ? 'text-emerald-600' : 'text-amber-600', iconBg: 'bg-violet-500/80' },
+    pipelines: { href: '/pipelines', icon: <BrandIcon name="cicd" size={20} style={{ fill: 'white' }} />, label: 'Pipelines', value: pipelineSourceList.length, iconBg: 'bg-amber-500/80', child: <Link href="/pipeline-builder" className="text-[11px] font-medium text-[var(--accent)] hover:underline">Build &rarr;</Link> },
+    connections: { href: '/connections', icon: <BrandIcon name="plugin" size={20} style={{ fill: 'white' }} />, label: 'Connections', value: connList.length, iconBg: 'bg-blue-500/80' },
+    environments: { href: '/environments', icon: <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" /></svg>, label: 'Environments', value: envList.length, iconBg: 'bg-teal-500/80' },
+    'docker-containers': { href: '/docker-services', icon: <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" /></svg>, label: 'Containers', value: runningContainers, subtitle: `${dockerServiceList.length} services`, iconBg: 'bg-sky-500/80' },
+    'gitops-repos': { href: '/gitops', icon: <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.99 8.99 0 017.843 4.582M12 3a8.99 8.99 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" /></svg>, label: 'GitOps Repos', value: gitopsRepos.length, iconBg: 'bg-orange-500/80' },
   };
 
   const visibleStatCards = config.statCards.filter(k => k in statCardDefs);

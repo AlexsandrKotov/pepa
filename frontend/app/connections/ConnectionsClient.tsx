@@ -9,6 +9,7 @@ import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/Vault
 import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
 import { usePermission } from '@/hooks/usePermission';
+import { SkeletonTable } from '@/components/Skeleton';
 
 const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; color: string; description: string; requiredPlugins?: string[] }[] = [
   { type: 'git', label: 'Git', icon: 'git', color: '#F05032', description: 'GitHub, GitLab, Gitea, Bitbucket, local' },
@@ -265,15 +266,7 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
       )}
 
       {loading ? (
-        <div className="card card-body text-center py-12">
-          <div className="flex items-center justify-center gap-2 text-[var(--text-tertiary)]">
-            <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            <p className="text-[13px]">Loading connections...</p>
-          </div>
-        </div>
+        <SkeletonTable rows={4} cols={4} />
       ) : connections.length === 0 ? (
         <div className="page-animate-up text-center py-20 card" style={{ borderRadius: '16px' }}>
           <div className="mb-4 opacity-20"><BrandIcon name="plugin" size={48} /></div>

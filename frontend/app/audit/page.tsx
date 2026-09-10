@@ -6,6 +6,7 @@ import { audit, listUsers, type AuditEntry, type SSHCommandEntry, type PluginAct
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
 import Tabs from '@/components/Tabs';
+import { SkeletonTable } from '@/components/Skeleton';
 
 type Tab = 'audit' | 'plugin-actions' | 'ssh-commands';
 
@@ -176,8 +177,8 @@ export default function AuditPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+      <div className="space-y-6">
+        <SkeletonTable rows={6} cols={4} />
       </div>
     );
   }

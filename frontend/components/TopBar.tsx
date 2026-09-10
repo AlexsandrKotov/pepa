@@ -280,7 +280,6 @@ function TopBar() {
       : theme;
     root.setAttribute('data-theme', resolvedTheme);
     root.style.colorScheme = resolvedTheme;
-    root.style.background = resolvedTheme === 'dark' ? '#1a1d24' : '';
     localStorage.setItem('pepa-theme', theme);
   }, [theme]);
 
@@ -298,7 +297,6 @@ function TopBar() {
       const d = mq.matches ? 'dark' : 'light';
       document.documentElement.setAttribute('data-theme', d);
       document.documentElement.style.colorScheme = d;
-      document.documentElement.style.background = d === 'dark' ? '#1a1d24' : '';
     };
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
@@ -334,7 +332,7 @@ function TopBar() {
   const currentWsName = wsList.find(w => w.id === wsCurrent)?.name || 'Workspace';
 
   return (
-    <header className={`h-[52px] border-b flex items-center justify-between px-4 md:px-6 shrink-0 relative z-[100] ${glassEnabled ? 'glass-surface border-[var(--border)]' : 'bg-[var(--surface)] border-[var(--border)]'}`}>
+    <header className={`h-[48px] border-b flex items-center justify-between px-4 md:px-6 shrink-0 relative z-[100] ${glassEnabled ? 'glass-surface border-[var(--border)]' : 'bg-[var(--surface)] border-[var(--border)]'}`}>
       {/* Left: Mobile hamburger + Page title */}
       <div className="flex items-center gap-3">
         <button
@@ -429,9 +427,21 @@ function TopBar() {
         {/* Search — opens Command Palette */}
         <button
           onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-          className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)] rounded-lg transition-colors"
+          className="hidden sm:flex items-center gap-1.5 px-2 py-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] rounded-lg transition-colors border border-[var(--border-light)]"
           aria-label="Search (Cmd+K)"
           title="Search (⌘K)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <span className="text-[11px]">Search</span>
+          <kbd className="text-[9px] px-1 py-0.5 bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-tertiary)] font-medium">⌘K</kbd>
+        </button>
+        {/* Mobile search — icon only */}
+        <button
+          onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+          className="sm:hidden p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)] rounded-lg transition-colors"
+          aria-label="Search (Cmd+K)"
         >
           <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

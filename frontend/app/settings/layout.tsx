@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
 import Tabs from '@/components/Tabs';
+import { SkeletonCard } from '@/components/Skeleton';
 
 const tabs = [
   { key: 'general', label: 'General', href: '/settings', icon: 'settings' },
@@ -28,8 +29,14 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <SkeletonCard />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
       </div>
     );
   }

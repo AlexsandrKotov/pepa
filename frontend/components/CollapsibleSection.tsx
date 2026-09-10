@@ -29,7 +29,7 @@ export default function CollapsibleSection({ id, title, defaultExpanded = true, 
       <div className="card-header">
         <button
           onClick={toggle}
-          className="flex items-center gap-2 text-[13px] font-medium text-[#171717] hover:text-[#0066ff] transition-colors"
+          className="flex items-center gap-2 text-[13px] font-medium text-[var(--text-primary)] hover:text-[var(--accent)] transition-colors"
         >
           <svg
             className={`w-3.5 h-3.5 transition-transform ${expanded ? 'rotate-0' : '-rotate-90'}`}

@@ -8,6 +8,7 @@ import BrandIcon from '@/components/BrandIcon';
 import Tabs from '@/components/Tabs';
 import ConfirmModal from '@/components/ConfirmModal';
 import GitRepoPicker, { type GitRepoPickerValue } from '@/components/GitRepoPicker';
+import { SkeletonDashboard } from '@/components/Skeleton';
 
 type TabKey = 'overview' | 'targets' | 'scans' | 'reports' | 'schedules' | 'compliance' | 'findings';
 
@@ -139,9 +140,7 @@ export default function SecurityClient() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
-        </div>
+        <SkeletonDashboard />
       ) : (
         <>
           {activeTab === 'overview' && <OverviewTab dashboard={dashboard} scans={scans} targets={targets} />}
