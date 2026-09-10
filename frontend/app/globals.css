@@ -45,6 +45,12 @@ html {
   /* Surface states */
   --surface-hover: #f5f5f5;
   --surface-active: #f0f0f0;
+
+  /* iOS spring easing curves */
+  --ease-ios: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-ios-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-ios-gentle: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-ios-snappy: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 [data-theme="dark"] {
@@ -158,7 +164,7 @@ body::before {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  transition: box-shadow 0.25s var(--ease-ios), transform 0.25s var(--ease-ios);
 }
 
 .card-header {
@@ -190,7 +196,7 @@ body::before {
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+  transition: background 0.2s var(--ease-ios), border-color 0.2s var(--ease-ios), box-shadow 0.2s var(--ease-ios), transform 0.15s var(--ease-ios-spring);
   white-space: nowrap;
   text-decoration: none;
 }
@@ -201,7 +207,8 @@ body::before {
 }
 
 .btn:active:not(:disabled) {
-  transform: scale(0.97);
+  transform: scale(0.96);
+  transition: transform 0.1s var(--ease-ios-spring);
 }
 
 .btn-primary {
@@ -276,7 +283,7 @@ body::before {
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-primary);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.2s var(--ease-ios), box-shadow 0.2s var(--ease-ios);
 }
 
 .input:focus, .select:focus {
@@ -385,7 +392,7 @@ body::before {
 .progress-bar-fill {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s;
+  transition: width 0.4s var(--ease-ios-snappy);
 }
 
 /* ── Empty State ────────────────────────────────────────── */
@@ -429,32 +436,73 @@ body::before {
 
 /* Card hover lift — use on interactive cards */
 .card-hover {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.25s var(--ease-ios), box-shadow 0.25s var(--ease-ios);
 }
 .card-hover:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
 
+/* iOS-style tap feedback — scale down on press with spring return */
+.ios-tap-scale {
+  transition: transform 0.15s var(--ease-ios-spring);
+}
+.ios-tap-scale:active {
+  transform: scale(0.96);
+}
+
+/* Spring bounce — for elements that bounce back on interaction */
+.spring-bounce {
+  transition: transform 0.3s var(--ease-ios-spring);
+}
+.spring-bounce:active {
+  transform: scale(0.95);
+}
+
 /* Content reveal animation — use when data loads */
 @keyframes content-reveal {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .content-reveal {
-  animation: content-reveal 0.35s ease-out forwards;
+  animation: content-reveal 0.35s var(--ease-ios-snappy) forwards;
 }
 
-/* Dialog enter animation */
+/* Dialog enter animation — iOS spring feel */
 @keyframes dialog-enter {
-  from { opacity: 0; transform: scale(0.95) translateY(8px); }
+  from { opacity: 0; transform: scale(0.94) translateY(10px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Sheet enter animation — slides up from bottom */
+@keyframes sheet-enter {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Context menu enter — scale + fade */
+@keyframes context-menu-enter {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Preview pop — 3D Touch / long-press */
+@keyframes preview-pop {
+  0%   { opacity: 0; transform: scale(0.85); }
+  60%  { transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Live Activity pill pulse */
+@keyframes live-activity-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 /* Staggered children — each child animates with a delay */
 .stagger-children > * {
   opacity: 0;
-  animation: content-reveal 0.35s ease-out forwards;
+  animation: content-reveal 0.35s var(--ease-ios-snappy) forwards;
 }
 .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
 .stagger-children > *:nth-child(2) { animation-delay: 50ms; }
@@ -470,6 +518,10 @@ body::before {
   .card-hover:hover { transform: none; }
   .content-reveal { animation: none; opacity: 1; }
   .stagger-children > * { animation: none; opacity: 1; }
+  .ios-tap-scale:active { transform: none; }
+  .spring-bounce:active { transform: none; }
+  .page-animate, .page-animate-scale, .page-animate-up { animation: none; opacity: 1; }
+  .dash-animate-in, .dash-animate-scale, .dash-animate-slide-up { animation: none; opacity: 1; }
 }
 
 /* Glass dropdown — shared style for portal dropdowns */
@@ -484,8 +536,9 @@ body::before {
   -webkit-backdrop-filter: blur(16px) saturate(1.4) brightness(0.92);
 }
 
-/* ── Scrollbar ──────────────────────────────────────────── */
+/* ── Scrollbar & Overscroll ─────────────────────────────── */
 
+/* iOS-style thin scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -502,6 +555,29 @@ body::before {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-tertiary);
+}
+
+/* iOS-style overscroll containment — prevents page bounce on scrollable areas */
+.overscroll-contain {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Main content areas — contain overscroll to prevent rubber-banding the whole page */
+main {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Table horizontal scroll — rubber band effect */
+.table-container {
+  overscroll-behavior-x: contain;
+}
+
+/* Sidebar — contain vertical overscroll */
+aside {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* ── View Transitions — smooth page switches ──────────── */
@@ -538,7 +614,7 @@ body::before {
 }
 
 .animate-slide-in-right {
-  animation: slide-in-right 0.25s ease-out;
+  animation: slide-in-right 0.3s var(--ease-ios-snappy);
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1254,15 +1330,15 @@ aside a:active .brand-icon svg {
 }
 
 .page-animate {
-  animation: page-fade-in 0.2s ease-out both;
+  animation: page-fade-in 0.25s var(--ease-ios-snappy) both;
 }
 
 .page-animate-scale {
-  animation: page-scale-in 0.18s ease-out both;
+  animation: page-scale-in 0.22s var(--ease-ios-snappy) both;
 }
 
 .page-animate-up {
-  animation: page-slide-up 0.2s ease-out both;
+  animation: page-slide-up 0.25s var(--ease-ios-snappy) both;
 }
 
 .page-delay-1 { animation-delay: 0.03s; }
@@ -1292,7 +1368,7 @@ aside a:active .brand-icon svg {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 20px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.25s var(--ease-ios), box-shadow 0.25s var(--ease-ios), border-color 0.25s var(--ease-ios);
 }
 .modern-stat-card:hover {
   transform: translateY(-2px);
@@ -1305,7 +1381,7 @@ aside a:active .brand-icon svg {
 
 /* Modern card hover effect for list items */
 .modern-card-hover {
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.25s var(--ease-ios), box-shadow 0.25s var(--ease-ios), border-color 0.25s var(--ease-ios);
 }
 .modern-card-hover:hover {
   transform: translateY(-2px);
@@ -1359,15 +1435,15 @@ aside a:active .brand-icon svg {
 }
 
 .dash-animate-in {
-  animation: dash-fade-in 0.25s ease-out both;
+  animation: dash-fade-in 0.3s var(--ease-ios-snappy) both;
 }
 
 .dash-animate-scale {
-  animation: dash-scale-in 0.2s ease-out both;
+  animation: dash-scale-in 0.25s var(--ease-ios-snappy) both;
 }
 
 .dash-animate-slide-up {
-  animation: dash-slide-up 0.25s ease-out both;
+  animation: dash-slide-up 0.3s var(--ease-ios-snappy) both;
 }
 
 .dash-delay-1 { animation-delay: 0.04s; }
@@ -1379,7 +1455,7 @@ aside a:active .brand-icon svg {
 
 /* 3D card hover effect */
 .dash-card-3d {
-  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  transition: transform 0.25s var(--ease-ios), box-shadow 0.25s var(--ease-ios);
 }
 .dash-card-3d:hover {
   transform: translateY(-3px) scale(1.01);
@@ -1401,7 +1477,7 @@ aside a:active .brand-icon svg {
 
 /* AI Widget styles */
 .dash-ai-bubble {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: transform 0.25s var(--ease-ios-spring), box-shadow 0.25s var(--ease-ios);
 }
 .dash-ai-bubble:hover {
   transform: scale(1.08);
@@ -1493,7 +1569,7 @@ aside a:active .brand-icon svg {
 /* ── Liquid Glass Effect (iOS 26 style) ─────────────────── */
 
 .glass-surface {
-  transition: background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+  transition: background 0.3s var(--ease-ios), box-shadow 0.3s var(--ease-ios), border-color 0.3s var(--ease-ios);
 }
 
 [data-glass="on"] .glass-surface {

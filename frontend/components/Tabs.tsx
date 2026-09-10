@@ -74,9 +74,9 @@ export default function Tabs({
   );
 
   const isSm = size === 'sm';
-  const padX = isSm ? 'px-3' : 'px-4';
-  const padY = isSm ? 'py-1.5' : 'py-2.5';
-  const textSize = isSm ? 'text-[12px]' : 'text-[13px]';
+  const padX = isSm ? 'px-3' : 'px-5';
+  const padY = isSm ? 'py-1.5' : 'py-3';
+  const textSize = isSm ? 'text-[12px]' : 'text-[14px]';
 
   const isPills = variant === 'pills';
   const activeClasses = variant === 'rounded'

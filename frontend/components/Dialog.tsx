@@ -76,7 +76,7 @@ export default function Dialog({
         ref={contentRef}
         tabIndex={-1}
         className={`relative w-full ${sizeClasses[size]} bg-[var(--surface)] rounded-[var(--radius-lg)] shadow-2xl border border-[var(--border)] overflow-hidden`}
-        style={{ animation: 'dialog-enter 0.2s ease-out forwards' }}
+        style={{ animation: 'dialog-enter 0.25s var(--ease-ios-spring) forwards' }}
         role="dialog"
         aria-modal="true"
         aria-label={title}

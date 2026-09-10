@@ -92,6 +92,117 @@ func (r *ClusterRepository) List(ctx context.Context, tenantID uuid.UUID) ([]Clu
 	return items, nil
 }
 
+// ClusterFilter defines filtering and pagination parameters for cluster lists.
+type ClusterFilter struct {
+	TenantID    uuid.UUID
+	Page        int
+	PerPage     int
+	Search      string
+	Status      string
+	Environment string
+	SortBy      string
+	SortDir     string
+}
+
+// ClusterListResponse is the paginated result of ListFiltered.
+type ClusterListResponse struct {
+	Items      []Cluster `json:"items"`
+	Total      int64     `json:"total"`
+	Page       int       `json:"page"`
+	PerPage    int       `json:"per_page"`
+	TotalPages int       `json:"total_pages"`
+}
+
+// ListFiltered returns clusters with filtering, sorting, and pagination.
+func (r *ClusterRepository) ListFiltered(ctx context.Context, f ClusterFilter) (*ClusterListResponse, error) {
+	query := `
+		SELECT id, tenant_id, name, COALESCE(description,''), environment, COALESCE(api_server_url,''),
+		       flux_installed, status, node_count, COALESCE(kubernetes_version,''),
+		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       is_active, (kubeconfig_encrypted IS NOT NULL AND kubeconfig_encrypted != ''),
+		       connection_id, last_heartbeat_at, created_at, updated_at
+		FROM clusters WHERE tenant_id = $1`
+	args := []interface{}{f.TenantID}
+	argIdx := 2
+
+	if f.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, f.Status)
+		argIdx++
+	}
+	if f.Environment != "" {
+		query += fmt.Sprintf(" AND environment = $%d", argIdx)
+		args = append(args, f.Environment)
+		argIdx++
+	}
+	if f.Search != "" {
+		query += fmt.Sprintf(" AND (name ILIKE $%d OR description ILIKE $%d)", argIdx, argIdx)
+		args = append(args, "%"+f.Search+"%")
+		argIdx++
+	}
+
+	// Count
+	countQuery := "SELECT COUNT(*) FROM (" + query + ") sub"
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count clusters: %w", err)
+	}
+
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PerPage < 1 {
+		f.PerPage = 20
+	}
+	offset := (f.Page - 1) * f.PerPage
+
+	// Sort
+	orderBy := "name ASC"
+	if f.SortBy == "created_at" {
+		orderBy = "created_at DESC"
+	} else if f.SortBy == "status" {
+		orderBy = "status ASC"
+	}
+	if f.SortDir == "asc" && f.SortBy == "created_at" {
+		orderBy = "created_at ASC"
+	}
+
+	query += fmt.Sprintf(" ORDER BY %s", orderBy)
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, f.PerPage, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query clusters: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Cluster, 0)
+	for rows.Next() {
+		var c Cluster
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.Name, &c.Description, &c.Environment, &c.APIServerURL,
+			&c.FluxInstalled, &c.Status, &c.NodeCount, &c.KubernetesVersion,
+			&c.Labels, &c.Notes,
+			&c.IsActive, &c.HasKubeconfig, &c.ConnectionID, &c.LastHeartbeatAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan cluster: %w", err)
+		}
+		items = append(items, c)
+	}
+
+	totalPages := int(total) / f.PerPage
+	if int(total)%f.PerPage > 0 {
+		totalPages++
+	}
+
+	return &ClusterListResponse{
+		Items:      items,
+		Total:      total,
+		Page:       f.Page,
+		PerPage:    f.PerPage,
+		TotalPages: totalPages,
+	}, nil
+}
+
 // Get returns a cluster by ID, scoped to tenantID (zero = no filter).
 func (r *ClusterRepository) Get(ctx context.Context, id, tenantID uuid.UUID) (*Cluster, error) {
 	query := `

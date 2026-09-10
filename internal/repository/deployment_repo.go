@@ -94,6 +94,134 @@ func (r *DeploymentRepository) List(ctx context.Context, tenantID uuid.UUID) ([]
 	return items, nil
 }
 
+// DeploymentFilter defines filtering and pagination parameters for deployment lists.
+type DeploymentFilter struct {
+	TenantID    uuid.UUID
+	Page        int
+	PerPage     int
+	Search      string
+	Status      string
+	TeamName    string
+	ServiceName string
+	ClusterID   string
+	Stage       string
+}
+
+// DeploymentListResponse is the paginated result of ListFiltered.
+type DeploymentListResponse struct {
+	Items      []Deployment `json:"items"`
+	Total      int64        `json:"total"`
+	Page       int          `json:"page"`
+	PerPage    int          `json:"per_page"`
+	TotalPages int          `json:"total_pages"`
+}
+
+// ListFiltered returns deployments with filtering and pagination.
+func (r *DeploymentRepository) ListFiltered(ctx context.Context, f DeploymentFilter) (*DeploymentListResponse, error) {
+	query := `
+		SELECT id, tenant_id, COALESCE(jira_issue_key,''), COALESCE(jira_summary,''),
+		       gitlab_project_id, COALESCE(gitlab_project_name,''),
+		       gitlab_mr_id, COALESCE(gitlab_mr_url,''),
+		       target_cluster_id, COALESCE(target_namespace,''),
+		       COALESCE(image_tag,''), COALESCE(image_repository,''),
+		       COALESCE(deploy_type,'helm'), COALESCE(replicas,1), COALESCE(strategy,'rolling'),
+		       COALESCE(spec,'{}'::jsonb),
+		       status, COALESCE(error_message,''), COALESCE(logs,''),
+		       COALESCE(promoted_by,''), promoted_at,
+		       COALESCE(created_by,''), COALESCE(timeout_seconds,300),
+		       COALESCE(team_name,''), COALESCE(stage,'dev'),
+		       created_at, updated_at
+		FROM deployments WHERE tenant_id = $1`
+	args := []interface{}{f.TenantID}
+	argIdx := 2
+
+	if f.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, f.Status)
+		argIdx++
+	}
+	if f.TeamName != "" {
+		query += fmt.Sprintf(" AND team_name = $%d", argIdx)
+		args = append(args, f.TeamName)
+		argIdx++
+	}
+	if f.ServiceName != "" {
+		query += fmt.Sprintf(" AND gitlab_project_name = $%d", argIdx)
+		args = append(args, f.ServiceName)
+		argIdx++
+	}
+	if f.ClusterID != "" {
+		query += fmt.Sprintf(" AND target_cluster_id::text = $%d", argIdx)
+		args = append(args, f.ClusterID)
+		argIdx++
+	}
+	if f.Stage != "" {
+		query += fmt.Sprintf(" AND stage = $%d", argIdx)
+		args = append(args, f.Stage)
+		argIdx++
+	}
+	if f.Search != "" {
+		query += fmt.Sprintf(" AND (gitlab_project_name ILIKE $%d OR jira_issue_key ILIKE $%d OR jira_summary ILIKE $%d)", argIdx, argIdx, argIdx)
+		args = append(args, "%"+f.Search+"%")
+		argIdx++
+	}
+
+	// Count
+	countQuery := "SELECT COUNT(*) FROM (" + query + ") sub"
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count deployments: %w", err)
+	}
+
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PerPage < 1 {
+		f.PerPage = 20
+	}
+	offset := (f.Page - 1) * f.PerPage
+
+	query += " ORDER BY created_at DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, f.PerPage, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query deployments: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Deployment, 0)
+	for rows.Next() {
+		var d Deployment
+		if err := rows.Scan(&d.ID, &d.TenantID, &d.JiraIssueKey, &d.JiraSummary,
+			&d.GitlabProjectID, &d.GitlabProjectName, &d.GitlabMRID, &d.GitlabMRURL,
+			&d.TargetClusterID, &d.TargetNamespace, &d.ImageTag, &d.ImageRepository,
+			&d.DeployType, &d.Replicas, &d.Strategy, &d.Spec,
+			&d.Status, &d.ErrorMessage, &d.Logs,
+			&d.PromotedBy, &d.PromotedAt, &d.CreatedBy,
+			&d.TimeoutSeconds,
+			&d.TeamName, &d.Stage,
+			&d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan deployment: %w", err)
+		}
+		items = append(items, d)
+	}
+
+	totalPages := int(total) / f.PerPage
+	if int(total)%f.PerPage > 0 {
+		totalPages++
+	}
+
+	return &DeploymentListResponse{
+		Items:      items,
+		Total:      total,
+		Page:       f.Page,
+		PerPage:    f.PerPage,
+		TotalPages: totalPages,
+	}, nil
+}
+
 // Get returns a deployment by ID.
 func (r *DeploymentRepository) Get(ctx context.Context, id uuid.UUID) (*Deployment, error) {
 	row := r.pool.QueryRow(ctx, `

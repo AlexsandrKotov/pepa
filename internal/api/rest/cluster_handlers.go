@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -93,23 +94,40 @@ func listClusters(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Cluster == nil {
 			slog.Warn("listClusters: cluster repository not available")
-			c.JSON(http.StatusOK, gin.H{"clusters": []interface{}{}, "total": 0})
+			c.JSON(http.StatusOK, gin.H{"clusters": []interface{}{}, "total": 0, "page": 1, "per_page": 20, "total_pages": 0})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
-		items, err := deps.Repos.Cluster.List(c.Request.Context(), tenantID)
+
+		// Parse pagination and filter params.
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+		filter := repository.ClusterFilter{
+			TenantID:    tenantID,
+			Page:        page,
+			PerPage:     perPage,
+			Search:      c.Query("search"),
+			Status:      c.Query("status"),
+			Environment: c.Query("environment"),
+			SortBy:      c.DefaultQuery("sort_by", "name"),
+			SortDir:     c.DefaultQuery("sort_dir", "asc"),
+		}
+
+		result, err := deps.Repos.Cluster.ListFiltered(c.Request.Context(), filter)
 		if err != nil {
 			slog.Error("listClusters: query failed", "tenant_id", tenantID, "error", err)
 			respondInternalError(c, err)
 			return
 		}
-		if len(items) == 0 {
+		if result.Total == 0 {
 			slog.Info("listClusters: no clusters found", "tenant_id", tenantID)
 		}
 
+		items := result.Items
+
 		// Return cached data from DB immediately. Refresh cluster health in background (parallel).
 		go func() {
-			bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			bgCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 
 			type clusterJob struct {
@@ -118,11 +136,15 @@ func listClusters(deps Dependencies) gin.HandlerFunc {
 			jobs := make([]clusterJob, 0, len(items))
 			for i := range items {
 				if items[i].HasKubeconfig {
+					// Skip health check if checked within last 60 seconds
+					if items[i].LastHeartbeatAt != nil && time.Since(*items[i].LastHeartbeatAt) < 60*time.Second {
+						continue
+					}
 					jobs = append(jobs, clusterJob{idx: i})
 				}
 			}
 
-			sem := make(chan struct{}, 5) // limit concurrency to 5
+			sem := make(chan struct{}, 10) // limit concurrency to 10
 			var wg sync.WaitGroup
 			for _, job := range jobs {
 				wg.Add(1)
@@ -171,7 +193,13 @@ func listClusters(deps Dependencies) gin.HandlerFunc {
 			wg.Wait()
 		}()
 
-		c.JSON(http.StatusOK, gin.H{"clusters": items, "total": len(items)})
+		c.JSON(http.StatusOK, gin.H{
+			"clusters":    items,
+			"total":       result.Total,
+			"page":        result.Page,
+			"per_page":    result.PerPage,
+			"total_pages": result.TotalPages,
+		})
 	}
 }
 

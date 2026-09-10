@@ -99,7 +99,7 @@ export default function S3ManageClient({
 
   // ── Load connections ──────────────────────────────────────────
   useEffect(() => {
-    connectionsAPI.list('storage')
+    connectionsAPI.list({ type: 'storage' })
       .then(data => setConnections((data.connections || []).filter(c => c.type === 'storage')))
       .catch(() => setConnections([]))
       .finally(() => setLoading(false));

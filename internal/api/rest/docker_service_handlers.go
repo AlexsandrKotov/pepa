@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,16 +109,35 @@ func dockerClientForService(deps Dependencies, svc *repository.DockerService, te
 func listDockerServices(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.DockerHost == nil {
-			c.JSON(http.StatusOK, gin.H{"docker_services": []interface{}{}, "total": 0})
+			c.JSON(http.StatusOK, gin.H{"docker_services": []interface{}{}, "total": 0, "page": 1, "per_page": 20, "total_pages": 0})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
-		items, err := deps.Repos.DockerHost.ListServices(c.Request.Context(), tenantID)
+
+		// Parse pagination and filter params.
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+		filter := repository.DockerServiceFilter{
+			TenantID: tenantID,
+			Page:     page,
+			PerPage:  perPage,
+			Search:   c.Query("search"),
+			Status:   c.Query("status"),
+			HostID:   c.Query("host_id"),
+		}
+
+		result, err := deps.Repos.DockerHost.ListServicesFiltered(c.Request.Context(), filter)
 		if err != nil {
 			respondInternalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"docker_services": items, "total": len(items)})
+		c.JSON(http.StatusOK, gin.H{
+			"docker_services": result.Items,
+			"total":           result.Total,
+			"page":            result.Page,
+			"per_page":        result.PerPage,
+			"total_pages":     result.TotalPages,
+		})
 	}
 }
 

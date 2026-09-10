@@ -189,11 +189,7 @@ function ServicesList() {
       pepaMap.set(unifiedKey, s);
     }
 
-    // GitOps releases (argocd/fluxcd) are shown on the Releases page, not here
-    const gitopsSources = new Set(['argocd', 'fluxcd']);
-
     for (const ds of discoveredServices) {
-      if (gitopsSources.has(ds.source)) continue;
       const key = `${ds.name}:${ds.namespace}:${ds.cluster || 'default'}`;
       const existing = serviceMap.get(key);
       if (!existing) {
@@ -408,8 +404,8 @@ function ServicesList() {
       <div className="space-y-3">
         <div className="flex flex-wrap gap-3 items-center">
           {/* Search */}
-          <div className="relative flex-1 min-w-[200px]">
-            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <div className="relative flex-1 min-w-[200px] overflow-hidden">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
@@ -417,7 +413,7 @@ function ServicesList() {
               placeholder="Search services..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="input pl-8 flex-1 min-w-[200px]"
+              className="input !pl-8 flex-1 min-w-[200px]"
             />
             {search && (
               <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
@@ -480,6 +476,8 @@ function ServicesList() {
               <select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)} className="select w-36">
                 <option value="">All Sources</option>
                 <option value="pepa">PEPA</option>
+                <option value="argocd">ArgoCD</option>
+                <option value="fluxcd">FluxCD</option>
                 <option value="docker">Docker</option>
                 <option value="docker-container">Docker Container</option>
                 <option value="manual">Manual</option>

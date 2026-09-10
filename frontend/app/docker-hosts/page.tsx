@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { dockerHosts, type DockerHost, type DockerHostTestResult } from '@/lib/api';
 import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/VaultInput';
 import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
 import ConfirmModal from '@/components/ConfirmModal';
+import Pagination from '@/components/Pagination';
 
 const defaultForm = {
   name: '', description: '', host_type: 'local' as DockerHost['host_type'],
@@ -18,6 +19,20 @@ export default function DockerHostsPage() {
   const { isAdmin, hasPermission, loading: permLoading } = usePermission();
   const [hosts, setHosts] = useState<DockerHost[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [hostTypeFilter, setHostTypeFilter] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the debounce timer on unmount to avoid setState after unmount
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<DockerHost | null>(null);
 
@@ -34,13 +49,34 @@ export default function DockerHostsPage() {
 
   const load = async () => {
     try {
-      const res = await dockerHosts.list();
+      const params: Record<string, string> = { page: String(page), per_page: String(perPage) };
+      if (search) params.search = search;
+      if (statusFilter) params.status = statusFilter;
+      if (hostTypeFilter) params.host_type = hostTypeFilter;
+      const res = await dockerHosts.list(params);
       setHosts(res.docker_hosts || []);
+      setTotal(res.total || 0);
+      setTotalPages(res.total_pages || 0);
     } catch { /* ignore */ }
     setLoading(false);
   };
 
-  useEffect(() => { if (isAdmin) load(); }, [isAdmin]);
+  useEffect(() => { if (isAdmin) load(); }, [isAdmin, page, perPage, search, statusFilter, hostTypeFilter]);
+
+  // Debounced server-side search
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setSearch(value);
+      setPage(1);
+    }, 300);
+  };
+
+  const handleFilterChange = (setter: (v: string) => void, value: string) => {
+    setter(value);
+    setPage(1);
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -148,6 +184,41 @@ export default function DockerHostsPage() {
         <button onClick={openCreate} className="btn btn-primary">+ Add Docker Host</button>
       </div>
 
+      {/* Search & Filters */}
+      <div className="flex flex-wrap items-center gap-2 page-animate-up page-delay-1">
+        <div className="relative flex-1 min-w-[200px] max-w-[320px] overflow-hidden">
+          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search hosts..."
+            className="input !pl-9"
+          />
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => handleFilterChange(setStatusFilter, e.target.value)}
+          className="input w-auto"
+        >
+          <option value="">All Statuses</option>
+          <option value="connected">Connected</option>
+          <option value="error">Error</option>
+        </select>
+        <select
+          value={hostTypeFilter}
+          onChange={(e) => handleFilterChange(setHostTypeFilter, e.target.value)}
+          className="input w-auto"
+        >
+          <option value="">All Types</option>
+          <option value="local">Local</option>
+          <option value="tcp">TCP</option>
+          <option value="ssh">SSH</option>
+        </select>
+      </div>
+
       {/* Grid */}
       {loading ? (
         <div className="card card-body text-center py-12">
@@ -234,6 +305,17 @@ export default function DockerHostsPage() {
             );
           })}
         </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <Pagination
+          page={page}
+          perPage={perPage}
+          total={total}
+          onPageChange={setPage}
+          onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+        />
       )}
 
       {/* Create/Edit Modal */}

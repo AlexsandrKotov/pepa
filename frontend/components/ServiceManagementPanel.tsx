@@ -237,7 +237,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
       {/* Backdrop */}
       <div className="fixed inset-0 bg-black/30 z-[110] transition-opacity" onClick={onClose} />
       {/* Slide-out Panel */}
-      <div className="fixed top-0 right-0 bottom-0 w-full max-w-2xl bg-[var(--surface)] border-l border-[var(--border)] z-[120] shadow-2xl flex flex-col animate-slide-in-right">
+      <div className="fixed top-0 right-0 bottom-0 w-full max-w-4xl bg-[var(--surface)] border-l border-[var(--border)] z-[120] shadow-2xl flex flex-col animate-slide-in-right">
         {/* Health indicator bar */}
         <div className={`h-1 w-full ${healthColor}`} />
         {/* Header */}
@@ -257,7 +257,7 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            {!isDockerContainer && (
+            {deployInfo && (
               <button
                 onClick={() => { setEditMode(!editMode); if (!editMode) setTab('overview'); }}
                 className={`p-1.5 rounded-lg transition-colors ${editMode ? 'text-[var(--accent)] bg-[var(--accent)]/10' : 'text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--border-light)]'}`}
@@ -268,15 +268,6 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
                 </svg>
               </button>
             )}
-            <button
-              onClick={() => window.open(`/services?q=${encodeURIComponent(service.name)}`, '_blank')}
-              className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--border-light)] rounded-lg transition-colors"
-              title="Open in Services page"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-              </svg>
-            </button>
             <button onClick={onClose} className="p-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)] rounded-lg transition-colors" title="Close (Esc)">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -297,7 +288,6 @@ export default function ServiceManagementPanel({ service, onClose, onUpdate }: S
           <Tabs
             activeKey={tab}
             onChange={(k) => setTab(k as typeof tab)}
-            size="sm"
             variant="rounded"
             tabs={[
               { key: 'overview', label: 'Overview', icon: 'discovery' },

@@ -18,6 +18,8 @@ const fieldOptions = [
   { value: 'status', label: 'Status', category: 'basic' },
   { value: 'name', label: 'Name', category: 'basic' },
   { value: 'description', label: 'Description', category: 'basic' },
+  { value: 'sync_status', label: 'Sync Status', category: 'basic' },
+  { value: 'plugin_name', label: 'Plugin Name', category: 'basic' },
   { value: 'has_metadata', label: 'Has metadata field...', category: 'metadata' },
   { value: 'not_empty', label: 'Not empty field...', category: 'metadata' },
 ];
@@ -25,6 +27,12 @@ const fieldOptions = [
 const operatorOptions = [
   { value: '==', label: 'equals' },
   { value: '!=', label: 'not equals' },
+  { value: '>=', label: '≥ greater or equal' },
+  { value: '<=', label: '≤ less or equal' },
+  { value: '>', label: '> greater' },
+  { value: '<', label: '< less' },
+  { value: 'contains', label: 'contains' },
+  { value: 'starts_with', label: 'starts with' },
   { value: 'has_metadata', label: 'has metadata' },
   { value: 'not_empty', label: 'is not empty' },
 ];
@@ -32,13 +40,24 @@ const operatorOptions = [
 const metadataFieldPresets = [
   'health_endpoint', 'owner', 'repository', 'replicas', 'image',
   'source', 'cluster', 'namespace', 'monitoring', 'documentation',
-  'ci_cd', 'vault_secrets', 'resource_limits',
+  'ci_cd', 'vault_secrets', 'resource_limits', 'tags', 'version',
+  'environment',
+];
+
+const quickExamples = [
+  { label: 'Active service', expr: 'status == active && type_key == service' },
+  { label: 'At least 2 replicas', expr: 'metadata.replicas >= 2' },
+  { label: 'Has owner & repo', expr: 'has_metadata.owner && has_metadata.repository' },
+  { label: 'Prod or staging', expr: '(metadata.environment == production || metadata.environment == staging)' },
+  { label: 'Image from registry', expr: 'metadata.image starts_with "registry.example.com/"' },
+  { label: 'Vault + monitoring', expr: 'has_metadata.vault_secrets && has_metadata.monitoring' },
 ];
 
 export default function ExpressionBuilder({ value, onChange }: Props) {
   const [conditions, setConditions] = useState<ExpressionCondition[]>([]);
   const [logicOp, setLogicOp] = useState<'&&' | '||'>('&&');
   const [mode, setMode] = useState<'visual' | 'raw'>('visual');
+  const [showHelp, setShowHelp] = useState(false);
 
   // Parse existing expression on mount
   useEffect(() => {
@@ -75,6 +94,10 @@ export default function ExpressionBuilder({ value, onChange }: Props) {
       if (c.operator === 'not_empty') {
         return `not_empty.${c.value || 'field'}`;
       }
+      if (c.operator === 'contains' || c.operator === 'starts_with') {
+        const val = c.value || 'value';
+        return `${c.field} ${c.operator} "${val}"`;
+      }
       const val = c.value.includes(' ') ? `"${c.value}"` : c.value;
       return `${c.field} ${c.operator} ${val}`;
     });
@@ -90,6 +113,11 @@ export default function ExpressionBuilder({ value, onChange }: Props) {
     if (mode === 'visual') {
       setMode('raw');
     } else {
+      // Parentheses expressions are raw-only — stay in raw mode
+      if (value.includes('(') || value.includes(')')) {
+        setMode('raw');
+        return;
+      }
       // Try to parse raw expression back to visual
       const parsed = parseExpression(value);
       if (parsed.conditions.length > 0) {
@@ -100,25 +128,117 @@ export default function ExpressionBuilder({ value, onChange }: Props) {
     }
   };
 
+  // Operators available for basic fields (not has_metadata/not_empty)
+  const basicOperators = operatorOptions.filter(o => o.value !== 'has_metadata' && o.value !== 'not_empty');
+
+  // Check if operator is numeric-only
+  const isNumericOp = (op: string) => ['>=', '<=', '>', '<'].includes(op);
+  // Check if operator is string-only
+  const isStringOp = (op: string) => ['contains', 'starts_with'].includes(op);
+
   return (
     <div className="space-y-3">
-      {/* Mode toggle */}
+      {/* Mode toggle + Help */}
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-[var(--text-tertiary)]">
-          {mode === 'visual' ? 'Visual builder' : 'Raw expression'}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-[var(--text-tertiary)]">
+            {mode === 'visual' ? 'Visual builder' : 'Raw expression'}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowHelp(!showHelp)}
+            className={`text-[11px] px-1.5 py-0.5 rounded transition-colors ${showHelp ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
+          >
+            {showHelp ? '✕ close help' : '? reference'}
+          </button>
+        </div>
         <button type="button" onClick={toggleMode} className="text-[11px] text-[var(--accent)] hover:underline">
           Switch to {mode === 'visual' ? 'raw' : 'visual'}
         </button>
       </div>
 
+      {/* Help / Reference panel */}
+      {showHelp && (
+        <div className="p-3 rounded-lg border border-[var(--border-light)] bg-[var(--bg)] space-y-3">
+          <p className="text-[11px] font-medium text-[var(--text-primary)]">Available Fields</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[var(--text-secondary)]">type_key</span> — entity type (service, team, ...)
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[var(--text-secondary)]">status</span> — active, inactive, deprecated
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[var(--text-secondary)]">name</span> — entity name
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[var(--text-secondary)]">description</span> — entity description
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[var(--text-secondary)]">sync_status</span> — synced, pending, error
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="font-mono text-[var(--text-secondary)]">plugin_name</span> — source plugin
+            </div>
+            <div className="text-[10px] text-[var(--text-tertiary)] col-span-2">
+              <span className="font-mono text-[var(--text-secondary)]">metadata.*</span> — any metadata field (e.g. <span className="font-mono">replicas</span>, <span className="font-mono">owner</span>, <span className="font-mono">image</span>)
+            </div>
+          </div>
+
+          <p className="text-[11px] font-medium text-[var(--text-primary)]">Operators</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">==</span> / <span className="font-mono text-[var(--text-secondary)]">!=</span> — equals / not equals</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">&gt;=</span> / <span className="font-mono text-[var(--text-secondary)]">&lt;=</span> — numeric comparison</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">&gt;</span> / <span className="font-mono text-[var(--text-secondary)]">&lt;</span> — numeric comparison</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">contains</span> — substring match</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">starts_with</span> — prefix match</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">has_metadata.X</span> — field exists</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">not_empty.X</span> — non-empty check</div>
+            <div className="text-[10px] text-[var(--text-tertiary)]"><span className="font-mono text-[var(--text-secondary)]">&&</span> / <span className="font-mono text-[var(--text-secondary)]">||</span> — AND / OR</div>
+          </div>
+
+          <p className="text-[11px] font-medium text-[var(--text-primary)]">Quick Examples</p>
+          <div className="space-y-1">
+            {quickExamples.map((ex, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  setMode('raw');
+                  onChange(ex.expr);
+                }}
+                className="block w-full text-left px-2 py-1 rounded hover:bg-[var(--bg-secondary)] transition-colors group"
+              >
+                <span className="text-[10px] text-[var(--text-secondary)] group-hover:text-[var(--accent)]">{ex.label}:</span>
+                <code className="text-[10px] font-mono text-[var(--text-tertiary)] ml-2">{ex.expr}</code>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {mode === 'raw' ? (
-        <input
-          value={value}
-          onChange={e => handleRawChange(e.target.value)}
-          className="input font-mono text-[12px]"
-          placeholder="e.g. metadata.health_endpoint == true && status == active"
-        />
+        <div className="space-y-2">
+          <input
+            value={value}
+            onChange={e => handleRawChange(e.target.value)}
+            className="input font-mono text-[12px]"
+            placeholder="e.g. metadata.replicas >= 2 && status == active"
+          />
+          {/* Quick insert buttons */}
+          <div className="flex flex-wrap gap-1">
+            {quickExamples.slice(0, 4).map((ex, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => onChange(ex.expr)}
+                className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--bg)] border border-[var(--border-light)] text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:border-[var(--accent)]/30 transition-colors"
+              >
+                {ex.label}
+              </button>
+            ))}
+          </div>
+        </div>
       ) : (
         <div className="space-y-2">
           {/* Logic operator toggle */}
@@ -155,7 +275,11 @@ export default function ExpressionBuilder({ value, onChange }: Props) {
                   const updates: Partial<ExpressionCondition> = { field };
                   // Auto-set operator for special fields
                   if (field === 'has_metadata') updates.operator = 'has_metadata';
-                  if (field === 'not_empty') updates.operator = 'not_empty';
+                  else if (field === 'not_empty') updates.operator = 'not_empty';
+                  // Reset operator if it's incompatible with the new field type
+                  else if (isNumericOp(cond.operator) || isStringOp(cond.operator)) {
+                    updates.operator = '==';
+                  }
                   updateCondition(i, updates);
                 }}
                 className="input text-[12px] flex-1"
@@ -177,9 +301,9 @@ export default function ExpressionBuilder({ value, onChange }: Props) {
                 <select
                   value={cond.operator}
                   onChange={e => updateCondition(i, { operator: e.target.value })}
-                  className="input text-[12px] w-[120px]"
+                  className="input text-[12px] w-[150px]"
                 >
-                  {operatorOptions.filter(o => o.value !== 'has_metadata' && o.value !== 'not_empty').map(o => (
+                  {basicOperators.map(o => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
@@ -218,12 +342,22 @@ export default function ExpressionBuilder({ value, onChange }: Props) {
                   <option value="environment">environment</option>
                   <option value="api_endpoint">api_endpoint</option>
                 </select>
+              ) : cond.field === 'sync_status' ? (
+                <select
+                  value={cond.value}
+                  onChange={e => updateCondition(i, { value: e.target.value })}
+                  className="input text-[12px] flex-1"
+                >
+                  <option value="synced">synced</option>
+                  <option value="pending">pending</option>
+                  <option value="error">error</option>
+                </select>
               ) : (
                 <input
                   value={cond.value}
                   onChange={e => updateCondition(i, { value: e.target.value })}
                   className="input text-[12px] flex-1"
-                  placeholder="value"
+                  placeholder={isNumericOp(cond.operator) ? 'number' : isStringOp(cond.operator) ? 'substring' : 'value'}
                 />
               )}
 
@@ -273,8 +407,20 @@ function parseExpression(expr: string): { conditions: ExpressionCondition[]; log
       conditions.push({ field: 'not_empty', operator: 'not_empty', value: part.replace('not_empty.', '') });
       continue;
     }
+    // field contains "value" / field starts_with "value"
+    const strOpMatch = part.match(/^(\w[\w.]*)\s+(contains|starts_with)\s+(.+)$/);
+    if (strOpMatch) {
+      conditions.push({ field: strOpMatch[1], operator: strOpMatch[2], value: strOpMatch[3].replace(/"/g, '') });
+      continue;
+    }
+    // field >= value / field <= value / field > value / field < value
+    const numMatch = part.match(/^(\w[\w.]*)\s*(>=|<=|>|<)\s*(.+)$/);
+    if (numMatch) {
+      conditions.push({ field: numMatch[1], operator: numMatch[2], value: numMatch[3].replace(/"/g, '') });
+      continue;
+    }
     // field == value or field != value
-    const match = part.match(/^(\w+)\s*(==|!=)\s*(.+)$/);
+    const match = part.match(/^(\w[\w.]*)\s*(==|!=)\s*(.+)$/);
     if (match) {
       conditions.push({ field: match[1], operator: match[2], value: match[3].replace(/"/g, '') });
       continue;

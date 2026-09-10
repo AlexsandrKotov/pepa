@@ -472,15 +472,15 @@ export default function RegistryRepositoriesPage() {
                   <div>
                     <p className="text-[11px] text-[var(--text-tertiary)] uppercase tracking-wider mb-2">{images.length} images available</p>
                     {images.length > 5 && (
-                      <div className="relative mb-2">
-                        <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <div className="relative mb-2 overflow-hidden">
+                        <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
                         <input
                           type="text"
                           value={searchQuery}
                           onChange={e => { setSearchQuery(e.target.value); setVisibleCount(20); }}
-                          className="input pl-8 text-[12px]"
+                          className="input !pl-8 text-[12px]"
                           placeholder="Search images..."
                         />
                       </div>

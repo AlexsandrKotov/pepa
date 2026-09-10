@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useId, type CSSProperties } from 'react';
 
 interface BrandIconProps {
   name: string;
@@ -17,18 +17,19 @@ interface BrandIconProps {
  */
 export default function BrandIcon({ name, size = 16, className = '', style, monochrome = false }: BrandIconProps) {
   const iconData = BRAND_ICONS[name.toLowerCase()] || BRAND_ICONS['default'];
+  const scopeId = useId().replace(/:/g, '');
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      className={className}
+      className={`${className}${monochrome ? ` mono-${scopeId}` : ''}`}
       style={style}
       xmlns="http://www.w3.org/2000/svg"
     >
       {monochrome ? (
         <>
-          <style>{`path, circle, ellipse, rect { fill: currentColor !important; } ellipse[fill="none"], path[fill="none"] { stroke: currentColor !important; fill: none !important; }`}</style>
+          <style>{`.mono-${scopeId} path, .mono-${scopeId} circle, .mono-${scopeId} ellipse, .mono-${scopeId} rect { fill: currentColor !important; } .mono-${scopeId} ellipse[fill="none"], .mono-${scopeId} path[fill="none"] { stroke: currentColor !important; fill: none !important; }`}</style>
           {iconData}
         </>
       ) : iconData}

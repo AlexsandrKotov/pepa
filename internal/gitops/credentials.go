@@ -234,6 +234,152 @@ func (r *CredentialResolver) fluxcredsFromConnection(ctx context.Context, conn *
 	return creds, nil
 }
 
+// ResolveAllFlux returns FluxCD credentials for every matching connection in the
+// tenant.  It collects both dedicated fluxcd connections and kubernetes-type
+// connections (the unified replacement).  This is used by the engine List path
+// where we need to query ALL clusters, not just one.
+func (r *CredentialResolver) ResolveAllFlux(ctx context.Context, opts ResolveOpts) ([]*FluxCredentials, error) {
+	if r.connRepo == nil {
+		return nil, fmt.Errorf("connection repository not available")
+	}
+
+	var allCreds []*FluxCredentials
+	seen := map[uuid.UUID]bool{}
+
+	// 1. Explicit connection_id (highest priority)
+	if opts.ConnectionID != nil {
+		conn, err := r.connRepo.GetDecrypted(ctx, *opts.ConnectionID, opts.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("get connection %s: %w", *opts.ConnectionID, err)
+		}
+		if conn.Type != repository.ConnectionFluxCD && conn.Type != repository.ConnectionKubernetes {
+			return nil, fmt.Errorf("connection %s is not a FluxCD connection (type: %s)", *opts.ConnectionID, conn.Type)
+		}
+		creds, err := r.fluxcredsFromConnection(ctx, conn)
+		if err == nil {
+			allCreds = append(allCreds, creds)
+			seen[conn.ID] = true
+		}
+		return allCreds, nil
+	}
+
+	// 2. Dedicated fluxcd connections
+	conns, err := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionFluxCD))
+	if err == nil {
+		for i := range conns {
+			if conns[i].Status != "connected" || seen[conns[i].ID] {
+				continue
+			}
+			decrypted, derr := r.connRepo.GetDecrypted(ctx, conns[i].ID, opts.TenantID)
+			if derr != nil {
+				continue
+			}
+			creds, cerr := r.fluxcredsFromConnection(ctx, decrypted)
+			if cerr == nil {
+				allCreds = append(allCreds, creds)
+				seen[conns[i].ID] = true
+			}
+		}
+	}
+
+	// 3. Kubernetes-type connections (unified fallback)
+	kConns, kErr := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionKubernetes))
+	if kErr == nil {
+		for i := range kConns {
+			if kConns[i].Status != "connected" || seen[kConns[i].ID] {
+				continue
+			}
+			decrypted, derr := r.connRepo.GetDecrypted(ctx, kConns[i].ID, opts.TenantID)
+			if derr != nil {
+				continue
+			}
+			creds, cerr := r.fluxcredsFromConnection(ctx, decrypted)
+			if cerr == nil {
+				allCreds = append(allCreds, creds)
+				seen[kConns[i].ID] = true
+			}
+		}
+	}
+
+	if len(allCreds) == 0 {
+		return nil, fmt.Errorf("no FluxCD connection configured for tenant %s", opts.TenantID)
+	}
+	return allCreds, nil
+}
+
+// ResolveAllArgo returns ArgoCD credentials for every matching connection in the
+// tenant.  It collects both dedicated argocd connections and kubernetes-type
+// connections.  This is used by the engine List path where we need to query
+// ALL clusters, not just one.
+func (r *CredentialResolver) ResolveAllArgo(ctx context.Context, opts ResolveOpts) ([]*ArgoCredentials, error) {
+	if r.connRepo == nil {
+		return nil, fmt.Errorf("connection repository not available")
+	}
+
+	var allCreds []*ArgoCredentials
+	seen := map[uuid.UUID]bool{}
+
+	// 1. Explicit connection_id (highest priority)
+	if opts.ConnectionID != nil {
+		conn, err := r.connRepo.GetDecrypted(ctx, *opts.ConnectionID, opts.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("get connection %s: %w", *opts.ConnectionID, err)
+		}
+		if conn.Type != repository.ConnectionArgoCD && conn.Type != repository.ConnectionKubernetes {
+			return nil, fmt.Errorf("connection %s is not an ArgoCD connection (type: %s)", *opts.ConnectionID, conn.Type)
+		}
+		creds, err := r.argocredsFromConnection(ctx, conn)
+		if err == nil {
+			allCreds = append(allCreds, creds)
+			seen[conn.ID] = true
+		}
+		return allCreds, nil
+	}
+
+	// 2. Dedicated argocd connections
+	conns, err := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionArgoCD))
+	if err == nil {
+		for i := range conns {
+			if conns[i].Status != "connected" || seen[conns[i].ID] {
+				continue
+			}
+			decrypted, derr := r.connRepo.GetDecrypted(ctx, conns[i].ID, opts.TenantID)
+			if derr != nil {
+				continue
+			}
+			creds, cerr := r.argocredsFromConnection(ctx, decrypted)
+			if cerr == nil {
+				allCreds = append(allCreds, creds)
+				seen[conns[i].ID] = true
+			}
+		}
+	}
+
+	// 3. Kubernetes-type connections (unified fallback)
+	kConns, kErr := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionKubernetes))
+	if kErr == nil {
+		for i := range kConns {
+			if kConns[i].Status != "connected" || seen[kConns[i].ID] {
+				continue
+			}
+			decrypted, derr := r.connRepo.GetDecrypted(ctx, kConns[i].ID, opts.TenantID)
+			if derr != nil {
+				continue
+			}
+			creds, cerr := r.argocredsFromConnection(ctx, decrypted)
+			if cerr == nil {
+				allCreds = append(allCreds, creds)
+				seen[kConns[i].ID] = true
+			}
+		}
+	}
+
+	if len(allCreds) == 0 {
+		return nil, fmt.Errorf("no ArgoCD connection configured for tenant %s", opts.TenantID)
+	}
+	return allCreds, nil
+}
+
 // resolveVaultRef resolves a vault reference (vault:<path>) to the actual secret value.
 // If the value is not a vault reference, it returns the value as-is.
 // Uses tenant-scoped Vault access to maintain multi-tenant isolation.

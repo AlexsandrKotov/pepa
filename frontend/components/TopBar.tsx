@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { notifications as notificationsAPI, logout as doLogout, removeToken, getStoredUser, setStoredUser, getMe, setToken, workspaces, getBase, type NotificationLog, type Workspace } from '@/lib/api';
 import { usePermission } from '@/hooks/usePermission';
+import useIsMac from '@/hooks/useIsMac';
 import GearIcon from '@/components/GearIcon';
 
 const pageNames: Record<string, string> = {
@@ -92,6 +93,7 @@ const typeColors: Record<string, string> = {
 function TopBar() {
   const pathname = usePathname();
   const { isAdmin, hasPermission } = usePermission();
+  const isMac = useIsMac();
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [profileOpen, setProfileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -427,21 +429,23 @@ function TopBar() {
         {/* Search — opens Command Palette */}
         <button
           onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-          className="hidden sm:flex items-center gap-1.5 px-2 py-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] rounded-lg transition-colors border border-[var(--border-light)]"
-          aria-label="Search (Cmd+K)"
-          title="Search (⌘K)"
+          className="hidden sm:flex items-center gap-2 px-3 py-1.5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-hover)] rounded-lg transition-colors border border-[var(--border-light)]"
+          aria-label={`Search (${isMac ? '⌘K' : 'Ctrl+K'})`}
+          title={`Search (${isMac ? '⌘K' : 'Ctrl+K'})`}
         >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
-          <span className="text-[11px]">Search</span>
-          <kbd className="text-[9px] px-1 py-0.5 bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-tertiary)] font-medium">⌘K</kbd>
+          <span className="text-[13px]">Search</span>
+          <kbd className="text-[11px] px-1.5 py-0.5 bg-[var(--bg)] border border-[var(--border)] rounded text-[var(--text-tertiary)] font-medium">
+            {isMac ? '⌘K' : 'Ctrl+K'}
+          </kbd>
         </button>
         {/* Mobile search — icon only */}
         <button
           onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
           className="sm:hidden p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)] rounded-lg transition-colors"
-          aria-label="Search (Cmd+K)"
+          aria-label={`Search (${isMac ? '⌘K' : 'Ctrl+K'})`}
         >
           <svg className="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />

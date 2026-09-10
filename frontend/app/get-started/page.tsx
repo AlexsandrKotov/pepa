@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
-  connections, clusters, entities, workflows, audit, platformSettings,
+  connections, clusters, entities, workflows, audit, platformSettings, organization,
   type Workflow,
 } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
@@ -22,10 +22,16 @@ export default function GetStartedPage() {
   const [showCompleted, setShowCompleted] = useState(false);
   const [demoWf, setDemoWf] = useState<Workflow | null>(null);
   const [runState, setRunState] = useState<{ running: boolean; result?: string; error?: string }>({ running: false });
+  // Organization setup form state
+  const [orgName, setOrgName] = useState('');
+  const [orgSlug, setOrgSlug] = useState('');
+  const [orgBusy, setOrgBusy] = useState(false);
+  const [orgError, setOrgError] = useState('');
 
   const loadProgress = useCallback(async () => {
     try {
-      const [connData, clusterData, entData, wfData, auditData] = await Promise.all([
+      const [orgData, connData, clusterData, entData, wfData, auditData] = await Promise.all([
+        organization.get().catch(() => null),
         connections.list().catch(() => ({ connections: [], total: 0 })),
         clusters.list().catch(() => ({ clusters: [], total: 0 })),
         entities.list({ per_page: '1' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 1, total_pages: 0 })),
@@ -37,8 +43,15 @@ export default function GetStartedPage() {
       const clusterList = clusterData.clusters || [];
       const wfList = wfData.workflows || [];
       const ranWorkflow = (auditData.items || []).some(a => a.action === 'execute' && a.entity_type === 'workflow');
+      const orgConfigured = !!orgData?.organization?.name;
 
       setStatuses({
+        org: {
+          done: orgConfigured,
+          detail: orgConfigured
+            ? orgData.organization.name
+            : 'Not configured yet',
+        },
         cluster: {
           done: clusterList.length > 0,
           detail: clusterList.length > 0
@@ -81,7 +94,7 @@ export default function GetStartedPage() {
   useEffect(() => { loadProgress(); }, [loadProgress]);
 
   // Only required steps count toward completion (GitLab is optional)
-  const requiredStepIds = ['cluster', 'service', 'workflow', 'run'];
+  const requiredStepIds = ['org', 'cluster', 'service', 'workflow', 'run'];
   const allDone = requiredStepIds.every(id => statuses[id]?.done);
 
   // Auto-mark tour as completed when all steps are done — hides the sidebar tab
@@ -129,7 +142,30 @@ export default function GetStartedPage() {
     }
   };
 
+  const handleOrgSetup = async () => {
+    if (!orgName.trim() || !orgSlug.trim()) {
+      setOrgError('Name and slug are required');
+      return;
+    }
+    setOrgBusy(true);
+    setOrgError('');
+    try {
+      await organization.setup({ name: orgName.trim(), slug: orgSlug.trim() });
+      await loadProgress();
+    } catch (err) {
+      const fe = friendlyError(err);
+      setOrgError(fe.hint ? `${fe.hint} (${fe.message})` : fe.message);
+    } finally {
+      setOrgBusy(false);
+    }
+  };
+
   const STEPS = [
+    {
+      id: 'org',
+      title: 'Name your organization',
+      desc: 'Your company or team name. It will appear throughout the platform. You can create isolated workspaces later from Settings.',
+    },
     {
       id: 'cluster',
       title: 'Connect a Kubernetes cluster',
@@ -185,8 +221,9 @@ export default function GetStartedPage() {
       <div className="page-animate">
         <h1 className="page-title-modern">Get Started with PEPA</h1>
         <p className="page-subtitle-modern">
-          Five steps from an empty platform to your first automated workflow run.
-          Each step is checked automatically against your real data.
+          {statuses.org?.done
+            ? 'Five steps from an empty platform to your first automated workflow run. Each step is checked automatically against your real data.'
+            : 'Six steps to set up your platform from scratch. Each step is checked automatically against your real data.'}
         </p>
       </div>
 
@@ -232,26 +269,66 @@ export default function GetStartedPage() {
                         </span>
                       </div>
                       <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{s.desc}</p>
-                      <div className="flex items-center gap-3 mt-2">
-                        {!done && (
-                          <Link
-                            href={s.href}
-                            className="px-3 py-1.5 bg-[var(--accent)] text-white text-[12px] rounded-lg hover:opacity-90 transition-colors"
-                          >
-                            {s.action}
-                          </Link>
-                        )}
-                        {s.runnable && !done && (
+                      {/* Inline org setup form */}
+                      {s.id === 'org' && !done && (
+                        <div className="mt-3 space-y-2 max-w-sm">
+                          <div>
+                            <input
+                              type="text"
+                              value={orgName}
+                              onChange={e => {
+                                setOrgName(e.target.value);
+                                setOrgSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
+                              }}
+                              placeholder="e.g., Acme Corp"
+                              className="w-full px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent bg-[var(--bg)]"
+                            />
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={orgSlug}
+                              onChange={e => setOrgSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''))}
+                              placeholder="e.g., acme-corp"
+                              className="w-full px-3 py-1.5 border border-[var(--border)] rounded-lg text-[12px] focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent bg-[var(--bg)]"
+                            />
+                            <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5">URL-friendly identifier</p>
+                          </div>
+                          {orgError && (
+                            <p className="text-[11px] text-red-500">{orgError}</p>
+                          )}
                           <button
-                            onClick={runDemo}
-                            disabled={runState.running || !demoWf}
-                            title={!demoWf ? 'Load demo data first to get the Hello PEPA workflow' : undefined}
-                            className="px-3 py-1.5 border border-[var(--border)] text-[var(--text-secondary)] text-[12px] rounded-lg hover:bg-[var(--bg)] disabled:opacity-50 transition-colors"
+                            onClick={handleOrgSetup}
+                            disabled={orgBusy}
+                            className="px-3 py-1.5 bg-[var(--accent)] text-white text-[12px] rounded-lg hover:opacity-90 disabled:opacity-50 transition-colors"
                           >
-                            {runState.running ? 'Running...' : demoWf ? 'Run "Hello PEPA" now' : 'Run demo (load demo data first)'}
+                            {orgBusy ? 'Saving...' : 'Save organization'}
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
+                      {/* Standard action link for non-org steps */}
+                      {s.id !== 'org' && !done && (
+                        <div className="flex items-center gap-3 mt-2">
+                          {s.href && (
+                            <Link
+                              href={s.href}
+                              className="px-3 py-1.5 bg-[var(--accent)] text-white text-[12px] rounded-lg hover:opacity-90 transition-colors"
+                            >
+                              {s.action}
+                            </Link>
+                          )}
+                          {s.runnable && (
+                            <button
+                              onClick={runDemo}
+                              disabled={runState.running || !demoWf}
+                              title={!demoWf ? 'Load demo data first to get the Hello PEPA workflow' : undefined}
+                              className="px-3 py-1.5 border border-[var(--border)] text-[var(--text-secondary)] text-[12px] rounded-lg hover:bg-[var(--bg)] disabled:opacity-50 transition-colors"
+                            >
+                              {runState.running ? 'Running...' : demoWf ? 'Run "Hello PEPA" now' : 'Run demo (load demo data first)'}
+                            </button>
+                          )}
+                        </div>
+                      )}
                       {s.runnable && runState.result && (
                         <p className="text-[12px] text-green-600 mt-2">✓ {runState.result}</p>
                       )}
@@ -268,7 +345,7 @@ export default function GetStartedPage() {
             <div className="p-4 border-t border-[var(--border-light)] bg-emerald-500/10 border-emerald-500/20">
               <div className="flex items-center justify-between">
                 <p className="text-[13px] text-emerald-600 font-medium">
-                  {statuses.gitlab?.done ? 'All five steps are done. Nice work!' : 'All required steps are done. Nice work!'}
+                  {statuses.gitlab?.done ? 'All steps are done. Nice work!' : 'All required steps are done. Nice work!'}
                 </p>
                 <button
                   onClick={markCompleted}

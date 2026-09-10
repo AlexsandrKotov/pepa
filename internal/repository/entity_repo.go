@@ -71,7 +71,7 @@ func (r *EntityRepository) List(ctx context.Context, filter models.EntityFilter)
 	}
 	if filter.Search != "" {
 		query += fmt.Sprintf(" AND (e.name ILIKE $%d OR e.description ILIKE $%d)", argIdx, argIdx)
-		args = append(args, "%"+filter.Search+"%", "%"+filter.Search+"%")
+		args = append(args, "%"+filter.Search+"%")
 		argIdx++
 	}
 	if filter.TenantID != uuid.Nil {

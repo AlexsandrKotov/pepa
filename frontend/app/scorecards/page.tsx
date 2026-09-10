@@ -54,6 +54,7 @@ const presets: Preset[] = [
       { name: 'Active Status', description: 'Service is marked as active', expression: 'status == active', weight: 5, severity: 'warning', pass_message: 'Service is active', fail_message: 'Service is not active' },
       { name: 'Has Owner', description: 'Service has an assigned owner', expression: 'has_metadata.owner', weight: 7, severity: 'critical', pass_message: 'Owner assigned', fail_message: 'No owner specified' },
       { name: 'Has Repository', description: 'Source code repository is linked', expression: 'has_metadata.repository', weight: 6, severity: 'warning', pass_message: 'Repository linked', fail_message: 'No repository linked' },
+      { name: 'High Availability', description: 'At least 2 replicas for HA', expression: 'metadata.replicas >= 2', weight: 8, severity: 'critical', pass_message: 'Replicas ≥ 2', fail_message: 'Less than 2 replicas configured' },
     ],
   },
   {
@@ -64,6 +65,7 @@ const presets: Preset[] = [
       { name: 'Has Resource Limits', description: 'Container resource limits are set', expression: 'has_metadata.resource_limits', weight: 7, severity: 'warning', pass_message: 'Resource limits defined', fail_message: 'No resource limits set' },
       { name: 'Active Status', description: 'Service is active', expression: 'status == active', weight: 4, severity: 'info', pass_message: 'Service is active', fail_message: 'Service is not active' },
       { name: 'Has Monitoring', description: 'Monitoring is configured', expression: 'has_metadata.monitoring', weight: 8, severity: 'critical', pass_message: 'Monitoring configured', fail_message: 'No monitoring setup' },
+      { name: 'Approved Registry', description: 'Image from approved container registry', expression: 'metadata.image starts_with "registry."', weight: 6, severity: 'warning', pass_message: 'Image from approved registry', fail_message: 'Image not from approved registry' },
     ],
   },
   {
@@ -74,6 +76,18 @@ const presets: Preset[] = [
       { name: 'Has CI/CD', description: 'CI/CD pipeline is configured', expression: 'has_metadata.ci_cd', weight: 7, severity: 'warning', pass_message: 'CI/CD configured', fail_message: 'No CI/CD pipeline' },
       { name: 'Has Description', description: 'Service has a description', expression: 'not_empty.description', weight: 3, severity: 'info', pass_message: 'Description provided', fail_message: 'Description missing' },
       { name: 'Service Type', description: 'Entity is of type service', expression: 'type_key == service', weight: 2, severity: 'info', pass_message: 'Correct type', fail_message: 'Not a service type' },
+      { name: 'Version Tagged', description: 'Service has a version tag', expression: 'not_empty.version', weight: 4, severity: 'info', pass_message: 'Version specified', fail_message: 'No version tag' },
+    ],
+  },
+  {
+    name: 'GitOps Compliance',
+    description: 'Verifies GitOps workflow compliance',
+    rules: [
+      { name: 'GitOps Source', description: 'Entity managed via GitOps', expression: 'metadata.source == gitops', weight: 6, severity: 'warning', pass_message: 'GitOps managed', fail_message: 'Not GitOps managed' },
+      { name: 'Has CI/CD Pipeline', description: 'CI/CD pipeline configured', expression: 'has_metadata.ci_cd', weight: 7, severity: 'critical', pass_message: 'CI/CD configured', fail_message: 'No CI/CD pipeline' },
+      { name: 'Repository Linked', description: 'Source repository is linked', expression: 'has_metadata.repository', weight: 5, severity: 'warning', pass_message: 'Repository linked', fail_message: 'No repository linked' },
+      { name: 'Cluster & Namespace', description: 'Cluster and namespace specified', expression: 'has_metadata.cluster && has_metadata.namespace', weight: 6, severity: 'warning', pass_message: 'Cluster and namespace set', fail_message: 'Missing cluster or namespace' },
+      { name: 'Synced Status', description: 'Entity sync status is current', expression: 'sync_status == synced', weight: 4, severity: 'info', pass_message: 'Sync is current', fail_message: 'Sync is not current' },
     ],
   },
 ];
@@ -280,7 +294,7 @@ export default function ScorecardsPage() {
               <button onClick={() => setShowPresets(false)} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] text-[12px]">✕</button>
             </div>
             <div className="card-body">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {presets.map((preset) => (
                   <div key={preset.name} className="p-3 rounded-lg border border-[var(--border-light)] hover:border-[var(--border)] transition-all">
                     <p className="text-[13px] font-medium text-[var(--text-primary)]">{preset.name}</p>
@@ -402,6 +416,9 @@ export default function ScorecardsPage() {
                     <div className="col-span-1 md:col-span-2">
                       <label className="label">Expression *</label>
                       <ExpressionBuilder value={ruleForm.expression} onChange={(expr) => setRuleForm({ ...ruleForm, expression: expr })} />
+                      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                        Supports: <code className="font-mono">==</code> <code className="font-mono">!=</code> <code className="font-mono">&gt;=</code> <code className="font-mono">&lt;=</code> <code className="font-mono">contains</code> <code className="font-mono">starts_with</code> <code className="font-mono">has_metadata.X</code> <code className="font-mono">&amp;&amp;</code> <code className="font-mono">||</code> <code className="font-mono">()</code>
+                      </p>
                     </div>
                     <div><label className="label">Description</label><input value={ruleForm.description} onChange={e => setRuleForm({ ...ruleForm, description: e.target.value })} className="input" placeholder="What this rule checks" /></div>
                     <div className="grid grid-cols-2 gap-3">

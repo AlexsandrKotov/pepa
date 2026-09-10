@@ -295,15 +295,16 @@ func (r *ScorecardRepository) EvaluateEntity(ctx context.Context, scorecardID, e
 	var typeKey, name, description, status string
 	var metadataRaw []byte
 	var entityTenantID uuid.UUID
+	var syncStatus, pluginName, externalID string
 
 	// Try entities table first
-	err := r.db.Pool.QueryRow(ctx, `SELECT id, type_key, name, description, metadata, status, tenant_id FROM entities WHERE id = $1`, entityID).Scan(
-		&id, &typeKey, &name, &description, &metadataRaw, &status, &entityTenantID,
+	err := r.db.Pool.QueryRow(ctx, `SELECT id, type_key, name, description, metadata, status, tenant_id, COALESCE(sync_status,''), COALESCE(plugin_name,''), COALESCE(external_id,'') FROM entities WHERE id = $1`, entityID).Scan(
+		&id, &typeKey, &name, &description, &metadataRaw, &status, &entityTenantID, &syncStatus, &pluginName, &externalID,
 	)
 	if err != nil {
 		// Fall back to services table
-		err2 := r.db.Pool.QueryRow(ctx, `SELECT id, 'service', name, COALESCE(description, ''), COALESCE(resource_config, '{}'::jsonb), status, tenant_id FROM services WHERE id = $1`, entityID).Scan(
-			&id, &typeKey, &name, &description, &metadataRaw, &status, &entityTenantID,
+		err2 := r.db.Pool.QueryRow(ctx, `SELECT id, 'service', name, COALESCE(description, ''), COALESCE(resource_config, '{}'::jsonb), status, tenant_id, '', '', '' FROM services WHERE id = $1`, entityID).Scan(
+			&id, &typeKey, &name, &description, &metadataRaw, &status, &entityTenantID, &syncStatus, &pluginName, &externalID,
 		)
 		if err2 != nil {
 			return nil, fmt.Errorf("load entity: %w (also tried services: %w)", err, err2)
@@ -337,6 +338,9 @@ func (r *ScorecardRepository) EvaluateEntity(ctx context.Context, scorecardID, e
 		"name":        name,
 		"description": description,
 		"status":      status,
+		"sync_status": syncStatus,
+		"plugin_name": pluginName,
+		"external_id": externalID,
 		"metadata":    metadata,
 	}
 
@@ -404,10 +408,13 @@ func (r *ScorecardRepository) EvaluateEntity(ctx context.Context, scorecardID, e
 // evaluateExpression evaluates a rule expression against an entity context.
 // Supported syntax:
 //   - "a && b" / "a || b" — logical composition of sub-expressions
+//   - "(expr1 || expr2) && expr3" — parentheses for grouping
 //   - "has_metadata.field" — metadata field existence
 //   - "not_empty.field" — field is present and non-empty
-//   - "field == value" / "field != value" — comparison (field may be a top-level
-//     attribute like status/name/description/type_key, or a dotted metadata path)
+//   - "field == value" / "field != value" — equality comparison
+//   - "field >= n" / "field <= n" / "field > n" / "field < n" — numeric comparison
+//   - "field contains \"str\"" — substring match
+//   - "field starts_with \"str\"" — prefix match
 //   - "field == null" / "field != null" — presence checks
 //   - "metadata.field", "field" or "a.b.c" — bare existence check (dotted = nested)
 //   - "always_true" / "always_false"
@@ -423,8 +430,29 @@ func evaluateExpression(expr string, ctx map[string]interface{}) bool {
 		return false
 	}
 
-	// Logical AND — all parts must pass
-	if parts := splitLogical(expr, "&&"); len(parts) > 1 {
+	// Handle parentheses: strip matching outer parens
+	if expr[0] == '(' {
+		depth := 0
+		matchingClose := -1
+		for i, ch := range expr {
+			if ch == '(' {
+				depth++
+			} else if ch == ')' {
+				depth--
+				if depth == 0 {
+					matchingClose = i
+					break
+				}
+			}
+		}
+		// If the closing paren is the last char, strip both parens and evaluate inner
+		if matchingClose == len(expr)-1 {
+			return evaluateExpression(expr[1:len(expr)-1], ctx)
+		}
+	}
+
+	// Logical operators — split at top-level (not inside parentheses)
+	if parts := splitLogicalRespectingParens(expr, "&&"); len(parts) > 1 {
 		for _, p := range parts {
 			if !evaluateExpression(p, ctx) {
 				return false
@@ -432,8 +460,7 @@ func evaluateExpression(expr string, ctx map[string]interface{}) bool {
 		}
 		return true
 	}
-	// Logical OR — any part must pass
-	if parts := splitLogical(expr, "||"); len(parts) > 1 {
+	if parts := splitLogicalRespectingParens(expr, "||"); len(parts) > 1 {
 		for _, p := range parts {
 			if evaluateExpression(p, ctx) {
 				return true
@@ -457,6 +484,66 @@ func evaluateExpression(expr string, ctx map[string]interface{}) bool {
 			return false
 		}
 		return !isEmptyValue(val)
+	}
+
+	// Pattern: field contains "value"
+	if idx := strings.Index(expr, " contains "); idx > 0 {
+		left := strings.TrimSpace(expr[:idx])
+		right := strings.TrimSpace(expr[idx+len(" contains "):])
+		right = strings.Trim(right, `"'`)
+		actual, exists := resolveValue(left, ctx)
+		if !exists {
+			return false
+		}
+		return strings.Contains(fmt.Sprintf("%v", actual), right)
+	}
+
+	// Pattern: field starts_with "value"
+	if idx := strings.Index(expr, " starts_with "); idx > 0 {
+		left := strings.TrimSpace(expr[:idx])
+		right := strings.TrimSpace(expr[idx+len(" starts_with "):])
+		right = strings.Trim(right, `"'`)
+		actual, exists := resolveValue(left, ctx)
+		if !exists {
+			return false
+		}
+		return strings.HasPrefix(fmt.Sprintf("%v", actual), right)
+	}
+
+	// Numeric comparisons: >=, <=, >, < (check multi-char operators first)
+	for _, op := range []struct {
+		symbol string
+		kind   int // 1: >=, 2: <=, 3: >, 4: <
+	}{
+		{" >= ", 1}, {" <= ", 2}, {" > ", 3}, {" < ", 4},
+	} {
+		idx := strings.Index(expr, op.symbol)
+		if idx <= 0 {
+			continue
+		}
+		left := strings.TrimSpace(expr[:idx])
+		right := strings.TrimSpace(expr[idx+len(op.symbol):])
+		right = strings.Trim(right, `"'`)
+
+		actual, exists := resolveValue(left, ctx)
+		if !exists {
+			return false
+		}
+		af, errA := toFloat(actual)
+		ef, errE := strconv.ParseFloat(right, 64)
+		if errA != nil || errE != nil {
+			return false // numeric comparison requires both sides numeric
+		}
+		switch op.kind {
+		case 1:
+			return af >= ef
+		case 2:
+			return af <= ef
+		case 3:
+			return af > ef
+		case 4:
+			return af < ef
+		}
 	}
 
 	// Pattern: left == right / left != right
@@ -491,30 +578,55 @@ func evaluateExpression(expr string, ctx map[string]interface{}) bool {
 	return exists
 }
 
-// splitLogical splits an expression on a top-level logical operator.
-func splitLogical(expr, op string) []string {
-	parts := strings.Split(expr, op)
+// splitLogicalRespectingParens splits an expression on a top-level logical
+// operator while ignoring occurrences inside parentheses.
+func splitLogicalRespectingParens(expr, op string) []string {
+	depth := 0
+	start := 0
+	var parts []string
+
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		if ch == '(' {
+			depth++
+			continue
+		}
+		if ch == ')' {
+			depth--
+			continue
+		}
+		if depth > 0 {
+			continue
+		}
+		// Check if operator starts here
+		if i+len(op) <= len(expr) && expr[i:i+len(op)] == op {
+			part := strings.TrimSpace(expr[start:i])
+			if part != "" {
+				parts = append(parts, part)
+			}
+			start = i + len(op)
+			i += len(op) - 1 // skip ahead (loop will +1)
+		}
+	}
+	// Last segment
+	part := strings.TrimSpace(expr[start:])
+	if part != "" {
+		parts = append(parts, part)
+	}
 	if len(parts) < 2 {
 		return nil
 	}
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
+	return parts
 }
 
 // resolveValue resolves a field reference against the evaluation context.
-// Top-level attributes (type_key, name, description, status) are read from ctx,
-// everything else (with or without the "metadata." prefix) is resolved as a
-// dotted path inside entity metadata.
+// Top-level attributes (type_key, name, description, status, sync_status,
+// plugin_name, external_id) are read from ctx, everything else (with or without
+// the "metadata." prefix) is resolved as a dotted path inside entity metadata.
 func resolveValue(ref string, ctx map[string]interface{}) (interface{}, bool) {
 	ref = strings.TrimSpace(ref)
 	switch ref {
-	case "type_key", "name", "description", "status":
+	case "type_key", "name", "description", "status", "sync_status", "plugin_name", "external_id":
 		val, ok := ctx[ref]
 		return val, ok
 	}

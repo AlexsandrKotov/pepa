@@ -645,19 +645,33 @@ View execution logs:
 
 ### Production Readiness
 
-Scorecards evaluate services against weighted rules:
+Scorecards evaluate services against weighted rules. See the [Scorecard Rules Reference](scorecard-rules-reference.md) for full expression syntax and examples.
 
-| Rule | Weight | Severity |
-|------|--------|----------|
-| Health endpoint | High | Error |
-| Readiness endpoint | High | Error |
-| Owner team assigned | Medium | Warning |
-| Resource limits set | Medium | Warning |
-| Replica count ≥ 2 | Medium | Warning |
-| GitLab project linked | Low | Info |
-| Helm chart linked | Low | Warning |
-| Deployment strategy | Low | Info |
-| Environment variables | Low | Info |
+**Expression syntax highlights:**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `==` / `!=` | Equals / not equals | `status == active` |
+| `>=` / `<=` / `>` / `<` | Numeric comparison | `metadata.replicas >= 2` |
+| `contains` | Substring match | `metadata.image contains "nginx"` |
+| `starts_with` | Prefix match | `metadata.image starts_with "registry."` |
+| `has_metadata.X` | Field existence | `has_metadata.health_endpoint` |
+| `not_empty.X` | Non-empty check | `not_empty.description` |
+| `&&` / `\|\|` | AND / OR | `has_metadata.owner && status == active` |
+| `()` | Grouping | `(metadata.env == prod \|\| metadata.env == staging) && has_metadata.monitoring` |
+
+**Available fields:** `type_key`, `name`, `description`, `status`, `sync_status`, `plugin_name`, `external_id`, and any `metadata.*` path.
+
+**Example rules:**
+
+| Rule | Expression | Weight | Severity |
+|------|-----------|--------|----------|
+| Health endpoint | `has_metadata.health_endpoint` | 8 | critical |
+| Active status | `status == active` | 5 | warning |
+| HA (≥2 replicas) | `metadata.replicas >= 2` | 8 | critical |
+| Owner assigned | `has_metadata.owner` | 7 | critical |
+| Repository linked | `has_metadata.repository` | 6 | warning |
+| Approved registry | `metadata.image starts_with "registry."` | 6 | warning |
 
 > 📸 **Screenshot suggestion**: Scorecard rules configuration
 

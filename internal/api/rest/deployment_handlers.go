@@ -43,45 +43,39 @@ func registerDeploymentRoutes(r *gin.RouterGroup, deps Dependencies) {
 func listDeployments(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Deployment == nil {
-			c.JSON(http.StatusOK, gin.H{"deployments": []interface{}{}, "total": 0})
+			c.JSON(http.StatusOK, gin.H{"deployments": []interface{}{}, "total": 0, "page": 1, "per_page": 20, "total_pages": 0})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
-		items, err := deps.Repos.Deployment.List(c.Request.Context(), tenantID)
+
+		// Parse pagination and filter params.
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+		filter := repository.DeploymentFilter{
+			TenantID:    tenantID,
+			Page:        page,
+			PerPage:     perPage,
+			Search:      c.Query("search"),
+			Status:      c.Query("status"),
+			TeamName:    c.Query("team"),
+			ServiceName: c.Query("service"),
+			ClusterID:   c.Query("cluster_id"),
+			Stage:       c.Query("stage"),
+		}
+
+		result, err := deps.Repos.Deployment.ListFiltered(c.Request.Context(), filter)
 		if err != nil {
 			respondInternalError(c, err)
 			return
 		}
 
-		// Apply optional query filters.
-		statusFilter := c.Query("status")
-		teamFilter := c.Query("team")
-		serviceFilter := c.Query("service")
-		limitStr := c.DefaultQuery("limit", "0")
-		limit := 0
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
-		}
-
-		filtered := make([]repository.Deployment, 0, len(items))
-		for _, d := range items {
-			if statusFilter != "" && d.Status != statusFilter {
-				continue
-			}
-			if teamFilter != "" && d.TeamName != teamFilter {
-				continue
-			}
-			if serviceFilter != "" && d.GitlabProjectName != serviceFilter {
-				continue
-			}
-			filtered = append(filtered, d)
-		}
-
-		if limit > 0 && len(filtered) > limit {
-			filtered = filtered[:limit]
-		}
-
-		c.JSON(http.StatusOK, gin.H{"deployments": filtered, "total": len(filtered)})
+		c.JSON(http.StatusOK, gin.H{
+			"deployments": result.Items,
+			"total":       result.Total,
+			"page":        result.Page,
+			"per_page":    result.PerPage,
+			"total_pages": result.TotalPages,
+		})
 	}
 }
 

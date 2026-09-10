@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
 import { clusters, environments, connections, Cluster, Environment } from '@/lib/api';
@@ -9,6 +9,7 @@ import ConceptHelp from '@/components/ConceptHelp';
 import EmptyState from '@/components/EmptyState';
 import ConfirmModal from '@/components/ConfirmModal';
 import BrandIcon from '@/components/BrandIcon';
+import Pagination from '@/components/Pagination';
 
 // ── Kubeconfig Parser ────────────────────────────────────────
 
@@ -200,6 +201,26 @@ export default function ClustersClient() {
   const [deleteTarget, setDeleteTarget] = useState<Cluster | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [envFilter, setEnvFilter] = useState('');
+  const [environmentList, setEnvironmentList] = useState<Environment[]>([]);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the debounce timer on unmount to avoid setState after unmount
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
+
+  // Load environments for the filter dropdown
+  useEffect(() => {
+    environments.list().then(data => setEnvironmentList(data.environments || [])).catch(() => {});
+  }, []);
 
   // Escape key closes modals
   const anyModalOpen = showAdd || showImportKubeconfig || editCluster !== null;
@@ -211,16 +232,37 @@ export default function ClustersClient() {
 
   const loadClusters = useCallback(async () => {
     try {
-      const data = await clusters.list();
+      const params: Record<string, string> = { page: String(page), per_page: String(perPage) };
+      if (search) params.search = search;
+      if (statusFilter) params.status = statusFilter;
+      if (envFilter) params.environment = envFilter;
+      const data = await clusters.list(params);
       setClusterList(data.clusters || []);
+      setTotal(data.total || 0);
+      setTotalPages(data.total_pages || 0);
     } catch {
       setToast({ message: 'Failed to load clusters', type: 'error' });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, perPage, search, statusFilter, envFilter]);
 
   useEffect(() => { loadClusters(); }, [loadClusters]);
+
+  // Debounced search — update the input immediately, commit to the server after 300ms
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setSearch(value);
+      setPage(1);
+    }, 300);
+  };
+
+  const handleFilterChange = (setter: (v: string) => void, value: string) => {
+    setter(value);
+    setPage(1);
+  };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -357,6 +399,43 @@ export default function ClustersClient() {
         </div>
       </div>
 
+      {/* Search & Filters */}
+      <div className="flex flex-wrap items-center gap-2 page-animate-up page-delay-1">
+        <div className="relative flex-1 min-w-[200px] max-w-[320px] overflow-hidden">
+          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search clusters..."
+            className="input !pl-9"
+          />
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => handleFilterChange(setStatusFilter, e.target.value)}
+          className="input w-auto"
+        >
+          <option value="">All Statuses</option>
+          <option value="connected">Connected</option>
+          <option value="disconnected">Disconnected</option>
+          <option value="syncing">Syncing</option>
+          <option value="pending">Pending</option>
+        </select>
+        <select
+          value={envFilter}
+          onChange={(e) => handleFilterChange(setEnvFilter, e.target.value)}
+          className="input w-auto"
+        >
+          <option value="">All Environments</option>
+          {(environmentList || []).map((env) => (
+            <option key={env.id} value={env.slug}>{env.name}</option>
+          ))}
+        </select>
+      </div>
+
       {/* Cluster List */}
       <div className="space-y-3 page-animate-up page-delay-2">
         {clusterList.map((cluster) => (
@@ -441,24 +520,35 @@ export default function ClustersClient() {
           <>
             <EmptyState
               icon={<BrandIcon name="kubernetes" size={48} />}
-              title="No clusters connected"
-              description="A cluster is a Kubernetes environment where your services run. Connect one by pasting its kubeconfig — PEPA will detect its health and GitOps engine automatically."
-              actionLabel="+ Add Cluster"
-              actionOnClick={() => setShowAdd(true)}
-              secondaryHref="/setup"
-              secondaryLabel="Open setup wizard"
+              title={search || statusFilter || envFilter ? 'No clusters match filters' : 'No clusters connected'}
+              description={search || statusFilter || envFilter ? 'Try adjusting or clearing the filters above.' : 'A cluster is a Kubernetes environment where your services run. Connect one by pasting its kubeconfig — PEPA will detect its health and GitOps engine automatically.'}
+              actionLabel={search || statusFilter || envFilter ? undefined : '+ Add Cluster'}
+              actionOnClick={search || statusFilter || envFilter ? undefined : () => setShowAdd(true)}
             />
-            <div className="text-center mt-3">
-              <button
-                onClick={() => setShowImportKubeconfig(true)}
-                className="text-[12px] text-[var(--accent)] hover:underline"
-              >
-                Have a kubeconfig with multiple clusters? Import them all at once {'\u2192'}
-              </button>
-            </div>
+            {!search && !statusFilter && !envFilter && (
+              <div className="text-center mt-3">
+                <button
+                  onClick={() => setShowImportKubeconfig(true)}
+                  className="text-[12px] text-[var(--accent)] hover:underline"
+                >
+                  Have a kubeconfig with multiple clusters? Import them all at once {'\u2192'}
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <Pagination
+          page={page}
+          perPage={perPage}
+          total={total}
+          onPageChange={setPage}
+          onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+        />
+      )}
 
       {/* Import Kubeconfig Modal */}
       {showImportKubeconfig && <ImportKubeconfigModal onClose={() => setShowImportKubeconfig(false)} onCreated={loadClusters} />}

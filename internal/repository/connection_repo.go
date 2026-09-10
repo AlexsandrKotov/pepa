@@ -124,6 +124,118 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 	return items, nil
 }
 
+// ConnectionFilter defines filtering and pagination parameters for connection lists.
+type ConnectionFilter struct {
+	TenantID uuid.UUID
+	Page     int
+	PerPage  int
+	Search   string
+	Type     string
+	Status   string
+}
+
+// ConnectionListResponse is the paginated result of ListFiltered.
+type ConnectionListResponse struct {
+	Items      []Connection `json:"items"`
+	Total      int64        `json:"total"`
+	Page       int          `json:"page"`
+	PerPage    int          `json:"per_page"`
+	TotalPages int          `json:"total_pages"`
+}
+
+// ListFiltered returns connections with filtering, sorting, and pagination.
+func (r *ConnectionRepository) ListFiltered(ctx context.Context, f ConnectionFilter) (*ConnectionListResponse, error) {
+	query := `
+		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+		       type, name, COALESCE(description,''),
+		       COALESCE(config,'{}'::jsonb), status, last_check_at,
+		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       COALESCE(fallback_to_admin, true),
+		       created_at, updated_at
+		FROM connections WHERE tenant_id = $1`
+	args := []interface{}{f.TenantID}
+	argIdx := 2
+
+	if f.Type != "" {
+		query += fmt.Sprintf(" AND type = $%d", argIdx)
+		args = append(args, f.Type)
+		argIdx++
+	}
+	if f.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, f.Status)
+		argIdx++
+	}
+	if f.Search != "" {
+		query += fmt.Sprintf(" AND (name ILIKE $%d OR description ILIKE $%d)", argIdx, argIdx)
+		args = append(args, "%"+f.Search+"%")
+		argIdx++
+	}
+
+	// Count
+	countQuery := "SELECT COUNT(*) FROM (" + query + ") sub"
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count connections: %w", err)
+	}
+
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PerPage < 1 {
+		f.PerPage = 20
+	}
+	offset := (f.Page - 1) * f.PerPage
+
+	query += " ORDER BY created_at DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, f.PerPage, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query connections: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]Connection, 0)
+	for rows.Next() {
+		var c Connection
+		var configJSON, labelsJSON []byte
+		var ownerIDRaw string
+		if err := rows.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
+			&c.Type, &c.Name, &c.Description,
+			&configJSON, &c.Status, &c.LastCheckAt,
+			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan connection: %w", err)
+		}
+		if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
+			c.OwnerID = &parsed
+		}
+		_ = json.Unmarshal(configJSON, &c.Config)
+		_ = json.Unmarshal(labelsJSON, &c.Labels)
+		if c.Config == nil {
+			c.Config = map[string]any{}
+		}
+		if c.Labels == nil {
+			c.Labels = map[string]string{}
+		}
+		items = append(items, c)
+	}
+
+	totalPages := int(total) / f.PerPage
+	if int(total)%f.PerPage > 0 {
+		totalPages++
+	}
+
+	return &ConnectionListResponse{
+		Items:      items,
+		Total:      total,
+		Page:       f.Page,
+		PerPage:    f.PerPage,
+		TotalPages: totalPages,
+	}, nil
+}
+
 // Get returns a connection by ID, scoped to a tenant.
 func (r *ConnectionRepository) Get(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) (*Connection, error) {
 	row := r.pool.QueryRow(ctx, `

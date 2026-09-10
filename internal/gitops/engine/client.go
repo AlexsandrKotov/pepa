@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -180,13 +181,15 @@ type ListOptions struct {
 func (c *Client) List(ctx context.Context, opts ListOptions) ([]AppSummary, error) {
 	var allApps []AppSummary
 
+	slog.Info("gitops engine List", "tenant_id", opts.TenantID, "engine_type", opts.EngineType)
+
 	// List from ArgoCD if requested
 	if opts.EngineType == "" || opts.EngineType == "argocd" {
 		argoApps, err := c.listArgoApps(ctx, opts)
 		if err != nil {
-			// Log but continue — FluxCD may still work
-			_ = err
+			slog.Warn("listArgoApps failed", "tenant_id", opts.TenantID, "error", err)
 		} else {
+			slog.Info("listArgoApps returned", "count", len(argoApps))
 			allApps = append(allApps, argoApps...)
 		}
 	}
@@ -195,8 +198,9 @@ func (c *Client) List(ctx context.Context, opts ListOptions) ([]AppSummary, erro
 	if opts.EngineType == "" || opts.EngineType == "fluxcd" {
 		fluxApps, err := c.listFluxApps(ctx, opts)
 		if err != nil {
-			_ = err
+			slog.Warn("listFluxApps failed", "tenant_id", opts.TenantID, "error", err)
 		} else {
+			slog.Info("listFluxApps returned", "count", len(fluxApps))
 			allApps = append(allApps, fluxApps...)
 		}
 	}
@@ -235,97 +239,103 @@ func (c *Client) List(ctx context.Context, opts ListOptions) ([]AppSummary, erro
 	return allApps, nil
 }
 
-// listArgoApps lists applications from ArgoCD.
+// listArgoApps lists applications from ArgoCD across all resolved connections.
 func (c *Client) listArgoApps(ctx context.Context, opts ListOptions) ([]AppSummary, error) {
 	if c.registry == nil {
 		return nil, fmt.Errorf("plugin registry not available")
 	}
 
-	// Resolve ArgoCD credentials
-	creds, err := c.credResolver.ResolveArgo(ctx, gitops.ResolveOpts{
+	// Resolve all ArgoCD credentials (iterates every matching connection)
+	allCreds, err := c.credResolver.ResolveAllArgo(ctx, gitops.ResolveOpts{
 		TenantID: opts.TenantID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve argo credentials: %w", err)
 	}
 
-	// Build config for plugin
-	config := map[string]string{
-		"server_url": creds.ServerURL,
-		"auth_token": creds.AuthToken,
-		"kubeconfig": creds.Kubeconfig,
-		"insecure":   fmt.Sprintf("%v", creds.Insecure),
-	}
+	var allApps []AppSummary
+	for _, creds := range allCreds {
+		config := map[string]string{
+			"server_url": creds.ServerURL,
+			"auth_token": creds.AuthToken,
+			"kubeconfig": creds.Kubeconfig,
+			"insecure":   fmt.Sprintf("%v", creds.Insecure),
+		}
 
-	// Call list_applications action
-	resp, err := c.registry.ExecuteAction(ctx, "argocd", "list_applications", nil, config)
-	if err != nil {
-		return nil, fmt.Errorf("execute list_applications: %w", err)
-	}
-	if !resp.Success {
-		return nil, fmt.Errorf("list_applications failed: %s", resp.Error)
-	}
+		// Call list_applications action
+		resp, err := c.registry.ExecuteAction(ctx, "argocd", "list_applications", nil, config)
+		if err != nil {
+			slog.Info("listArgoApps: plugin call failed", "connection_id", creds.ConnectionID, "error", err)
+			continue
+		}
+		if !resp.Success {
+			slog.Info("listArgoApps: plugin returned error", "connection_id", creds.ConnectionID, "error", resp.Error)
+			continue
+		}
 
-	// Parse response
-	var apps []provider.CDApplication
-	if err := json.Unmarshal(resp.Output, &apps); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
+		// Parse response
+		var apps []provider.CDApplication
+		if err := json.Unmarshal(resp.Output, &apps); err != nil {
+			slog.Info("listArgoApps: parse error", "connection_id", creds.ConnectionID, "error", err)
+			continue
+		}
 
-	// Convert to AppSummary
-	summaries := make([]AppSummary, 0, len(apps))
-	for _, app := range apps {
-		summaries = append(summaries, AppSummary{
-			Name:         app.Name,
-			Namespace:    app.Namespace,
-			EngineType:   "argocd",
-			Health:       app.Health,
-			SyncStatus:   app.SyncStatus,
-			Revision:     app.Revision,
-			ConnectionID: creds.ConnectionID.String(),
-		})
+		// Convert to AppSummary
+		for _, app := range apps {
+			allApps = append(allApps, AppSummary{
+				Name:         app.Name,
+				Namespace:    app.Namespace,
+				EngineType:   "argocd",
+				Health:       app.Health,
+				SyncStatus:   app.SyncStatus,
+				Revision:     app.Revision,
+				ConnectionID: creds.ConnectionID.String(),
+			})
+		}
 	}
-	return summaries, nil
+	return allApps, nil
 }
 
-// listFluxApps lists Kustomizations and HelmReleases from FluxCD.
+// listFluxApps lists Kustomizations and HelmReleases from FluxCD across all
+// resolved connections (clusters).
 func (c *Client) listFluxApps(ctx context.Context, opts ListOptions) ([]AppSummary, error) {
 	if c.registry == nil {
 		return nil, fmt.Errorf("plugin registry not available")
 	}
 
-	// Resolve FluxCD credentials
-	creds, err := c.credResolver.ResolveFlux(ctx, gitops.ResolveOpts{
+	// Resolve all FluxCD credentials (iterates every matching connection)
+	allCreds, err := c.credResolver.ResolveAllFlux(ctx, gitops.ResolveOpts{
 		TenantID: opts.TenantID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("resolve flux credentials: %w", err)
 	}
 
-	config := map[string]string{
-		"kubeconfig": creds.Kubeconfig,
-	}
-
 	var allApps []AppSummary
+	for _, creds := range allCreds {
+		config := map[string]string{
+			"kubeconfig": creds.Kubeconfig,
+		}
 
-	// List Kustomizations
-	resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "list_kustomizations", nil, config)
-	if err == nil && resp.Success {
-		var items []map[string]interface{}
-		if err := json.Unmarshal(resp.Output, &items); err == nil {
-			for _, item := range items {
-				allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
+		// List Kustomizations
+		resp, err := c.registry.ExecuteAction(ctx, "fluxcd", "list_kustomizations", nil, config)
+		if err == nil && resp.Success {
+			var items []map[string]interface{}
+			if err := json.Unmarshal(resp.Output, &items); err == nil {
+				for _, item := range items {
+					allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
+				}
 			}
 		}
-	}
 
-	// List HelmReleases
-	resp, err = c.registry.ExecuteAction(ctx, "fluxcd", "list_helmreleases", nil, config)
-	if err == nil && resp.Success {
-		var items []map[string]interface{}
-		if err := json.Unmarshal(resp.Output, &items); err == nil {
-			for _, item := range items {
-				allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
+		// List HelmReleases
+		resp, err = c.registry.ExecuteAction(ctx, "fluxcd", "list_helmreleases", nil, config)
+		if err == nil && resp.Success {
+			var items []map[string]interface{}
+			if err := json.Unmarshal(resp.Output, &items); err == nil {
+				for _, item := range items {
+					allApps = append(allApps, fluxItemToAppSummary(item, creds.ConnectionID.String()))
+				}
 			}
 		}
 	}

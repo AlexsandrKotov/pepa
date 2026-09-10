@@ -164,7 +164,7 @@ export default function KnowledgeBasePage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 24, color: 'var(--text-secondary, #888)' }}>
+      <div style={{ padding: 24, color: 'var(--text-secondary)' }}>
         Loading Knowledge Base...
       </div>
     );
@@ -173,10 +173,10 @@ export default function KnowledgeBasePage() {
   return (
     <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
       <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary, #fff)', margin: 0 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
           Knowledge Base
         </h1>
-        <p style={{ color: 'var(--text-secondary, #888)', margin: '4px 0 0', fontSize: 14 }}>
+        <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0', fontSize: 14 }}>
           RAG-powered knowledge base for AI context. Documents are automatically indexed and searchable.
         </p>
       </div>
@@ -186,8 +186,8 @@ export default function KnowledgeBasePage() {
         <StatCard label="Documents" value={stats?.total_documents ?? 0} color="#3B82F6" />
         <StatCard label="Chunks" value={stats?.total_chunks ?? 0} color="#8B5CF6" />
         <StatCard label="RAG Status" value={stats?.rag_enabled ? 'Active' : 'Disabled'} color={stats?.rag_enabled ? '#10B981' : '#EF4444'} />
-        <div style={{ background: 'var(--bg-secondary, #1a1a2e)', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginBottom: 4 }}>By Source</div>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>By Source</div>
           {stats?.stats && Object.entries(stats.stats)
             .filter(([k]) => !k.startsWith('_'))
             .map(([source, count]) => (
@@ -196,7 +196,7 @@ export default function KnowledgeBasePage() {
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: SOURCE_COLORS[source] || '#666', display: 'inline-block' }} />
                   {source}
                 </span>
-                <span style={{ color: 'var(--text-primary, #fff)', fontWeight: 600 }}>{count}</span>
+                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{count}</span>
               </div>
             ))}
         </div>
@@ -211,9 +211,9 @@ export default function KnowledgeBasePage() {
             style={{
               padding: '8px 16px',
               borderRadius: 8,
-              border: 'none',
-              background: activeTab === tab ? 'var(--bg-accent, #3B82F6)' : 'var(--bg-secondary, #1a1a2e)',
-              color: activeTab === tab ? '#fff' : 'var(--text-secondary, #888)',
+              background: activeTab === tab ? 'var(--accent)' : 'var(--surface)',
+              border: activeTab === tab ? 'none' : '1px solid var(--border)',
+              color: activeTab === tab ? '#fff' : 'var(--text-secondary)',
               cursor: 'pointer',
               fontSize: 14,
               fontWeight: activeTab === tab ? 600 : 400,
@@ -244,7 +244,7 @@ export default function KnowledgeBasePage() {
             padding: '8px 16px',
             borderRadius: 8,
             border: 'none',
-            background: reindexing ? 'var(--bg-secondary, #333)' : '#10B981',
+            background: reindexing ? 'var(--surface)' : '#10B981',
             color: '#fff',
             cursor: reindexing ? 'not-allowed' : 'pointer',
             fontSize: 14,
@@ -256,14 +256,14 @@ export default function KnowledgeBasePage() {
 
       {/* Tab Content */}
       {activeTab === 'overview' && (
-        <div style={{ background: 'var(--bg-secondary, #1a1a2e)', borderRadius: 12, padding: 24 }}>
-          <h3 style={{ margin: '0 0 12px', color: 'var(--text-primary, #fff)' }}>How it works</h3>
-          <p style={{ color: 'var(--text-secondary, #888)', lineHeight: 1.6, fontSize: 14 }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 24 }}>
+          <h3 style={{ margin: '0 0 12px', color: 'var(--text-primary)' }}>How it works</h3>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, fontSize: 14 }}>
             The Knowledge Base uses RAG (Retrieval-Augmented Generation) to give the AI assistant
             context about your platform. Documents from services, entities, pipelines, and more
             are automatically chunked, embedded, and indexed for semantic search.
           </p>
-          <ul style={{ color: 'var(--text-secondary, #888)', lineHeight: 2, fontSize: 14, paddingLeft: 20 }}>
+          <ul style={{ color: 'var(--text-secondary)', lineHeight: 2, fontSize: 14, paddingLeft: 20 }}>
             <li><strong>Auto-ingestion:</strong> Services, entities, and pipeline runs are indexed automatically</li>
             <li><strong>Custom documents:</strong> Add your own documentation, runbooks, and guides</li>
             <li><strong>Hybrid search:</strong> Combines vector similarity + keyword matching for best results</li>
@@ -274,33 +274,33 @@ export default function KnowledgeBasePage() {
       )}
 
       {activeTab === 'documents' && (
-        <div style={{ background: 'var(--bg-secondary, #1a1a2e)', borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-primary, #333)' }}>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary, #888)', fontWeight: 500 }}>Source</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary, #888)', fontWeight: 500 }}>Type</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary, #888)', fontWeight: 500 }}>Content Preview</th>
-                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary, #888)', fontWeight: 500 }}>Ingested</th>
-                <th style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-secondary, #888)', fontWeight: 500 }}>Actions</th>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>Source</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>Type</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>Content Preview</th>
+                <th style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>Ingested</th>
+                <th style={{ padding: '12px 16px', textAlign: 'right', color: 'var(--text-secondary)', fontWeight: 500 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {documents.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary, #888)' }}>No documents indexed yet. Click &quot;Re-index All&quot; or &quot;+ Add Document&quot; to start.</td></tr>
+                <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>No documents indexed yet. Click &quot;Re-index All&quot; or &quot;+ Add Document&quot; to start.</td></tr>
               ) : documents.map(doc => (
-                <tr key={doc.id} style={{ borderBottom: '1px solid var(--border-primary, #222)' }}>
+                <tr key={doc.id} style={{ borderBottom: '1px solid var(--border-light)' }}>
                   <td style={{ padding: '10px 16px' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: SOURCE_COLORS[doc.source] || '#666', display: 'inline-block' }} />
                       {doc.source}
                     </span>
                   </td>
-                  <td style={{ padding: '10px 16px', color: 'var(--text-secondary, #888)' }}>{doc.source_type || '-'}</td>
-                  <td style={{ padding: '10px 16px', color: 'var(--text-secondary, #888)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '10px 16px', color: 'var(--text-secondary)' }}>{doc.source_type || '-'}</td>
+                  <td style={{ padding: '10px 16px', color: 'var(--text-secondary)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {doc.content?.slice(0, 100) || '-'}
                   </td>
-                  <td style={{ padding: '10px 16px', color: 'var(--text-secondary, #888)', fontSize: 12 }}>
+                  <td style={{ padding: '10px 16px', color: 'var(--text-secondary)', fontSize: 12 }}>
                     {doc.ingested_at ? new Date(doc.ingested_at).toLocaleDateString() : '-'}
                   </td>
                   <td style={{ padding: '10px 16px', textAlign: 'right' }}>
@@ -327,9 +327,9 @@ export default function KnowledgeBasePage() {
                 flex: 1,
                 padding: '10px 16px',
                 borderRadius: 8,
-                border: '1px solid var(--border-primary, #333)',
-                background: 'var(--bg-secondary, #1a1a2e)',
-                color: 'var(--text-primary, #fff)',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text-primary)',
                 fontSize: 14,
                 outline: 'none',
               }}
@@ -354,15 +354,15 @@ export default function KnowledgeBasePage() {
           {searchResults.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {searchResults.map((r, i) => (
-                <div key={r.chunk_id || i} style={{ background: 'var(--bg-secondary, #1a1a2e)', borderRadius: 12, padding: 16 }}>
+                <div key={r.chunk_id || i} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ width: 8, height: 8, borderRadius: '50%', background: SOURCE_COLORS[r.source] || '#666', display: 'inline-block' }} />
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary, #fff)', fontSize: 14 }}>{r.source}/{r.source_type}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 14 }}>{r.source}/{r.source_type}</span>
                     </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary, #888)' }}>score: {r.score?.toFixed(3)}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>score: {r.score?.toFixed(3)}</span>
                   </div>
-                  <pre style={{ fontSize: 13, color: 'var(--text-secondary, #ccc)', whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit', lineHeight: 1.5 }}>
+                  <pre style={{ fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit', lineHeight: 1.5 }}>
                     {r.content}
                   </pre>
                 </div>
@@ -371,7 +371,7 @@ export default function KnowledgeBasePage() {
           )}
 
           {searchResults.length === 0 && searchQuery && !searching && (
-            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary, #888)' }}>
+            <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary)' }}>
               No results found. Try a different query.
             </div>
           )}
@@ -381,15 +381,15 @@ export default function KnowledgeBasePage() {
       {/* Edit Document Modal */}
       {editDoc && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'var(--bg-primary, #0f0f1a)', borderRadius: 16, padding: 24, width: '90%', maxWidth: 800, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 24, width: '90%', maxWidth: 800, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: 'var(--text-primary, #fff)', fontSize: 18 }}>
+              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 18 }}>
                 Edit Document
-                <span style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginLeft: 8, fontWeight: 400 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)', marginLeft: 8, fontWeight: 400 }}>
                   {editDoc.source}/{editDoc.source_type}
                 </span>
               </h2>
-              <button onClick={() => setEditDoc(null)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
+              <button onClick={() => setEditDoc(null)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
             </div>
             <textarea
               value={editContent}
@@ -399,9 +399,9 @@ export default function KnowledgeBasePage() {
                 minHeight: 300,
                 padding: 16,
                 borderRadius: 8,
-                border: '1px solid var(--border-primary, #333)',
-                background: 'var(--bg-secondary, #1a1a2e)',
-                color: 'var(--text-primary, #fff)',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text-primary)',
                 fontSize: 14,
                 fontFamily: 'monospace',
                 lineHeight: 1.6,
@@ -410,7 +410,7 @@ export default function KnowledgeBasePage() {
               }}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button onClick={() => setEditDoc(null)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-primary, #333)', background: 'transparent', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+              <button onClick={() => setEditDoc(null)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
               <button onClick={handleEditSave} disabled={editLoading} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#3B82F6', color: '#fff', cursor: editLoading ? 'not-allowed' : 'pointer', fontSize: 14 }}>
                 {editLoading ? 'Saving...' : 'Save & Re-index'}
               </button>
@@ -422,10 +422,10 @@ export default function KnowledgeBasePage() {
       {/* Create Document Modal */}
       {showCreate && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'var(--bg-primary, #0f0f1a)', borderRadius: 16, padding: 24, width: '90%', maxWidth: 800, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 16, padding: 24, width: '90%', maxWidth: 800, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ margin: 0, color: 'var(--text-primary, #fff)', fontSize: 18 }}>Add Document</h2>
-              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
+              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 18 }}>Add Document</h2>
+              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 20 }}>&times;</button>
             </div>
             <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
               <input
@@ -437,9 +437,9 @@ export default function KnowledgeBasePage() {
                   flex: 2,
                   padding: '10px 16px',
                   borderRadius: 8,
-                  border: '1px solid var(--border-primary, #333)',
-                  background: 'var(--bg-secondary, #1a1a2e)',
-                  color: 'var(--text-primary, #fff)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
                   fontSize: 14,
                   outline: 'none',
                 }}
@@ -451,9 +451,9 @@ export default function KnowledgeBasePage() {
                   flex: 1,
                   padding: '10px 16px',
                   borderRadius: 8,
-                  border: '1px solid var(--border-primary, #333)',
-                  background: 'var(--bg-secondary, #1a1a2e)',
-                  color: 'var(--text-primary, #fff)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--surface)',
+                  color: 'var(--text-primary)',
                   fontSize: 14,
                   outline: 'none',
                 }}
@@ -473,9 +473,9 @@ export default function KnowledgeBasePage() {
                 minHeight: 300,
                 padding: 16,
                 borderRadius: 8,
-                border: '1px solid var(--border-primary, #333)',
-                background: 'var(--bg-secondary, #1a1a2e)',
-                color: 'var(--text-primary, #fff)',
+                border: '1px solid var(--border)',
+                background: 'var(--surface)',
+                color: 'var(--text-primary)',
                 fontSize: 14,
                 fontFamily: 'monospace',
                 lineHeight: 1.6,
@@ -484,7 +484,7 @@ export default function KnowledgeBasePage() {
               }}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button onClick={() => setShowCreate(false)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border-primary, #333)', background: 'transparent', color: 'var(--text-secondary, #888)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
+              <button onClick={() => setShowCreate(false)} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 14 }}>Cancel</button>
               <button onClick={handleCreate} disabled={createLoading || !createForm.title.trim() || !createForm.content.trim()} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#6366F1', color: '#fff', cursor: (createLoading || !createForm.title.trim() || !createForm.content.trim()) ? 'not-allowed' : 'pointer', fontSize: 14 }}>
                 {createLoading ? 'Creating...' : 'Create & Index'}
               </button>
@@ -510,8 +510,8 @@ export default function KnowledgeBasePage() {
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
-    <div style={{ background: 'var(--bg-secondary, #1a1a2e)', borderRadius: 12, padding: 16 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-secondary, #888)', marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, color }}>{value}</div>
     </div>
   );

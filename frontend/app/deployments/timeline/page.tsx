@@ -39,10 +39,10 @@ export default function DeploymentTimelinePage() {
   const loadDeployments = async () => {
     setLoading(true);
     try {
-      const filters: { status?: string; team?: string; limit?: number } = { limit };
-      if (statusFilter) filters.status = statusFilter;
-      if (teamFilter) filters.team = teamFilter;
-      const data = await deployments.list(filters);
+      const params: Record<string, string> = { per_page: String(limit) };
+      if (statusFilter) params.status = statusFilter;
+      if (teamFilter) params.team = teamFilter;
+      const data = await deployments.list(params);
       setDeploymentsList(data.deployments || []);
     } catch {
       setDeploymentsList([]);

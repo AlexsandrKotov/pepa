@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,14 +45,26 @@ func listConnections(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
-		connType := c.Query("type")
 		isAdmin := auth.IsPlatformAdmin(c)
 
-		items, err := deps.Repos.Connection.List(c.Request.Context(), tenantID, connType)
+		// Parse pagination and filter params.
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+		filter := repository.ConnectionFilter{
+			TenantID: tenantID,
+			Page:     page,
+			PerPage:  perPage,
+			Search:   c.Query("search"),
+			Type:     c.Query("type"),
+			Status:   c.Query("status"),
+		}
+
+		result, err := deps.Repos.Connection.ListFiltered(c.Request.Context(), filter)
 		if err != nil {
 			respondInternalError(c, err)
 			return
 		}
+		items := result.Items
 		if items == nil {
 			items = []repository.Connection{}
 		}
@@ -73,7 +86,13 @@ func listConnections(deps Dependencies) gin.HandlerFunc {
 				items[i].Config = map[string]any{"_masked": true}
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"connections": items, "total": len(items)})
+		c.JSON(http.StatusOK, gin.H{
+			"connections": items,
+			"total":       result.Total,
+			"page":        result.Page,
+			"per_page":    result.PerPage,
+			"total_pages": result.TotalPages,
+		})
 	}
 }
 

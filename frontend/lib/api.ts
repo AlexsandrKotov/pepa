@@ -1447,7 +1447,10 @@ export interface ClusterNode {
 }
 
 export const clusters = {
-  list: () => fetchAPI<{ clusters: Cluster[]; total: number }>('/api/v1/clusters'),
+  list: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ clusters: Cluster[]; total: number; page: number; per_page: number; total_pages: number }>(`/api/v1/clusters${qs}`);
+  },
   get: (id: string) => fetchAPI<Cluster>(`/api/v1/clusters/${id}`),
   create: (data: Record<string, unknown>) =>
     fetchAPI<Cluster>('/api/v1/clusters', { method: 'POST', body: JSON.stringify(data) }),
@@ -1545,15 +1548,9 @@ export interface DeploymentSpec {
 }
 
 export const deployments = {
-  list: (filters?: { status?: string; team?: string; service?: string; limit?: number }) => {
-    if (!filters) return fetchAPI<{ deployments: Deployment[]; total: number }>('/api/v1/deployments');
-    const qs = new URLSearchParams();
-    if (filters.status) qs.set('status', filters.status);
-    if (filters.team) qs.set('team', filters.team);
-    if (filters.service) qs.set('service', filters.service);
-    if (filters.limit) qs.set('limit', String(filters.limit));
-    const q = qs.toString();
-    return fetchAPI<{ deployments: Deployment[]; total: number }>(`/api/v1/deployments${q ? `?${q}` : ''}`);
+  list: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ deployments: Deployment[]; total: number; page: number; per_page: number; total_pages: number }>(`/api/v1/deployments${qs}`);
   },
   get: (id: string) => fetchAPI<Deployment>(`/api/v1/deployments/${id}`),
   create: (data: Record<string, unknown>) =>
@@ -1883,9 +1880,9 @@ export interface ParsedCluster {
 }
 
 export const connections = {
-  list: (type?: string) => {
-    const qs = type ? `?type=${type}` : '';
-    return fetchAPI<{ connections: Connection[]; total: number }>(`/api/v1/connections${qs}`);
+  list: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ connections: Connection[]; total: number; page: number; per_page: number; total_pages: number }>(`/api/v1/connections${qs}`);
   },
   get: (id: string) => fetchAPI<Connection>(`/api/v1/connections/${id}`),
   create: (data: Record<string, unknown>) =>
@@ -3327,8 +3324,10 @@ export interface DockerHostTestResult {
 }
 
 export const dockerHosts = {
-  list: () =>
-    fetchAPI<{ docker_hosts: DockerHost[]; total: number }>('/api/v1/docker-hosts'),
+  list: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ docker_hosts: DockerHost[]; total: number; page: number; per_page: number; total_pages: number }>(`/api/v1/docker-hosts${qs}`);
+  },
   get: (id: string) =>
     fetchAPI<DockerHost>(`/api/v1/docker-hosts/${id}`),
   create: (data: { name: string; description?: string; host_type: string; host_address: string; tls_ca_cert?: string; tls_cert?: string; tls_key?: string; ssh_key?: string }) =>
@@ -3392,8 +3391,10 @@ export interface DockerServiceHistory {
 }
 
 export const dockerServices = {
-  list: () =>
-    fetchAPI<{ docker_services: DockerService[]; total: number }>('/api/v1/docker-services'),
+  list: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<{ docker_services: DockerService[]; total: number; page: number; per_page: number; total_pages: number }>(`/api/v1/docker-services${qs}`);
+  },
   get: (id: string) =>
     fetchAPI<DockerService>(`/api/v1/docker-services/${id}`),
   create: (data: { docker_host_id: string; name: string; compose_yaml?: string; folder_path?: string; env_vars?: Record<string, string> }) =>

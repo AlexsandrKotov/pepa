@@ -99,7 +99,7 @@ function OverviewTab({ showToast, onSwitchTab }: { showToast: (msg: string, type
   useEffect(() => {
     Promise.all([
       notifications.stats().then(data => setStats(data.stats || [])).catch(() => {}),
-      connections.list('notification').then(data => setConnList((data as { connections: Connection[] }).connections || [])).catch(() => {}),
+      connections.list({ type: 'notification' }).then(data => setConnList((data as { connections: Connection[] }).connections || [])).catch(() => {}),
     ]).finally(() => setLoading(false));
   }, []);
 
@@ -216,7 +216,7 @@ function RulesTab({ showToast }: { showToast: (msg: string, type?: 'success' | '
     try {
       const [rulesRes, connsRes, eventsRes] = await Promise.all([
         notifications.listRules(),
-        connections.list('notification'),
+        connections.list({ type: 'notification' }),
         notifications.eventTypes(),
       ]);
       setRules(rulesRes.rules || []);

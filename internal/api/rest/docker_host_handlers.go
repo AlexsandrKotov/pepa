@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,23 +31,43 @@ func registerDockerHostRoutes(r *gin.RouterGroup, deps Dependencies) {
 func listDockerHosts(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.DockerHost == nil {
-			c.JSON(http.StatusOK, gin.H{"docker_hosts": []interface{}{}, "total": 0})
+			c.JSON(http.StatusOK, gin.H{"docker_hosts": []interface{}{}, "total": 0, "page": 1, "per_page": 20, "total_pages": 0})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
-		items, err := deps.Repos.DockerHost.ListHosts(c.Request.Context(), tenantID)
+
+		// Parse pagination and filter params.
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
+		filter := repository.DockerHostFilter{
+			TenantID: tenantID,
+			Page:     page,
+			PerPage:  perPage,
+			Search:   c.Query("search"),
+			Status:   c.Query("status"),
+			HostType: c.Query("host_type"),
+		}
+
+		result, err := deps.Repos.DockerHost.ListHostsFiltered(c.Request.Context(), filter)
 		if err != nil {
 			respondInternalError(c, err)
 			return
 		}
 		// Strip sensitive fields from list response
+		items := result.Items
 		for i := range items {
 			items[i].TLSCACert = ""
 			items[i].TLSCert = ""
 			items[i].TLSKey = ""
 			items[i].SSHKey = ""
 		}
-		c.JSON(http.StatusOK, gin.H{"docker_hosts": items, "total": len(items)})
+		c.JSON(http.StatusOK, gin.H{
+			"docker_hosts": items,
+			"total":        result.Total,
+			"page":         result.Page,
+			"per_page":     result.PerPage,
+			"total_pages":  result.TotalPages,
+		})
 	}
 }
 

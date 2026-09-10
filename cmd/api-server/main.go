@@ -236,6 +236,14 @@ func main() {
 	go scanScheduler.Start(rootCtx)
 	slog.Info("security scan scheduler started")
 
+	// Auto-start Trivy DB manager if the Trivy plugin is already enabled.
+	// This ensures the vulnerability databases are downloaded/refreshed on
+	// server restart without requiring the user to re-enable the plugin.
+	if trivyPlugin, err := comp.PluginRepo.GetByName(rootCtx, "trivy"); err == nil && trivyPlugin.Enabled && deps.Scanner != nil {
+		slog.Info("Trivy plugin is enabled, starting DB manager on startup")
+		deps.Scanner.StartDBManager(rootCtx)
+	}
+
 	// Initialize HTTP router
 	router, shutdownRouter := rest.NewRouter(deps)
 

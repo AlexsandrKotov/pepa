@@ -9,6 +9,7 @@ import BrandIcon from '@/components/BrandIcon';
 import DeploymentDetailClient from './DeploymentDetailClient';
 import ConfirmModal from '@/components/ConfirmModal';
 import HelmValuesEditor, { toYaml, fromYaml } from '@/components/HelmValuesEditor';
+import Pagination from '@/components/Pagination';
 
 function DeploymentsPageContent() {
   const searchParams = useSearchParams();
@@ -68,6 +69,18 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   const [clusterList, setClusterList] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(20);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the debounce timer on unmount to avoid setState after unmount
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
   const [pageTab, setPageTab] = useState<'all' | 'create'>(autoCreate ? 'create' : 'all');
 
   // Switch tab and keep the URL in sync so the sidebar highlight matches.
@@ -273,8 +286,16 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
 
   const refresh = async () => {
     try {
-      const [d, c] = await Promise.allSettled([deployments.list(), clusters.list()]);
-      if (d.status === 'fulfilled') setDeployList(d.value.deployments || []);
+      const dParams: Record<string, string> = { page: String(page), per_page: String(perPage) };
+      if (statusFilter) dParams.status = statusFilter;
+      if (search) dParams.search = search;
+      const cParams: Record<string, string> = { per_page: '200' };
+      const [d, c] = await Promise.allSettled([deployments.list(dParams), clusters.list(cParams)]);
+      if (d.status === 'fulfilled') {
+        setDeployList(d.value.deployments || []);
+        setTotal(d.value.total || 0);
+        setTotalPages(d.value.total_pages || 0);
+      }
       if (c.status === 'fulfilled') setClusterList(c.value.clusters || []);
       // Load DORA metrics
       deployments.metrics('30d').then(m => setDoraMetrics(m)).catch(() => {});
@@ -282,7 +303,22 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     setLoading(false);
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [page, perPage, statusFilter, search]);
+
+  // Debounced search: only update the query 300ms after typing stops
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setSearch(value);
+      setPage(1);
+    }, 300);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatusFilter(value);
+    setPage(1);
+  };
 
   // Check deployment windows on load
   useEffect(() => {
@@ -473,9 +509,8 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     return () => clearInterval(interval);
   }, [showLogs, logsData?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = statusFilter
-    ? deployList.filter(d => d.status === statusFilter)
-    : deployList;
+  // Filtering and pagination are handled server-side (status/search params in refresh).
+const filtered = deployList;
 
   const stats = {
     total: deployList.length,
@@ -616,10 +651,22 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
       )}
 
       {viewMode === 'list' && (<>
-      <div className="flex gap-3 page-animate-up page-delay-2">
+      <div className="flex flex-wrap items-center gap-3 page-animate-up page-delay-2">
+        <div className="relative flex-1 min-w-[180px] max-w-[320px] overflow-hidden">
+          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={e => handleSearchChange(e.target.value)}
+            placeholder="Search deployments..."
+            className="input !pl-9"
+          />
+        </div>
         <select
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          onChange={e => handleStatusChange(e.target.value)}
           className="input w-48"
         >
           <option value="">All statuses</option>
@@ -812,6 +859,15 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
             </tbody>
           </table>
         </div>
+      )}
+      {viewMode === 'list' && !loading && totalPages > 1 && (
+        <Pagination
+          page={page}
+          perPage={perPage}
+          total={total}
+          onPageChange={setPage}
+          onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+        />
       )}
       </>)}
 

@@ -60,6 +60,104 @@ type DockerService struct {
 
 // ── Docker Host CRUD ─────────────────────────────────────────
 
+// DockerHostFilter defines filtering and pagination parameters for Docker host lists.
+type DockerHostFilter struct {
+	TenantID uuid.UUID
+	Page     int
+	PerPage  int
+	Search   string
+	Status   string
+	HostType string
+}
+
+// DockerHostListResponse is the paginated result of ListHostsFiltered.
+type DockerHostListResponse struct {
+	Items      []DockerHost `json:"items"`
+	Total      int64        `json:"total"`
+	Page       int          `json:"page"`
+	PerPage    int          `json:"per_page"`
+	TotalPages int          `json:"total_pages"`
+}
+
+// ListHostsFiltered returns Docker hosts with filtering and pagination.
+func (r *DockerHostRepository) ListHostsFiltered(ctx context.Context, f DockerHostFilter) (*DockerHostListResponse, error) {
+	query := `
+		SELECT id, tenant_id, name, COALESCE(description,''), host_type, host_address,
+		       COALESCE(tls_ca_cert,''), COALESCE(tls_cert,''), COALESCE(tls_key,''), COALESCE(ssh_key,''),
+		       status, COALESCE(docker_version,''), COALESCE(os_arch,''),
+		       COALESCE(containers_running,0), last_checked_at,
+		       created_at, updated_at
+		FROM docker_hosts WHERE tenant_id = $1`
+	args := []interface{}{f.TenantID}
+	argIdx := 2
+
+	if f.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, f.Status)
+		argIdx++
+	}
+	if f.HostType != "" {
+		query += fmt.Sprintf(" AND host_type = $%d", argIdx)
+		args = append(args, f.HostType)
+		argIdx++
+	}
+	if f.Search != "" {
+		query += fmt.Sprintf(" AND (name ILIKE $%d OR description ILIKE $%d OR host_address ILIKE $%d)", argIdx, argIdx, argIdx)
+		args = append(args, "%"+f.Search+"%")
+		argIdx++
+	}
+
+	// Count
+	countQuery := "SELECT COUNT(*) FROM (" + query + ") sub"
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count docker hosts: %w", err)
+	}
+
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PerPage < 1 {
+		f.PerPage = 20
+	}
+	offset := (f.Page - 1) * f.PerPage
+
+	query += " ORDER BY created_at DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, f.PerPage, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query docker hosts: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]DockerHost, 0)
+	for rows.Next() {
+		var h DockerHost
+		if err := rows.Scan(&h.ID, &h.TenantID, &h.Name, &h.Description,
+			&h.HostType, &h.HostAddress, &h.TLSCACert, &h.TLSCert, &h.TLSKey, &h.SSHKey,
+			&h.Status, &h.DockerVersion, &h.OSArch, &h.ContainersRunning,
+			&h.LastCheckedAt, &h.CreatedAt, &h.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan docker host: %w", err)
+		}
+		items = append(items, h)
+	}
+
+	totalPages := int(total) / f.PerPage
+	if int(total)%f.PerPage > 0 {
+		totalPages++
+	}
+
+	return &DockerHostListResponse{
+		Items:      items,
+		Total:      total,
+		Page:       f.Page,
+		PerPage:    f.PerPage,
+		TotalPages: totalPages,
+	}, nil
+}
+
 // ListHosts returns all Docker hosts for a tenant.
 func (r *DockerHostRepository) ListHosts(ctx context.Context, tenantID uuid.UUID) ([]DockerHost, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -198,6 +296,102 @@ func (r *DockerHostRepository) DeleteHost(ctx context.Context, id uuid.UUID) err
 }
 
 // ── Docker Service CRUD ──────────────────────────────────────
+
+// DockerServiceFilter defines filtering and pagination parameters for Docker service lists.
+type DockerServiceFilter struct {
+	TenantID uuid.UUID
+	Page     int
+	PerPage  int
+	Search   string
+	Status   string
+	HostID   string
+}
+
+// DockerServiceListResponse is the paginated result of ListServicesFiltered.
+type DockerServiceListResponse struct {
+	Items      []DockerService `json:"items"`
+	Total      int64           `json:"total"`
+	Page       int             `json:"page"`
+	PerPage    int             `json:"per_page"`
+	TotalPages int             `json:"total_pages"`
+}
+
+// ListServicesFiltered returns Docker services with filtering and pagination.
+func (r *DockerHostRepository) ListServicesFiltered(ctx context.Context, f DockerServiceFilter) (*DockerServiceListResponse, error) {
+	query := `
+		SELECT id, tenant_id, docker_host_id, name, COALESCE(compose_yaml,''),
+		       COALESCE(folder_path,''), COALESCE(env_vars,'{}'::jsonb), status,
+		       COALESCE(containers,'[]'::jsonb),
+		       created_at, updated_at
+		FROM docker_services WHERE tenant_id = $1`
+	args := []interface{}{f.TenantID}
+	argIdx := 2
+
+	if f.Status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argIdx)
+		args = append(args, f.Status)
+		argIdx++
+	}
+	if f.HostID != "" {
+		query += fmt.Sprintf(" AND docker_host_id::text = $%d", argIdx)
+		args = append(args, f.HostID)
+		argIdx++
+	}
+	if f.Search != "" {
+		query += fmt.Sprintf(" AND name ILIKE $%d", argIdx)
+		args = append(args, "%"+f.Search+"%")
+		argIdx++
+	}
+
+	// Count
+	countQuery := "SELECT COUNT(*) FROM (" + query + ") sub"
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count docker services: %w", err)
+	}
+
+	if f.Page < 1 {
+		f.Page = 1
+	}
+	if f.PerPage < 1 {
+		f.PerPage = 20
+	}
+	offset := (f.Page - 1) * f.PerPage
+
+	query += " ORDER BY created_at DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	args = append(args, f.PerPage, offset)
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query docker services: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]DockerService, 0)
+	for rows.Next() {
+		var s DockerService
+		if err := rows.Scan(&s.ID, &s.TenantID, &s.DockerHostID, &s.Name,
+			&s.ComposeYaml, &s.FolderPath, &s.EnvVars, &s.Status, &s.Containers,
+			&s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan docker service: %w", err)
+		}
+		items = append(items, s)
+	}
+
+	totalPages := int(total) / f.PerPage
+	if int(total)%f.PerPage > 0 {
+		totalPages++
+	}
+
+	return &DockerServiceListResponse{
+		Items:      items,
+		Total:      total,
+		Page:       f.Page,
+		PerPage:    f.PerPage,
+		TotalPages: totalPages,
+	}, nil
+}
 
 // ListServices returns all Docker services for a tenant.
 func (r *DockerHostRepository) ListServices(ctx context.Context, tenantID uuid.UUID) ([]DockerService, error) {

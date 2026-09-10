@@ -126,7 +126,7 @@ function NewServiceForm() {
       const [bpData, clusterData, connData] = await Promise.all([
         blueprintsAPI.list().catch(() => ({ blueprints: [] })),
         clusters.list().catch(() => ({ clusters: [], total: 0 })),
-        connections.list('kubernetes').catch(() => ({ connections: [], total: 0 })),
+        connections.list({ type: 'kubernetes' }).catch(() => ({ connections: [], total: 0 })),
       ]);
       const allBp = bpData.blueprints || [];
       setBlueprints(allBp);

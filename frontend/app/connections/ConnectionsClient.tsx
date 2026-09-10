@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { connections as connectionsAPI, plugins as pluginsAPI, ai as aiAPI, type Connection, type ConnectionType, type PluginInfo, type ConnectionCredentialStatus } from '@/lib/api';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
@@ -89,6 +89,14 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   const [defaultAIProvider, setDefaultAIProvider] = useState('');
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
   const [credStatuses, setCredStatuses] = useState<Record<string, ConnectionCredentialStatus>>({});
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the debounce timer on unmount to avoid setState after unmount
+  useEffect(() => () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
   const { isAdmin, hasPermission } = usePermission();
   const canCreate = isAdmin || hasPermission('connections', 'create');
@@ -97,11 +105,20 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   // Fetch connections client-side (server-side has no auth token)
   useEffect(() => {
     if (initialConnections) return; // already provided
-    connectionsAPI.list()
+    const params: Record<string, string> = { per_page: '200' };
+    if (search) params.search = search;
+    connectionsAPI.list(params)
       .then(data => setConnections(data.connections || []))
       .catch(() => setConnections([]))
       .finally(() => setLoading(false));
-  }, [initialConnections]);
+  }, [initialConnections, search]);
+
+  // Debounced search: only update the query 300ms after typing stops
+  const handleSearchChange = (value: string) => {
+    setSearchInput(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => setSearch(value), 300);
+  };
 
   // Fetch installed plugins to determine which connection types are available
   useEffect(() => {
@@ -247,6 +264,22 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
               </button>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="page-animate-up">
+        <div className="relative max-w-[320px] overflow-hidden">
+          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search connections..."
+            className="input !pl-9"
+          />
         </div>
       </div>
 

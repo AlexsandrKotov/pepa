@@ -13,6 +13,7 @@ import {
 } from '@/lib/api';
 import { getStoredUser } from '@/lib/api';
 import CollapsibleSection from '@/components/CollapsibleSection';
+import useIsMac from '@/hooks/useIsMac';
 import {
   StatCard, QuickActionButton, ClusterRow,
   DeploymentHealthWidget, PipelineActivityWidget, EnvironmentOverviewWidget,
@@ -155,7 +156,7 @@ function WelcomeBanner({ userName, onDismiss }: { userName: string; onDismiss: (
       <div className="relative px-5 py-4 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-[15px] font-semibold text-[var(--text-primary)] mb-0.5">Welcome, {userName}!</h2>
-          <p className="text-[12px] text-[var(--text-secondary)]">Get started by setting up your first connection, or explore the platform.</p>
+          <p className="text-[12px] text-[var(--text-secondary)]">Follow the guided tour to set up your organization, connect a cluster, and run your first workflow.</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <Link href="/get-started" className="btn btn-primary btn-sm">
@@ -182,6 +183,7 @@ function getGreeting(): string {
 // ── Main Component ───────────────────────────────────────────
 
 export default function DashboardClient() {
+  const isMac = useIsMac();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -209,15 +211,15 @@ export default function DashboardClient() {
   // Fetch all dashboard data
   useEffect(() => {
     Promise.all([
-      connections.list().catch(() => ({ connections: [], total: 0 })),
-      clusters.list().catch(() => ({ clusters: [], total: 0 })),
-      deployments.list().catch(() => ({ deployments: [], total: 0 })),
+      connections.list({ per_page: '100' }).catch(() => ({ connections: [], total: 0, page: 1, per_page: 100, total_pages: 0 })),
+      clusters.list({ per_page: '100' }).catch(() => ({ clusters: [], total: 0, page: 1, per_page: 100, total_pages: 0 })),
+      deployments.list({ per_page: '10' }).catch(() => ({ deployments: [], total: 0, page: 1, per_page: 10, total_pages: 0 })),
       audit.list({ per_page: '8' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 8, total_pages: 0 })),
       services.list({ per_page: '6' }).catch(() => ({ items: [], total: 0 })),
       environments.list().catch(() => ({ environments: [], total: 0 })),
       gitops.listRepos().catch(() => ({ repos: [], total: 0 })),
       pipelineSources.list({ per_page: '5' }).catch(() => ({ sources: [], total: 0 })),
-      dockerServices.list().catch(() => ({ docker_services: [], total: 0 })),
+      dockerServices.list({ per_page: '10' }).catch(() => ({ docker_services: [], total: 0, page: 1, per_page: 10, total_pages: 0 })),
       vault.getStatus().catch(() => ({ status: { total_secrets: 0, v1_secrets: 0, v2_secrets: 0, encryption_type: '', key_derivation: '', per_path_keys: false, needs_rotation: false, tenant_isolation: false, created_by_tracking: false, argon2_params: { time: 0, memory: 0, threads: 0, keyLen: 0 } }, mode: 'unknown' })),
     ]).then(([connData, clusterData, deploymentData, auditData, serviceData, envData, gitopsData, pipelineData, dockerData, vaultData]) => {
       // Fetch pipeline runs for all sources
@@ -356,8 +358,8 @@ export default function DashboardClient() {
               Guided tour
             </Link>
           )}
-          <kbd className="hidden md:flex items-center gap-1 px-2.5 py-1 text-[10px] text-[var(--text-tertiary)] bg-[var(--surface)] border border-[var(--border)] rounded-lg">
-            <span className="font-medium">⌘K</span>
+          <kbd className="hidden md:flex items-center gap-1 px-2.5 py-1 text-[11px] text-[var(--text-tertiary)] bg-[var(--surface)] border border-[var(--border)] rounded-lg">
+            <span className="font-medium">{isMac ? '⌘K' : 'Ctrl+K'}</span>
             <span>Quick search</span>
           </kbd>
         </div>
