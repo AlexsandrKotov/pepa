@@ -42,7 +42,10 @@ export default function MarketplacePage() {
       const res = await marketplace.install(pluginId);
       const hint = (res as { hint?: string })?.hint || 'Plugin installed successfully!';
       setToast({ message: hint, type: 'success' });
-      await loadPlugins();
+      // Update plugin status locally to avoid full list reload and page jump
+      setAvailablePlugins(prev => prev.map(p =>
+        p.id === pluginId ? { ...p, installed: true, running: true } : p
+      ));
       // Notify sidebar to refresh enabled plugins list
       window.dispatchEvent(new CustomEvent('pepa:plugins-changed'));
     } catch (err) {
@@ -57,7 +60,10 @@ export default function MarketplacePage() {
     try {
       await marketplace.uninstall(pluginId, force);
       setToast({ message: 'Plugin uninstalled successfully!', type: 'success' });
-      await loadPlugins();
+      // Update plugin status locally to avoid full list reload and page jump
+      setAvailablePlugins(prev => prev.map(p =>
+        p.id === pluginId ? { ...p, installed: false, running: false } : p
+      ));
       // Notify sidebar to refresh enabled plugins list
       window.dispatchEvent(new CustomEvent('pepa:plugins-changed'));
     } catch (err: unknown) {
@@ -192,16 +198,15 @@ export default function MarketplacePage() {
                     <span className="text-[14px] font-medium text-[var(--text-primary)]">
                       {plugin.name || plugin.display_name || plugin.id}
                     </span>
-                    {plugin.installed && plugin.running && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-600 rounded-full">
-                        Running
-                      </span>
-                    )}
-                    {plugin.installed && !plugin.running && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-yellow-500/10 text-yellow-600 rounded-full">
-                        Installed
-                      </span>
-                    )}
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full h-[18px]">
+                      {plugin.installed && plugin.running ? (
+                        <span className="bg-emerald-500/10 text-emerald-600">Running</span>
+                      ) : plugin.installed && !plugin.running ? (
+                        <span className="bg-yellow-500/10 text-yellow-600">Installed</span>
+                      ) : (
+                        <span className="invisible">Running</span>
+                      )}
+                    </span>
                   </div>
                   <span className="text-[12px] text-[var(--text-tertiary)]">
                     v{plugin.version} by {plugin.author}
@@ -260,7 +265,7 @@ export default function MarketplacePage() {
                     <button
                       onClick={() => setUninstallTarget(plugin.id)}
                       disabled={installing === plugin.id}
-                      className="text-[12px] text-red-500 hover:text-red-400 font-medium disabled:opacity-50"
+                      className="btn btn-sm border border-red-500/30 text-red-500 hover:bg-red-500/10 font-medium disabled:opacity-50"
                     >
                       {installing === plugin.id ? 'Uninstalling...' : 'Uninstall'}
                     </button>

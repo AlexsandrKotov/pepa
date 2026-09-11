@@ -1,7 +1,7 @@
 'use client';
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { selfService, deployments, clusters, type Cluster, type Environment, type ProjectDetection, type SelfServiceDeployment } from '@/lib/api';
+import { selfService, deployments, clusters, helmRepositories, registryRepositories, type Cluster, type Environment, type ProjectDetection, type SelfServiceDeployment, type HelmRepository, type HelmChart, type HelmChartVersion, type RegistryRepository } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import BrandIcon from '@/components/BrandIcon';
@@ -68,6 +68,24 @@ function SelfServiceDeployContent() {
   const [envVars, setEnvVars] = useState<{ key: string; value: string }[]>([]);
   // Collapsible sections
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({ deployment: true, network: false, health: false, advanced: false });
+  // Loaded data for cascading dropdowns
+  const [helmRepoList, setHelmRepoList] = useState<HelmRepository[]>([]);
+  const [helmCharts, setHelmCharts] = useState<HelmChart[]>([]);
+  const [helmChartVersions, setHelmChartVersions] = useState<HelmChartVersion[]>([]);
+  const [selectedHelmRepoId, setSelectedHelmRepoId] = useState('');
+  const [registryList, setRegistryList] = useState<RegistryRepository[]>([]);
+  const [registryImages, setRegistryImages] = useState<string[]>([]);
+  const [registryTags, setRegistryTags] = useState<string[]>([]);
+  const [selectedRegistryId, setSelectedRegistryId] = useState('');
+  const [selectedRegistryImage, setSelectedRegistryImage] = useState('');
+  // Manual input toggle
+  const [dockerManual, setDockerManual] = useState(false);
+  const [helmManual, setHelmManual] = useState(false);
+  // Loading states
+  const [loadingHelmCharts, setLoadingHelmCharts] = useState(false);
+  const [loadingHelmVersions, setLoadingHelmVersions] = useState(false);
+  const [loadingImages, setLoadingImages] = useState(false);
+  const [loadingTags, setLoadingTags] = useState(false);
 
   const toggleSection = (key: string) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
 
@@ -84,7 +102,68 @@ function SelfServiceDeployContent() {
     clusters.list()
       .then(res => setClusterList(res.clusters || []))
       .catch(() => {});
+    // Load helm repos and registry repos for cascading dropdowns
+    helmRepositories.list()
+      .then(res => setHelmRepoList(res.helm_repositories || []))
+      .catch(() => {});
+    registryRepositories.list()
+      .then(res => setRegistryList(res.registry_repositories || []))
+      .catch(() => {});
   }, []);
+
+  // Load charts when a Helm repo is selected
+  useEffect(() => {
+    if (!selectedHelmRepoId) {
+      setHelmCharts([]);
+      setHelmChartVersions([]);
+      return;
+    }
+    setLoadingHelmCharts(true);
+    helmRepositories.listCharts(selectedHelmRepoId)
+      .then(res => { setHelmCharts(res.charts || []); setHelmChartVersions([]); })
+      .catch(() => { setHelmCharts([]); })
+      .finally(() => setLoadingHelmCharts(false));
+  }, [selectedHelmRepoId]);
+
+  // Load versions when a Helm chart is selected
+  const loadHelmVersions = useCallback((chartName: string) => {
+    if (!selectedHelmRepoId || !chartName) {
+      setHelmChartVersions([]);
+      return;
+    }
+    setLoadingHelmVersions(true);
+    helmRepositories.listChartVersions(selectedHelmRepoId, chartName)
+      .then(res => setHelmChartVersions(res.versions || []))
+      .catch(() => setHelmChartVersions([]))
+      .finally(() => setLoadingHelmVersions(false));
+  }, [selectedHelmRepoId]);
+
+  // Load images when a registry is selected
+  useEffect(() => {
+    if (!selectedRegistryId) {
+      setRegistryImages([]);
+      setRegistryTags([]);
+      return;
+    }
+    setLoadingImages(true);
+    registryRepositories.listImages(selectedRegistryId)
+      .then(res => { setRegistryImages(res.images || []); setRegistryTags([]); })
+      .catch(() => { setRegistryImages([]); })
+      .finally(() => setLoadingImages(false));
+  }, [selectedRegistryId]);
+
+  // Load tags when an image is selected
+  useEffect(() => {
+    if (!selectedRegistryId || !selectedRegistryImage) {
+      setRegistryTags([]);
+      return;
+    }
+    setLoadingTags(true);
+    registryRepositories.listTags(selectedRegistryId, selectedRegistryImage)
+      .then(res => setRegistryTags(res.tags || []))
+      .catch(() => setRegistryTags([]))
+      .finally(() => setLoadingTags(false));
+  }, [selectedRegistryId, selectedRegistryImage]);
 
   // Load my deployments
   useEffect(() => {
@@ -130,15 +209,18 @@ function SelfServiceDeployContent() {
       const spec: Record<string, unknown> = {};
 
       // Only include containers for Docker source (matching deployments page pattern)
-      if (sourceType === 'docker' && dockerImage.trim()) {
-        spec.containers = [{
-          name: 'main',
-          image: `${dockerImage}:${dockerTag}`,
-          cpu: containerCpu,
-          memory: containerMemory,
-          ports: [{ containerPort }],
-          ...(Object.keys(envRecord).length > 0 ? { env: envRecord } : {}),
-        }];
+      if (sourceType === 'docker') {
+        const resolvedImage = dockerManual ? dockerImage : (selectedRegistryImage || dockerImage);
+        if (resolvedImage.trim()) {
+          spec.containers = [{
+            name: 'main',
+            image: `${resolvedImage}:${dockerTag}`,
+            cpu: containerCpu,
+            memory: containerMemory,
+            ports: [{ containerPort }],
+            ...(Object.keys(envRecord).length > 0 ? { env: envRecord } : {}),
+          }];
+        }
       }
 
       spec.service = { port: servicePort, type: serviceType };
@@ -168,12 +250,15 @@ function SelfServiceDeployContent() {
       } else {
         // Use deployments API for non-Git sources
         if (sourceType === 'helm') {
-          spec.chart = { source_type: helmSourceType, chart_url: helmChartUrl, chart_name: helmChartName, chart_version: helmChartVersion || undefined };
+          const selectedRepo = helmRepoList.find(r => r.id === selectedHelmRepoId);
+          const resolvedChartUrl = helmManual ? helmChartUrl : (selectedRepo?.url || '');
+          const resolvedSourceType = helmManual ? helmSourceType : (selectedRepo ? `helm_${selectedRepo.repo_type}` : helmSourceType);
+          spec.chart = { source_type: resolvedSourceType, chart_url: resolvedChartUrl, chart_name: helmChartName, chart_version: helmChartVersion || undefined };
         } else if (sourceType === 'yaml') {
           spec.values_yaml = rawYaml;
         }
         await deployments.create({
-          gitlab_project_name: sourceType === 'docker' ? (dockerImage.split('/').pop() || 'app') : helmChartName || 'app',
+          gitlab_project_name: sourceType === 'docker' ? ((dockerManual ? dockerImage : selectedRegistryImage).split('/').pop() || 'app') : helmChartName || 'app',
           target_namespace: namespace,
           target_cluster_id: selectedClusterId || undefined,
           deploy_type: sourceType === 'helm' ? 'helm' : 'raw',
@@ -195,7 +280,7 @@ function SelfServiceDeployContent() {
     } finally {
       setDeploying(false);
     }
-  }, [sourceType, gitRepoUrl, gitBranch, dockerImage, dockerTag, helmChartUrl, helmChartName, helmChartVersion, helmSourceType, rawYaml, selectedEnv, selectedClusterId, namespace, blueprintType, replicas, strategy, timeoutSeconds, servicePort, serviceType, ingressEnabled, ingressHost, livenessPath, readinessPath, containerCpu, containerMemory, containerPort, envVars, showToast]);
+  }, [sourceType, gitRepoUrl, gitBranch, dockerImage, dockerTag, dockerManual, selectedRegistryId, selectedRegistryImage, helmChartUrl, helmChartName, helmChartVersion, helmSourceType, helmManual, selectedHelmRepoId, helmRepoList, rawYaml, selectedEnv, selectedClusterId, namespace, blueprintType, replicas, strategy, timeoutSeconds, servicePort, serviceType, ingressEnabled, ingressHost, livenessPath, readinessPath, containerCpu, containerMemory, containerPort, envVars, showToast]);
 
   const handleCancel = useCallback(async (id: string) => {
     try {
@@ -237,6 +322,16 @@ function SelfServiceDeployContent() {
     setEnvVars([]);
     setOpenSections({ deployment: true, network: false, health: false, advanced: false });
     setError(null);
+    // Reset cascading dropdown state
+    setSelectedHelmRepoId('');
+    setHelmCharts([]);
+    setHelmChartVersions([]);
+    setSelectedRegistryId('');
+    setRegistryImages([]);
+    setRegistryTags([]);
+    setSelectedRegistryImage('');
+    setDockerManual(false);
+    setHelmManual(false);
   };
 
   const sourceTypes: { value: SourceType; label: string; desc: string; icon: string }[] = [
@@ -249,8 +344,8 @@ function SelfServiceDeployContent() {
   const canProceed = () => {
     switch (sourceType) {
       case 'git': return gitRepoUrl.trim().length > 0;
-      case 'docker': return dockerImage.trim().length > 0;
-      case 'helm': return helmChartUrl.trim().length > 0 || helmChartName.trim().length > 0;
+      case 'docker': return dockerManual ? dockerImage.trim().length > 0 : (selectedRegistryId && selectedRegistryImage && dockerTag.trim().length > 0);
+      case 'helm': return helmManual ? (helmChartUrl.trim().length > 0 || helmChartName.trim().length > 0) : (selectedHelmRepoId && helmChartName.trim().length > 0);
       case 'yaml': return rawYaml.trim().length > 0;
     }
   };
@@ -376,26 +471,98 @@ function SelfServiceDeployContent() {
                 {/* Docker Image */}
                 {sourceType === 'docker' && (
                   <>
-                    <div>
-                      <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Image</label>
-                      <input
-                        value={dockerImage}
-                        onChange={e => setDockerImage(e.target.value)}
-                        placeholder="nginx, redis, registry.example.com/myapp"
-                        className="input text-[13px] w-full font-mono"
-                      />
-                      <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                        Docker image from Docker Hub, GHCR, or any registry
-                      </p>
-                    </div>
-                    <div>
-                      <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Tag</label>
-                      <input
-                        value={dockerTag}
-                        onChange={e => setDockerTag(e.target.value)}
-                        placeholder="latest"
-                        className="input text-[13px] w-full font-mono"
-                      />
+                    {!dockerManual && registryList.length > 0 ? (
+                      <>
+                        <div>
+                          <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Registry</label>
+                          <select
+                            value={selectedRegistryId}
+                            onChange={e => { setSelectedRegistryId(e.target.value); setSelectedRegistryImage(''); setDockerTag('latest'); }}
+                            className="input text-[13px] w-full"
+                          >
+                            <option value="">Select registry...</option>
+                            {registryList.map(r => (
+                              <option key={r.id} value={r.id}>{r.name} ({r.registry_type}) — {r.url}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">
+                              Image {loadingImages && <span className="text-[var(--text-tertiary)] font-normal">Loading...</span>}
+                            </label>
+                            <select
+                              value={selectedRegistryImage}
+                              onChange={e => { setSelectedRegistryImage(e.target.value); setDockerTag('latest'); }}
+                              disabled={!selectedRegistryId}
+                              className="input text-[13px] w-full font-mono disabled:opacity-50"
+                            >
+                              <option value="">Select image...</option>
+                              {registryImages.map(img => (
+                                <option key={img} value={img}>{img}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">
+                              Tag {loadingTags && <span className="text-[var(--text-tertiary)] font-normal">Loading...</span>}
+                            </label>
+                            <select
+                              value={dockerTag}
+                              onChange={e => setDockerTag(e.target.value)}
+                              disabled={!selectedRegistryImage}
+                              className="input text-[13px] w-full font-mono disabled:opacity-50"
+                            >
+                              <option value="">Select tag...</option>
+                              {registryTags.slice(0, 50).map(tag => (
+                                <option key={tag} value={tag}>{tag}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        {selectedRegistryImage && (
+                          <p className="text-[11px] font-mono text-[var(--text-tertiary)]">
+                            → {selectedRegistryImage}:{dockerTag || 'latest'}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Image</label>
+                          <input
+                            value={dockerImage}
+                            onChange={e => setDockerImage(e.target.value)}
+                            placeholder="nginx, redis, registry.example.com/myapp"
+                            className="input text-[13px] w-full font-mono"
+                          />
+                          <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+                            Docker image from Docker Hub, GHCR, or any registry
+                          </p>
+                        </div>
+                        <div>
+                          <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Tag</label>
+                          <input
+                            value={dockerTag}
+                            onChange={e => setDockerTag(e.target.value)}
+                            placeholder="latest"
+                            className="input text-[13px] w-full font-mono"
+                          />
+                        </div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setDockerManual(!dockerManual)}
+                        className="text-[11px] text-[var(--accent)] hover:underline flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                        {dockerManual ? 'Select from registry' : 'Enter manually'}
+                      </button>
+                      {!dockerManual && registryList.length === 0 && (
+                        <p className="text-[11px] text-[var(--text-tertiary)]">No registries configured — enter manually</p>
+                      )}
                     </div>
                   </>
                 )}
@@ -403,42 +570,120 @@ function SelfServiceDeployContent() {
                 {/* Helm Chart */}
                 {sourceType === 'helm' && (
                   <>
-                    <div>
-                      <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Chart Source Type</label>
-                      <select value={helmSourceType} onChange={e => setHelmSourceType(e.target.value)} className="input text-[13px] w-full">
-                        <option value="helm_http">HTTP Repository</option>
-                        <option value="helm_oci">OCI Registry</option>
-                        <option value="helm_git">Git Repository</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Repository URL</label>
-                      <input
-                        value={helmChartUrl}
-                        onChange={e => setHelmChartUrl(e.target.value)}
-                        placeholder="https://charts.bitnami.com/bitnami"
-                        className="input text-[13px] w-full font-mono"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Chart Name</label>
-                        <input
-                          value={helmChartName}
-                          onChange={e => setHelmChartName(e.target.value)}
-                          placeholder="postgresql"
-                          className="input text-[13px] w-full"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Version</label>
-                        <input
-                          value={helmChartVersion}
-                          onChange={e => setHelmChartVersion(e.target.value)}
-                          placeholder="latest"
-                          className="input text-[13px] w-full font-mono"
-                        />
-                      </div>
+                    {!helmManual && helmRepoList.length > 0 ? (
+                      <>
+                        <div>
+                          <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Helm Repository</label>
+                          <select
+                            value={selectedHelmRepoId}
+                            onChange={e => { setSelectedHelmRepoId(e.target.value); setHelmChartName(''); setHelmChartVersion(''); }}
+                            className="input text-[13px] w-full"
+                          >
+                            <option value="">Select repository...</option>
+                            {helmRepoList.map(r => (
+                              <option key={r.id} value={r.id}>
+                                {r.name} ({r.repo_type}) — {r.url}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">
+                              Chart {loadingHelmCharts && <span className="text-[var(--text-tertiary)] font-normal">Loading...</span>}
+                            </label>
+                            <select
+                              value={helmChartName}
+                              onChange={e => { setHelmChartName(e.target.value); setHelmChartVersion(''); loadHelmVersions(e.target.value); }}
+                              disabled={!selectedHelmRepoId}
+                              className="input text-[13px] w-full disabled:opacity-50"
+                            >
+                              <option value="">Select chart...</option>
+                              {helmCharts.map(c => (
+                                <option key={c.name} value={c.name}>
+                                  {c.name} {c.latest_version ? `v${c.latest_version}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">
+                              Version {loadingHelmVersions && <span className="text-[var(--text-tertiary)] font-normal">Loading...</span>}
+                            </label>
+                            <select
+                              value={helmChartVersion}
+                              onChange={e => setHelmChartVersion(e.target.value)}
+                              disabled={!helmChartName}
+                              className="input text-[13px] w-full font-mono disabled:opacity-50"
+                            >
+                              <option value="">Latest</option>
+                              {helmChartVersions.map(v => (
+                                <option key={v.version} value={v.version}>
+                                  {v.version}{v.app_version ? ` (app ${v.app_version})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        {helmChartName && (
+                          <p className="text-[11px] font-mono text-[var(--text-tertiary)]">
+                            → {helmRepoList.find(r => r.id === selectedHelmRepoId)?.name}/{helmChartName}{helmChartVersion ? ` v${helmChartVersion}` : ''}
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Chart Source Type</label>
+                          <select value={helmSourceType} onChange={e => setHelmSourceType(e.target.value)} className="input text-[13px] w-full">
+                            <option value="helm_http">HTTP Repository</option>
+                            <option value="helm_oci">OCI Registry</option>
+                            <option value="helm_git">Git Repository</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Repository URL</label>
+                          <input
+                            value={helmChartUrl}
+                            onChange={e => setHelmChartUrl(e.target.value)}
+                            placeholder="https://charts.bitnami.com/bitnami"
+                            className="input text-[13px] w-full font-mono"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Chart Name</label>
+                            <input
+                              value={helmChartName}
+                              onChange={e => setHelmChartName(e.target.value)}
+                              placeholder="postgresql"
+                              className="input text-[13px] w-full"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[12px] font-medium text-[var(--text-secondary)] mb-1 block">Version</label>
+                            <input
+                              value={helmChartVersion}
+                              onChange={e => setHelmChartVersion(e.target.value)}
+                              placeholder="latest"
+                              className="input text-[13px] w-full font-mono"
+                            />
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setHelmManual(!helmManual)}
+                        className="text-[11px] text-[var(--accent)] hover:underline flex items-center gap-1"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+                        {helmManual ? 'Select from repository' : 'Enter manually'}
+                      </button>
+                      {!helmManual && helmRepoList.length === 0 && (
+                        <p className="text-[11px] text-[var(--text-tertiary)]">No Helm repos configured — enter manually</p>
+                      )}
                     </div>
                   </>
                 )}
@@ -548,8 +793,8 @@ function SelfServiceDeployContent() {
                   </div>
                   <p className="text-[11px] font-mono text-[var(--text-tertiary)]">
                     {sourceType === 'git' && `${gitRepoUrl} (${gitBranch})`}
-                    {sourceType === 'docker' && `${dockerImage}:${dockerTag}`}
-                    {sourceType === 'helm' && `${helmChartName || helmChartUrl}${helmChartVersion ? ` v${helmChartVersion}` : ''}`}
+                    {sourceType === 'docker' && `${dockerManual ? dockerImage : selectedRegistryImage}:${dockerTag}`}
+                    {sourceType === 'helm' && `${helmManual ? (helmChartName || helmChartUrl) : `${helmRepoList.find(r => r.id === selectedHelmRepoId)?.name || ''}/${helmChartName}`}${helmChartVersion ? ` v${helmChartVersion}` : ''}`}
                     {sourceType === 'yaml' && `${yamlFormat === 'k8s' ? 'Kubernetes' : 'Compose'} manifest (${rawYaml.length} chars)`}
                   </p>
                 </div>

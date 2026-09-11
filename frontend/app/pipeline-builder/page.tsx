@@ -29,6 +29,8 @@ export default function PipelineBuilderPage() {
   const [deployStatus, setDeployStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [deployLog, setDeployLog] = useState<string[]>([]);
   const [bpSearch, setBpSearch] = useState('');
+  const [bpFilter, setBpFilter] = useState<'user' | 'all'>('user');
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [showValuesFor, setShowValuesFor] = useState<string | null>(null);
@@ -299,9 +301,30 @@ export default function PipelineBuilderPage() {
     }
   };
 
-  const filteredBlueprints = bpSearch
-    ? blueprints.filter(b => b.name.toLowerCase().includes(bpSearch.toLowerCase()) || b.category.includes(bpSearch.toLowerCase()))
+  const baseFiltered = bpFilter === 'user'
+    ? blueprints.filter(b => !b.is_system)
     : blueprints;
+  const filteredBlueprints = bpSearch
+    ? baseFiltered.filter(b => b.name.toLowerCase().includes(bpSearch.toLowerCase()) || b.category.includes(bpSearch.toLowerCase()))
+    : baseFiltered;
+
+  // Group by category
+  const categoryOrder = ['backend', 'frontend', 'data', 'infrastructure', 'messaging', 'ml', 'devops', 'import', 'general'];
+  const groupedBlueprints = filteredBlueprints.reduce<Record<string, ServiceBlueprint[]>>((acc, bp) => {
+    const cat = bp.category || 'general';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(bp);
+    return acc;
+  }, {});
+  const sortedCategories = Object.keys(groupedBlueprints).sort((a, b) => {
+    const ai = categoryOrder.indexOf(a);
+    const bi = categoryOrder.indexOf(b);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+
+  const toggleCategory = (cat: string) => setCollapsedCats(prev => ({ ...prev, [cat]: !prev[cat] }));
+
+  const userCount = blueprints.filter(b => !b.is_system).length;
 
   const enabledCount = pipeline.filter(p => p.enabled).length;
   const selectedCluster = clusterList.find(c => c.id === selectedClusterId);
@@ -367,10 +390,33 @@ export default function PipelineBuilderPage() {
 
             {/* Individual Blueprints */}
             <div className="card-header">
-              <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Available Templates</h2>
-              <span className="text-[11px] text-[var(--text-tertiary)]">{blueprints.length}</span>
+              <h2 className="text-[13px] font-medium text-[var(--text-primary)]">Templates</h2>
+              <span className="text-[11px] text-[var(--text-tertiary)]">{bpFilter === 'user' ? userCount : blueprints.length}</span>
             </div>
             <div className="p-3 space-y-2">
+              {/* Filter toggle */}
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setBpFilter('user')}
+                  className={`flex-1 text-[11px] px-2 py-1.5 rounded-lg border transition-all font-medium ${
+                    bpFilter === 'user'
+                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                  }`}
+                >
+                  My ({userCount})
+                </button>
+                <button
+                  onClick={() => setBpFilter('all')}
+                  className={`flex-1 text-[11px] px-2 py-1.5 rounded-lg border transition-all font-medium ${
+                    bpFilter === 'all'
+                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                  }`}
+                >
+                  All ({blueprints.length})
+                </button>
+              </div>
               <input
                 type="text"
                 placeholder="Search..."
@@ -378,39 +424,62 @@ export default function PipelineBuilderPage() {
                 onChange={e => setBpSearch(e.target.value)}
                 className="input text-[12px]"
               />
-              <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+              <div className="space-y-1 max-h-[55vh] overflow-y-auto">
                 {filteredBlueprints.length === 0 && (
                   <p className="text-[12px] text-[var(--text-tertiary)] text-center py-4">
-                    {blueprints.length === 0 ? (
+                    {bpFilter === 'user' && userCount === 0 ? (
+                      <>No custom templates yet. <Link href="/pipeline-blueprints" className="text-[var(--accent)] hover:underline">Create one</Link></>
+                    ) : blueprints.length === 0 ? (
                       <>No blueprints. <Link href="/pipeline-blueprints" className="text-[var(--accent)] hover:underline">Create some</Link></>
                     ) : 'No matches'}
                   </p>
                 )}
-                {filteredBlueprints.map(bp => {
-                  const inPipeline = pipeline.some(p => p.blueprint.id === bp.id);
+                {sortedCategories.map(cat => {
+                  const items = groupedBlueprints[cat];
+                  const isCollapsed = collapsedCats[cat];
                   return (
-                    <button
-                      key={bp.id}
-                      onClick={() => !inPipeline && addToPipeline(bp)}
-                      disabled={inPipeline}
-                      className={`w-full text-left p-2.5 rounded-lg border transition-all text-[12px] ${
-                        inPipeline
-                          ? 'border-emerald-500/20 bg-emerald-500/10 opacity-60 cursor-default'
-                          : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] cursor-pointer'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{categoryIcons[bp.category] || '📦'}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-[var(--text-primary)] truncate">{bp.name}</div>
-                          <div className="text-[10px] text-[var(--text-tertiary)] font-mono truncate">
-                            {bp.source_type === 'docker_compose' ? (bp.compose_git_url ? `🔀 ${bp.compose_git_url}` : bp.compose_folder_path ? `📂 ${bp.compose_folder_path}` : `Compose (${bp.compose_yaml?.split('\n').length || 0} lines)`) :
-                             bp.source_type === 'container' ? bp.image : bp.chart_url}
-                          </div>
+                    <div key={cat}>
+                      <button
+                        onClick={() => toggleCategory(cat)}
+                        className="w-full flex items-center gap-1.5 py-1.5 text-[11px] font-medium text-[var(--text-tertiary)] uppercase tracking-wider hover:text-[var(--text-secondary)] transition-colors"
+                      >
+                        <span className={`transition-transform text-[9px] ${isCollapsed ? '' : 'rotate-90'}`}>&#9654;</span>
+                        <span>{categoryIcons[cat] || '📦'}</span>
+                        <span className="capitalize">{cat}</span>
+                        <span className="ml-auto text-[10px] normal-case tracking-normal">{items.length}</span>
+                      </button>
+                      {!isCollapsed && (
+                        <div className="space-y-1 mb-1">
+                          {items.map(bp => {
+                            const inPipeline = pipeline.some(p => p.blueprint.id === bp.id);
+                            return (
+                              <button
+                                key={bp.id}
+                                onClick={() => !inPipeline && addToPipeline(bp)}
+                                disabled={inPipeline}
+                                className={`w-full text-left p-2 rounded-lg border transition-all text-[12px] ${
+                                  inPipeline
+                                    ? 'border-emerald-500/20 bg-emerald-500/10 opacity-60 cursor-default'
+                                    : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] cursor-pointer'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-medium text-[var(--text-primary)] truncate text-[11px]">{bp.name}</div>
+                                    <div className="text-[10px] text-[var(--text-tertiary)] font-mono truncate">
+                                      {bp.source_type === 'docker_compose' ? (bp.compose_git_url ? `🔀 ${bp.compose_git_url}` : bp.compose_folder_path ? `📂 ${bp.compose_folder_path}` : `Compose`) :
+                                       bp.source_type === 'container' ? bp.image : bp.chart_url}
+                                    </div>
+                                  </div>
+                                  {inPipeline && <span className="text-green-600 text-[10px] shrink-0">✓</span>}
+                                  {bp.is_system && <span className="text-[9px] px-1 py-0.5 rounded bg-[var(--border-light)] text-[var(--text-tertiary)] shrink-0">sys</span>}
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
-                        {inPipeline && <span className="text-green-600 text-[10px]">✓ added</span>}
-                      </div>
-                    </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
