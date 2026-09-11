@@ -23,9 +23,11 @@ func discoverGitOpsApplications(deps Dependencies) gin.HandlerFunc {
 
 		engineClient := newEngineClient(deps)
 
-		// Get all connections for reference
+		// Get all connections for reference (including kubernetes-type which the
+		// engine resolves as a FluxCD/ArgoCD fallback).
 		argoConns, _ := deps.Repos.Connection.List(ctx, tenantID, "argocd")
 		fluxConns, _ := deps.Repos.Connection.List(ctx, tenantID, "fluxcd")
+		k8sConns, _ := deps.Repos.Connection.List(ctx, tenantID, "kubernetes")
 
 		// Build connection name lookup
 		connNames := make(map[string]string)
@@ -35,8 +37,11 @@ func discoverGitOpsApplications(deps Dependencies) gin.HandlerFunc {
 		for _, conn := range fluxConns {
 			connNames[conn.ID.String()] = conn.Name
 		}
+		for _, conn := range k8sConns {
+			connNames[conn.ID.String()] = conn.Name
+		}
 
-		var discovered []discoveredApp
+		var discovered []*discoveredApp
 		var created int
 
 		// List all ArgoCD applications
@@ -50,7 +55,7 @@ func discoverGitOpsApplications(deps Dependencies) gin.HandlerFunc {
 
 		for _, app := range argoApps {
 			connID, _ := uuid.Parse(app.ConnectionID)
-			disc := discoveredApp{
+			disc := &discoveredApp{
 				ConnectionID:   connID,
 				ConnectionName: connNames[app.ConnectionID],
 				App:            app,
@@ -97,7 +102,7 @@ func discoverGitOpsApplications(deps Dependencies) gin.HandlerFunc {
 
 		for _, app := range fluxApps {
 			connID, _ := uuid.Parse(app.ConnectionID)
-			disc := discoveredApp{
+			disc := &discoveredApp{
 				ConnectionID:   connID,
 				ConnectionName: connNames[app.ConnectionID],
 				App:            app,

@@ -5,45 +5,6 @@ import Link from 'next/link';
 import { gitopsBindings, environments, connections, GitOpsBinding, DiscoveredApp, Environment, WriteBackResult, Connection } from '@/lib/api';
 import BindingWizard from '@/components/BindingWizard';
 
-// ─── Column definitions ──────────────────────────────────────────────────────
-
-const ALL_COLUMNS = [
-  { id: 'application', label: 'Application', alwaysVisible: true },
-  { id: 'engine', label: 'Engine', alwaysVisible: false },
-  { id: 'namespace', label: 'Namespace', alwaysVisible: false },
-  { id: 'cluster', label: 'Cluster', alwaysVisible: false },
-  { id: 'environment', label: 'Environment', alwaysVisible: false },
-  { id: 'strategy', label: 'Strategy', alwaysVisible: false },
-  { id: 'actions', label: 'Actions', alwaysVisible: true },
-];
-
-const DEFAULT_VISIBLE = new Set(['application', 'engine', 'namespace', 'cluster', 'environment', 'strategy', 'actions']);
-
-const GROUP_BY_OPTIONS = [
-  { value: 'cluster', label: 'Cluster' },
-  { value: 'namespace', label: 'Namespace' },
-  { value: 'engine', label: 'Engine' },
-  { value: 'environment', label: 'Environment' },
-  { value: 'none', label: 'None' },
-];
-
-function loadVisibleColumns(): Set<string> {
-  if (typeof window === 'undefined') return new Set(DEFAULT_VISIBLE);
-  try {
-    const saved = localStorage.getItem('gitops-bindings-columns');
-    if (saved) {
-      const arr = JSON.parse(saved) as string[];
-      return new Set(arr);
-    }
-  } catch { /* ignore */ }
-  return new Set(DEFAULT_VISIBLE);
-}
-
-function loadGroupBy(): string {
-  if (typeof window === 'undefined') return 'cluster';
-  return localStorage.getItem('gitops-bindings-groupby') || 'cluster';
-}
-
 export default function GitOpsBindingsPage() {
   const [bindings, setBindings] = useState<GitOpsBinding[]>([]);
   const [envs, setEnvs] = useState<Environment[]>([]);
@@ -61,12 +22,6 @@ export default function GitOpsBindingsPage() {
   const [filterNamespace, setFilterNamespace] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Group-by & columns
-  const [groupBy, setGroupBy] = useState<string>('cluster');
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(DEFAULT_VISIBLE);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [showColumnMenu, setShowColumnMenu] = useState(false);
-
   // Modals
   const [settingEnv, setSettingEnv] = useState<GitOpsBinding | null>(null);
   const [showWizard, setShowWizard] = useState(false);
@@ -76,12 +31,6 @@ export default function GitOpsBindingsPage() {
   const [writeBackLoading, setWriteBackLoading] = useState(false);
   const [writeBackResult, setWriteBackResult] = useState<WriteBackResult | null>(null);
   const [writeBackError, setWriteBackError] = useState('');
-
-  // Initialize from localStorage
-  useEffect(() => {
-    setVisibleColumns(loadVisibleColumns());
-    setGroupBy(loadGroupBy());
-  }, []);
 
   const loadBindings = async () => {
     try {
@@ -155,92 +104,6 @@ export default function GitOpsBindingsPage() {
       return true;
     });
   }, [bindings, filterEnv, filterEngine, filterCluster, filterNamespace, searchQuery]);
-
-  // Stats
-  const stats = useMemo(() => ({
-    total: bindings.length,
-    clusters: new Set(bindings.map(b => b.argo_connection_id).filter(Boolean)).size,
-    namespaces: new Set(bindings.map(b => b.app_namespace)).size,
-    unbound: bindings.filter(b => !b.environment_id).length,
-  }), [bindings]);
-
-  // Group label depends on the active groupBy mode; must be declared before
-  // groupedBindings, which is evaluated during the very first render.
-  const getGroupLabel = useCallback((key: string) => {
-    switch (groupBy) {
-      case 'cluster': return connName(key);
-      case 'namespace': return key;
-      case 'engine': return key === 'argocd' ? 'ArgoCD' : key === 'fluxcd' ? 'FluxCD' : key;
-      case 'environment': return key;
-      default: return key;
-    }
-  }, [groupBy, connName]);
-
-  // Grouped bindings
-  const groupedBindings = useMemo(() => {
-    if (groupBy === 'none') return null;
-
-    const groups = new Map<string, GitOpsBinding[]>();
-
-    filteredBindings.forEach(b => {
-      let key: string;
-      switch (groupBy) {
-        case 'cluster':
-          key = b.argo_connection_id || 'unknown';
-          break;
-        case 'namespace':
-          key = b.app_namespace || 'unknown';
-          break;
-        case 'engine':
-          key = b.engine_type || 'unknown';
-          break;
-        case 'environment':
-          key = b.env_name || 'Unassigned';
-          break;
-        default:
-          key = 'all';
-      }
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(b);
-    });
-
-    return [...groups.entries()]
-      .map(([key, items]) => ({ key, label: getGroupLabel(key), items }))
-      .sort((a, b) => {
-        if (a.key === 'unknown' || a.key === 'Unassigned') return 1;
-        if (b.key === 'unknown' || b.key === 'Unassigned') return -1;
-        return a.label.localeCompare(b.label);
-      });
-  }, [filteredBindings, groupBy, getGroupLabel]);
-
-  const toggleGroup = (key: string) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-
-  const handleGroupByChange = (value: string) => {
-    setGroupBy(value);
-    localStorage.setItem('gitops-bindings-groupby', value);
-    setCollapsedGroups(new Set());
-  };
-
-  const handleColumnToggle = (colId: string) => {
-    setVisibleColumns(prev => {
-      const next = new Set(prev);
-      if (next.has(colId)) next.delete(colId); else next.add(colId);
-      localStorage.setItem('gitops-bindings-columns', JSON.stringify([...next]));
-      return next;
-    });
-  };
-
-  const isColVisible = (id: string) => {
-    const col = ALL_COLUMNS.find(c => c.id === id);
-    if (col?.alwaysVisible) return true;
-    return visibleColumns.has(id);
-  };
 
   // ─── Handlers ────────────────────────────────────────────────────────────────
 
@@ -334,81 +197,67 @@ export default function GitOpsBindingsPage() {
 
   const renderBindingRow = (binding: GitOpsBinding) => (
     <tr key={binding.id} className="hover:bg-[var(--border-light)] transition-colors">
-      {isColVisible('application') && (
-        <td className="!px-3 !py-2.5">
-          <Link
-            href={`/gitops/applications/${binding.argo_connection_id}/${binding.app_namespace}/${binding.app_name}`}
-            className="text-[13px] font-medium text-[var(--accent)] hover:underline"
+      <td className="!px-3 !py-2.5">
+        <Link
+          href={`/gitops/applications/${binding.argo_connection_id}/${binding.app_namespace}/${binding.app_name}`}
+          className="text-[13px] font-medium text-[var(--accent)] hover:underline"
+        >
+          {binding.name}
+        </Link>
+      </td>
+      <td className="!px-3 !py-2.5">
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${getEngineBadge(binding.engine_type)}`}>
+          {getEngineLabel(binding.engine_type)}
+        </span>
+      </td>
+      <td className="!px-3 !py-2.5 text-[12px] font-mono text-[var(--text-secondary)]">
+        {binding.app_namespace}
+      </td>
+      <td className="!px-3 !py-2.5 text-[12px] text-[var(--text-secondary)]">
+        {connName(binding.argo_connection_id)}
+      </td>
+      <td className="!px-3 !py-2.5">
+        {binding.env_name ? (
+          <button
+            onClick={() => setSettingEnv(binding)}
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium hover:opacity-80 transition-opacity"
+            style={{
+              backgroundColor: (binding.env_color || '#6B7280') + '20',
+              color: binding.env_color || '#6B7280',
+            }}
           >
-            {binding.name}
-          </Link>
-        </td>
-      )}
-      {isColVisible('engine') && (
-        <td className="!px-3 !py-2.5">
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${getEngineBadge(binding.engine_type)}`}>
-            {getEngineLabel(binding.engine_type)}
-          </span>
-        </td>
-      )}
-      {isColVisible('namespace') && (
-        <td className="!px-3 !py-2.5 text-[12px] font-mono text-[var(--text-secondary)]">
-          {binding.app_namespace}
-        </td>
-      )}
-      {isColVisible('cluster') && (
-        <td className="!px-3 !py-2.5 text-[12px] text-[var(--text-secondary)]">
-          {connName(binding.argo_connection_id)}
-        </td>
-      )}
-      {isColVisible('environment') && (
-        <td className="!px-3 !py-2.5">
-          {binding.env_name ? (
-            <button
-              onClick={() => setSettingEnv(binding)}
-              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium hover:opacity-80 transition-opacity"
-              style={{
-                backgroundColor: (binding.env_color || '#6B7280') + '20',
-                color: binding.env_color || '#6B7280',
-              }}
-            >
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: binding.env_color || '#6B7280' }} />
-              {binding.env_name}
-            </button>
-          ) : (
-            <button
-              onClick={() => setSettingEnv(binding)}
-              className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--accent)]"
-            >
-              Set...
-            </button>
-          )}
-        </td>
-      )}
-      {isColVisible('strategy') && (
-        <td className="!px-3 !py-2.5 text-[11px] text-[var(--text-secondary)]">
-          {binding.update_strategy}
-        </td>
-      )}
-      {isColVisible('actions') && (
-        <td className="!px-3 !py-2.5">
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={() => openWriteBack(binding)}
-              className="text-[11px] px-2 py-1 bg-emerald-500/10 text-emerald-600 rounded hover:bg-emerald-500/15 font-medium"
-              title="Write image tag back to Git"
-            >
-              Write Back
-            </button>
-            <button
-              onClick={() => handleDelete(binding.id)}
-              className="text-[11px] px-2 py-1 bg-red-500/5 text-red-400 rounded hover:bg-red-500/10"
-            >
-              Delete
-            </button>
-          </div>
-        </td>
-      )}
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: binding.env_color || '#6B7280' }} />
+            {binding.env_name}
+          </button>
+        ) : (
+          <button
+            onClick={() => setSettingEnv(binding)}
+            className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--accent)]"
+          >
+            Set...
+          </button>
+        )}
+      </td>
+      <td className="!px-3 !py-2.5 text-[11px] text-[var(--text-secondary)]">
+        {binding.update_strategy}
+      </td>
+      <td className="!px-3 !py-2.5">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={() => openWriteBack(binding)}
+            className="text-[11px] px-2 py-1 bg-emerald-500/10 text-emerald-600 rounded hover:bg-emerald-500/15 font-medium"
+            title="Write image tag back to Git"
+          >
+            Write Back
+          </button>
+          <button
+            onClick={() => handleDelete(binding.id)}
+            className="text-[11px] px-2 py-1 bg-red-500/5 text-red-400 rounded hover:bg-red-500/10"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
     </tr>
   );
 
@@ -417,13 +266,13 @@ export default function GitOpsBindingsPage() {
       <table>
         <thead>
           <tr>
-            {isColVisible('application') && <th className="!px-3">Application</th>}
-            {isColVisible('engine') && <th className="!px-3">Engine</th>}
-            {isColVisible('namespace') && <th className="!px-3">Namespace</th>}
-            {isColVisible('cluster') && <th className="!px-3">Cluster</th>}
-            {isColVisible('environment') && <th className="!px-3">Environment</th>}
-            {isColVisible('strategy') && <th className="!px-3">Strategy</th>}
-            {isColVisible('actions') && <th className="!px-3 text-right">Actions</th>}
+            <th className="!px-3">Application</th>
+            <th className="!px-3">Engine</th>
+            <th className="!px-3">Namespace</th>
+            <th className="!px-3">Cluster</th>
+            <th className="!px-3">Environment</th>
+            <th className="!px-3">Strategy</th>
+            <th className="!px-3 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -432,66 +281,6 @@ export default function GitOpsBindingsPage() {
       </table>
     </div>
   );
-
-  const renderGroupedTables = () => {
-    if (!groupedBindings) return renderTable(filteredBindings);
-
-    return (
-      <div className="space-y-4">
-        {groupedBindings.map(({ key, label, items }) => {
-          const isCollapsed = collapsedGroups.has(key);
-          return (
-            <div key={key} className="card overflow-hidden">
-              {/* Group header */}
-              <button
-                onClick={() => toggleGroup(key)}
-                className="w-full flex items-center justify-between px-4 py-3 bg-[var(--bg)] hover:bg-[var(--border-light)] transition-colors border-b border-[var(--border-light)]"
-              >
-                <div className="flex items-center gap-2">
-                  <svg
-                    className={`w-4 h-4 text-[var(--text-tertiary)] transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
-                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                  <span className="text-[13px] font-semibold text-[var(--text-primary)]">{label}</span>
-                  {groupBy === 'cluster' && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${getEngineBadge(items[0]?.engine_type || '')}`}>
-                      {getEngineLabel(items[0]?.engine_type || '')}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[11px] text-[var(--text-tertiary)] bg-[var(--border-light)] px-2 py-0.5 rounded-full">
-                  {items.length} binding{items.length !== 1 ? 's' : ''}
-                </span>
-              </button>
-              {/* Group content */}
-              {!isCollapsed && (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="bg-[var(--bg)]">
-                        {isColVisible('application') && <th className="!px-3 !py-2 text-[10px]">Application</th>}
-                        {isColVisible('engine') && <th className="!px-3 !py-2 text-[10px]">Engine</th>}
-                        {isColVisible('namespace') && <th className="!px-3 !py-2 text-[10px]">Namespace</th>}
-                        {isColVisible('cluster') && <th className="!px-3 !py-2 text-[10px]">Cluster</th>}
-                        {isColVisible('environment') && <th className="!px-3 !py-2 text-[10px]">Environment</th>}
-                        {isColVisible('strategy') && <th className="!px-3 !py-2 text-[10px]">Strategy</th>}
-                        {isColVisible('actions') && <th className="!px-3 !py-2 text-[10px] text-right">Actions</th>}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map(renderBindingRow)}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
 
   // ─── Loading state ────────────────────────────────────────────────────────────
 
@@ -539,23 +328,8 @@ export default function GitOpsBindingsPage() {
           </div>
         )}
 
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 page-animate-up page-delay-1">
-          {[
-            { label: 'Total Bindings', value: stats.total, color: 'text-[var(--text-primary)]' },
-            { label: 'Clusters', value: stats.clusters, color: 'text-blue-600' },
-            { label: 'Namespaces', value: stats.namespaces, color: 'text-purple-600' },
-            { label: 'Unassigned Env', value: stats.unbound, color: stats.unbound > 0 ? 'text-orange-600' : 'text-[var(--text-tertiary)]' },
-          ].map(s => (
-            <div key={s.label} className="card card-body py-3 flex items-center gap-3">
-              <div className={`text-[22px] font-bold ${s.color}`}>{s.value}</div>
-              <div className="text-[11px] text-[var(--text-tertiary)]">{s.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Filters + Group-by + Columns */}
-        <div className="flex flex-wrap items-center gap-3 page-animate-up page-delay-2">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-3 page-animate-up page-delay-1">
           <input
             type="text"
             placeholder="Search apps..."
@@ -586,56 +360,6 @@ export default function GitOpsBindingsPage() {
             <option value="argocd">ArgoCD</option>
             <option value="fluxcd">FluxCD</option>
           </select>
-
-          {/* Group by */}
-          <div className="flex items-center gap-1.5 ml-auto">
-            <label className="text-[11px] text-[var(--text-tertiary)] font-medium whitespace-nowrap">Group by:</label>
-            <select
-              value={groupBy}
-              onChange={e => handleGroupByChange(e.target.value)}
-              className="input w-28 !py-1.5 text-[12px]"
-            >
-              {GROUP_BY_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Column visibility */}
-          <div className="relative">
-            <button
-              onClick={() => setShowColumnMenu(!showColumnMenu)}
-              className="btn btn-secondary !py-1.5 text-[12px] flex items-center gap-1.5"
-              title="Toggle columns"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 4v16m6-16v16M4 9h16M4 15h16" />
-              </svg>
-              Columns
-            </button>
-            {showColumnMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowColumnMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-50 w-44 card shadow-lg py-2">
-                  {ALL_COLUMNS.map(col => (
-                    <label
-                      key={col.id}
-                      className={`flex items-center gap-2 px-3 py-1.5 text-[12px] cursor-pointer ${col.alwaysVisible ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--border-light)]'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={col.alwaysVisible || visibleColumns.has(col.id)}
-                        disabled={col.alwaysVisible}
-                        onChange={() => handleColumnToggle(col.id)}
-                        className="rounded border-[var(--border)]"
-                      />
-                      {col.label}
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
 
           {hasActiveFilters && (
             <button
@@ -745,7 +469,7 @@ export default function GitOpsBindingsPage() {
           </div>
         ) : (
           <>
-            {renderGroupedTables()}
+            {renderTable(filteredBindings)}
             <div className="text-[11px] text-[var(--text-tertiary)]">
               Showing {filteredBindings.length} of {bindings.length} binding{bindings.length !== 1 ? 's' : ''}
             </div>
