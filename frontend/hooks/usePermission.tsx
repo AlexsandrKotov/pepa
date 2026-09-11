@@ -77,7 +77,10 @@ export function PermissionProvider({ children }: { children: ReactNode }) {
     };
   }, [fetchSession]);
 
-  const isAdmin = session.roles.some((r) => r === 'admin' || r === 'super_admin');
+  const isAdmin = session.roles.some((r) => {
+    const lower = r.toLowerCase();
+    return lower === 'admin' || lower === 'super_admin' || lower === 'platform_admin' || lower === 'platform admin';
+  });
 
   const hasPermission = useCallback(
     (resource: string, action: string) => {
