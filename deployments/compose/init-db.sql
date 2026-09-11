@@ -630,6 +630,8 @@ CREATE TABLE IF NOT EXISTS deployments (
     promoted_by         VARCHAR(64),
     promoted_at         TIMESTAMPTZ,
     created_by          VARCHAR(64),
+    team_name           VARCHAR(128) DEFAULT '',
+    stage               VARCHAR(64) DEFAULT 'dev',
     created_at          TIMESTAMPTZ DEFAULT NOW(),
     updated_at          TIMESTAMPTZ DEFAULT NOW()
 );
@@ -637,6 +639,7 @@ CREATE TABLE IF NOT EXISTS deployments (
 CREATE INDEX IF NOT EXISTS idx_deploy_tenant ON deployments(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_deploy_jira ON deployments(jira_issue_key);
 CREATE INDEX IF NOT EXISTS idx_deploy_status ON deployments(status);
+CREATE INDEX IF NOT EXISTS idx_deployments_tenant_team_stage ON deployments(tenant_id, team_name, stage);
 
 -- ============================================================
 -- JIRA ISSUES (synced from Jira API)

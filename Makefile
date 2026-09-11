@@ -12,7 +12,9 @@ VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_TIME  := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS     := -ldflags "-s -w -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME)"
 GOFILES     := $(shell find . -name '*.go' -not -path './vendor/*')
-OPENTOFU_VERSION ?= 1.9.0
+
+# Tool versions — single source of truth in .env.versions
+include .env.versions
 
 # ── Build ────────────────────────────────────────────────────
 
@@ -45,17 +47,17 @@ run-worker:
 # Start infra (postgres + redis) via Docker, run API + worker locally
 dev:
 	@echo "→ Starting infrastructure services..."
-	@docker compose -f $(COMPOSE_FILE) up -d postgres redis
+	@cd $(COMPOSE_DIR) && docker compose up -d postgres redis
 	@echo "→ Waiting for PostgreSQL..."
 	@for i in $$(seq 1 30); do \
-		if docker compose -f $(COMPOSE_FILE) exec -T postgres pg_isready -U pepa -d pepa >/dev/null 2>&1; then \
+		if docker compose -p pepa -f $(COMPOSE_DIR)/docker-compose.yml exec -T postgres pg_isready -U pepa -d pepa >/dev/null 2>&1; then \
 			echo "  ✓ PostgreSQL ready"; break; \
 		fi; \
 		sleep 1; \
 	done
 	@echo "→ Waiting for Redis..."
 	@for i in $$(seq 1 15); do \
-		if docker compose -f $(COMPOSE_FILE) exec -T redis redis-cli ping >/dev/null 2>&1; then \
+		if docker compose -p pepa -f $(COMPOSE_DIR)/docker-compose.yml exec -T redis redis-cli ping >/dev/null 2>&1; then \
 			echo "  ✓ Redis ready"; break; \
 		fi; \
 		sleep 1; \
@@ -65,7 +67,7 @@ dev:
 	@echo "    make run-api     # API server (terminal 1)"
 	@echo "    make run-worker  # Background worker (terminal 2)"
 	@echo ""
-	@echo "  Stop infra:  docker compose -f $(COMPOSE_FILE) down"
+	@echo "  Stop infra:  cd $(COMPOSE_DIR) && docker compose down"
 	@echo ""
 
 # ── Test & Lint ──────────────────────────────────────────────
@@ -115,36 +117,38 @@ migrate-init:
 
 # ── Docker ───────────────────────────────────────────────────
 
-COMPOSE_FILE := deployments/compose/docker-compose.yml
-COMPOSE      := docker compose -f $(COMPOSE_FILE) --profile production
+COMPOSE_DIR  := deployments/compose
+COMPOSE      := docker compose -p pepa -f $(COMPOSE_DIR)/docker-compose.yml
 
 docker-build:
 	@echo "→ Building Docker images..."
-	@docker build -f deployments/docker/Dockerfile.api --build-arg OPENTOFU_VERSION=$(OPENTOFU_VERSION) -t ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest .
+	@docker build -f deployments/docker/Dockerfile.api --build-arg HELM_VERSION=$(HELM_VERSION) --build-arg OPENTOFU_VERSION=$(OPENTOFU_VERSION) --build-arg TRIVY_VERSION=$(TRIVY_VERSION) -t ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest .
 	@docker build -f deployments/docker/Dockerfile.worker -t ghcr.io/alexsandrkotov/pepa/pepa-worker:latest .
 	@docker build -f deployments/docker/Dockerfile.frontend -t ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest frontend/
 
 docker-up:
 	@echo "→ Starting PEPA stack..."
-	@$(COMPOSE) up -d
+	@cd $(COMPOSE_DIR) && docker compose up -d
 
 docker-down:
 	@echo "→ Stopping PEPA stack..."
-	@$(COMPOSE) down
+	@cd $(COMPOSE_DIR) && docker compose down
 
 docker-logs:
-	@$(COMPOSE) logs -f
+	@cd $(COMPOSE_DIR) && docker compose logs -f
 
 # ── Full clean deploy ────────────────────────────────────────
 
 deploy: clean plugins docker-build
 	@echo ""
 	@echo "→ Stopping old containers and volumes..."
-	@$(COMPOSE) down -v --remove-orphans 2>/dev/null || true
+	@cd $(COMPOSE_DIR) && docker compose down -v --remove-orphans 2>/dev/null || true
 	@echo "→ Ensuring .env exists..."
-	@test -f deployments/compose/.env || cp deployments/compose/.env.example deployments/compose/.env
-	@echo "→ Starting PEPA stack..."
-	@$(COMPOSE) up -d
+	@test -f $(COMPOSE_DIR)/.env || cp $(COMPOSE_DIR)/.env.example $(COMPOSE_DIR)/.env
+	@echo "→ Ensuring docker-compose.override.yml exists (dev mode)..."
+	@test -f $(COMPOSE_DIR)/docker-compose.override.yml || cp $(COMPOSE_DIR)/docker-compose.override.yml.example $(COMPOSE_DIR)/docker-compose.override.yml
+	@echo "→ Starting PEPA stack (base + override)..."
+	@cd $(COMPOSE_DIR) && docker compose up -d
 	@echo ""
 	@echo "✓ PEPA deployed!"
 	@echo ""

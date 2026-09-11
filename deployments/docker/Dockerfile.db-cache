@@ -1,8 +1,11 @@
 # Lightweight Trivy DB Cache Warmer
 # Downloads and refreshes trivy-db and trivy-java-db every 6 hours
 # from multiple sources with automatic fallback.
+#
+# Build: docker build --build-arg TRIVY_VERSION=<version> -f ... .
 
-FROM aquasec/trivy:0.74.0
+ARG TRIVY_VERSION
+FROM aquasec/trivy:${TRIVY_VERSION}
 
 # Install shell for script execution
 RUN apk add --no-cache bash

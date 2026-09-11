@@ -1,0 +1,81 @@
+# ============================================================
+# PEPA — Development Override
+# ============================================================
+# This file is AUTO-LOADED by Docker Compose when present.
+# It adds build contexts, source mounts, and dev-only services
+# on top of the production-ready docker-compose.yml base.
+#
+# Setup:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# The override file is gitignored — each developer maintains
+# their own local copy.
+# ============================================================
+
+services:
+
+  # ── API Server: build from source ──────────────────────────
+  api-server:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.api
+    volumes:
+      # Bind-mount source tree plugins instead of archive-local ./plugins
+      - ../../plugins:/plugins:ro
+      # Real $HOME for IaC path access (not /root as in production)
+      - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
+      - ${HOST_HOME_DIR:-${HOME}}:${HOST_HOME_DIR:-${HOME}}:ro
+      # VEX documents for vulnerability noise reduction (dev only)
+      - ./trivy-vex:/etc/trivy/vex:ro
+    environment:
+      # Dev-friendly CORS (direct access without nginx)
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:8088}
+
+  # ── Worker: build from source ──────────────────────────────
+  worker:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.worker
+    volumes:
+      - ../../plugins:/plugins:ro
+      - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
+      - ${HOST_HOME_DIR:-${HOME}}:${HOST_HOME_DIR:-${HOME}}:ro
+
+  # ── Frontend: build from source ────────────────────────────
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../deployments/docker/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: ""
+
+  # ── Trivy DB Cache Warmer (dev only) ───────────────────────
+  # Keeps trivy-db and trivy-java-db fresh from multiple sources.
+  # Not included in the production archive — production relies on
+  # the named trivy-cache volume and in-container DB downloads.
+  db-cache:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.db-cache
+      args:
+        TRIVY_VERSION: ${TRIVY_VERSION:-0.74.0}
+    image: ghcr.io/alexsandrkotov/pepa/pepa-db-cache:latest
+    container_name: pepa-db-cache
+    restart: unless-stopped
+    environment:
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
+      TRIVY_DB_REPOSITORY: ${TRIVY_DB_REPOSITORY:-public.ecr.aws/aquasecurity/trivy-db}
+      TRIVY_JAVA_DB_REPOSITORY: ${TRIVY_JAVA_DB_REPOSITORY:-public.ecr.aws/aquasecurity/trivy-java-db}
+      TRIVY_DB_FALLBACK_1: ${TRIVY_DB_FALLBACK_1:-ghcr.io/aquasecurity/trivy-db}
+      TRIVY_DB_FALLBACK_2: ${TRIVY_DB_FALLBACK_2:-mirror.gcr.io/aquasecurity/trivy-db}
+      TRIVY_JAVA_DB_FALLBACK_1: ${TRIVY_JAVA_DB_FALLBACK_1:-ghcr.io/aquasecurity/trivy-java-db}
+      UPDATE_INTERVAL: ${TRIVY_DB_UPDATE_INTERVAL:-21600}
+    volumes:
+      - trivy-cache:/tmp/trivy-cache
+    networks:
+      - pepa-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M

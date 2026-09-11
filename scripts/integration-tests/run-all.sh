@@ -132,10 +132,33 @@ PHASES=(
     [18]="18-test-multi-cluster.sh:Multi-Cluster"
     [19]="19-test-credential-resolution.sh:Credential Resolution"
     [20]="20-test-iac.sh:IaC Execution"
+    [22]="22-test-deployment-crud.sh:Deployment CRUD & Filter"
+    [23]="23-test-deployment-promotion.sh:Deployment Promotion Lifecycle"
+    [24]="24-test-deployment-rollback.sh:Deployment Rollback & Cancel"
+    [25]="25-test-gitops-workflow-board.sh:GitOps Workflow Board"
+    [26]="26-test-environment-deployments.sh:Environment Deployments"
+    [27]="27-test-blueprint-filter.sh:Blueprint Filter & Groups"
+    [28]="28-test-gitops-app-detail.sh:GitOps App Detail & Sync"
+    [29]="29-test-gitops-bindings.sh:GitOps Bindings CRUD"
+    [30]="30-test-workflow-execution.sh:Workflow Execution"
+    [31]="31-test-pipeline-sources.sh:Pipeline Sources & Runs"
+    [32]="32-test-deployment-metrics.sh:Deployment Metrics & Logs"
+    [33]="33-test-deployment-advanced.sh:Deployment Advanced Tests"
+    [34]="34-test-gitops-repos-crud.sh:GitOps Repos CRUD & Advanced"
+    [35]="35-test-environment-variables.sh:Environment Variables & Compare"
+    [36]="36-test-security-scan-advanced.sh:Security Scanning Advanced"
+    [37]="37-test-observability.sh:Observability Overview & Settings"
+    [38]="38-test-gitops-drift-schedules.sh:GitOps Drift Schedules & Approval"
+    [39]="39-test-deployment-deep.sh:Deployment Deep Coverage"
+    [40]="40-test-gitops-bindings-lifecycle.sh:GitOps Bindings & Lifecycle"
+    [41]="41-test-workflow-pipeline.sh:Workflow & Pipeline Sources"
+    [42]="42-test-blueprints-registry.sh:Service Blueprints & Registry"
+    [43]="43-test-notifications-rbac.sh:Notifications & RBAC"
+    [44]="44-test-auto-deploy-connections.sh:Auto-Deploy Rules & Connections"
 )
 
 # Sequential phases (dependencies)
-SEQUENTIAL_ORDER=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)
+SEQUENTIAL_ORDER=(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44)
 
 if [[ -n "$SINGLE_PHASE" ]]; then
     if [[ -n "${PHASES[$SINGLE_PHASE]:-}" ]]; then

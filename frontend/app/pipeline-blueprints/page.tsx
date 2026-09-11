@@ -30,6 +30,7 @@ export default function PipelineBlueprintsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<ServiceBlueprint | null>(null);
   const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Form state
   const [form, setForm] = useState({
@@ -327,117 +328,124 @@ export default function PipelineBlueprintsPage() {
           <button onClick={openCreate} className="btn btn-primary">+ Create First Blueprint</button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 page-animate-up page-delay-2">
-          {filtered.map(bp => (
-            <div key={bp.id} className="card p-5 hover:border-[var(--accent)] transition-colors group modern-card-hover" style={{ borderRadius: '12px' }}>
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">{categoryIcons[bp.category] || '📦'}</span>
-                  <div>
-                    <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">{bp.name}</h3>
-                    <span className="text-[10px] text-[var(--text-tertiary)]">{bp.category}</span>
-                  </div>
-                </div>
-              </div>
-              {bp.description && (
-                <p className="text-[12px] text-[var(--text-secondary)] mb-3 line-clamp-2">{bp.description}</p>
-              )}
-              <div className="space-y-1.5 mb-4">
-                {/* Source type badge */}
-                <div className="flex items-center gap-2 text-[11px]">
-                  <span className="text-[var(--text-tertiary)] w-16">Source:</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                    bp.source_type === 'container' ? 'bg-blue-500/10 text-blue-500' :
-                    bp.source_type === 'helm_git' ? 'bg-purple-500/10 text-purple-500' :
-                    bp.source_type === 'helm_http' ? 'bg-orange-500/10 text-orange-500' :
-                    bp.source_type === 'docker_compose' ? 'bg-cyan-500/10 text-cyan-500' :
-                    'bg-emerald-500/10 text-emerald-500'
-                  }`}>
-                    {bp.source_type === 'container' ? '🐳 Container' :
-                     bp.source_type === 'helm_git' ? '🔀 Helm Git' :
-                     bp.source_type === 'helm_http' ? '🌐 Helm HTTP' :
-                     bp.source_type === 'docker_compose' ? '🐙 Compose' :
-                     '📦 Helm OCI'}
-                  </span>
-                </div>
-                {bp.source_type === 'docker_compose' ? (
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="text-[var(--text-tertiary)] w-16">Compose:</span>
-                    {bp.compose_git_url ? (
-                      <span className="font-mono text-cyan-500 truncate" title={bp.compose_git_url}>🔀 {bp.compose_git_url}</span>
-                    ) : bp.compose_folder_path ? (
-                      <span className="font-mono text-cyan-500 truncate" title={bp.compose_folder_path}>📂 {bp.compose_folder_path}</span>
-                    ) : (
-                      <span className="text-cyan-500 font-medium">{bp.compose_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
-                    )}
-                  </div>
-                ) : bp.source_type === 'container' ? (
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="text-[var(--text-tertiary)] w-16">Image:</span>
-                    <span className="font-mono text-[var(--text-secondary)] truncate">{bp.image || '—'}</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2 text-[11px]">
-                      <span className="text-[var(--text-tertiary)] w-16">Chart:</span>
-                      <span className="font-mono text-[var(--text-secondary)] truncate">{bp.chart_url}</span>
-                    </div>
-                    {bp.chart_version && (
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span className="text-[var(--text-tertiary)] w-16">Version:</span>
-                        <span className="text-[var(--text-secondary)]">{bp.chart_version}</span>
+        <div className="card overflow-hidden page-animate-up page-delay-2" style={{ borderRadius: '12px' }}>
+          {filtered.map((bp, idx) => {
+            const isExpanded = expandedId === bp.id;
+            const srcLabel = bp.source_type === 'container' ? '🐳 Container' :
+              bp.source_type === 'helm_git' ? '🔀 Helm Git' :
+              bp.source_type === 'helm_http' ? '🌐 Helm HTTP' :
+              bp.source_type === 'docker_compose' ? '🐙 Compose' : '📦 Helm OCI';
+            const srcColor = bp.source_type === 'container' ? 'text-blue-500' :
+              bp.source_type === 'helm_git' ? 'text-purple-500' :
+              bp.source_type === 'helm_http' ? 'text-orange-500' :
+              bp.source_type === 'docker_compose' ? 'text-cyan-500' : 'text-emerald-500';
+            const detail = bp.source_type === 'container' ? (bp.image || '—') :
+              bp.source_type === 'docker_compose' ? (bp.compose_git_url || bp.compose_folder_path || `${bp.compose_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines`) :
+              (bp.chart_url || '');
+            return (
+              <div key={bp.id} className={idx > 0 ? 'border-t border-[var(--border-light)]' : ''}>
+                {/* Compact row */}
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : bp.id)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--border-light)]/50 transition-colors text-left"
+                >
+                  <svg className={`w-3.5 h-3.5 text-[var(--text-tertiary)] transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span className="text-sm shrink-0">{categoryIcons[bp.category] || '📦'}</span>
+                  <span className="text-[13px] font-medium text-[var(--text-primary)] truncate min-w-0 flex-shrink">{bp.name}</span>
+                  <span className={`text-[10px] font-medium shrink-0 ${srcColor}`}>{srcLabel}</span>
+                  <span className="text-[11px] text-[var(--text-tertiary)] truncate ml-auto shrink-0 hidden sm:inline">{detail}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-[var(--border-light)] text-[var(--text-tertiary)] rounded shrink-0">{bp.category}</span>
+                </button>
+                {/* Expanded details */}
+                {isExpanded && (
+                  <div className="px-4 pb-3 pt-1 bg-[var(--border-light)]/20 border-t border-[var(--border-light)]">
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[11px] mb-3">
+                      {bp.description && (
+                        <div className="col-span-2 text-[var(--text-secondary)] mb-1">{bp.description}</div>
+                      )}
+                      {bp.source_type === 'docker_compose' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[var(--text-tertiary)] w-16">Compose:</span>
+                          {bp.compose_git_url ? (
+                            <span className="font-mono text-cyan-500 truncate" title={bp.compose_git_url}>🔀 {bp.compose_git_url}</span>
+                          ) : bp.compose_folder_path ? (
+                            <span className="font-mono text-cyan-500 truncate" title={bp.compose_folder_path}>📂 {bp.compose_folder_path}</span>
+                          ) : (
+                            <span className="text-cyan-500 font-medium">{bp.compose_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
+                          )}
+                        </div>
+                      ) : bp.source_type === 'container' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[var(--text-tertiary)] w-16">Image:</span>
+                          <span className="font-mono text-[var(--text-secondary)] truncate">{bp.image || '—'}</span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[var(--text-tertiary)] w-16">Chart:</span>
+                            <span className="font-mono text-[var(--text-secondary)] truncate">{bp.chart_url}</span>
+                          </div>
+                          {bp.chart_version && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[var(--text-tertiary)] w-16">Version:</span>
+                              <span className="text-[var(--text-secondary)]">{bp.chart_version}</span>
+                            </div>
+                          )}
+                          {bp.image && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-[var(--text-tertiary)] w-16">Image:</span>
+                              <span className="font-mono text-[var(--text-secondary)] truncate">{bp.image}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[var(--text-tertiary)] w-16">NS:</span>
+                        <span className="text-[var(--text-secondary)]">{bp.namespace}</span>
                       </div>
-                    )}
-                    {bp.image && (
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span className="text-[var(--text-tertiary)] w-16">Image:</span>
-                        <span className="font-mono text-[var(--text-secondary)] truncate">{bp.image}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[var(--text-tertiary)] w-16">Resources:</span>
+                        <span className="text-[var(--text-secondary)]">{bp.cpu} / {bp.memory} x {bp.replicas}</span>
                       </div>
-                    )}
-                  </>
-                )}
-                <div className="flex items-center gap-2 text-[11px]">
-                  <span className="text-[var(--text-tertiary)] w-16">NS:</span>
-                  <span className="text-[var(--text-secondary)]">{bp.namespace}</span>
-                </div>
-                <div className="flex items-center gap-2 text-[11px]">
-                  <span className="text-[var(--text-tertiary)] w-16">Resources:</span>
-                  <span className="text-[var(--text-secondary)]">{bp.cpu} / {bp.memory} × {bp.replicas}</span>
-                </div>
-                {bp.ports.length > 0 && (
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="text-[var(--text-tertiary)] w-16">Ports:</span>
-                    <div className="flex gap-1">
-                      {bp.ports.map(p => (
-                        <span key={p} className="px-1.5 py-0.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded text-[10px] font-mono">{p}</span>
-                      ))}
+                      {bp.ports.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[var(--text-tertiary)] w-16">Ports:</span>
+                          <div className="flex gap-1">
+                            {bp.ports.map(p => (
+                              <span key={p} className="px-1.5 py-0.5 bg-[var(--border-light)] text-[var(--text-secondary)] rounded text-[10px] font-mono">{p}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {bp.values_yaml && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[var(--text-tertiary)] w-16">values.yaml:</span>
+                          <span className="text-green-600 font-medium">{bp.values_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2 pt-2 border-t border-[var(--border-light)]">
+                      <button onClick={() => openDeployModal(bp)} className="text-[11px] px-2.5 py-1 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 rounded-lg transition-colors font-medium">Deploy</button>
+                      {bp.is_system ? (
+                        <>
+                          <span className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-500 rounded-lg font-medium">System</span>
+                          <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Fork & Edit</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => openEdit(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Edit</button>
+                          <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded-lg transition-colors">Duplicate</button>
+                          <button onClick={() => handleDelete(bp.id)} className="text-[11px] px-2.5 py-1 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors ml-auto">Delete</button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
-                {bp.values_yaml && (
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="text-[var(--text-tertiary)] w-16">values.yaml:</span>
-                    <span className="text-green-600 font-medium">{bp.values_yaml.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} lines</span>
-                  </div>
-                )}
               </div>
-              <div className="flex gap-2 pt-3 border-t border-[var(--border-light)]">
-                <button onClick={() => openDeployModal(bp)} className="text-[11px] px-2.5 py-1 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 rounded-lg transition-colors font-medium">Deploy</button>
-                {bp.is_system ? (
-                  <>
-                    <span className="text-[10px] px-2 py-1 bg-blue-500/10 text-blue-500 rounded-lg font-medium">System</span>
-                    <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Fork & Edit</button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => openEdit(bp)} className="text-[11px] px-2.5 py-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-lg transition-colors">Edit</button>
-                    <button onClick={() => handleDuplicate(bp)} className="text-[11px] px-2.5 py-1 text-[var(--text-tertiary)] hover:bg-[var(--border-light)] rounded-lg transition-colors">Duplicate</button>
-                    <button onClick={() => handleDelete(bp.id)} className="text-[11px] px-2.5 py-1 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors ml-auto">Delete</button>
-                  </>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

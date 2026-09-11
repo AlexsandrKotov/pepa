@@ -24,6 +24,7 @@ out/
 .env.local
 .env.*.local
 deployments/compose/.env
+deployments/compose/docker-compose.override.yml
 
 # IDE
 .idea/

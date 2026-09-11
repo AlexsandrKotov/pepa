@@ -31,10 +31,7 @@ CREATE TABLE IF NOT EXISTS auto_deploy_rules (
     -- Metadata
     created_by UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    -- Ensure no duplicate rules for same source + pattern + environment
-    CONSTRAINT uq_auto_deploy_rule UNIQUE (tenant_id, COALESCE(pipeline_source_id, '00000000-0000-0000-0000-000000000000'::uuid), branch_pattern, environment_id)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Indexes for fast lookups
@@ -44,21 +41,38 @@ CREATE INDEX IF NOT EXISTS idx_auto_deploy_rules_project ON auto_deploy_rules (p
 CREATE INDEX IF NOT EXISTS idx_auto_deploy_rules_env ON auto_deploy_rules (environment_id);
 CREATE INDEX IF NOT EXISTS idx_auto_deploy_rules_enabled ON auto_deploy_rules (enabled) WHERE enabled = true;
 
+-- Ensure no duplicate rules for same source + pattern + environment.
+-- PostgreSQL does not allow expressions inside table UNIQUE constraints, so
+-- the dedupe (including COALESCE so project_path-based rules, where
+-- pipeline_source_id IS NULL, collapse to one group) is a unique expression index.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_auto_deploy_rule
+    ON auto_deploy_rules (
+        tenant_id,
+        COALESCE(pipeline_source_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        branch_pattern,
+        environment_id
+    );
+
 -- RLS policies
 ALTER TABLE auto_deploy_rules ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "auto_deploy_rules_tenant_isolation" ON auto_deploy_rules
-    USING (tenant_id = current_setting('app.tenant_id')::uuid);
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
 
--- RBAC permissions
-INSERT INTO rbac_permissions (role, resource, action)
-VALUES
-    ('admin', 'auto_deploy_rules', 'read'),
-    ('admin', 'auto_deploy_rules', 'create'),
-    ('admin', 'auto_deploy_rules', 'update'),
-    ('admin', 'auto_deploy_rules', 'delete'),
-    ('platform_admin', 'auto_deploy_rules', 'read'),
-    ('platform_admin', 'auto_deploy_rules', 'create'),
-    ('platform_admin', 'auto_deploy_rules', 'update'),
-    ('platform_admin', 'auto_deploy_rules', 'delete')
-ON CONFLICT DO NOTHING;
+-- RBAC permissions (only if the optional rbac_permissions table exists;
+-- the runtime RBAC engine and the admin JWT bypass use the permissions table)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'rbac_permissions') THEN
+        INSERT INTO rbac_permissions (role, resource, action) VALUES
+            ('admin', 'auto_deploy_rules', 'read'),
+            ('admin', 'auto_deploy_rules', 'create'),
+            ('admin', 'auto_deploy_rules', 'update'),
+            ('admin', 'auto_deploy_rules', 'delete'),
+            ('platform_admin', 'auto_deploy_rules', 'read'),
+            ('platform_admin', 'auto_deploy_rules', 'create'),
+            ('platform_admin', 'auto_deploy_rules', 'update'),
+            ('platform_admin', 'auto_deploy_rules', 'delete')
+        ON CONFLICT (role, resource, action) DO NOTHING;
+    END IF;
+END $$;

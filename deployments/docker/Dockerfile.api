@@ -1,6 +1,6 @@
 # Stage 1: Helm binary (cached independently of Go code)
 FROM alpine:3.24 AS helm
-ARG HELM_VERSION=v4.2.4
+ARG HELM_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache curl && \
     ARCH=$(if [ "$TARGETARCH" = "arm64" ]; then echo "arm64"; else echo "amd64"; fi) && \
@@ -11,7 +11,7 @@ RUN apk add --no-cache curl && \
 
 # Stage 1b: OpenTofu binary (open-source Terraform fork, MPL 2.0)
 FROM alpine:3.24 AS opentofu
-ARG OPENTOFU_VERSION=1.9.0
+ARG OPENTOFU_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache curl unzip && \
     ARCH=$(if [ "$TARGETARCH" = "arm64" ]; then echo "arm64"; else echo "amd64"; fi) && \
@@ -23,7 +23,7 @@ RUN apk add --no-cache curl unzip && \
 
 # Stage 1c: Trivy binary (security scanner for the trivy plugin)
 FROM alpine:3.24 AS trivy
-ARG TRIVY_VERSION=0.74.0
+ARG TRIVY_VERSION
 ARG TARGETARCH
 RUN apk add --no-cache curl && \
     ARCH=$(if [ "$TARGETARCH" = "arm64" ]; then echo "ARM64"; else echo "64bit"; fi) && \

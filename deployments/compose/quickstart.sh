@@ -6,7 +6,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 
 # Colors
 RED='\033[0;31m'
@@ -82,6 +81,20 @@ else
   ok "deployments/compose/.env already exists"
 fi
 
+# ── Setup override file (dev mode) ───────────────────────────
+# The override file adds build contexts and source mounts.
+OVERRIDE_ENV="$SCRIPT_DIR/docker-compose.override.yml"
+if [ ! -f "$OVERRIDE_ENV" ]; then
+  if [ -f "$SCRIPT_DIR/docker-compose.override.yml.example" ]; then
+    cp "$SCRIPT_DIR/docker-compose.override.yml.example" "$OVERRIDE_ENV"
+    ok "Created docker-compose.override.yml (dev mode with build contexts)"
+  else
+    warn "docker-compose.override.yml.example not found"
+  fi
+else
+  ok "docker-compose.override.yml already exists"
+fi
+
 # ── Build profiles ────────────────────────────────────────────
 PROFILES=""
 
@@ -92,14 +105,14 @@ echo ""
 
 cd "$SCRIPT_DIR"
 
-# Build images
-$COMPOSE_CMD -f "$COMPOSE_FILE" $PROFILES build
+# Build images (override.yml auto-loaded from current directory)
+$COMPOSE_CMD $PROFILES build
 
 # Start services
 if $DETACH; then
-  $COMPOSE_CMD -f "$COMPOSE_FILE" $PROFILES up -d
+  $COMPOSE_CMD $PROFILES up -d
 else
-  $COMPOSE_CMD -f "$COMPOSE_FILE" $PROFILES up
+  $COMPOSE_CMD $PROFILES up
 fi
 
 # ── Wait for services ─────────────────────────────────────────
@@ -135,8 +148,8 @@ if $DETACH; then
 
   echo ""
   log "Useful commands:"
-  echo "  $COMPOSE_CMD -f $COMPOSE_FILE logs -f     # Follow logs"
-  echo "  $COMPOSE_CMD -f $COMPOSE_FILE down        # Stop all services"
-  echo "  $COMPOSE_CMD -f $COMPOSE_FILE ps          # Show service status"
+  echo "  $COMPOSE_CMD logs -f     # Follow logs"
+  echo "  $COMPOSE_CMD down        # Stop all services"
+  echo "  $COMPOSE_CMD ps          # Show service status"
   echo ""
 fi

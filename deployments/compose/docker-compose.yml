@@ -2,9 +2,16 @@
 # PEPA — Platform Engineering & Pipeline Automator
 # "Delivery without pain, GitOps with joy."
 # ============================================================
+# This is the PRODUCTION-READY base compose file.
+# It uses pre-built images (no build contexts) and works both
+# as-is for production deployments and with the override file
+# (docker-compose.override.yml) for local development.
+#
 # Usage:
-#   Development:  docker compose up -d
-#   Production:   docker compose --profile production up -d
+#   Production:  docker compose up -d
+#   Development: copy docker-compose.override.yml.example to
+#                docker-compose.override.yml, then:
+#                docker compose up -d
 #
 # All sensitive values are loaded from .env file (see .env.example).
 # NEVER hardcode secrets here — they belong in .env (gitignored).
@@ -15,20 +22,23 @@ name: pepa
 networks:
   pepa-net:
     driver: bridge
-  pepa-frontend:
-    driver: bridge
 
 volumes:
   postgres-data:
+    driver: local
   redis-data:
+    driver: local
   custom-plugins:  # For user-uploaded custom plugin binaries
+    driver: local
   pepa-token-tmpfs:  # In-memory volume for bootstrap token (never persisted)
+    driver: local
   nginx-logs:
     driver: local
   trivy-cache:  # Persistent cache for Trivy vulnerability DB (avoids re-downloading ~1GB on each restart)
+    driver: local
 
 # ── Shared environment variables (api-server + worker) ──────
-# Both Go services need the same DB/Redis/S3 connection settings.
+# Both Go services need the same DB/Redis connection settings.
 # Use YAML anchor to define once, reference with <<: *common-env.
 x-common-env: &common-env
   POSTGRES_HOST: postgres
@@ -40,9 +50,6 @@ x-common-env: &common-env
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_PASSWORD: ${REDIS_PASSWORD}
-  S3_ENDPOINT: ""  # Uncomment to enable external S3: http://minio:9000
-  # S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-  # S3_SECRET_KEY: ${S3_SECRET_KEY}
   ENCRYPTION_KEY: ${ENCRYPTION_KEY}
   AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
   AUTH_SESSION_DURATION: ${AUTH_SESSION_DURATION:-168h}
@@ -51,7 +58,6 @@ x-common-env: &common-env
   PLUGIN_SIGNATURE_ENFORCE: ${PLUGIN_SIGNATURE_ENFORCE:-true}
   VAULT_ALLOW_PRIVATE_IPS: ${VAULT_ALLOW_PRIVATE_IPS:-false}
   REGISTRY_ALLOW_PRIVATE_IPS: ${REGISTRY_ALLOW_PRIVATE_IPS:-true}
-  # REGISTRY_ALLOWED_CIDRS: ${REGISTRY_ALLOWED_CIDRS:-}  # Granular: 10.0.0.0/8,172.16.0.0/12
 
 services:
 
@@ -127,9 +133,6 @@ services:
 
   # ── PEPA API Server ────────────────────────────────────────
   api-server:
-    build:
-      context: ../..
-      dockerfile: deployments/docker/Dockerfile.api
     image: ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
     container_name: pepa-api
     restart: unless-stopped
@@ -139,24 +142,22 @@ services:
       SERVER_HOST: "0.0.0.0"
       SERVER_ENV: ${SERVER_ENV:-production}
       CUSTOM_PLUGIN_DIR: /custom-plugins
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:3000,http://localhost:8088}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
       IAC_BINARY: ${IAC_BINARY:-}
       # Ansible needs a writable temp directory; root filesystem is read-only.
       ANSIBLE_LOCAL_TEMP: /tmp/ansible
-      # Trivy vulnerability scanner cache — mounted as named volume (see trivy-cache below).
+      # Trivy vulnerability scanner cache — mounted as named volume.
       TRIVY_CACHE_DIR: /tmp/trivy-cache
-      # Pin Trivy DB to the public GHCR registry — mirror.gcr.io requires auth and causes UNAUTHORIZED errors.
+      # Pin Trivy DB to the public GHCR registry.
       TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
       # Java DB for JVM vulnerability detection
       TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
-      # Skip DB update checks — db-cache service keeps DB fresh every 6h
       TRIVY_SKIP_DB_UPDATE: "false"
       # VEX documents for false-positive filtering (OpenVEX/CycloneDX format)
       TRIVY_VEX_DIR: /etc/trivy/vex
       # VEX repository URI (auto-fetched VEX documents)
       TRIVY_VEX_REPOSITORY_URI: ${TRIVY_VEX_REPOSITORY_URI:-}
       # OpenTelemetry — PEPA exports traces/logs/metrics via OTLP directly.
-      # Point OTEL_ENDPOINT to your backend (SigNoz, Tempo, etc.).
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
       OTEL_ENDPOINT: ${OTEL_ENDPOINT:-}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-pepa}
@@ -171,32 +172,13 @@ services:
       retries: 5
       start_period: 30s
     volumes:
-      # Plugins are bind-mounted from the host — not baked into the image.
-      # Run `make plugins` to build them, then restart the container.
-      - ../../plugins:/plugins:ro
+      - ./plugins:/plugins:ro
       - custom-plugins:/custom-plugins
-      # Host filesystem — allows IaC engines to access local Ansible/Terraform
-      # projects by their host path (e.g. /Users/akotau/pepa/ansible).
-      # The backend auto-translates host paths → /host-home/... inside the container.
-      # Read-only for security. Override with HOST_HOME_DIR in .env if needed.
-      - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
-      # Docker compose needs the original host path so the Docker daemon can resolve
-      # bind mounts in compose files (volumes, build contexts). Without this mount,
-      # the daemon sees /host-home/... which doesn't exist on the host.
-      - ${HOST_HOME_DIR:-${HOME}}:${HOST_HOME_DIR:-${HOME}}:ro
-      # WARNING: Mounting the Docker socket gives the api container control
-      # over the Docker daemon (create/delete containers, read secrets, etc.).
-      # Disabled by default (mounts /dev/null). Set MOUNT_DOCK_SOCKET to the
-      # socket path only if you need Docker host management features; the
-      # mount stays read-only either way.
+      - ${HOST_HOME_DIR:-/root}:/host-home:ro
+      - ${HOST_HOME_DIR:-/root}:${HOST_HOME_DIR:-/root}:ro
       - ${MOUNT_DOCK_SOCKET:-/dev/null}:/var/run/docker.sock:ro
-      # Bootstrap token is written here (in-memory tmpfs, never touches disk).
-      # Read it with: docker exec pepa-api cat /var/run/pepa/bootstrap_token.txt
       - pepa-token-tmpfs:/var/run/pepa
-      # Trivy vulnerability DB cache — persisted across restarts to avoid re-downloading.
       - trivy-cache:/tmp/trivy-cache
-      # VEX documents for vulnerability noise reduction
-      - ./trivy-vex:/etc/trivy/vex:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -208,9 +190,8 @@ services:
     read_only: true
     security_opt:
       - no-new-privileges:true
-    # Access to Docker socket (owned by root:root)
     group_add:
-      - "0"  # root group — needed to write to /var/run/docker.sock
+      - "0"  # root group — needed for Docker socket access
     tmpfs:
       - /tmp:size=2g,exec
     deploy:
@@ -219,57 +200,21 @@ services:
           cpus: '${API_CPUS_LIMIT:-2.0}'
           memory: ${API_MEMORY_LIMIT:-1G}
 
-  # ── Trivy DB Cache Warmer ───────────────────────────────────
-  # Keeps trivy-db and trivy-java-db fresh from multiple sources.
-  # Updates every 6 hours with fallback registries for resilience.
-  db-cache:
-    build:
-      context: ../..
-      dockerfile: deployments/docker/Dockerfile.db-cache
-    image: ghcr.io/alexsandrkotov/pepa/pepa-db-cache:latest
-    container_name: pepa-db-cache
-    restart: unless-stopped
-    environment:
-      TRIVY_CACHE_DIR: /tmp/trivy-cache
-      # Primary DB sources (override in .env for custom mirrors)
-      TRIVY_DB_REPOSITORY: ${TRIVY_DB_REPOSITORY:-public.ecr.aws/aquasecurity/trivy-db}
-      TRIVY_JAVA_DB_REPOSITORY: ${TRIVY_JAVA_DB_REPOSITORY:-public.ecr.aws/aquasecurity/trivy-java-db}
-      # Fallback registries for resilience
-      TRIVY_DB_FALLBACK_1: ${TRIVY_DB_FALLBACK_1:-ghcr.io/aquasecurity/trivy-db}
-      TRIVY_DB_FALLBACK_2: ${TRIVY_DB_FALLBACK_2:-mirror.gcr.io/aquasecurity/trivy-db}
-      TRIVY_JAVA_DB_FALLBACK_1: ${TRIVY_JAVA_DB_FALLBACK_1:-ghcr.io/aquasecurity/trivy-java-db}
-      # Update interval in seconds (default: 6 hours)
-      UPDATE_INTERVAL: ${TRIVY_DB_UPDATE_INTERVAL:-21600}
-    volumes:
-      - trivy-cache:/tmp/trivy-cache
-    networks:
-      - pepa-net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
-
   # ── PEPA Background Worker ─────────────────────────────────
   worker:
-    build:
-      context: ../..
-      dockerfile: deployments/docker/Dockerfile.worker
     image: ghcr.io/alexsandrkotov/pepa/pepa-worker:latest
     container_name: pepa-worker
     restart: unless-stopped
     environment:
       <<: *common-env
       CUSTOM_PLUGIN_DIR: /custom-plugins
+      SERVER_ENV: ${SERVER_ENV:-production}
+      LOG_LEVEL: info
     volumes:
-      # Plugins are bind-mounted from the host — not baked into the image.
-      - ../../plugins:/plugins:ro
-      # Writable storage for uploaded custom plugins.
+      - ./plugins:/plugins:ro
       - custom-plugins:/custom-plugins
-      # Host filesystem — same mount for the worker engine.
-      - ${HOST_HOME_DIR:-${HOME}}:/host-home:ro
-      # Original host path for Docker compose bind-mount resolution.
-      - ${HOST_HOME_DIR:-${HOME}}:${HOST_HOME_DIR:-${HOME}}:ro
+      - ${HOST_HOME_DIR:-/root}:/host-home:ro
+      - ${HOST_HOME_DIR:-/root}:${HOST_HOME_DIR:-/root}:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -293,22 +238,15 @@ services:
 
   # ── Frontend (Next.js) ────────────────────────────────────
   frontend:
-    build:
-      context: ../../frontend
-      dockerfile: ../deployments/docker/Dockerfile.frontend
-      args:
-        NEXT_PUBLIC_API_URL: ""
     image: ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest
     container_name: pepa-frontend
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
-      api-server:
-        condition: service_healthy
+      - api-server
     networks:
       - pepa-net
-      - pepa-frontend
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
       interval: 15s
@@ -327,21 +265,17 @@ services:
           cpus: '${FRONTEND_CPUS_LIMIT:-0.5}'
           memory: ${FRONTEND_MEMORY_LIMIT:-256M}
 
-  # ── Nginx Reverse Proxy (Production only) ─────────────────
-  # Enabled with: docker compose --profile production up -d
+  # ── Nginx Reverse Proxy ────────────────────────────────────
   # Provides TLS termination, rate limiting, and security headers.
   nginx:
     image: nginx:1.31-alpine
     container_name: pepa-nginx
     restart: unless-stopped
-    profiles:
-      - production
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
       - nginx-logs:/var/log/nginx
     depends_on:
@@ -350,7 +284,6 @@ services:
       frontend:
         condition: service_healthy
     networks:
-      - pepa-frontend
       - pepa-net
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
