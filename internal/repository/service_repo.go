@@ -96,6 +96,11 @@ func (r *ServiceRepository) List(ctx context.Context, filter models.ServiceFilte
 	args := []interface{}{}
 	argIdx := 1
 
+	if filter.TenantID != uuid.Nil {
+		query += fmt.Sprintf(" AND s.tenant_id = $%d", argIdx)
+		args = append(args, filter.TenantID)
+		argIdx++
+	}
 	if filter.Status != "" {
 		query += fmt.Sprintf(" AND s.status = $%d", argIdx)
 		args = append(args, filter.Status)

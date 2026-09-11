@@ -33,27 +33,27 @@ type EnvironmentOverview struct {
 
 // EnvironmentOverviewRow represents a row in the overview matrix (one service across all environments).
 type EnvironmentOverviewRow struct {
-	ServiceID    uuid.UUID            `json:"service_id"`
-	ServiceName  string               `json:"service_name"`
-	ServiceSlug  string               `json:"service_slug"`
-	OwnerTeam    string               `json:"owner_team"`
-	Status       string               `json:"status"`
+	ServiceID    uuid.UUID                       `json:"service_id"`
+	ServiceName  string                          `json:"service_name"`
+	ServiceSlug  string                          `json:"service_slug"`
+	OwnerTeam    string                          `json:"owner_team"`
+	Status       string                          `json:"status"`
 	Environments map[string]*EnvironmentOverview `json:"environments"` // keyed by environment slug
 }
 
 // EnvironmentOverviewResponse is the full response for the overview endpoint.
 type EnvironmentOverviewResponse struct {
-	Environments []Environment               `json:"environments"`
-	Services     []EnvironmentOverviewRow    `json:"services"`
-	Problems     []EnvironmentProblem        `json:"problems"`
-	Summary      EnvironmentOverviewSummary  `json:"summary"`
+	Environments []Environment              `json:"environments"`
+	Services     []EnvironmentOverviewRow   `json:"services"`
+	Problems     []EnvironmentProblem       `json:"problems"`
+	Summary      EnvironmentOverviewSummary `json:"summary"`
 }
 
 // EnvironmentProblem represents a problem detected in an environment.
 type EnvironmentProblem struct {
 	ID            string    `json:"id"`
-	Type          string    `json:"type"`           // drift, failed_deploy, unhealthy, security
-	Severity      string    `json:"severity"`       // critical, warning, info
+	Type          string    `json:"type"`     // drift, failed_deploy, unhealthy, security
+	Severity      string    `json:"severity"` // critical, warning, info
 	ServiceID     uuid.UUID `json:"service_id"`
 	ServiceName   string    `json:"service_name"`
 	EnvironmentID uuid.UUID `json:"environment_id"`
@@ -65,12 +65,12 @@ type EnvironmentProblem struct {
 
 // EnvironmentOverviewSummary holds aggregate counts.
 type EnvironmentOverviewSummary struct {
-	TotalServices      int `json:"total_services"`
-	HealthyServices    int `json:"healthy_services"`
-	DegradedServices   int `json:"degraded_services"`
-	TotalDrifts        int `json:"total_drifts"`
-	FailedDeployments  int `json:"failed_deployments"`
-	TotalEnvironments  int `json:"total_environments"`
+	TotalServices     int `json:"total_services"`
+	HealthyServices   int `json:"healthy_services"`
+	DegradedServices  int `json:"degraded_services"`
+	TotalDrifts       int `json:"total_drifts"`
+	FailedDeployments int `json:"failed_deployments"`
+	TotalEnvironments int `json:"total_environments"`
 }
 
 // EnvironmentOverviewRepository handles environment overview queries.
@@ -191,22 +191,30 @@ func (r *EnvironmentOverviewRepository) getEnvironments(ctx context.Context, ten
 }
 
 func (r *EnvironmentOverviewRepository) getServicesWithDeployments(ctx context.Context, tenantID uuid.UUID, envs []Environment) ([]EnvironmentOverviewRow, error) {
-	// Get services with their latest deployment per environment
+	// Deployment state is read from service_deployments: it is the only table
+	// that links a service to an environment (by slug). The deployments table
+	// carries no service reference.
+	envBySlug := make(map[string]Environment, len(envs))
+	for _, e := range envs {
+		envBySlug[e.Slug] = e
+	}
+
 	rows, err := r.pool.Query(ctx, `
-		WITH latest_deployments AS (
-			SELECT DISTINCT ON (d.service_id, d.environment_id)
-				d.service_id, d.environment_id, d.id as deployment_id, 
-				d.status, d.image_tag, d.created_at, d.replicas_ready, d.replicas_desired
-			FROM deployments d
-			WHERE d.tenant_id = $1
-			ORDER BY d.service_id, d.environment_id, d.created_at DESC
+		WITH latest_deploys AS (
+			SELECT DISTINCT ON (sd.service_id, sd.environment)
+				sd.service_id, sd.environment, sd.status, sd.image_tag,
+				COALESCE(sd.deployed_at, sd.created_at) AS deployed_at,
+				sd.pods_ready, sd.pods_total
+			FROM service_deployments sd
+			WHERE sd.tenant_id = $1
+			ORDER BY sd.service_id, sd.environment, COALESCE(sd.deployed_at, sd.created_at) DESC
 		)
-		SELECT s.id, s.name, s.slug, s.status,
-		       ld.environment_id, ld.deployment_id, ld.status as deploy_status,
-		       ld.image_tag, ld.created_at as deployed_at,
-		       ld.replicas_ready, ld.replicas_desired
+		SELECT s.id, s.name, s.slug, COALESCE(s.status,''), COALESCE(t.name,''),
+		       ld.environment, ld.status, ld.image_tag, ld.deployed_at,
+		       COALESCE(ld.pods_ready, 0), COALESCE(ld.pods_total, 0)
 		FROM services s
-		LEFT JOIN latest_deployments ld ON ld.service_id = s.id
+		LEFT JOIN teams t ON t.id = s.owner_team_id
+		LEFT JOIN latest_deploys ld ON ld.service_id = s.id
 		WHERE s.tenant_id = $1
 		ORDER BY s.name
 	`, tenantID)
@@ -216,18 +224,18 @@ func (r *EnvironmentOverviewRepository) getServicesWithDeployments(ctx context.C
 	defer rows.Close()
 
 	serviceMap := make(map[uuid.UUID]*EnvironmentOverviewRow)
+	serviceOrder := make([]uuid.UUID, 0)
 	for rows.Next() {
 		var serviceID uuid.UUID
-		var serviceName, serviceSlug, serviceStatus string
-		var envID *uuid.UUID
-		var deploymentID *uuid.UUID
+		var serviceName, serviceSlug, serviceStatus, ownerTeam string
+		var envSlug *string
 		var deployStatus *string
 		var imageTag *string
 		var deployedAt *time.Time
-		var replicasReady, replicasDesired *int
+		var replicasReady, replicasDesired int
 
-		if err := rows.Scan(&serviceID, &serviceName, &serviceSlug, &serviceStatus,
-			&envID, &deploymentID, &deployStatus, &imageTag, &deployedAt,
+		if err := rows.Scan(&serviceID, &serviceName, &serviceSlug, &serviceStatus, &ownerTeam,
+			&envSlug, &deployStatus, &imageTag, &deployedAt,
 			&replicasReady, &replicasDesired); err != nil {
 			return nil, err
 		}
@@ -238,76 +246,75 @@ func (r *EnvironmentOverviewRepository) getServicesWithDeployments(ctx context.C
 				ServiceID:    serviceID,
 				ServiceName:  serviceName,
 				ServiceSlug:  serviceSlug,
+				OwnerTeam:    ownerTeam,
 				Status:       serviceStatus,
 				Environments: make(map[string]*EnvironmentOverview),
 			}
 			serviceMap[serviceID] = row
+			serviceOrder = append(serviceOrder, serviceID)
 		}
 
-		if envID != nil && deployStatus != nil {
-			// Find the environment slug
-			var envSlug, envName, envColor string
-			for _, e := range envs {
-				if e.ID == *envID {
-					envSlug = e.Slug
-					envName = e.Name
-					envColor = e.Color
-					break
-				}
-			}
-			if envSlug == "" {
-				continue
-			}
-
-			status := "not_deployed"
-			healthStatus := "unknown"
-			switch *deployStatus {
-			case "deployed", "completed":
-				status = "deployed"
-				healthStatus = "healthy"
-			case "deploying", "pending":
-				status = "deploying"
-				healthStatus = "unknown"
-			case "failed", "error":
-				status = "failed"
-				healthStatus = "degraded"
-			case "rolled_back":
-				status = "deployed"
-				healthStatus = "degraded"
-			}
-
-			overview := &EnvironmentOverview{
-				ServiceID:       serviceID,
-				ServiceName:     serviceName,
-				ServiceSlug:     serviceSlug,
-				EnvironmentID:   *envID,
-				EnvironmentName: envName,
-				EnvColor:        envColor,
-				EnvSlug:         envSlug,
-				Status:          status,
-				DeploymentID:    deploymentID,
-				HealthStatus:    healthStatus,
-				SyncStatus:      "unknown",
-			}
-			if imageTag != nil {
-				overview.ImageTag = *imageTag
-			}
-			if deployedAt != nil {
-				overview.DeployedAt = deployedAt
-			}
-			if replicasReady != nil {
-				overview.ReplicasReady = *replicasReady
-			}
-			if replicasDesired != nil {
-				overview.ReplicasDesired = *replicasDesired
-			}
-			row.Environments[envSlug] = overview
+		// A row without a deployment just registers the service; the cells are
+		// filled with "not_deployed" defaults by GetOverview.
+		if envSlug == nil || deployStatus == nil {
+			continue
 		}
+		env, known := envBySlug[*envSlug]
+		if !known {
+			// Deployment points at an environment that no longer exists.
+			continue
+		}
+
+		status := "not_deployed"
+		healthStatus := "unknown"
+		switch *deployStatus {
+		case "deployed", "completed", "promoted":
+			status = "deployed"
+			healthStatus = "healthy"
+		case "deploying", "pending":
+			status = "deploying"
+			healthStatus = "unknown"
+		case "failed", "error":
+			status = "failed"
+			healthStatus = "degraded"
+		case "rolled_back":
+			status = "deployed"
+			healthStatus = "degraded"
+		}
+		// A deployed release with pods still not ready counts as degraded.
+		if status == "deployed" && replicasDesired > 0 && replicasReady < replicasDesired {
+			healthStatus = "degraded"
+		}
+
+		overview := &EnvironmentOverview{
+			ServiceID:       serviceID,
+			ServiceName:     serviceName,
+			ServiceSlug:     serviceSlug,
+			EnvironmentID:   env.ID,
+			EnvironmentName: env.Name,
+			EnvColor:        env.Color,
+			EnvSlug:         env.Slug,
+			Status:          status,
+			HealthStatus:    healthStatus,
+			SyncStatus:      "unknown",
+			ReplicasReady:   replicasReady,
+			ReplicasDesired: replicasDesired,
+		}
+		if imageTag != nil {
+			overview.ImageTag = *imageTag
+		}
+		if deployedAt != nil {
+			overview.DeployedAt = deployedAt
+		}
+		row.Environments[env.Slug] = overview
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	result := make([]EnvironmentOverviewRow, 0, len(serviceMap))
-	for _, row := range serviceMap {
-		result = append(result, *row)
+	for _, id := range serviceOrder {
+		result = append(result, *serviceMap[id])
 	}
 	return result, nil
 }
@@ -353,12 +360,23 @@ func (r *EnvironmentOverviewRepository) getBindingsOverview(ctx context.Context,
 }
 
 func (r *EnvironmentOverviewRepository) getDriftCounts(ctx context.Context, tenantID uuid.UUID) (map[string]int, error) {
-	// Get drift counts per service+environment from drift detection results
+	// Drift scans are recorded per repository+cluster in drift_detection_logs.
+	// The most recent successful scan within 24h is attributed to the service and
+	// environment its GitOps bindings point at.
 	rows, err := r.pool.Query(ctx, `
-		SELECT service_id, environment_id, COUNT(*) as drift_count
-		FROM drift_detection_results
-		WHERE tenant_id = $1 AND detected_at > NOW() - INTERVAL '24 hours'
-		GROUP BY service_id, environment_id
+		WITH latest_scans AS (
+			SELECT DISTINCT ON (dl.repo_id, dl.cluster_id)
+				dl.repo_id, dl.cluster_id, dl.drift_count
+			FROM drift_detection_logs dl
+			WHERE dl.tenant_id = $1 AND dl.status = 'success'
+			  AND dl.started_at > NOW() - INTERVAL '24 hours'
+			ORDER BY dl.repo_id, dl.cluster_id, dl.started_at DESC
+		)
+		SELECT b.service_id, b.environment_id, COALESCE(SUM(ls.drift_count), 0)::int AS drift_count
+		FROM gitops_application_bindings b
+		JOIN latest_scans ls ON ls.repo_id = b.repo_id AND ls.cluster_id = b.cluster_id
+		WHERE b.tenant_id = $1 AND b.service_id IS NOT NULL AND b.environment_id IS NOT NULL
+		GROUP BY b.service_id, b.environment_id
 	`, tenantID)
 	if err != nil {
 		return nil, err
@@ -374,6 +392,9 @@ func (r *EnvironmentOverviewRepository) getDriftCounts(ctx context.Context, tena
 		}
 		key := fmt.Sprintf("%s:%s", serviceID.String(), envID.String())
 		result[key] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

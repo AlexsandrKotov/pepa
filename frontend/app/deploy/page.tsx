@@ -8,7 +8,7 @@ function DeployRedirect() {
 
   useEffect(() => {
     const service = searchParams.get('service');
-    const target = service ? `/services?id=${service}` : '/deployments/new';
+    const target = service ? `/services?id=${service}` : '/services/new';
     router.replace(target);
   }, [searchParams, router]);
 

@@ -266,7 +266,11 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerGitOpsApplicationRoutes(v1, deps)
 		registerGitOpsBindingRoutes(v1, deps)
 		registerSettingsRoutes(v1, deps)
+		// Overview must come first: its static /environments/overview paths have
+		// to be inserted before the /environments/:id wildcard.
+		registerEnvironmentOverviewRoutes(v1, deps)
 		registerEnvironmentRoutes(v1, deps)
+		registerSelfServiceRoutes(v1, deps)
 		registerMarketplaceRoutes(v1, deps)
 		registerDiscoveryRoutes(v1, deps)
 		registerDockerHostRoutes(v1, deps)

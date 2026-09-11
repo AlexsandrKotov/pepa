@@ -18,7 +18,7 @@ interface PaletteItem {
 // All navigable pages — categories mirror the sidebar grouping
 const pages: PaletteItem[] = [
   { id: 'dashboard', label: 'Dashboard', description: 'Platform overview', href: '/', icon: 'dashboard', category: 'Core' },
-  { id: 'deploy', label: 'Quick Deploy', description: 'Deploy a service wizard', href: '/deploy', icon: 'argocd', category: 'Core' },
+  { id: 'deploy', label: 'Quick Deploy', description: 'Deploy a service wizard', href: '/services/new', icon: 'argocd', category: 'Core' },
   { id: 'ai', label: 'AI Assistant', description: 'Chat with AI', href: '/ai', icon: 'ai', category: 'Core' },
   { id: 'services', label: 'Service Catalog', description: 'Manage logical service definitions', href: '/services', icon: 'storage', category: 'Catalog' },
   { id: 'entities', label: 'Entities', description: 'Entity management', href: '/entities', icon: 'plugin', category: 'Catalog' },
@@ -57,7 +57,7 @@ const pages: PaletteItem[] = [
 // Quick actions
 const actions: PaletteItem[] = [
   { id: 'new-service', label: 'Create New Service', description: 'Register a new service', href: '/services/new', icon: 'argocd', category: 'Actions' },
-  { id: 'quick-deploy', label: 'Quick Deploy', description: 'Deploy a service wizard', href: '/deploy', icon: 'argocd', category: 'Actions' },
+  { id: 'quick-deploy', label: 'Quick Deploy', description: 'Deploy a service wizard', href: '/services/new', icon: 'argocd', category: 'Actions' },
   { id: 'new-deploy', label: 'Trigger Deployment', description: 'GitOps deployment', href: '/deployments', icon: 'argocd', category: 'Actions' },
   { id: 'new-connection', label: 'Add Connection', description: 'Connect external tool', href: '/connections', icon: 'plugin', category: 'Actions' },
   { id: 'run-scan', label: 'Run Security Scan', description: 'Scan for vulnerabilities', href: '/security', icon: 'vault', category: 'Actions' },

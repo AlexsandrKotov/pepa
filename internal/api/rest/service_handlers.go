@@ -98,6 +98,7 @@ func (h *ServiceHandlers) ListServices(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	filter.TenantID = auth.GetTenantID(c)
 
 	result, err := h.repo.List(c.Request.Context(), filter)
 	if err != nil {

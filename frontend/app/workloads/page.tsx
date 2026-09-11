@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { discovery, gitopsApplications, dockerServices, dockerHosts, type DiscoveredService, type GitOpsAppSummary, type DockerService, type DiscoveredDockerContainer, type DockerHost } from '@/lib/api';
+import { discovery, dockerServices, dockerHosts, type DiscoveredService, type DockerService, type DiscoveredDockerContainer, type DockerHost } from '@/lib/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import Tabs from '@/components/Tabs';
 import BrandIcon from '@/components/BrandIcon';
@@ -12,7 +12,9 @@ import ConfirmModal from '@/components/ConfirmModal';
 function WorkloadsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'kubernetes';
+  const rawTab = searchParams.get('tab') || 'kubernetes';
+  const activeTab = rawTab === 'gitops' ? 'kubernetes' : rawTab;
+  const [showRedirectBanner, setShowRedirectBanner] = useState(rawTab === 'gitops');
 
   const handleTabChange = useCallback((tab: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -27,9 +29,22 @@ function WorkloadsPageContent() {
         <div className="page-animate flex items-center justify-between">
           <div>
             <h1 className="page-title-modern">Workloads</h1>
-            <p className="page-subtitle-modern">All running workloads across Kubernetes, GitOps, and Docker</p>
+            <p className="page-subtitle-modern">All running workloads across Kubernetes and Docker</p>
           </div>
         </div>
+
+        {/* Redirect banner for old GitOps tab bookmarks */}
+        {showRedirectBanner && (
+          <div className="page-animate-up flex items-center justify-between rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-3">
+            <p className="text-sm font-medium text-blue-600">
+              GitOps Releases moved to{' '}
+              <Link href="/gitops/applications" className="underline hover:no-underline">
+                Delivery &gt; GitOps &gt; Applications
+              </Link>
+            </p>
+            <button onClick={() => setShowRedirectBanner(false)} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">&#x2715;</button>
+          </div>
+        )}
 
         {/* Tabs */}
         <Tabs
@@ -37,8 +52,7 @@ function WorkloadsPageContent() {
           onChange={handleTabChange}
           variant="pills"
           tabs={[
-            { key: 'kubernetes', label: 'Kubernetes', icon: 'kubernetes' },
-            { key: 'gitops', label: 'GitOps Releases', icon: 'gitops' },
+            { key: 'kubernetes', label: 'All Workloads', icon: 'kubernetes' },
             { key: 'docker', label: 'Docker Containers', icon: 'docker' },
           ]}
           className="page-animate-up"
@@ -47,7 +61,6 @@ function WorkloadsPageContent() {
         {/* Tab Content */}
         <div className="page-animate-up page-delay-1">
           {activeTab === 'kubernetes' && <KubernetesTab />}
-          {activeTab === 'gitops' && <GitOpsTab />}
           {activeTab === 'docker' && <DockerTab />}
         </div>
       </div>
@@ -204,230 +217,6 @@ function KubernetesTab() {
             {services.length} resource{services.length !== 1 ? 's' : ''}
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-// ─── GitOps Tab ─────────────────────────────────────────────────────────────
-
-function GitOpsTab() {
-  const router = useRouter();
-  const [apps, setApps] = useState<GitOpsAppSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [healthFilter, setHealthFilter] = useState('');
-  const [engineFilter, setEngineFilter] = useState('');
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [actionConfirm, setActionConfirm] = useState<{ app: GitOpsAppSummary; action: string } | null>(null);
-  const [actionResult, setActionResult] = useState<{ ok: boolean; text: string } | null>(null);
-
-  const normalizeHealth = (h: string) => {
-    const map: Record<string, string> = { Healthy: 'healthy', Ready: 'healthy', Progressing: 'progressing', Reconciling: 'progressing', Degraded: 'degraded', NotReady: 'degraded', Suspended: 'suspended' };
-    return map[h] || h;
-  };
-  const normalizeSync = (s: string) => {
-    const map: Record<string, string> = { Synced: 'synced', OutOfSync: 'out_of_sync' };
-    return map[s] || s;
-  };
-
-  const healthStyles: Record<string, string> = {
-    healthy: 'bg-emerald-500/15 text-emerald-600', progressing: 'bg-blue-500/15 text-blue-500',
-    degraded: 'bg-red-500/15 text-red-500', suspended: 'bg-yellow-500/15 text-yellow-600',
-    unknown: 'bg-[var(--border-light)] text-[var(--text-tertiary)]',
-  };
-  const syncStyles: Record<string, string> = {
-    synced: 'bg-emerald-500/15 text-emerald-600', out_of_sync: 'bg-orange-500/15 text-orange-500',
-    unknown: 'bg-[var(--border-light)] text-[var(--text-tertiary)]',
-  };
-
-  const load = useCallback(async () => {
-    try {
-      const res = await gitopsApplications.list();
-      setApps(res.applications || []);
-    } catch { setApps([]); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Auto-refresh
-  useEffect(() => {
-    const hasProgressing = apps.some(a => normalizeHealth(a.health) === 'progressing' || normalizeSync(a.sync_status) === 'out_of_sync');
-    if (!hasProgressing) return;
-    const interval = setInterval(load, 10000);
-    return () => clearInterval(interval);
-  }, [apps, load]);
-
-  const filtered = apps.filter(a => {
-    if (search) {
-      const q = search.toLowerCase();
-      if (!a.name.toLowerCase().includes(q) && !a.namespace.toLowerCase().includes(q)) return false;
-    }
-    if (healthFilter && normalizeHealth(a.health) !== healthFilter) return false;
-    if (engineFilter && a.engine_type !== engineFilter) return false;
-    return true;
-  });
-
-  const stats = {
-    total: apps.length,
-    healthy: apps.filter(a => normalizeHealth(a.health) === 'healthy').length,
-    degraded: apps.filter(a => normalizeHealth(a.health) === 'degraded').length,
-    outOfSync: apps.filter(a => normalizeSync(a.sync_status) === 'out_of_sync').length,
-  };
-
-  const handleAction = async (app: GitOpsAppSummary, action: string) => {
-    const connId = app.connection_id;
-    if (!connId) { setActionResult({ ok: false, text: `Cannot ${action}: connection not found` }); return; }
-    setActionLoading(`${app.name}-${action}`);
-    setActionResult(null);
-    try {
-      if (action === 'sync') await gitopsApplications.sync(connId, app.namespace, app.name);
-      else if (action === 'refresh') await gitopsApplications.refresh(connId, app.namespace, app.name);
-      else if (action === 'terminate') await gitopsApplications.terminate(connId, app.namespace, app.name);
-      setActionResult({ ok: true, text: `${action.charAt(0).toUpperCase() + action.slice(1)} triggered for ${app.name}` });
-      await load();
-    } catch { setActionResult({ ok: false, text: `Failed to ${action} ${app.name}` }); }
-    setActionLoading(null);
-    setActionConfirm(null);
-  };
-
-  const engineBadge = (engine: string) => {
-    const s: Record<string, string> = { fluxcd: 'bg-purple-500/15 text-purple-600', argocd: 'bg-orange-500/15 text-orange-600' };
-    const l: Record<string, string> = { fluxcd: 'FluxCD', argocd: 'ArgoCD' };
-    return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${s[engine] || 'bg-[var(--border-light)] text-[var(--text-secondary)]'}`}>{l[engine] || engine}</span>;
-  };
-
-  return (
-    <div className="space-y-4">
-      {/* Feedback */}
-      {actionResult && (
-        <div className={`rounded-xl border p-4 flex items-start justify-between gap-3 ${actionResult.ok ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-          <p className={`text-sm font-medium ${actionResult.ok ? 'text-emerald-600' : 'text-red-500'}`}>
-            {actionResult.ok ? '\u2713 ' : '\u26A0 '}{actionResult.text}
-          </p>
-          <button onClick={() => setActionResult(null)} className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">&#x2715;</button>
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Total Apps', value: stats.total, color: 'text-[var(--text-primary)]' },
-          { label: 'Healthy', value: stats.healthy, color: 'text-emerald-600' },
-          { label: 'Degraded', value: stats.degraded, color: 'text-red-600' },
-          { label: 'Out of Sync', value: stats.outOfSync, color: 'text-orange-600' },
-        ].map(s => (
-          <div key={s.label} className="card card-body py-3 flex items-center gap-3">
-            <div className={`text-[22px] font-bold ${s.color}`}>{s.value}</div>
-            <div className="text-[11px] text-[var(--text-tertiary)]">{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <input type="text" placeholder="Search applications..." value={search} onChange={e => setSearch(e.target.value)} className="input flex-1 max-w-xs" />
-        <select value={healthFilter} onChange={e => setHealthFilter(e.target.value)} className="input w-40">
-          <option value="">All Health</option>
-          <option value="healthy">Healthy</option>
-          <option value="progressing">Progressing</option>
-          <option value="degraded">Degraded</option>
-          <option value="suspended">Suspended</option>
-        </select>
-        <select value={engineFilter} onChange={e => setEngineFilter(e.target.value)} className="input w-40">
-          <option value="">All Engines</option>
-          <option value="argocd">ArgoCD</option>
-          <option value="fluxcd">FluxCD</option>
-        </select>
-        <Link href="/gitops/applications" className="btn btn-secondary text-xs self-center">Full View</Link>
-      </div>
-
-      {/* Table */}
-      {loading ? (
-        <div className="card card-body text-center py-12">
-          <p className="text-[13px] text-[var(--text-tertiary)]">Loading GitOps applications...</p>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="card card-body text-center py-12">
-          <div className="text-4xl mb-3 opacity-30">&#x1F6E0;&#xFE0F;</div>
-          <p className="text-[13px] text-[var(--text-secondary)] mb-1">
-            {apps.length === 0 ? 'No GitOps applications found' : 'No applications match your filters'}
-          </p>
-          <p className="text-[12px] text-[var(--text-tertiary)]">
-            {apps.length === 0 ? 'Configure ArgoCD or FluxCD connections to see applications' : 'Try adjusting your filters'}
-          </p>
-        </div>
-      ) : (
-        <div className="card">
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Application</th>
-                  <th>Namespace</th>
-                  <th>Engine</th>
-                  <th>Health</th>
-                  <th>Sync</th>
-                  <th>Revision</th>
-                  <th>Environment</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(app => {
-                  const nh = normalizeHealth(app.health);
-                  const ns = normalizeSync(app.sync_status);
-                  const ak = app.name;
-                  return (
-                    <tr
-                      key={`${app.connection_id}-${app.namespace}-${app.name}`}
-                      className="hover:bg-[var(--border-light)] transition-colors cursor-pointer"
-                      onClick={() => app.connection_id && router.push(`/gitops/applications/${app.connection_id}/${app.namespace}/${app.name}`)}
-                    >
-                      <td>
-                        <div className="font-medium text-[var(--text-primary)]">{app.name}</div>
-                        {app.project && <p className="text-[10px] text-[var(--text-tertiary)]">{app.project}</p>}
-                      </td>
-                      <td className="text-[12px] font-mono text-[var(--text-secondary)]">{app.namespace}</td>
-                      <td>{engineBadge(app.engine_type)}</td>
-                      <td><span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${healthStyles[nh] || healthStyles.unknown}`}>{nh}</span></td>
-                      <td><span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${syncStyles[ns] || syncStyles.unknown}`}>{ns}</span></td>
-                      <td className="text-[11px] font-mono text-[var(--text-tertiary)]">{app.revision ? app.revision.slice(0, 8) : '\u2014'}</td>
-                      <td>{app.environment ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--bg)] text-[var(--text-secondary)] font-medium">{app.environment}</span> : <span className="text-[var(--text-tertiary)]">&mdash;</span>}</td>
-                      <td onClick={e => e.stopPropagation()}>
-                        <div className="flex gap-1">
-                          <button onClick={() => handleAction(app, 'sync')} disabled={actionLoading === `${ak}-sync`} className="text-[11px] px-2 py-1 bg-blue-500/10 text-blue-500 rounded hover:bg-blue-500/15 disabled:opacity-50">
-                            {actionLoading === `${ak}-sync` ? '...' : 'Sync'}
-                          </button>
-                          <button onClick={() => handleAction(app, 'refresh')} disabled={actionLoading === `${ak}-refresh`} className="text-[11px] px-2 py-1 bg-emerald-500/10 text-emerald-600 rounded hover:bg-emerald-500/15 disabled:opacity-50">
-                            {actionLoading === `${ak}-refresh` ? '...' : 'Refresh'}
-                          </button>
-                          <button onClick={() => setActionConfirm({ app, action: 'terminate' })} className="text-[11px] px-2 py-1 bg-red-500/5 text-red-400 rounded hover:bg-red-500/10">
-                            Terminate
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="px-4 py-2 border-t border-[var(--border)] text-[11px] text-[var(--text-tertiary)]">
-            {filtered.length} application{filtered.length !== 1 ? 's' : ''}
-          </div>
-        </div>
-      )}
-
-      {actionConfirm && (
-        <ConfirmModal
-          open title={`Terminate ${actionConfirm.app.name}?`}
-          description="This will terminate the running application. This action may be irreversible."
-          confirmLabel="Terminate" variant="danger"
-          onConfirm={() => handleAction(actionConfirm.app, actionConfirm.action)}
-          onCancel={() => setActionConfirm(null)}
-        />
       )}
     </div>
   );

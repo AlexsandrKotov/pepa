@@ -126,11 +126,12 @@ type UpdateServiceRequest struct {
 }
 
 type ServiceFilter struct {
-	Status   string `form:"status"`
-	Template string `form:"template"`
-	Search   string `form:"search"`
-	Page     int    `form:"page,default=1"`
-	PerPage  int    `form:"per_page,default=20"`
+	Status   string    `form:"status"`
+	Template string    `form:"template"`
+	Search   string    `form:"search"`
+	TenantID uuid.UUID `form:"-"`
+	Page     int       `form:"page,default=1"`
+	PerPage  int       `form:"per_page,default=20"`
 }
 
 type ServiceListResponse struct {

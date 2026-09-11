@@ -13,7 +13,7 @@ interface QuickAction {
 
 const quickActions: QuickAction[] = [
   { label: 'New Service', href: '/services/new', icon: '📦', description: 'Register a service', color: 'bg-blue-500/10 text-blue-500 hover:bg-blue-500/15' },
-  { label: 'Deploy', href: '/deployments', icon: '🚀', description: 'Trigger deployment', color: 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15' },
+  { label: 'Deploy', href: '/services/new', icon: '🚀', description: 'Deploy a service', color: 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/15' },
   { label: 'Connection', href: '/connections', icon: '🔗', description: 'Add integration', color: 'bg-violet-500/10 text-violet-500 hover:bg-violet-500/15' },
   { label: 'Security Scan', href: '/security', icon: '🛡️', description: 'Run vulnerability scan', color: 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/15' },
   { label: 'AI Assistant', href: '/ai', icon: '🤖', description: 'Ask AI for help', color: 'bg-pink-500/10 text-pink-500 hover:bg-pink-500/15' },
