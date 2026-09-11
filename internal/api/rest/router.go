@@ -92,6 +92,13 @@ type Dependencies struct {
 	AIManager        *ai.Manager
 	IngestionEngine  *ai.IngestionEngine
 	RAGPipeline      *ai.RAGPipeline
+	// Proactive AI components; nil when no AI provider is configured, in which
+	// case the endpoints that use them answer 503 instead of pretending to work.
+	RiskScorer      *ai.RiskScorer
+	DocGenerator    *ai.DocGenerator
+	CostAdvisor     *ai.CostAdvisor
+	StaleDetector   *ai.StaleDetector
+	WorkflowBuilder *ai.WorkflowBuilder
 	RBAC             *rbacengine.Engine
 	Storage          storage.Storage
 	LoginLimiter     *auth.LoginRateLimiter
@@ -327,7 +334,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 			// RAG knowledge base endpoints
 			if deps.Repos != nil && deps.Repos.RAG != nil && deps.AIManager != nil {
 				tenantID := uuid.MustParse(database.DefaultTenantID)
-				ragHandlers := NewRAGHandlers(deps.Repos.RAG, deps.AIManager, tenantID)
+				ragHandlers := NewRAGHandlers(deps.Repos.RAG, deps.AIManager, tenantID, deps)
 				ragHandlers.SetIngestionEngine(deps.IngestionEngine)
 				ragHandlers.SetPipeline(deps.RAGPipeline)
 				v1.POST("/rag/ingest", ragHandlers.IngestDocument)
@@ -343,11 +350,10 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 				v1.POST("/rag/chat/stream", ragHandlers.ChatStreamWithRAG)
 			}
 
-			// Proactive AI endpoints (risk assessment, doc generation, cost analysis)
-			// These are registered but will return 503 if components aren't initialized.
-			// Use the default tenant ID from constants instead of hardcoding.
-			tenantID := uuid.MustParse(database.DefaultTenantID)
-			proactiveHandlers := NewProactiveAIHandlers(nil, nil, nil, nil, tenantID)
+			// Proactive AI endpoints (risk assessment, doc generation, cost analysis).
+			// The components are only built when an AI provider is configured, so
+			// they answer 503 until one exists instead of silently doing nothing.
+			proactiveHandlers := NewProactiveAIHandlers(deps.RiskScorer, deps.DocGenerator, deps.CostAdvisor, deps.StaleDetector)
 			v1.POST("/ai/risk/assess", proactiveHandlers.AssessDeploymentRisk)
 			v1.POST("/ai/docs/generate", proactiveHandlers.GenerateServiceDocs)
 			v1.POST("/ai/docs/generate/:service", proactiveHandlers.GenerateServiceDocs)
@@ -355,7 +361,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 			v1.GET("/ai/cost/stale", proactiveHandlers.DetectStaleResources)
 
 			// NL Workflow Builder endpoint
-			workflowBuilderHandlers := NewWorkflowBuilderHandlers(nil)
+			workflowBuilderHandlers := NewWorkflowBuilderHandlers(deps.WorkflowBuilder)
 			v1.POST("/ai/workflow/build", workflowBuilderHandlers.BuildWorkflow)
 			v1.POST("/ai/workflow/preview", workflowBuilderHandlers.PreviewWorkflow)
 
@@ -378,6 +384,13 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		sseGroup.Use(bootstrapGuardMiddleware(deps))
 		sseGroup.Use(auth.Middleware(deps.Config.Auth.JWTSecret))
 		registerSSERoutes(sseGroup, deps.EventBus)
+	}
+
+	// RBAC coverage self-check: every /api/v1 route must resolve to a known
+	// RBAC resource, otherwise it silently skips the permission check.
+	if gaps := verifyRBACCoverage(r); len(gaps) > 0 {
+		slog.Error("RBAC coverage gaps: routes below are NOT permission-checked, add them to rbacResourceMap",
+			"count", len(gaps), "routes", gaps)
 	}
 
 	return r, func() {

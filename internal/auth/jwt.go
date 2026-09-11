@@ -142,17 +142,25 @@ func GetTokenVersion(c *gin.Context) int {
 	return 0
 }
 
-// IsPlatformAdmin reports whether the authenticated user holds a platform-wide
-// admin role, based on the verified JWT. The role list mirrors the admin bypass
-// in rbacMiddleware so that authorization and tenant-scoping bypasses agree.
-func IsPlatformAdmin(c *gin.Context) bool {
-	for _, r := range GetRoles(c) {
-		switch strings.ToLower(r) {
+// IsAdminRoles reports whether a role list (as carried by a verified JWT or
+// read back from the roles table) contains a role that grants the platform-wide
+// admin bypass. It is the single definition of "admin" for authorization
+// decisions — every previous copy of this list disagreed by one spelling.
+func IsAdminRoles(roles []string) bool {
+	for _, r := range roles {
+		switch strings.ToLower(strings.TrimSpace(r)) {
 		case "admin", "super_admin", "platform admin", "platform_admin":
 			return true
 		}
 	}
 	return false
+}
+
+// IsPlatformAdmin reports whether the authenticated user holds a platform-wide
+// admin role, based on the verified JWT. The role list mirrors the admin bypass
+// in rbacMiddleware so that authorization and tenant-scoping bypasses agree.
+func IsPlatformAdmin(c *gin.Context) bool {
+	return IsAdminRoles(GetRoles(c))
 }
 
 // ValidateJWT parses and validates a JWT token string, returning the claims.

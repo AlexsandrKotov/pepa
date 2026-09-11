@@ -45,6 +45,10 @@ func initAuditWorkers(repo interface{ Create(context.Context, *models.AuditLog) 
 	auditRepo = repo
 }
 // registerAuditRoutes registers audit log API endpoints.
+//
+// Only /audit is exposed: an /audit-logs alias used to exist here for "frontend
+// compatibility", but no client referenced it and its prefix was absent from
+// rbacResourceMap, so it silently bypassed the audit:read permission check.
 func registerAuditRoutes(r *gin.RouterGroup, deps Dependencies) {
 	audit := r.Group("/audit")
 	{
@@ -55,14 +59,6 @@ func registerAuditRoutes(r *gin.RouterGroup, deps Dependencies) {
 		// present all activity in one place.
 		audit.GET("/plugin-actions", listPluginActions(deps))
 		audit.GET("/ssh-commands", listSSHCommands(deps))
-	}
-	// Alias: /audit-logs → /audit (frontend compatibility)
-	auditLogs := r.Group("/audit-logs")
-	{
-		auditLogs.GET("", listAuditLogs(deps))
-		auditLogs.GET("/stats", auditStats(deps))
-		auditLogs.GET("/plugin-actions", listPluginActions(deps))
-		auditLogs.GET("/ssh-commands", listSSHCommands(deps))
 	}
 }
 
@@ -146,7 +142,23 @@ func listAuditLogs(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		result, err := deps.Repos.Audit.List(c.Request.Context(), filter)
+		// entity_id / user_id are compared against uuid columns: an invalid value
+		// would surface as a Postgres 22P02 error and a 500 for what is a bad
+		// query string.
+		if filter.EntityID != "" {
+			if _, err := uuid.Parse(filter.EntityID); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid entity_id"})
+				return
+			}
+		}
+		if filter.UserID != "" {
+			if _, err := uuid.Parse(filter.UserID); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
+				return
+			}
+		}
+
+		result, err := deps.Repos.Audit.List(c.Request.Context(), filter, auth.GetTenantID(c))
 		if err != nil {
 			respondInternalError(c, err)
 			return
@@ -158,13 +170,14 @@ func listAuditLogs(deps Dependencies) gin.HandlerFunc {
 
 func auditStats(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		byAction, err := deps.Repos.Audit.CountByAction(c.Request.Context())
+		tenantID := auth.GetTenantID(c)
+		byAction, err := deps.Repos.Audit.CountByAction(c.Request.Context(), tenantID)
 		if err != nil {
 			respondInternalError(c, err)
 			return
 		}
 
-		byResource, err := deps.Repos.Audit.CountByResource(c.Request.Context())
+		byResource, err := deps.Repos.Audit.CountByResource(c.Request.Context(), tenantID)
 		if err != nil {
 			respondInternalError(c, err)
 			return
@@ -190,8 +203,8 @@ func apiAuditMiddleware(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		// Skip audit and observability read endpoints to avoid self-referential log spam
-		if (path == "/api/v1/audit" || path == "/api/v1/audit-logs" ||
-			path == "/api/v1/audit/stats" || path == "/api/v1/audit-logs/stats" ||
+		if (path == "/api/v1/audit" ||
+			path == "/api/v1/audit/stats" ||
 			path == "/api/v1/observability/logs" || path == "/api/v1/observability/overview" ||
 			path == "/api/v1/observability/settings") && c.Request.Method == "GET" {
 			c.Next()

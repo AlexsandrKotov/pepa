@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -65,6 +66,28 @@ func NewRAGRepository(db *database.DB) *RAGRepository {
 	return &RAGRepository{pool: db.Pool}
 }
 
+// ErrRAGNotFound is returned when a RAG row is absent for the requested scope.
+// Handlers map it to 404 instead of leaking a database error as 500.
+var ErrRAGNotFound = errors.New("rag document not found")
+
+// TenantScope normalises a set of tenant IDs a query may read. Zero UUIDs are
+// dropped (they would match the seeded placeholder rows, not a real tenant) and
+// duplicates removed, so callers can pass "own tenant + platform tenant"
+// without caring whether they are the same. An empty result means "read
+// nothing" — the SQL functions are written to fail closed on an empty array.
+func TenantScope(ids ...uuid.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ids))
+	seen := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		if id == uuid.Nil || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
 // UpsertDocument inserts or updates a document based on source identity.
 // Returns the document ID (existing or new).
 func (r *RAGRepository) UpsertDocument(ctx context.Context, doc *RAGDocument) (uuid.UUID, error) {
@@ -102,26 +125,35 @@ func (r *RAGRepository) InsertDocument(ctx context.Context, doc *RAGDocument) (u
 	return id, nil
 }
 
-// DeleteDocument removes a document and its chunks.
-func (r *RAGRepository) DeleteDocument(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM rag_documents WHERE id = $1`, id)
+// DeleteDocument removes a document and its chunks, but only when the document
+// belongs to tenantID. Without that check any authenticated caller could delete
+// another workspace's knowledge base by guessing a document UUID.
+func (r *RAGRepository) DeleteDocument(ctx context.Context, id, tenantID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM rag_documents WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("delete rag document: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRAGNotFound
 	}
 	return nil
 }
 
-// GetDocument retrieves a single document by ID.
-func (r *RAGRepository) GetDocument(ctx context.Context, id uuid.UUID) (*RAGDocument, error) {
+// GetDocument retrieves a single document by ID, restricted to the tenants in
+// scope (own workspace plus the platform-seeded corpus).
+func (r *RAGRepository) GetDocument(ctx context.Context, id uuid.UUID, tenantIDs []uuid.UUID) (*RAGDocument, error) {
 	var d RAGDocument
 	var metaBytes []byte
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, source, source_type, COALESCE(source_id,''), COALESCE(source_url,''),
 		       content, metadata, ingested_at, updated_at, expires_at, created_at
-		FROM rag_documents WHERE id = $1
-	`, id).Scan(&d.ID, &d.TenantID, &d.Source, &d.SourceType,
+		FROM rag_documents WHERE id = $1 AND tenant_id = ANY($2)
+	`, id, tenantIDs).Scan(&d.ID, &d.TenantID, &d.Source, &d.SourceType,
 		&d.SourceID, &d.SourceURL, &d.Content, &metaBytes,
 		&d.IngestedAt, &d.UpdatedAt, &d.ExpiresAt, &d.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrRAGNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get rag document: %w", err)
 	}
@@ -129,15 +161,19 @@ func (r *RAGRepository) GetDocument(ctx context.Context, id uuid.UUID) (*RAGDocu
 	return &d, nil
 }
 
-// UpdateDocumentContent updates a document's content and metadata, then resets expiration.
-func (r *RAGRepository) UpdateDocumentContent(ctx context.Context, id uuid.UUID, content string, metadata map[string]interface{}) error {
-	_, err := r.pool.Exec(ctx, `
+// UpdateDocumentContent updates a document's content and metadata, then resets
+// expiration. Only rows owned by tenantID are touched.
+func (r *RAGRepository) UpdateDocumentContent(ctx context.Context, id, tenantID uuid.UUID, content string, metadata map[string]interface{}) error {
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE rag_documents
 		SET content = $2, metadata = $3, updated_at = NOW(), expires_at = NOW() + INTERVAL '30 days'
-		WHERE id = $1
-	`, id, content, mustJSON(metadata))
+		WHERE id = $1 AND tenant_id = $4
+	`, id, content, mustJSON(metadata), tenantID)
 	if err != nil {
 		return fmt.Errorf("update rag document: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRAGNotFound
 	}
 	return nil
 }
@@ -200,16 +236,17 @@ func (r *RAGRepository) DeleteChunksByDocument(ctx context.Context, documentID u
 	return nil
 }
 
-// VectorSearch performs cosine similarity search.
-func (r *RAGRepository) VectorSearch(ctx context.Context, queryEmbedding []float32, tenantID uuid.UUID, topK int, filters map[string]string) ([]RAGSearchResult, error) {
+// VectorSearch performs cosine similarity search across the tenants in scope
+// (migration 074 changed rag_search to accept an array of tenant IDs).
+func (r *RAGRepository) VectorSearch(ctx context.Context, queryEmbedding []float32, tenantIDs []uuid.UUID, topK int, filters map[string]string) ([]RAGSearchResult, error) {
 	embeddingStr := formatEmbedding(queryEmbedding)
 	filtersJSON, _ := json.Marshal(filters)
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT chunk_id, document_id, content, chunk_index, metadata,
 		       source, source_type, source_id, source_url, similarity
-		FROM rag_search($1::vector, $2, $3, $4::jsonb)
-	`, embeddingStr, tenantID, topK, string(filtersJSON))
+		FROM rag_search($1::vector, $2::uuid[], $3, $4::jsonb)
+	`, embeddingStr, tenantIDs, topK, string(filtersJSON))
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -218,15 +255,15 @@ func (r *RAGRepository) VectorSearch(ctx context.Context, queryEmbedding []float
 	return r.scanSearchResults(rows)
 }
 
-// KeywordSearch performs full-text keyword search.
-func (r *RAGRepository) KeywordSearch(ctx context.Context, query string, tenantID uuid.UUID, topK int, filters map[string]string) ([]RAGSearchResult, error) {
+// KeywordSearch performs full-text keyword search across the tenants in scope.
+func (r *RAGRepository) KeywordSearch(ctx context.Context, query string, tenantIDs []uuid.UUID, topK int, filters map[string]string) ([]RAGSearchResult, error) {
 	filtersJSON, _ := json.Marshal(filters)
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT chunk_id, document_id, content, chunk_index, metadata,
 		       source, source_type, source_id, source_url, relevance
-		FROM rag_keyword_search($1, $2, $3, $4::jsonb)
-	`, query, tenantID, topK, string(filtersJSON))
+		FROM rag_keyword_search($1, $2::uuid[], $3, $4::jsonb)
+	`, query, tenantIDs, topK, string(filtersJSON))
 	if err != nil {
 		return nil, fmt.Errorf("keyword search: %w", err)
 	}
@@ -235,10 +272,19 @@ func (r *RAGRepository) KeywordSearch(ctx context.Context, query string, tenantI
 	return r.scanSearchResults(rows)
 }
 
-// ListDocuments returns documents for a tenant with pagination.
-func (r *RAGRepository) ListDocuments(ctx context.Context, tenantID uuid.UUID, source string, limit, offset int) ([]RAGDocument, int, error) {
-	countQuery := `SELECT COUNT(*) FROM rag_documents WHERE tenant_id = $1`
-	countArgs := []interface{}{tenantID}
+// ListDocuments returns documents visible to the tenants in scope.
+func (r *RAGRepository) ListDocuments(ctx context.Context, tenantIDs []uuid.UUID, source string, limit, offset int) ([]RAGDocument, int, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	if limit > maxPerPage {
+		limit = maxPerPage
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	countQuery := `SELECT COUNT(*) FROM rag_documents WHERE tenant_id = ANY($1::uuid[])`
+	countArgs := []interface{}{tenantIDs}
 	if source != "" {
 		countQuery += ` AND source = $2`
 		countArgs = append(countArgs, source)
@@ -252,9 +298,9 @@ func (r *RAGRepository) ListDocuments(ctx context.Context, tenantID uuid.UUID, s
 	query := `
 		SELECT id, tenant_id, source, source_type, COALESCE(source_id,''), COALESCE(source_url,''),
 		       LEFT(content, 500), metadata, ingested_at, updated_at, expires_at, created_at
-		FROM rag_documents WHERE tenant_id = $1
+		FROM rag_documents WHERE tenant_id = ANY($1::uuid[])
 	`
-	args := []interface{}{tenantID}
+	args := []interface{}{tenantIDs}
 	if source != "" {
 		query += ` AND source = $2`
 		args = append(args, source)
@@ -280,16 +326,19 @@ func (r *RAGRepository) ListDocuments(ctx context.Context, tenantID uuid.UUID, s
 		_ = json.Unmarshal(metaBytes, &d.Metadata)
 		docs = append(docs, d)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate rag documents: %w", err)
+	}
 	return docs, total, nil
 }
 
 // GetDocumentStats returns document and chunk counts by source.
-func (r *RAGRepository) GetDocumentStats(ctx context.Context, tenantID uuid.UUID) (map[string]int, error) {
+func (r *RAGRepository) GetDocumentStats(ctx context.Context, tenantIDs []uuid.UUID) (map[string]int, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT source, COUNT(*) FROM rag_documents
-		WHERE tenant_id = $1
+		WHERE tenant_id = ANY($1::uuid[])
 		GROUP BY source
-	`, tenantID)
+	`, tenantIDs)
 	if err != nil {
 		return nil, fmt.Errorf("rag document stats: %w", err)
 	}
@@ -304,12 +353,15 @@ func (r *RAGRepository) GetDocumentStats(ctx context.Context, tenantID uuid.UUID
 		}
 		stats[source] = count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rag stats: %w", err)
+	}
 
 	// Total chunks
 	var totalChunks int
 	if err := r.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM rag_chunks WHERE tenant_id = $1
-	`, tenantID).Scan(&totalChunks); err != nil {
+		SELECT COUNT(*) FROM rag_chunks WHERE tenant_id = ANY($1::uuid[])
+	`, tenantIDs).Scan(&totalChunks); err != nil {
 		return nil, err
 	}
 	stats["_chunks"] = totalChunks
@@ -351,6 +403,9 @@ func (r *RAGRepository) scanSearchResults(rows pgx.Rows) ([]RAGSearchResult, err
 		}
 		_ = json.Unmarshal(metaBytes, &res.Metadata)
 		results = append(results, res)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search results: %w", err)
 	}
 	return results, nil
 }

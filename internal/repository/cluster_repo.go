@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -93,15 +94,163 @@ func (r *ClusterRepository) List(ctx context.Context, tenantID uuid.UUID) ([]Clu
 }
 
 // ClusterFilter defines filtering and pagination parameters for cluster lists.
+// Statuses and Environments are OR-combined within a dimension and AND-combined
+// across dimensions, which is what the frontend filter chips express.
 type ClusterFilter struct {
-	TenantID    uuid.UUID
-	Page        int
-	PerPage     int
-	Search      string
-	Status      string
-	Environment string
-	SortBy      string
-	SortDir     string
+	TenantID     uuid.UUID
+	Page         int
+	PerPage      int
+	Search       string
+	Statuses     []string
+	Environments []string
+	Gitops       string // flux | argo | none
+	SortBy       string
+	SortDir      string
+}
+
+// clusterWhere builds the shared WHERE fragment used by both ListFiltered and
+// Facets, so a pill's count can never disagree with the rows it filters.
+// skip names a dimension whose predicate is left out, which is what makes facet
+// counts answer "how many rows would I get if I also picked this value".
+func clusterWhere(f ClusterFilter, skip string) (string, []interface{}) {
+	where := "tenant_id = $1"
+	args := []interface{}{f.TenantID}
+	next := 2
+
+	add := func(cond string, values ...interface{}) {
+		where += " AND " + cond
+		args = append(args, values...)
+		next += len(values)
+	}
+
+	inList := func(column string, values []string) {
+		if len(values) == 0 {
+			return
+		}
+		placeholders := make([]string, 0, len(values))
+		for i := range values {
+			placeholders = append(placeholders, fmt.Sprintf("$%d", next+i))
+		}
+		add(column+" IN ("+strings.Join(placeholders, ",")+")", toArgs(values)...)
+	}
+
+	if f.Search != "" {
+		add(fmt.Sprintf("(name ILIKE $%d OR description ILIKE $%d)", next, next), "%"+f.Search+"%")
+	}
+	if skip != "status" {
+		inList("status", f.Statuses)
+	}
+	if skip != "environment" {
+		inList("environment", f.Environments)
+	}
+	if gitopsCond := gitopsCondition(f.Gitops); gitopsCond != "" && skip != "gitops" {
+		add(gitopsCond)
+	}
+
+	return where, args
+}
+
+func gitopsCondition(engine string) string {
+	switch engine {
+	case "flux":
+		return "COALESCE(flux_installed, FALSE)"
+	case "argo":
+		return "COALESCE(labels->>'argocd_detected', '') = 'true'"
+	case "any":
+		return "(COALESCE(flux_installed, FALSE) OR COALESCE(labels->>'argocd_detected', '') = 'true')"
+	case "none":
+		return "(NOT COALESCE(flux_installed, FALSE) AND COALESCE(labels->>'argocd_detected', '') <> 'true')"
+	}
+	return ""
+}
+
+func toArgs(values []string) []interface{} {
+	args := make([]interface{}, 0, len(values))
+	for _, v := range values {
+		args = append(args, v)
+	}
+	return args
+}
+
+// ClusterFacets holds per-value counts for every filter dimension.
+// Gitops keys are flux, argo, any and none.
+type ClusterFacets struct {
+	Status          map[string]int `json:"status"`
+	Environment     map[string]int `json:"environment"`
+	Gitops          map[string]int `json:"gitops"`
+	TotalNodes      int64          `json:"total_nodes"`
+	TotalUnfiltered int64          `json:"total_unfiltered"`
+}
+
+// Facets returns counts for the cluster filters, honouring the search term and
+// every dimension except the one being counted.
+func (r *ClusterRepository) Facets(ctx context.Context, f ClusterFilter) (*ClusterFacets, error) {
+	facets := &ClusterFacets{
+		Status:      map[string]int{},
+		Environment: map[string]int{},
+		Gitops:      map[string]int{},
+	}
+
+	countBy := func(column, skip string) error {
+		where, args := clusterWhere(f, skip)
+		rows, err := r.pool.Query(ctx, "SELECT COALESCE("+column+", ''), COUNT(*) FROM clusters WHERE "+where+" GROUP BY 1", args...)
+		if err != nil {
+			return fmt.Errorf("facet %s: %w", column, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var key string
+			var count int
+			if err := rows.Scan(&key, &count); err != nil {
+				return fmt.Errorf("scan facet %s: %w", column, err)
+			}
+			target := facets.Status
+			if column == "environment" {
+				target = facets.Environment
+			}
+			target[key] = count
+		}
+		return rows.Err()
+	}
+
+	if err := countBy("status", "status"); err != nil {
+		return nil, err
+	}
+	if err := countBy("environment", "environment"); err != nil {
+		return nil, err
+	}
+
+	// GitOps counts exclude their own dimension, otherwise selecting one engine
+	// would zero out every sibling pill and trap the user on that choice.
+	where, args := clusterWhere(f, "gitops")
+	gitopsQuery := "SELECT " +
+		"COUNT(*) FILTER (WHERE COALESCE(flux_installed, FALSE)), " +
+		"COUNT(*) FILTER (WHERE COALESCE(labels->>'argocd_detected', '') = 'true'), " +
+		"COUNT(*) FILTER (WHERE COALESCE(flux_installed, FALSE) OR COALESCE(labels->>'argocd_detected', '') = 'true'), " +
+		"COUNT(*) FILTER (WHERE NOT COALESCE(flux_installed, FALSE) AND COALESCE(labels->>'argocd_detected', '') <> 'true') " +
+		"FROM clusters WHERE " + where
+	var flux, argo, anyEngine, none int
+	if err := r.pool.QueryRow(ctx, gitopsQuery, args...).Scan(&flux, &argo, &anyEngine, &none); err != nil {
+		return nil, fmt.Errorf("cluster gitops facets: %w", err)
+	}
+	facets.Gitops["flux"] = flux
+	facets.Gitops["argo"] = argo
+	facets.Gitops["any"] = anyEngine
+	facets.Gitops["none"] = none
+
+	// Node total honours every active filter, so the stat card matches the list.
+	where, args = clusterWhere(f, "")
+	nodesQuery := "SELECT COALESCE(SUM(node_count), 0) FROM clusters WHERE " + where
+	if err := r.pool.QueryRow(ctx, nodesQuery, args...).Scan(&facets.TotalNodes); err != nil {
+		return nil, fmt.Errorf("cluster node total: %w", err)
+	}
+
+	// Unscoped total lets the UI say "12 of 148 clusters" while filters are on.
+	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM clusters WHERE tenant_id = $1", f.TenantID).Scan(&facets.TotalUnfiltered); err != nil {
+		return nil, fmt.Errorf("cluster unfiltered total: %w", err)
+	}
+
+	return facets, nil
 }
 
 // ClusterListResponse is the paginated result of ListFiltered.
@@ -115,48 +264,26 @@ type ClusterListResponse struct {
 
 // ListFiltered returns clusters with filtering, sorting, and pagination.
 func (r *ClusterRepository) ListFiltered(ctx context.Context, f ClusterFilter) (*ClusterListResponse, error) {
+	where, args := clusterWhere(f, "")
 	query := `
 		SELECT id, tenant_id, name, COALESCE(description,''), environment, COALESCE(api_server_url,''),
 		       flux_installed, status, node_count, COALESCE(kubernetes_version,''),
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
 		       is_active, (kubeconfig_encrypted IS NOT NULL AND kubeconfig_encrypted != ''),
 		       connection_id, last_heartbeat_at, created_at, updated_at
-		FROM clusters WHERE tenant_id = $1`
-	args := []interface{}{f.TenantID}
-	argIdx := 2
-
-	if f.Status != "" {
-		query += fmt.Sprintf(" AND status = $%d", argIdx)
-		args = append(args, f.Status)
-		argIdx++
-	}
-	if f.Environment != "" {
-		query += fmt.Sprintf(" AND environment = $%d", argIdx)
-		args = append(args, f.Environment)
-		argIdx++
-	}
-	if f.Search != "" {
-		query += fmt.Sprintf(" AND (name ILIKE $%d OR description ILIKE $%d)", argIdx, argIdx)
-		args = append(args, "%"+f.Search+"%")
-		argIdx++
-	}
+		FROM clusters WHERE ` + where
 
 	// Count
-	countQuery := "SELECT COUNT(*) FROM (" + query + ") sub"
+	countQuery := "SELECT COUNT(*) FROM clusters WHERE " + where
 	var total int64
 	if err := r.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count clusters: %w", err)
 	}
 
-	if f.Page < 1 {
-		f.Page = 1
-	}
-	if f.PerPage < 1 {
-		f.PerPage = 20
-	}
+	f.Page, f.PerPage = ClampPagination(f.Page, f.PerPage, 20)
 	offset := (f.Page - 1) * f.PerPage
 
-	// Sort
+	// Sort — whitelisted, never interpolated from user input.
 	orderBy := "name ASC"
 	if f.SortBy == "created_at" {
 		orderBy = "created_at DESC"
@@ -167,8 +294,8 @@ func (r *ClusterRepository) ListFiltered(ctx context.Context, f ClusterFilter) (
 		orderBy = "created_at ASC"
 	}
 
-	query += fmt.Sprintf(" ORDER BY %s", orderBy)
-	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIdx, argIdx+1)
+	argIdx := len(args) + 1
+	query += fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", orderBy, argIdx, argIdx+1)
 	args = append(args, f.PerPage, offset)
 
 	rows, err := r.pool.Query(ctx, query, args...)

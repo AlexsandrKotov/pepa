@@ -249,7 +249,7 @@ func (b *WorkflowBuilder) getAvailablePlugins(ctx context.Context) (string, erro
 		SELECT name, plugin_type, COALESCE(description, '')
 		FROM plugins WHERE status = 'running' AND tenant_id = $1
 		ORDER BY name
-	`, b.tenantID)
+	`, resolveTenant(ctx, b.tenantID))
 	if err != nil {
 		return "", err
 	}
@@ -274,7 +274,7 @@ func (b *WorkflowBuilder) getAvailableEnvironments(ctx context.Context) (string,
 		SELECT name, COALESCE(description, '')
 		FROM environments WHERE tenant_id = $1
 		ORDER BY name
-	`, b.tenantID)
+	`, resolveTenant(ctx, b.tenantID))
 	if err != nil {
 		return "", err
 	}

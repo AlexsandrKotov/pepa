@@ -88,12 +88,7 @@ func (r *EntityRepository) List(ctx context.Context, filter models.EntityFilter)
 	}
 
 	// Pagination
-	if filter.Page < 1 {
-		filter.Page = 1
-	}
-	if filter.PerPage < 1 {
-		filter.PerPage = 20
-	}
+	filter.Page, filter.PerPage = ClampPagination(filter.Page, filter.PerPage, 20)
 	offset := (filter.Page - 1) * filter.PerPage
 
 	query += fmt.Sprintf(" ORDER BY e.updated_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)

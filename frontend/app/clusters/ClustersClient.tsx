@@ -1,15 +1,24 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { clusters, environments, connections, Cluster, Environment } from '@/lib/api';
+import { clusters, environments, connections, Cluster, Environment, ClusterFacets } from '@/lib/api';
 import { Modal, Toast } from '@/components/Interactive';
 import ConceptHelp from '@/components/ConceptHelp';
 import EmptyState from '@/components/EmptyState';
 import ConfirmModal from '@/components/ConfirmModal';
 import BrandIcon from '@/components/BrandIcon';
 import Pagination from '@/components/Pagination';
+import { Skeleton } from '@/components/Skeleton';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import FilterMenu from '@/components/filters/FilterMenu';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import type { FilterGroup, FilterOption } from '@/components/filters/types';
+import { fieldLabel, valueLabel, valueTone } from '@/lib/filter-labels';
 
 // ── Kubeconfig Parser ────────────────────────────────────────
 
@@ -192,35 +201,87 @@ function inferEnvironment(name: string): string {
 
 // ── Main Component ───────────────────────────────────────────
 
+/** Sort lives in the URL next to the filters but is not a filter itself. */
+const SORT_OPTIONS = [
+  { value: 'name', label: 'Name', by: 'name', dir: 'asc' },
+  { value: 'created', label: 'Recently added', by: 'created_at', dir: 'desc' },
+  { value: 'status', label: 'Status', by: 'status', dir: 'asc' },
+];
+
+/** Canonical order, so pills do not reshuffle as facet counts come and go. */
+const STATUS_ORDER = ['connected', 'syncing', 'pending', 'disconnected'];
+
+/**
+ * Stat tile that doubles as a one-click filter. Numbers come from server-side
+ * facets, so they describe the whole tenant instead of the current page.
+ * Tiles without an onClick stay informational and lose every interactive affordance.
+ */
+function StatTile({ icon, iconClass, valueClass, value, label, active, onClick, title }: {
+  icon: string;
+  iconClass: string;
+  valueClass?: string;
+  value: number | null;
+  label: string;
+  active?: boolean;
+  onClick?: () => void;
+  title?: string;
+}) {
+  const body = (
+    <>
+      <div className={`w-10 h-10 rounded-xl ${iconClass} flex items-center justify-center text-white shrink-0`}>
+        <BrandIcon name={icon} size={20} monochrome />
+      </div>
+      <div className="min-w-0">
+        {value === null
+          ? <Skeleton className="h-6 w-12 mb-1.5" />
+          : <p className={`text-[22px] font-bold leading-none mb-1 ${valueClass || 'text-[var(--text-primary)]'}`}>{value}</p>}
+        <p className="text-[11px] text-[var(--text-tertiary)] truncate">{label}</p>
+      </div>
+    </>
+  );
+
+  if (!onClick) {
+    return (
+      <div title={title} className={`modern-stat-card flex items-center gap-3 ${active ? 'stat-tile-active' : ''}`}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-pressed={active ? 'true' : 'false'}
+      className={`modern-stat-card stat-tile flex items-center gap-3 ${active ? 'stat-tile-active' : ''}`}
+    >
+      {body}
+    </button>
+  );
+}
+
 export default function ClustersClient() {
   const [clusterList, setClusterList] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [facets, setFacets] = useState<ClusterFacets | null>(null);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
   const [showImportKubeconfig, setShowImportKubeconfig] = useState(false);
   const [editCluster, setEditCluster] = useState<Cluster | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Cluster | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [search, setSearch] = useState('');
-  const [searchInput, setSearchInput] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [envFilter, setEnvFilter] = useState('');
-  const [environmentList, setEnvironmentList] = useState<Environment[]>([]);
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear the debounce timer on unmount to avoid setState after unmount
-  useEffect(() => () => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-  }, []);
-
-  // Load environments for the filter dropdown
-  useEffect(() => {
-    environments.list().then(data => setEnvironmentList(data.environments || [])).catch(() => {});
-  }, []);
+  // The query string is the filter state: views are linkable and survive reload,
+  // and params this page does not own (id, tab) are never touched.
+  const filters = useUrlFilters({
+    single: ['search', 'status', 'gitops', 'sort'],
+    multi: ['environment'],
+    keepOnClear: ['sort'],
+  });
+  const { ready, page, perPage, toApiParams } = filters;
 
   // Escape key closes modals
   const anyModalOpen = showAdd || showImportKubeconfig || editCluster !== null;
@@ -231,38 +292,36 @@ export default function ClustersClient() {
   }, anyModalOpen);
 
   const loadClusters = useCallback(async () => {
+    if (!ready) return;
+    const applied = toApiParams();
+    const sort = SORT_OPTIONS.find(option => option.value === (applied.sort || 'name')) ?? SORT_OPTIONS[0];
+    const params: Record<string, string> = {
+      page: String(page),
+      per_page: String(perPage),
+      sort_by: sort.by,
+      sort_dir: sort.dir,
+    };
+    if (applied.search) params.search = applied.search;
+    if (applied.status) params.status = applied.status;
+    if (applied.environment) params.environment = applied.environment;
+    if (applied.gitops) params.gitops = applied.gitops;
+
+    setRefreshing(true);
     try {
-      const params: Record<string, string> = { page: String(page), per_page: String(perPage) };
-      if (search) params.search = search;
-      if (statusFilter) params.status = statusFilter;
-      if (envFilter) params.environment = envFilter;
       const data = await clusters.list(params);
       setClusterList(data.clusters || []);
       setTotal(data.total || 0);
       setTotalPages(data.total_pages || 0);
+      setFacets(data.facets ?? null);
     } catch {
       setToast({ message: 'Failed to load clusters', type: 'error' });
     } finally {
+      setRefreshing(false);
       setLoading(false);
     }
-  }, [page, perPage, search, statusFilter, envFilter]);
+  }, [ready, toApiParams, page, perPage]);
 
   useEffect(() => { loadClusters(); }, [loadClusters]);
-
-  // Debounced search — update the input immediately, commit to the server after 300ms
-  const handleSearchChange = (value: string) => {
-    setSearchInput(value);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      setSearch(value);
-      setPage(1);
-    }, 300);
-  };
-
-  const handleFilterChange = (setter: (v: string) => void, value: string) => {
-    setter(value);
-    setPage(1);
-  };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -300,24 +359,106 @@ export default function ClustersClient() {
     pending: 'badge-default',
   };
 
-  if (loading) {
-    return (
-      <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
-        <div className="px-6 py-6 space-y-6">
-          <h1 className="page-title-modern">Kubernetes Clusters</h1>
-          <div className="card card-body text-center py-12" style={{ borderRadius: '12px' }}>
-            <p className="text-[13px] text-[var(--text-tertiary)]">Loading clusters...</p>
-          </div>
-        </div>
-      </div>
-    );
+  // ── Facet-driven options: counts come from the server, so they survive pagination ──
+  const statusOptions = useMemo<FilterOption[]>(() => {
+    const counts = facets?.status ?? {};
+    const known = Object.keys(counts).filter(Boolean).sort();
+    const ordered = [
+      ...STATUS_ORDER.filter(value => counts[value] !== undefined),
+      ...known.filter(value => !STATUS_ORDER.includes(value)),
+      // Keep the row stable on a fresh tenant, where no status has been seen yet.
+      ...STATUS_ORDER.filter(value => counts[value] === undefined),
+    ];
+    return ordered.map(value => ({
+      value,
+      label: valueLabel(value),
+      count: counts[value] ?? 0,
+      tone: valueTone(value),
+    }));
+  }, [facets]);
+
+  const gitopsOptions = useMemo<FilterOption[]>(() => {
+    const counts = facets?.gitops ?? {};
+    return [
+      // "Managed" is the union the stat tile shows, so tile and pill can never disagree.
+      { value: 'any', label: 'Managed', tone: 'info' as const },
+      { value: 'flux', label: 'FluxCD', tone: 'accent' as const },
+      { value: 'argo', label: 'ArgoCD', tone: 'warning' as const },
+      { value: 'none', label: 'No GitOps', tone: 'muted' as const },
+    ].map(option => ({ ...option, count: counts[option.value] ?? 0 }));
+  }, [facets]);
+
+  const filterGroups = useMemo<FilterGroup[]>(() => [
+    {
+      key: 'environment',
+      label: fieldLabel('environment'),
+      multi: true,
+      options: Object.entries(facets?.environment ?? {})
+        .filter(([value]) => value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([value, count]) => ({ value, label: valueLabel(value), count, tone: valueTone(value) })),
+    },
+  ], [facets]);
+
+  const sortGroup = useMemo<FilterGroup>(() => ({
+    key: 'sort',
+    label: fieldLabel('sort'),
+    options: SORT_OPTIONS.map(option => ({ value: option.value, label: option.label })),
+  }), []);
+
+  const activeSortValue = filters.get('sort') || SORT_OPTIONS[0].value;
+  const activeSortLabel = (SORT_OPTIONS.find(option => option.value === activeSortValue) ?? SORT_OPTIONS[0]).label;
+
+  const menuValues: Record<string, string[]> = {
+    environment: filters.getAll('environment'),
+    sort: [activeSortValue],
+  };
+
+  // Menu groups mix single- and multi-select; the page owns which is which.
+  const handleMenuSelect = (key: string, value: string) => {
+    if (key === 'environment') {
+      filters.toggle('environment', value);
+      return;
+    }
+    filters.set(key, filters.get(key) === value ? '' : value);
+  };
+
+  const chips: ActiveChip[] = [];
+  const searchValue = filters.get('search');
+  if (searchValue) {
+    chips.push({ id: 'search', field: fieldLabel('search'), label: `“${searchValue}”`, onRemove: () => filters.set('search', '') });
+  }
+  const statusValue = filters.get('status');
+  if (statusValue) {
+    chips.push({ id: 'status', field: fieldLabel('status'), label: valueLabel(statusValue), tone: valueTone(statusValue), onRemove: () => filters.set('status', '') });
+  }
+  for (const value of filters.getAll('environment')) {
+    chips.push({ id: `environment-${value}`, field: fieldLabel('environment'), label: valueLabel(value), tone: valueTone(value), onRemove: () => filters.toggle('environment', value) });
+  }
+  const gitopsValue = filters.get('gitops');
+  if (gitopsValue) {
+    const option = gitopsOptions.find(item => item.value === gitopsValue);
+    chips.push({
+      id: 'gitops',
+      field: fieldLabel('gitops'),
+      label: option?.label ?? valueLabel(gitopsValue),
+      tone: option?.tone,
+      onRemove: () => filters.set('gitops', ''),
+    });
   }
 
-  const connected = clusterList.filter(c => c.status === 'connected').length;
-  const fluxCount = clusterList.filter(c => c.flux_installed).length;
-  const argoCount = clusterList.filter(c => c.labels?.argocd_detected === 'true').length;
-  const gitopsCount = clusterList.filter(c => c.flux_installed || c.labels?.argocd_detected === 'true').length;
-  const totalNodes = clusterList.reduce((sum, c) => sum + c.node_count, 0);
+  const totalClusters = facets?.total_unfiltered ?? total;
+  const connectedCount = facets?.status?.connected ?? 0;
+  const gitopsCount = facets?.gitops?.any ?? 0;
+  const fluxCount = facets?.gitops?.flux ?? 0;
+  const argoCount = facets?.gitops?.argo ?? 0;
+  const totalNodes = facets?.total_nodes ?? 0;
+  const hasFilters = filters.activeCount > 0;
+  const resultSummary = loading
+    ? 'Loading clusters…'
+    : hasFilters || page > 1
+      ? `${total} of ${totalClusters} clusters`
+      : `${totalClusters} cluster${totalClusters === 1 ? '' : 's'}`;
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -351,93 +492,130 @@ export default function ClustersClient() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 page-animate-up page-delay-1">
-        <div className="modern-stat-card flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl stat-icon-blue flex items-center justify-center text-white text-sm">
-            <BrandIcon name="kubernetes" size={20} monochrome />
-          </div>
-          <div>
-            <p className="text-[22px] font-bold text-[var(--text-primary)]">{clusterList.length}</p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">Total Clusters</p>
-          </div>
-        </div>
-        <div className="modern-stat-card flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl stat-icon-green flex items-center justify-center text-white text-sm">
-            <BrandIcon name="argocd" size={20} monochrome />
-          </div>
-          <div>
-            <p className="text-[22px] font-bold text-emerald-600">{connected}</p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">Connected</p>
-          </div>
-        </div>
-        <div className="modern-stat-card flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl stat-icon-purple flex items-center justify-center text-white text-sm">
-            {fluxCount > 0 && argoCount === 0 ? (
-              <BrandIcon name="fluxcd" size={20} monochrome />
-            ) : argoCount > 0 && fluxCount === 0 ? (
-              <BrandIcon name="argocd" size={20} monochrome />
-            ) : (
-              <BrandIcon name="gitops" size={20} monochrome />
-            )}
-          </div>
-          <div>
-            <p className="text-[22px] font-bold text-blue-500">{gitopsCount}</p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">
-              {fluxCount > 0 && argoCount > 0 ? `GitOps (${fluxCount} Flux, ${argoCount} Argo)` : fluxCount > 0 ? 'FluxCD' : argoCount > 0 ? 'ArgoCD' : 'GitOps'}
-            </p>
-          </div>
-        </div>
-        <div className="modern-stat-card flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl stat-icon-amber flex items-center justify-center text-white text-sm">
-            <BrandIcon name="dashboard" size={20} monochrome />
-          </div>
-          <div>
-            <p className="text-[22px] font-bold text-[var(--text-primary)]">{totalNodes}</p>
-            <p className="text-[11px] text-[var(--text-tertiary)]">Total Nodes</p>
-          </div>
-        </div>
+      {/* Stats — each tile doubles as a one-click filter */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 page-animate-up page-delay-1">
+        <StatTile
+          icon="kubernetes"
+          iconClass="stat-icon-blue"
+          value={loading ? null : totalClusters}
+          label="Total Clusters"
+          active={chips.length > 0}
+          title={chips.length > 0 ? 'Clear all filters' : 'Every cluster in this tenant'}
+          onClick={() => filters.clear()}
+        />
+        <StatTile
+          icon="argocd"
+          iconClass="stat-icon-green"
+          valueClass="text-emerald-600"
+          value={loading ? null : connectedCount}
+          label="Connected"
+          active={statusValue === 'connected'}
+          title="Show only connected clusters"
+          onClick={() => filters.set('status', statusValue === 'connected' ? '' : 'connected')}
+        />
+        <StatTile
+          icon={fluxCount > 0 && argoCount === 0 ? 'fluxcd' : argoCount > 0 && fluxCount === 0 ? 'argocd' : 'cicd'}
+          iconClass="stat-icon-purple"
+          valueClass="text-blue-500"
+          value={loading ? null : gitopsCount}
+          label={fluxCount > 0 && argoCount > 0 ? `GitOps (${fluxCount} Flux, ${argoCount} Argo)` : fluxCount > 0 ? 'FluxCD' : argoCount > 0 ? 'ArgoCD' : 'GitOps'}
+          active={gitopsValue !== '' && gitopsValue !== 'none'}
+          title="Show only GitOps-managed clusters"
+          onClick={() => filters.set('gitops', gitopsValue === 'any' ? '' : 'any')}
+        />
+        <StatTile
+          icon="dashboard"
+          iconClass="stat-icon-amber"
+          value={loading ? null : totalNodes}
+          label="Total Nodes"
+          title="Nodes across the clusters matching the current filters"
+        />
       </div>
 
-      {/* Search & Filters */}
-      <div className="flex flex-wrap items-center gap-2 page-animate-up page-delay-1">
-        <div className="relative flex-1 min-w-[200px] max-w-[320px] overflow-hidden">
-          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => handleSearchChange(e.target.value)}
+      <FilterBar
+        className="page-animate-up page-delay-1"
+        sticky
+        loading={refreshing}
+        search={
+          <SearchInput
+            value={searchValue}
+            onCommit={value => filters.set('search', value)}
             placeholder="Search clusters..."
-            className="input !pl-9"
+            label="Search clusters"
+            loading={refreshing}
           />
-        </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => handleFilterChange(setStatusFilter, e.target.value)}
-          className="input w-auto"
-        >
-          <option value="">All Statuses</option>
-          <option value="connected">Connected</option>
-          <option value="disconnected">Disconnected</option>
-          <option value="syncing">Syncing</option>
-          <option value="pending">Pending</option>
-        </select>
-        <select
-          value={envFilter}
-          onChange={(e) => handleFilterChange(setEnvFilter, e.target.value)}
-          className="input w-auto"
-        >
-          <option value="">All Environments</option>
-          {(environmentList || []).map((env) => (
-            <option key={env.id} value={env.slug}>{env.name}</option>
-          ))}
-        </select>
-      </div>
+        }
+        quick={
+          <>
+            <QuickFilter
+              field="status"
+              label={fieldLabel('status')}
+              options={statusOptions}
+              value={statusValue}
+              onChange={value => filters.set('status', value)}
+              allCount={totalClusters}
+            />
+            <QuickFilter
+              field="gitops"
+              label={fieldLabel('gitops')}
+              options={gitopsOptions}
+              value={gitopsValue}
+              onChange={value => filters.set('gitops', value)}
+            />
+          </>
+        }
+        menu={
+          <FilterMenu
+            groups={filterGroups}
+            values={menuValues}
+            onToggle={handleMenuSelect}
+            onClearGroup={key => filters.remove(key)}
+            triggerLabel={filters.getAll('environment').length === 1
+              ? valueLabel(filters.getAll('environment')[0])
+              : fieldLabel('environment')}
+            activeCount={filters.getAll('environment').length}
+          />
+        }
+        actions={
+          <FilterMenu
+            groups={[sortGroup]}
+            values={menuValues}
+            onToggle={handleMenuSelect}
+            onClearGroup={key => filters.remove(key)}
+            triggerLabel={`Sort: ${activeSortLabel}`}
+            variant="sort"
+            align="right"
+          />
+        }
+        chips={
+          <FilterChips
+            chips={chips}
+            onClearAll={() => filters.clear()}
+            summary={resultSummary}
+          />
+        }
+      />
 
-      {/* Cluster List */}
-      <div className="space-y-3 page-animate-up page-delay-2">
+      {/* Cluster list — a refresh dims the result instead of blanking it, so the
+          page never jumps while pills are being clicked. */}
+      {loading ? (
+        <div className="space-y-3 page-animate-up page-delay-2" aria-hidden="true">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="card p-4 flex items-center gap-3" style={{ borderRadius: '12px' }}>
+              <Skeleton className="w-2.5 h-2.5 rounded-full shrink-0" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-1/4" />
+                <Skeleton className="h-3 w-1/3" />
+              </div>
+              <Skeleton className="h-4 w-16 shrink-0" />
+            </div>
+          ))}
+        </div>
+      ) : (
+      <div
+        className={`space-y-3 page-animate-up page-delay-2 transition-opacity duration-200 ${refreshing ? 'opacity-60' : ''}`}
+        aria-busy={refreshing}
+      >
         {clusterList.map((cluster) => (
           <div
             key={cluster.id}
@@ -517,15 +695,30 @@ export default function ClustersClient() {
           </div>
         ))}
         {clusterList.length === 0 && (
-          <>
+          hasFilters || page > 1 ? (
+            /* Filters excluded everything — always offer a way back, never a dead end. */
             <EmptyState
-              icon={<BrandIcon name="kubernetes" size={48} />}
-              title={search || statusFilter || envFilter ? 'No clusters match filters' : 'No clusters connected'}
-              description={search || statusFilter || envFilter ? 'Try adjusting or clearing the filters above.' : 'A cluster is a Kubernetes environment where your services run. Connect one by pasting its kubeconfig — PEPA will detect its health and GitOps engine automatically.'}
-              actionLabel={search || statusFilter || envFilter ? undefined : '+ Add Cluster'}
-              actionOnClick={search || statusFilter || envFilter ? undefined : () => setShowAdd(true)}
+              icon={
+                <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z" />
+                </svg>
+              }
+              title="No clusters match these filters"
+              description={chips.length
+                ? `Nothing matches ${chips.map(chip => `${chip.field.toLowerCase()} “${chip.label}”`).join(', ')}. Remove one of the filters or start from the full list.`
+                : 'This page is empty. Go back to the first page to see the clusters that do exist.'}
+              actionLabel="Clear filters"
+              actionOnClick={() => filters.clear()}
             />
-            {!search && !statusFilter && !envFilter && (
+          ) : (
+            <>
+              <EmptyState
+                icon={<BrandIcon name="kubernetes" size={48} />}
+                title="No clusters connected"
+                description="A cluster is a Kubernetes environment where your services run. Connect one by pasting its kubeconfig — PEPA will detect its health and GitOps engine automatically."
+                actionLabel="+ Add Cluster"
+                actionOnClick={() => setShowAdd(true)}
+              />
               <div className="text-center mt-3">
                 <button
                   onClick={() => setShowImportKubeconfig(true)}
@@ -534,10 +727,11 @@ export default function ClustersClient() {
                   Have a kubeconfig with multiple clusters? Import them all at once {'\u2192'}
                 </button>
               </div>
-            )}
-          </>
+            </>
+          )
         )}
       </div>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -545,8 +739,8 @@ export default function ClustersClient() {
           page={page}
           perPage={perPage}
           total={total}
-          onPageChange={setPage}
-          onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          onPageChange={filters.setPage}
+          onPerPageChange={filters.setPerPage}
         />
       )}
 

@@ -112,7 +112,7 @@ func (s *RiskScorer) gatherDeploymentContext(ctx context.Context, serviceName st
 		  AND ps.name ILIKE $2
 		ORDER BY pr.started_at DESC
 		LIMIT 10
-	`, s.tenantID, "%"+serviceName+"%")
+	`, resolveTenant(ctx, s.tenantID), "%"+serviceName+"%")
 	if err == nil {
 		defer rows.Close()
 		sb.(*stringBuilder).WriteString("\nRecent deployments:\n")
@@ -130,7 +130,7 @@ func (s *RiskScorer) gatherDeploymentContext(ctx context.Context, serviceName st
 	_ = s.pool.QueryRow(ctx, `
 		SELECT COALESCE(description,''), COALESCE(owner,''), COALESCE(status,'')
 		FROM services WHERE tenant_id = $1 AND name ILIKE $2 LIMIT 1
-	`, s.tenantID, "%"+serviceName+"%").Scan(&svcDesc, &svcOwner, &svcStatus)
+	`, resolveTenant(ctx, s.tenantID), "%"+serviceName+"%").Scan(&svcDesc, &svcOwner, &svcStatus)
 
 	if svcDesc != "" {
 		sb.(*stringBuilder).WriteString(fmt.Sprintf("\nService: %s\nOwner: %s\nStatus: %s\n",

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/google/uuid"
 )
 
 // LLMProvider — abstract interface for any LLM backend
@@ -156,6 +158,11 @@ type Citation struct {
 type RAGQuery struct {
 	Text             string            `json:"text"`
 	TenantID         string            `json:"tenant_id"`
+	// TenantIDs is the effective read scope: the caller's workspace plus any
+	// shared platform corpus. It is resolved from the verified token by the
+	// handler, never from the request body. When empty the pipeline falls back
+	// to the single TenantID.
+	TenantIDs        []uuid.UUID       `json:"-"`
 	TopK             int               `json:"top_k"`
 	MaxContextTokens int               `json:"max_context_tokens"`
 	Model            string            `json:"model,omitempty"`

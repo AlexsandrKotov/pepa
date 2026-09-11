@@ -553,7 +553,13 @@ export async function getMe(): Promise<{ user: { id: string; email: string; name
     credentials: 'include',
   });
   if (!res.ok) {
-    throw new Error(res.status === 401 ? 'Not authenticated' : `API error: ${res.status}`);
+    // Callers must be able to tell "no session" (401) apart from a transient
+    // failure (5xx / rate limit / proxy error) — see usePermission.
+    const err = new Error(
+      res.status === 401 ? 'Not authenticated' : `API error: ${res.status}`,
+    ) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -1446,10 +1452,20 @@ export interface ClusterNode {
   container_runtime: string;
 }
 
+/** Per-value counts for the cluster filters, returned by /clusters alongside the page. */
+export interface ClusterFacets {
+  status: Record<string, number>;
+  environment: Record<string, number>;
+  /** Keys: flux, argo, none. */
+  gitops: Record<string, number>;
+  total_nodes: number;
+  total_unfiltered: number;
+}
+
 export const clusters = {
   list: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
-    return fetchAPI<{ clusters: Cluster[]; total: number; page: number; per_page: number; total_pages: number }>(`/api/v1/clusters${qs}`);
+    return fetchAPI<{ clusters: Cluster[]; total: number; page: number; per_page: number; total_pages: number; facets?: ClusterFacets | null }>(`/api/v1/clusters${qs}`);
   },
   get: (id: string) => fetchAPI<Cluster>(`/api/v1/clusters/${id}`),
   create: (data: Record<string, unknown>) =>

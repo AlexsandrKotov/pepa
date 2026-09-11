@@ -26,12 +26,7 @@ func NewWorkflowRepository(db *database.DB) *WorkflowRepository {
 
 // List returns workflows with pagination.
 func (r *WorkflowRepository) List(ctx context.Context, tenantID uuid.UUID, page, perPage int) ([]models.Workflow, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 20
-	}
+	page, perPage = ClampPagination(page, perPage, 20)
 	offset := (page - 1) * perPage
 
 	var total int64
@@ -361,16 +356,20 @@ func (r *WorkflowRepository) CreateStepExecution(ctx context.Context, se *models
 	return nil
 }
 
-// ListStepExecutions returns step executions for a workflow execution.
-func (r *WorkflowRepository) ListStepExecutions(ctx context.Context, executionID uuid.UUID) ([]models.StepExecution, error) {
+// ListStepExecutions returns step executions for a workflow execution, but only
+// when that execution belongs to the given tenant. step_executions itself has no
+// tenant_id column, so the join through workflow_executions is the only thing
+// that keeps one workspace from reading another workspace's step params/outputs.
+func (r *WorkflowRepository) ListStepExecutions(ctx context.Context, executionID, tenantID uuid.UUID) ([]models.StepExecution, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, execution_id, step_name, step_type, plugin_name, action_name,
-		       params, status, started_at, completed_at, duration_ms, output,
-		       error, retry_count, created_at
-		FROM step_executions
-		WHERE execution_id = $1
-		ORDER BY created_at ASC
-	`, executionID)
+		SELECT se.id, se.execution_id, se.step_name, se.step_type, se.plugin_name, se.action_name,
+		       se.params, se.status, se.started_at, se.completed_at, se.duration_ms, se.output,
+		       se.error, se.retry_count, se.created_at
+		FROM step_executions se
+		JOIN workflow_executions we ON we.id = se.execution_id
+		WHERE se.execution_id = $1 AND we.tenant_id = $2
+		ORDER BY se.created_at ASC
+	`, executionID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("query step executions: %w", err)
 	}

@@ -30,7 +30,20 @@ type AgentDeps struct {
 	DockerHostRepo    *repository.DockerHostRepository
 	GitOpsBindingRepo *repository.GitOpsBindingRepository
 	DBPool            *pgxpool.Pool
-	TenantID          uuid.UUID
+	// TenantID is the fallback workspace, used only when a call carries no
+	// request context (background jobs, seeded runs).
+	TenantID uuid.UUID
+}
+
+// tenant resolves the workspace a tool call must run in.
+//
+// The registry is built once at bootstrap, so reading the tenant from the field
+// alone would let any chat participant list, create or deploy rows of the
+// bootstrap workspace regardless of their own. The context value is set by the
+// handler from the verified JWT, which makes the tool's data access follow the
+// same tenancy rule as the REST endpoints.
+func (d *AgentDeps) tenant(ctx context.Context) uuid.UUID {
+	return resolveTenant(ctx, d.TenantID)
 }
 
 // RegisterAgentTools registers all PEPA data-access tools into the registry.
@@ -170,7 +183,7 @@ func (t *listDeploymentsTool) Definition() ToolDefinition {
 	}
 }
 func (t *listDeploymentsTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
-	deployments, err := t.deps.DeploymentRepo.List(ctx, t.deps.TenantID)
+	deployments, err := t.deps.DeploymentRepo.List(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -220,7 +233,7 @@ func (t *listClustersTool) Definition() ToolDefinition {
 	}
 }
 func (t *listClustersTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
-	clusters, err := t.deps.ClusterRepo.List(ctx, t.deps.TenantID)
+	clusters, err := t.deps.ClusterRepo.List(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -250,7 +263,7 @@ func (t *getClusterTool) Execute(ctx context.Context, params json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("invalid cluster ID: %w", err)
 	}
-	c, err := t.deps.ClusterRepo.Get(ctx, uid, t.deps.TenantID)
+	c, err := t.deps.ClusterRepo.Get(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -279,7 +292,7 @@ func (t *listPipelinesTool) Execute(ctx context.Context, params json.RawMessage)
 	if p.Page < 1 {
 		p.Page = 1
 	}
-	sources, total, err := t.deps.PipelineSource.List(ctx, t.deps.TenantID, p.Page, 20)
+	sources, total, err := t.deps.PipelineSource.List(ctx, t.deps.tenant(ctx), p.Page, 20)
 	if err != nil {
 		return "", err
 	}
@@ -372,7 +385,7 @@ func (t *listWorkflowsTool) Execute(ctx context.Context, params json.RawMessage)
 	if p.Page < 1 {
 		p.Page = 1
 	}
-	wfs, total, err := t.deps.WorkflowRepo.List(ctx, t.deps.TenantID, p.Page, 50)
+	wfs, total, err := t.deps.WorkflowRepo.List(ctx, t.deps.tenant(ctx), p.Page, 50)
 	if err != nil {
 		return "", err
 	}
@@ -422,7 +435,7 @@ func (t *listEnvironmentsTool) Definition() ToolDefinition {
 	}
 }
 func (t *listEnvironmentsTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
-	envs, err := t.deps.EnvironmentRepo.List(ctx, t.deps.TenantID)
+	envs, err := t.deps.EnvironmentRepo.List(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -448,7 +461,7 @@ func (t *listConnectionsTool) Execute(ctx context.Context, params json.RawMessag
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
-	conns, err := t.deps.ConnectionRepo.List(ctx, t.deps.TenantID, p.Type)
+	conns, err := t.deps.ConnectionRepo.List(ctx, t.deps.tenant(ctx), p.Type)
 	if err != nil {
 		return "", err
 	}
@@ -495,7 +508,7 @@ func (t *listEntitiesTool) Execute(ctx context.Context, params json.RawMessage) 
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
-	resp, err := t.deps.EntityRepo.List(ctx, models.EntityFilter{Search: p.Search, TypeKey: p.TypeKey, Page: 1, PerPage: 20, TenantID: t.deps.TenantID})
+	resp, err := t.deps.EntityRepo.List(ctx, models.EntityFilter{Search: p.Search, TypeKey: p.TypeKey, Page: 1, PerPage: 20, TenantID: t.deps.tenant(ctx)})
 	if err != nil {
 		return "", err
 	}
@@ -525,7 +538,7 @@ func (t *getEntityTool) Execute(ctx context.Context, params json.RawMessage) (st
 	if err != nil {
 		return "", fmt.Errorf("invalid entity ID: %w", err)
 	}
-	e, err := t.deps.EntityRepo.Get(ctx, uid, t.deps.TenantID)
+	e, err := t.deps.EntityRepo.Get(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -550,7 +563,7 @@ func (t *listDockerServicesTool) Execute(ctx context.Context, _ json.RawMessage)
 	}
 
 	// 1. Get registered docker services from DB
-	dbServices, err := t.deps.DockerHostRepo.ListServices(ctx, t.deps.TenantID)
+	dbServices, err := t.deps.DockerHostRepo.ListServices(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -568,7 +581,7 @@ func (t *listDockerServicesTool) Execute(ctx context.Context, _ json.RawMessage)
 
 	var discovered []discoveredContainer
 
-	hosts, err := t.deps.DockerHostRepo.ListHosts(ctx, t.deps.TenantID)
+	hosts, err := t.deps.DockerHostRepo.ListHosts(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		slog.Info("list_docker_services: failed to list hosts", "error", err)
 	} else {
@@ -582,7 +595,7 @@ func (t *listDockerServicesTool) Execute(ctx context.Context, _ json.RawMessage)
 			if host.Status != "connected" {
 				continue
 			}
-			decrypted, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, host.ID, t.deps.TenantID)
+			decrypted, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, host.ID, t.deps.tenant(ctx))
 			if err != nil {
 				slog.Info("list_docker_services: failed to decrypt host ", "name", host.Name, "error", err)
 				continue
@@ -650,7 +663,7 @@ func (t *listJiraIssuesTool) Definition() ToolDefinition {
 	}
 }
 func (t *listJiraIssuesTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
-	issues, err := t.deps.JiraRepo.List(ctx, t.deps.TenantID)
+	issues, err := t.deps.JiraRepo.List(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -683,7 +696,7 @@ func (t *getDockerServiceTool) Execute(ctx context.Context, params json.RawMessa
 	if err != nil {
 		return "", fmt.Errorf("invalid docker service ID: %w", err)
 	}
-	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.TenantID)
+	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -721,11 +734,11 @@ func (t *getDockerServiceLogsTool) Execute(ctx context.Context, params json.RawM
 	if err != nil {
 		return "", fmt.Errorf("invalid docker service ID: %w", err)
 	}
-	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.TenantID)
+	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
-	client, err := newDockerClientForService(t.deps, svc)
+	client, err := newDockerClientForService(ctx, t.deps, svc)
 	if err != nil {
 		return "", err
 	}
@@ -754,14 +767,14 @@ func newDockerClient(host *repository.DockerHost) *dockerpkg.Client {
 
 // newDockerClientForService returns a Docker client for the given service.
 // If DockerHostID is nil, the local Docker socket is used.
-func newDockerClientForService(deps *AgentDeps, svc *repository.DockerService) (*dockerpkg.Client, error) {
+func newDockerClientForService(ctx context.Context, deps *AgentDeps, svc *repository.DockerService) (*dockerpkg.Client, error) {
 	if svc.DockerHostID == nil {
 		return dockerpkg.NewClient(dockerpkg.HostConfig{
 			HostType:    "local",
 			HostAddress: "unix:///var/run/docker.sock",
 		}), nil
 	}
-	host, err := deps.DockerHostRepo.GetHostDecrypted(context.Background(), *svc.DockerHostID, deps.TenantID)
+	host, err := deps.DockerHostRepo.GetHostDecrypted(ctx, *svc.DockerHostID, deps.tenant(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("docker host not found: %w", err)
 	}
@@ -833,7 +846,7 @@ func (t *createEntityTool) Execute(ctx context.Context, params json.RawMessage) 
 		Name:        p.Name,
 		Description: p.Description,
 	}
-	entity, err := t.deps.EntityRepo.Create(ctx, req, t.deps.TenantID, t.deps.TenantID, nil)
+	entity, err := t.deps.EntityRepo.Create(ctx, req, t.deps.tenant(ctx), t.deps.tenant(ctx), nil)
 	if err != nil {
 		return "", err
 	}
@@ -867,7 +880,7 @@ func (t *updateEntityTool) Execute(ctx context.Context, params json.RawMessage) 
 		return "", fmt.Errorf("invalid entity ID: %w", err)
 	}
 	// Get existing entity first
-	_, err = t.deps.EntityRepo.Get(ctx, uid, t.deps.TenantID)
+	_, err = t.deps.EntityRepo.Get(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -898,7 +911,7 @@ func (t *createEnvironmentTool) Execute(ctx context.Context, params json.RawMess
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
 	env := &repository.Environment{
-		TenantID:    t.deps.TenantID,
+		TenantID:    t.deps.tenant(ctx),
 		Name:        p.Name,
 		Slug:        p.Slug,
 		Type:        p.Type,
@@ -936,11 +949,11 @@ func (t *restartDockerServiceTool) Execute(ctx context.Context, params json.RawM
 	if err != nil {
 		return "", fmt.Errorf("invalid docker service ID: %w", err)
 	}
-	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.TenantID)
+	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
-	client, err := newDockerClientForService(t.deps, svc)
+	client, err := newDockerClientForService(ctx, t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
@@ -974,11 +987,11 @@ func (t *stopDockerServiceTool) Execute(ctx context.Context, params json.RawMess
 	if err != nil {
 		return "", fmt.Errorf("invalid docker service ID: %w", err)
 	}
-	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.TenantID)
+	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
-	client, err := newDockerClientForService(t.deps, svc)
+	client, err := newDockerClientForService(ctx, t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
@@ -1012,11 +1025,11 @@ func (t *startDockerServiceTool) Execute(ctx context.Context, params json.RawMes
 	if err != nil {
 		return "", fmt.Errorf("invalid docker service ID: %w", err)
 	}
-	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.TenantID)
+	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
-	client, err := newDockerClientForService(t.deps, svc)
+	client, err := newDockerClientForService(ctx, t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
@@ -1050,11 +1063,11 @@ func (t *refreshDockerServiceTool) Execute(ctx context.Context, params json.RawM
 	if err != nil {
 		return "", fmt.Errorf("invalid docker service ID: %w", err)
 	}
-	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.TenantID)
+	svc, err := t.deps.DockerHostRepo.GetService(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
-	client, err := newDockerClientForService(t.deps, svc)
+	client, err := newDockerClientForService(ctx, t.deps, svc)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
@@ -1095,14 +1108,14 @@ func (t *refreshAllDockerServicesTool) Execute(ctx context.Context, _ json.RawMe
 	if t.deps.DockerHostRepo == nil {
 		return "[]", nil
 	}
-	services, err := t.deps.DockerHostRepo.ListServices(ctx, t.deps.TenantID)
+	services, err := t.deps.DockerHostRepo.ListServices(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
 	refreshed := 0
 	for i := range services {
 		svc := &services[i]
-		client, err := newDockerClientForService(t.deps, svc)
+		client, err := newDockerClientForService(ctx, t.deps, svc)
 		if err != nil {
 			continue
 		}
@@ -1147,7 +1160,7 @@ func (t *createServiceTool) Execute(ctx context.Context, params json.RawMessage)
 	if err := json.Unmarshal(params, &p); err != nil {
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
-	svc, err := t.deps.ServiceRepo.Create(ctx, p, t.deps.TenantID, nil)
+	svc, err := t.deps.ServiceRepo.Create(ctx, p, t.deps.tenant(ctx), nil)
 	if err != nil {
 		return "", err
 	}
@@ -1314,7 +1327,7 @@ func (t *deployServiceTool) Execute(ctx context.Context, params json.RawMessage)
 		Branch:      p.Branch,
 		ImageTag:    p.ImageTag,
 	}
-	deployment, err := t.deps.ServiceRepo.CreateDeployment(ctx, uid, req, t.deps.TenantID)
+	deployment, err := t.deps.ServiceRepo.CreateDeployment(ctx, uid, req, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -1344,7 +1357,7 @@ func (t *createConnectionTool) Execute(ctx context.Context, params json.RawMessa
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
 	conn := &repository.Connection{
-		TenantID:    t.deps.TenantID,
+		TenantID:    t.deps.tenant(ctx),
 		Name:        p.Name,
 		Type:        repository.ConnectionType(p.Type),
 		Description: p.Description,
@@ -1393,7 +1406,7 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 	envJSON, _ := json.Marshal(envVars)
 
 	svc := &repository.DockerService{
-		TenantID:    t.deps.TenantID,
+		TenantID:    t.deps.tenant(ctx),
 		Name:        p.Name,
 		ComposeYaml: p.ComposeYaml,
 		FolderPath:  p.FolderPath,
@@ -1409,7 +1422,7 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 			return "", fmt.Errorf("invalid docker host ID: %w", err)
 		}
 		// Verify host exists
-		if _, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, hostID, t.deps.TenantID); err != nil {
+		if _, err := t.deps.DockerHostRepo.GetHostDecrypted(ctx, hostID, t.deps.tenant(ctx)); err != nil {
 			return "", fmt.Errorf("docker host not found: %w", err)
 		}
 		svc.DockerHostID = &hostID
@@ -1419,7 +1432,7 @@ func (t *createDockerServiceTool) Execute(ctx context.Context, params json.RawMe
 		return "", err
 	}
 
-	client, err := newDockerClientForService(t.deps, svc)
+	client, err := newDockerClientForService(ctx, t.deps, svc)
 	if err != nil {
 		svc.Status = "error"
 		_ = t.deps.DockerHostRepo.UpdateService(ctx, svc)
@@ -1479,7 +1492,7 @@ func (t *triggerPipelineTool) Execute(ctx context.Context, params json.RawMessag
 	}
 	now := time.Now()
 	run := &models.PipelineRun{
-		TenantID:   t.deps.TenantID,
+		TenantID:   t.deps.tenant(ctx),
 		SourceID:   sourceID,
 		Status:     models.PipelineRunPending,
 		Parameters: p.Parameters,
@@ -1526,7 +1539,7 @@ func (t *executeWorkflowTool) Execute(ctx context.Context, params json.RawMessag
 	now := time.Now()
 	exec := &models.WorkflowExecution{
 		WorkflowID:     wfID,
-		TenantID:       t.deps.TenantID,
+		TenantID:       t.deps.tenant(ctx),
 		TriggerType:    "ai_agent",
 		TriggerPayload: p.Payload,
 		Status:         models.ExecutionPending,
@@ -1575,7 +1588,7 @@ func (t *deployBlueprintToDockerTool) Execute(ctx context.Context, params json.R
 	err := t.deps.DBPool.QueryRow(ctx, `
 		SELECT name, source_type, COALESCE(compose_yaml,'') FROM service_blueprints
 		WHERE id = $1 AND tenant_id = $2
-	`, p.BlueprintID, t.deps.TenantID).Scan(&bpName, &sourceType, &composeYAML)
+	`, p.BlueprintID, t.deps.tenant(ctx)).Scan(&bpName, &sourceType, &composeYAML)
 	if err != nil {
 		return "", fmt.Errorf("blueprint not found: %w", err)
 	}
@@ -1592,7 +1605,7 @@ func (t *deployBlueprintToDockerTool) Execute(ctx context.Context, params json.R
 	err = t.deps.DBPool.QueryRow(ctx, `
 		SELECT name, host_address, host_type, status, COALESCE(ssh_key,'')
 		FROM docker_hosts WHERE id = $1 AND tenant_id = $2
-	`, p.DockerHostID, t.deps.TenantID).Scan(&hostName, &hostAddr, &hostType, &hostStatus, &hostSSHKey)
+	`, p.DockerHostID, t.deps.tenant(ctx)).Scan(&hostName, &hostAddr, &hostType, &hostStatus, &hostSSHKey)
 	if err != nil {
 		return "", fmt.Errorf("docker host not found: %w", err)
 	}
@@ -1605,12 +1618,12 @@ func (t *deployBlueprintToDockerTool) Execute(ctx context.Context, params json.R
 		VALUES ($1, $2, $3, $4, 'deploying', $5, $5)
 		ON CONFLICT DO NOTHING
 		RETURNING id
-	`, t.deps.TenantID, p.DockerHostID, bpName, composeYAML, now).Scan(&svcID)
+	`, t.deps.tenant(ctx), p.DockerHostID, bpName, composeYAML, now).Scan(&svcID)
 	if err != nil {
 		// Service may already exist; try to find it
 		_ = t.deps.DBPool.QueryRow(ctx, `
 			SELECT id FROM docker_services WHERE tenant_id = $1 AND docker_host_id = $2 AND name = $3
-		`, t.deps.TenantID, p.DockerHostID, bpName).Scan(&svcID)
+		`, t.deps.tenant(ctx), p.DockerHostID, bpName).Scan(&svcID)
 	}
 
 	result := map[string]interface{}{
@@ -1642,7 +1655,7 @@ func (t *listGitOpsBindingsTool) Execute(ctx context.Context, params json.RawMes
 	if t.deps.GitOpsBindingRepo == nil {
 		return "[]", nil
 	}
-	bindings, err := t.deps.GitOpsBindingRepo.List(ctx, t.deps.TenantID)
+	bindings, err := t.deps.GitOpsBindingRepo.List(ctx, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -1681,7 +1694,7 @@ func (t *getGitOpsSuggestionsTool) Execute(ctx context.Context, _ json.RawMessag
 
 	// Check bindings status
 	if t.deps.GitOpsBindingRepo != nil {
-		bindings, err := t.deps.GitOpsBindingRepo.List(ctx, t.deps.TenantID)
+		bindings, err := t.deps.GitOpsBindingRepo.List(ctx, t.deps.tenant(ctx))
 		if err == nil {
 			if len(bindings) == 0 {
 				suggestions = append(suggestions, map[string]interface{}{

@@ -186,7 +186,7 @@ func (h *AIHandlers) Chat(c *gin.Context) {
 			SystemInstruction: req.SystemInstruction,
 		}
 
-		resp, err := agent.Run(c.Request.Context(), task, req.Message)
+		resp, err := agent.Run(agentContext(c), task, req.Message)
 		if err != nil {
 			slog.Info("Agent error", "error", err)
 			respondInternalError(c, err)
@@ -318,7 +318,7 @@ func (h *AIHandlers) ChatStream(c *gin.Context) {
 		}
 
 		// Stream from the agent (prompt mode uses RunStream, native mode falls back to blocking run)
-		stream, sErr := agent.Stream(c.Request.Context(), task, req.Message)
+		stream, sErr := agent.Stream(agentContext(c), task, req.Message)
 		if sErr != nil {
 			_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": sErr.Error()}))
 			flusher.Flush()

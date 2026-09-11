@@ -118,12 +118,7 @@ func (r *ServiceRepository) List(ctx context.Context, filter models.ServiceFilte
 		return nil, fmt.Errorf("count services: %w", err)
 	}
 
-	if filter.Page < 1 {
-		filter.Page = 1
-	}
-	if filter.PerPage < 1 {
-		filter.PerPage = 20
-	}
+	filter.Page, filter.PerPage = ClampPagination(filter.Page, filter.PerPage, 20)
 	offset := (filter.Page - 1) * filter.PerPage
 
 	query += fmt.Sprintf(" ORDER BY s.updated_at DESC LIMIT $%d OFFSET $%d", argIdx, argIdx+1)

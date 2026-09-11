@@ -114,12 +114,7 @@ func (r *DockerHostRepository) ListHostsFiltered(ctx context.Context, f DockerHo
 		return nil, fmt.Errorf("count docker hosts: %w", err)
 	}
 
-	if f.Page < 1 {
-		f.Page = 1
-	}
-	if f.PerPage < 1 {
-		f.PerPage = 20
-	}
+	f.Page, f.PerPage = ClampPagination(f.Page, f.PerPage, 20)
 	offset := (f.Page - 1) * f.PerPage
 
 	query += " ORDER BY created_at DESC"
@@ -350,12 +345,7 @@ func (r *DockerHostRepository) ListServicesFiltered(ctx context.Context, f Docke
 		return nil, fmt.Errorf("count docker services: %w", err)
 	}
 
-	if f.Page < 1 {
-		f.Page = 1
-	}
-	if f.PerPage < 1 {
-		f.PerPage = 20
-	}
+	f.Page, f.PerPage = ClampPagination(f.Page, f.PerPage, 20)
 	offset := (f.Page - 1) * f.PerPage
 
 	query += " ORDER BY created_at DESC"

@@ -90,7 +90,7 @@ func (a *CostAdvisor) gatherCostContext(ctx context.Context) (string, error) {
 		SELECT name, COALESCE(language,''), COALESCE(status,''),
 		       COALESCE(owner,''), COALESCE(tags::text,'[]')
 		FROM services WHERE tenant_id = $1
-	`, a.tenantID)
+	`, resolveTenant(ctx, a.tenantID))
 	if err == nil {
 		defer rows.Close()
 		sb.WriteString("Services:\n")
@@ -105,7 +105,7 @@ func (a *CostAdvisor) gatherCostContext(ctx context.Context) (string, error) {
 	rows2, err := a.pool.Query(ctx, `
 		SELECT name, COALESCE(host,''), COALESCE(status,''), COALESCE(provider,'')
 		FROM clusters WHERE tenant_id = $1
-	`, a.tenantID)
+	`, resolveTenant(ctx, a.tenantID))
 	if err == nil {
 		defer rows2.Close()
 		sb.WriteString("\nClusters:\n")
@@ -123,7 +123,7 @@ func (a *CostAdvisor) gatherCostContext(ctx context.Context) (string, error) {
 		FROM docker_services ds
 		JOIN docker_hosts dh ON dh.id = ds.host_id
 		WHERE ds.tenant_id = $1
-	`, a.tenantID)
+	`, resolveTenant(ctx, a.tenantID))
 	if err == nil {
 		defer rows3.Close()
 		sb.WriteString("\nDocker Services:\n")
@@ -172,7 +172,7 @@ func (d *StaleDetector) DetectStaleResources(ctx context.Context) ([]StaleResour
 		WHERE s.tenant_id = $1
 		GROUP BY s.name, s.status
 		HAVING MAX(pr.started_at) IS NULL OR MAX(pr.started_at) < $2
-	`, d.tenantID, threshold)
+	`, resolveTenant(ctx, d.tenantID), threshold)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -199,7 +199,7 @@ func (d *StaleDetector) DetectStaleResources(ctx context.Context) ([]StaleResour
 		FROM environments e
 		WHERE e.tenant_id = $1
 		  AND e.updated_at < $2
-	`, d.tenantID, threshold)
+	`, resolveTenant(ctx, d.tenantID), threshold)
 	if err == nil {
 		defer rows2.Close()
 		for rows2.Next() {

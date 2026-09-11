@@ -2,11 +2,47 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrReservedRoleSlug is returned when a caller tries to create a role whose
+// slug collides with a name the authorisation layer treats as an administrator.
+var ErrReservedRoleSlug = errors.New("reserved role slug")
+
+// ReservedRoleSlugs are the role slugs that rbacMiddleware (and every
+// requireAdminRole check) treats as a blanket permission bypass. They may only
+// exist as system roles — see migration 075 for the database-side guard.
+var ReservedRoleSlugs = []string{"admin", "super_admin", "platform admin", "platform_admin"}
+
+// IsReservedRoleSlug reports whether slug grants the holder the admin bypass.
+func IsReservedRoleSlug(slug string) bool {
+	lower := strings.ToLower(strings.TrimSpace(slug))
+	for _, s := range ReservedRoleSlugs {
+		if lower == s {
+			return true
+		}
+	}
+	return false
+}
+
+// AllRBACResources is the single source of truth for permission seeding. It must
+// contain every resource name produced by rbacResourceMap in the REST layer,
+// otherwise a mapped route resolves to a resource nobody was ever granted and
+// non-admin users get a hard 403 (that is how /registry-repositories and
+// /observability broke).
+var AllRBACResources = []string{
+	"entities", "services", "deployments", "workflows", "clusters", "connections",
+	"scorecards", "plugins", "roles", "audit", "settings", "policies", "vault",
+	"pipelines", "gitops", "docker", "helm", "registry", "environments",
+	"discovery", "import", "ai", "jira", "credentials", "virtualization",
+	"observability", "notifications", "security", "self_service",
+	"auto_deploy_rules", "plugin_activity", "drift_schedules",
+}
 
 // Role represents a role in the system.
 type Role struct {
@@ -87,6 +123,12 @@ func (e *Engine) ListRoles(ctx context.Context, tenantID uuid.UUID) ([]Role, err
 func (e *Engine) CreateRole(ctx context.Context, tenantID uuid.UUID, name, slug, description, scope string) (*Role, error) {
 	if scope == "" {
 		scope = "tenant"
+	}
+	// A non-system role carrying a reserved slug would hand its holder the
+	// blanket admin bypass in rbacMiddleware. The database trigger (migration
+	// 075) enforces the same rule; this check turns it into a clean 400.
+	if IsReservedRoleSlug(slug) {
+		return nil, fmt.Errorf("%w: %s is reserved for the built-in administrator role", ErrReservedRoleSlug, slug)
 	}
 	r := &Role{
 		ID:          uuid.New(),
@@ -530,10 +572,7 @@ func (e *Engine) SeedDefaultRoles(ctx context.Context, tenantID uuid.UUID) error
 
 	// Admin gets all permissions
 	// NOTE: resource names must be PLURAL to match the frontend permission checks (e.g. "services", not "service").
-	resources := []string{
-		"entities", "services", "deployments", "workflows", "clusters", "connections", "scorecards", "plugins", "roles", "audit", "plugin_activity", "settings", "policies", "vault",
-		"pipelines", "gitops", "docker", "helm", "environments", "discovery", "import", "ai", "jira", "credentials", "virtualization", "observability", "notifications",
-	}
+	resources := AllRBACResources
 	actions := []string{"read", "create", "update", "delete"}
 	for _, res := range resources {
 		for _, act := range actions {
@@ -565,13 +604,9 @@ func (e *Engine) SeedDefaultRoles(ctx context.Context, tenantID uuid.UUID) error
 // have the expected base permissions, regardless of whether they were created by
 // migrations or by SeedDefaultRoles. This is idempotent and safe to call on every startup.
 func (e *Engine) EnsureBasePermissions(ctx context.Context, tenantID uuid.UUID) error {
-	// All resources that the frontend checks permissions for (must be PLURAL).
-	allResources := []string{
-		"entities", "services", "deployments", "workflows", "clusters", "connections",
-		"scorecards", "plugins", "roles", "audit", "settings", "policies", "vault",
-		"pipelines", "gitops", "docker", "helm", "environments", "discovery", "import",
-		"ai", "jira", "credentials", "virtualization", "observability",
-	}
+	// All resources that the frontend and rbacResourceMap check permissions for
+	// (must be PLURAL). Single source of truth: AllRBACResources.
+	allResources := AllRBACResources
 
 	// Find system roles for this tenant.
 	rows, err := e.db.Query(ctx, `

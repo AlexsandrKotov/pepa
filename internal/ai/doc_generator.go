@@ -79,7 +79,7 @@ Format as Markdown. Be specific and actionable.`, context)
 			'ai_docs_model', $2::text
 		)
 		WHERE tenant_id = $3 AND name ILIKE $4
-	`, doc.Content, doc.Model, g.tenantID, "%"+serviceName+"%")
+	`, doc.Content, doc.Model, resolveTenant(ctx, g.tenantID), "%"+serviceName+"%")
 
 	slog.Info("service documentation generated", "service", serviceName, "model", doc.Model)
 	return doc, nil
@@ -95,7 +95,7 @@ func (g *DocGenerator) gatherServiceContext(ctx context.Context, serviceName str
 		SELECT name, COALESCE(description,''), COALESCE(language,''),
 		       COALESCE(framework,''), COALESCE(owner,''), COALESCE(status,'')
 		FROM services WHERE tenant_id = $1 AND name ILIKE $2 LIMIT 1
-	`, g.tenantID, "%"+serviceName+"%").Scan(&name, &desc, &lang, &fw, &owner, &status)
+	`, resolveTenant(ctx, g.tenantID), "%"+serviceName+"%").Scan(&name, &desc, &lang, &fw, &owner, &status)
 
 	if err == nil {
 		sb.WriteString(fmt.Sprintf("Service: %s\nDescription: %s\nLanguage: %s\nFramework: %s\nOwner: %s\nStatus: %s\n",
@@ -128,7 +128,7 @@ func (g *DocGenerator) gatherServiceContext(ctx context.Context, serviceName str
 		JOIN pipeline_sources ps ON ps.id = pr.pipeline_source_id
 		WHERE ps.tenant_id = $1 AND ps.name ILIKE $2
 		ORDER BY pr.started_at DESC LIMIT 5
-	`, g.tenantID, "%"+serviceName+"%")
+	`, resolveTenant(ctx, g.tenantID), "%"+serviceName+"%")
 	if err == nil {
 		defer rows2.Close()
 		sb.WriteString("\nRecent deployments:\n")

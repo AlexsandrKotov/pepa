@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,14 +104,15 @@ func listClusters(deps Dependencies) gin.HandlerFunc {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
 		filter := repository.ClusterFilter{
-			TenantID:    tenantID,
-			Page:        page,
-			PerPage:     perPage,
-			Search:      c.Query("search"),
-			Status:      c.Query("status"),
-			Environment: c.Query("environment"),
-			SortBy:      c.DefaultQuery("sort_by", "name"),
-			SortDir:     c.DefaultQuery("sort_dir", "asc"),
+			TenantID:     tenantID,
+			Page:         page,
+			PerPage:      perPage,
+			Search:       c.Query("search"),
+			Statuses:     parseFilterList(c.Query("status")),
+			Environments: parseFilterList(c.Query("environment")),
+			Gitops:       c.Query("gitops"),
+			SortBy:       c.DefaultQuery("sort_by", "name"),
+			SortDir:      c.DefaultQuery("sort_dir", "asc"),
 		}
 
 		result, err := deps.Repos.Cluster.ListFiltered(c.Request.Context(), filter)
@@ -121,6 +123,14 @@ func listClusters(deps Dependencies) gin.HandlerFunc {
 		}
 		if result.Total == 0 {
 			slog.Info("listClusters: no clusters found", "tenant_id", tenantID)
+		}
+
+		// Facet counts power the filter pills and stat cards, so they must survive
+		// pagination. A failure here degrades to "no counts", never to a broken list.
+		facets, facetsErr := deps.Repos.Cluster.Facets(c.Request.Context(), filter)
+		if facetsErr != nil {
+			slog.Warn("listClusters: facet counts failed", "tenant_id", tenantID, "error", facetsErr)
+			facets = nil
 		}
 
 		items := result.Items
@@ -199,8 +209,25 @@ func listClusters(deps Dependencies) gin.HandlerFunc {
 			"page":        result.Page,
 			"per_page":    result.PerPage,
 			"total_pages": result.TotalPages,
+			"facets":      facets,
 		})
 	}
+}
+
+// parseFilterList splits a comma-separated query value into trimmed, non-empty
+// filter values so a single param can express an OR set ("status=connected,syncing").
+func parseFilterList(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if v := strings.TrimSpace(part); v != "" {
+			values = append(values, v)
+		}
+	}
+	return values
 }
 
 func createCluster(deps Dependencies) gin.HandlerFunc {

@@ -82,6 +82,9 @@ func main() {
 		slog.Info("RBAC base permissions verified")
 	}
 
+	// Report what row-level security actually covers.
+	reportRLSCoverage(comp)
+
 	// Seed bootstrap token for first-run setup
 	bootstrapDeps := rest.Dependencies{
 		Config: comp.Config,
@@ -214,6 +217,11 @@ func main() {
 		AIManager:        comp.AIManager,
 		IngestionEngine:  comp.IngestionEngine,
 		RAGPipeline:      comp.RAGPipeline,
+		RiskScorer:       comp.RiskScorer,
+		DocGenerator:     comp.DocGenerator,
+		CostAdvisor:      comp.CostAdvisor,
+		StaleDetector:    comp.StaleDetector,
+		WorkflowBuilder:  comp.WorkflowBuilder,
 		RBAC:             rbacEngine,
 		Storage:          comp.Storage,
 		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo, comp.ScanIgnoreRepo),
@@ -315,4 +323,46 @@ func writeSystemAuditEvent(comp *bootstrap.Components, action, entityType string
 	if err := comp.AuditRepo.Create(ctx, entry); err != nil {
 		slog.Warn("failed to write system audit event", "action", action, "error", err)
 	}
+}
+
+// reportRLSCoverage logs how much of the schema row-level security actually
+// protects, once, at startup.
+//
+// In PEPA the repositories' explicit tenant_id filters are the isolation
+// control; RLS is defence-in-depth on top of them. That layer is easy to believe
+// in while it silently applies to nothing: the application role typically owns
+// the tables (owners skip policies unless they are FORCED), and a policy reading
+// the retired 'app.current_tenant' setting never matches the GUC the code sets.
+// Saying it out loud at startup is what keeps "RLS is on" from being an
+// assumption nobody checked.
+func reportRLSCoverage(comp *bootstrap.Components) {
+	if comp.DB == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	report, err := comp.DB.InspectRLS(ctx)
+	if err != nil {
+		slog.Warn("RLS self-check failed", "error", err)
+		return
+	}
+
+	attrs := []any{
+		"role", report.RoleName,
+		"policies", report.Policies,
+		"rls_enabled_tables", report.EnabledTables,
+		"rls_forced_tables", report.ForcedTables,
+		"tenant_tables_without_policy", report.TablesWithTenantColumnWithoutPolicy,
+	}
+	if report.LegacyGUCPolicies > 0 {
+		slog.Error("RLS policies still read the retired app.current_tenant setting and therefore never match",
+			append(attrs, "legacy_guc_policies", report.LegacyGUCPolicies, "expected_guc", database.TenantGUC)...)
+	}
+	if report.RoleBypassesRLS {
+		slog.Warn("row-level security does NOT apply to the application role; tenant isolation relies on repository query filters",
+			append(attrs, "bypasses_rls", true)...)
+		return
+	}
+	slog.Info("row-level security self-check", append(attrs, "bypasses_rls", false)...)
 }

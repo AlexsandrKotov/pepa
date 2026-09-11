@@ -117,17 +117,9 @@ func logoutHandler(deps Dependencies) gin.HandlerFunc {
 // requireAdminRole is a middleware that checks if the user has the admin role.
 func requireAdminRole(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		roles := auth.GetRoles(c)
-		isAdmin := false
-		for _, r := range roles {
-			lower := strings.ToLower(r)
-			// Match by slug ("admin", "super_admin") or by legacy role name ("platform admin").
-			if lower == "admin" || lower == "super_admin" || lower == "platform admin" || lower == "platform_admin" {
-				isAdmin = true
-				break
-			}
-		}
-		if !isAdmin {
+		// Match by slug ("admin", "super_admin") or by legacy role name
+		// ("platform admin") — one definition, shared with rbacMiddleware.
+		if !auth.IsAdminRoles(auth.GetRoles(c)) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "admin access required"})
 			c.Abort()
 			return
@@ -238,19 +230,7 @@ func loginHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Get user roles
-		var roles []string
-		if deps.RBAC != nil {
-			assignments, err := deps.RBAC.GetUserRoles(ctx, user.TenantID, user.ID)
-			if err == nil {
-				for _, a := range assignments {
-					slug := a.RoleSlug
-					if slug == "" {
-						slug = a.RoleName
-					}
-					roles = append(roles, slug)
-				}
-			}
-		}
+		roles := userRoleNames(ctx, deps, user.TenantID, user.ID)
 		// No hardcoded fallback — only explicit role_assignments grant access.
 
 		// Generate JWT
@@ -331,17 +311,12 @@ func refreshTokenHandler(deps Dependencies) gin.HandlerFunc {
 		// Always trust the DB result (even if empty) to ensure revocations take effect.
 		var roles []string
 		if deps.RBAC != nil {
-			if assignments, err := deps.RBAC.GetUserRoles(ctx, tenantID, *userID); err == nil {
-				roles = make([]string, 0, len(assignments))
-				for _, a := range assignments {
-					slug := a.RoleSlug
-					if slug == "" {
-						slug = a.RoleName
-					}
-					roles = append(roles, slug)
-				}
+			assignments, err := deps.RBAC.GetUserRoles(ctx, tenantID, *userID)
+			if err == nil {
+				roles = jwtRolesFromAssignments(assignments)
 			} else {
-				// DB error: fall back to JWT roles rather than denying access
+				// DB error: fall back to the roles already in the verified token
+				// rather than silently dropping a session that is still valid.
 				roles = auth.GetRoles(c)
 			}
 		} else {
@@ -805,16 +780,8 @@ func getUserHandler(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Get user roles
-		var roles []string
-		if deps.RBAC != nil {
-			tenantID := auth.GetTenantID(c)
-			assignments, err := deps.RBAC.GetUserRoles(ctx, tenantID, user.ID)
-			if err == nil {
-				for _, a := range assignments {
-					roles = append(roles, a.RoleName)
-				}
-			}
-		}
+		tenantID := auth.GetTenantID(c)
+		roles := userRoleNames(ctx, deps, tenantID, user.ID)
 
 		c.JSON(http.StatusOK, gin.H{
 			"user":           user,
@@ -1011,8 +978,7 @@ func deactivateUserHandler(deps Dependencies) gin.HandlerFunc {
 			if err == nil {
 				targetIsAdmin := false
 				for _, r := range targetRoles {
-					name := strings.ToLower(r.RoleName)
-					if name == "admin" || name == "super_admin" {
+					if auth.IsAdminRoles([]string{r.RoleSlug, r.RoleName}) {
 						targetIsAdmin = true
 						break
 					}
@@ -1303,19 +1269,7 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 		// Get admin roles.
 		tenantID := uuid.MustParse(database.DefaultTenantID)
 		orgID := uuid.MustParse(database.DefaultOrganizationID)
-		var roles []string
-		if deps.RBAC != nil {
-			assignments, err := deps.RBAC.GetUserRoles(ctx, tenantID, adminID)
-			if err == nil {
-				for _, a := range assignments {
-					slug := a.RoleSlug
-					if slug == "" {
-						slug = a.RoleName
-					}
-					roles = append(roles, slug)
-				}
-			}
-		}
+		roles := userRoleNames(ctx, deps, tenantID, adminID)
 		if len(roles) == 0 {
 			roles = []string{"admin"}
 		}

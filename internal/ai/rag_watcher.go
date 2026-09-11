@@ -44,55 +44,65 @@ func NewRAGWatcher(eventBus *events.Bus, engine *IngestionEngine, tenantID uuid.
 }
 
 // Start registers event handlers and begins watching for changes.
+//
+// Each handler re-indexes the workspace that emitted the event. Before, every
+// event triggered a re-index of the single bootstrap tenant, so a change in
+// another workspace refreshed the wrong (or nothing's) documents.
 func (w *RAGWatcher) Start() {
 	// Service events → re-ingest service catalog
 	w.eventBus.On("service.created", func(e events.Event) {
-		w.debouncedIngest("service", func(ctx context.Context) error {
-			loader := NewServiceDocumentLoader(w.engine.pool, w.tenantID)
-			_, err := w.engine.ReindexAll(ctx, loader, w.tenantID)
+		tenantID := w.eventTenant(e.TenantID)
+		w.debouncedIngest("service", tenantID, func(ctx context.Context, tenantID uuid.UUID) error {
+			loader := NewServiceDocumentLoader(w.engine.pool, tenantID)
+			_, err := w.engine.ReindexAll(ctx, loader, tenantID)
 			return err
 		})
 	})
 
 	w.eventBus.On("service.updated", func(e events.Event) {
-		w.debouncedIngest("service", func(ctx context.Context) error {
-			loader := NewServiceDocumentLoader(w.engine.pool, w.tenantID)
-			_, err := w.engine.ReindexAll(ctx, loader, w.tenantID)
+		tenantID := w.eventTenant(e.TenantID)
+		w.debouncedIngest("service", tenantID, func(ctx context.Context, tenantID uuid.UUID) error {
+			loader := NewServiceDocumentLoader(w.engine.pool, tenantID)
+			_, err := w.engine.ReindexAll(ctx, loader, tenantID)
 			return err
 		})
 	})
 
 	// Entity events → re-ingest entity graph
 	w.eventBus.On("entity.created", func(e events.Event) {
-		w.debouncedIngest("entity", func(ctx context.Context) error {
-			loader := NewEntityDocumentLoader(w.engine.pool, w.tenantID)
-			_, err := w.engine.ReindexAll(ctx, loader, w.tenantID)
+		tenantID := w.eventTenant(e.TenantID)
+		w.debouncedIngest("entity", tenantID, func(ctx context.Context, tenantID uuid.UUID) error {
+			loader := NewEntityDocumentLoader(w.engine.pool, tenantID)
+			_, err := w.engine.ReindexAll(ctx, loader, tenantID)
 			return err
 		})
 	})
 
 	w.eventBus.On("entity.updated", func(e events.Event) {
-		w.debouncedIngest("entity", func(ctx context.Context) error {
-			loader := NewEntityDocumentLoader(w.engine.pool, w.tenantID)
-			_, err := w.engine.ReindexAll(ctx, loader, w.tenantID)
+		tenantID := w.eventTenant(e.TenantID)
+		w.debouncedIngest("entity", tenantID, func(ctx context.Context, tenantID uuid.UUID) error {
+			loader := NewEntityDocumentLoader(w.engine.pool, tenantID)
+			_, err := w.engine.ReindexAll(ctx, loader, tenantID)
 			return err
 		})
 	})
 
 	// Pipeline run events → re-ingest pipeline history
 	w.eventBus.On("pipeline_run.completed", func(e events.Event) {
-		w.debouncedIngest("pipeline", func(ctx context.Context) error {
-			loader := NewPipelineDocumentLoader(w.engine.pool, w.tenantID)
-			_, err := w.engine.ReindexAll(ctx, loader, w.tenantID)
+		tenantID := w.eventTenant(e.TenantID)
+		w.debouncedIngest("pipeline", tenantID, func(ctx context.Context, tenantID uuid.UUID) error {
+			loader := NewPipelineDocumentLoader(w.engine.pool, tenantID)
+			_, err := w.engine.ReindexAll(ctx, loader, tenantID)
 			return err
 		})
 	})
 
 	// Deployment events → re-ingest pipeline history
 	w.eventBus.On("deployment.completed", func(e events.Event) {
-		w.debouncedIngest("pipeline", func(ctx context.Context) error {
-			loader := NewPipelineDocumentLoader(w.engine.pool, w.tenantID)
-			_, err := w.engine.ReindexAll(ctx, loader, w.tenantID)
+		tenantID := w.eventTenant(e.TenantID)
+		w.debouncedIngest("pipeline", tenantID, func(ctx context.Context, tenantID uuid.UUID) error {
+			loader := NewPipelineDocumentLoader(w.engine.pool, tenantID)
+			_, err := w.engine.ReindexAll(ctx, loader, tenantID)
 			return err
 		})
 	})
@@ -100,21 +110,35 @@ func (w *RAGWatcher) Start() {
 	slog.Info("RAG watcher started, listening for platform events")
 }
 
-// debouncedIngest runs an ingestion function with debouncing.
-func (w *RAGWatcher) debouncedIngest(sourceType string, fn func(context.Context) error) {
+// eventTenant resolves the workspace an event came from. Events published
+// without a usable tenant fall back to the watcher's default so that the
+// long-standing single-tenant deployments keep re-indexing exactly as before.
+func (w *RAGWatcher) eventTenant(raw string) uuid.UUID {
+	if id, err := uuid.Parse(raw); err == nil && id != uuid.Nil {
+		return id
+	}
+	return w.tenantID
+}
+
+// debouncedIngest runs an ingestion function with debouncing. The debounce
+// window is tracked per source type *and* tenant, so a burst of activity in one
+// workspace cannot suppress another workspace's re-index.
+func (w *RAGWatcher) debouncedIngest(sourceType string, tenantID uuid.UUID, fn func(context.Context, uuid.UUID) error) {
+	key := sourceType + "|" + tenantID.String()
+
 	w.mu.Lock()
-	if last, ok := w.lastIngest[sourceType]; ok && time.Since(last) < w.debounce {
+	if last, ok := w.lastIngest[key]; ok && time.Since(last) < w.debounce {
 		w.mu.Unlock()
 		slog.Debug("RAG: skipping re-ingestion (debounced)", "source", sourceType)
 		return
 	}
-	w.lastIngest[sourceType] = time.Now()
+	w.lastIngest[key] = time.Now()
 	w.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(w.ctx, 60*time.Second)
 	defer cancel()
 
-	if err := fn(ctx); err != nil {
+	if err := fn(ctx, tenantID); err != nil {
 		slog.Warn("RAG: event-driven re-ingestion failed", "source", sourceType, "error", err)
 	} else {
 		slog.Info("RAG: re-ingested after event", "source", sourceType)
@@ -151,18 +175,32 @@ func (w *RAGWatcher) PeriodicReindex(interval time.Duration) {
 				slog.Info("RAG: starting periodic re-index")
 				ctx, cancel := context.WithTimeout(w.ctx, 5*time.Minute)
 
-				loaders := []namedLoader{
-					{"service", NewServiceDocumentLoader(w.engine.pool, w.tenantID)},
-					{"entity", NewEntityDocumentLoader(w.engine.pool, w.tenantID)},
-					{"pipeline", NewPipelineDocumentLoader(w.engine.pool, w.tenantID)},
+				tenants, err := w.knownTenants(ctx)
+				if err != nil {
+					slog.Warn("RAG: cannot list tenants for periodic re-index, using default", "error", err)
+					tenants = []uuid.UUID{w.tenantID}
+				}
+				if len(tenants) == 0 {
+					tenants = []uuid.UUID{w.tenantID}
 				}
 
-				for _, item := range loaders {
-					count, err := w.engine.ReindexAll(ctx, item.loader, w.tenantID)
-					if err != nil {
-						slog.Warn("RAG: periodic re-index failed", "source", item.name, "error", err)
-					} else {
-						slog.Info("RAG: periodic re-index complete", "source", item.name, "documents", count)
+				for _, tenantID := range tenants {
+					if ctx.Err() != nil {
+						break
+					}
+					loaders := []namedLoader{
+						{"service", NewServiceDocumentLoader(w.engine.pool, tenantID)},
+						{"entity", NewEntityDocumentLoader(w.engine.pool, tenantID)},
+						{"pipeline", NewPipelineDocumentLoader(w.engine.pool, tenantID)},
+					}
+
+					for _, item := range loaders {
+						count, err := w.engine.ReindexAll(ctx, item.loader, tenantID)
+						if err != nil {
+							slog.Warn("RAG: periodic re-index failed", "source", item.name, "tenant_id", tenantID.String(), "error", err)
+						} else {
+							slog.Info("RAG: periodic re-index complete", "source", item.name, "tenant_id", tenantID.String(), "documents", count)
+						}
 					}
 				}
 
@@ -178,6 +216,26 @@ func (w *RAGWatcher) PeriodicReindex(interval time.Duration) {
 			}
 		}
 	}()
+}
+
+// knownTenants lists every workspace whose knowledge base should be refreshed by
+// the periodic re-index. Results are ordered so the pass is deterministic.
+func (w *RAGWatcher) knownTenants(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := w.engine.pool.Query(ctx, `SELECT id FROM tenants ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tenants []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		tenants = append(tenants, id)
+	}
+	return tenants, rows.Err()
 }
 
 // IngestAll performs a one-time full re-index of all sources.

@@ -59,7 +59,7 @@ func (h *AIWebhookHandlers) Suggest(c *gin.Context) {
 		return
 	}
 
-	resp, err := agent.Run(c.Request.Context(), nil, prompt)
+	resp, err := agent.Run(agentContext(c), nil, prompt)
 	if err != nil {
 		respondInternalError(c, err)
 		return

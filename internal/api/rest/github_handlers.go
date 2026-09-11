@@ -127,14 +127,7 @@ func githubCallbackHandler(deps Dependencies) gin.HandlerFunc {
 		if deps.RBAC != nil {
 			assignments, err := deps.RBAC.GetUserRoles(c.Request.Context(), tenantID, user.ID)
 			if err == nil {
-				for _, a := range assignments {
-					slug := a.RoleSlug
-					if slug == "admin" || slug == "super_admin" || slug == "platform_admin" {
-						roles = append(roles, "admin")
-					} else {
-						roles = append(roles, slug)
-					}
-				}
+				roles = append(roles, jwtRolesFromAssignments(assignments)...)
 			}
 		}
 		// No hardcoded fallback roles — only explicit role_assignments grant access.

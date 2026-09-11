@@ -5,27 +5,25 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/ai"
 )
 
 // ProactiveAIHandlers handles proactive AI endpoints (risk, docs, cost, stale).
 type ProactiveAIHandlers struct {
-	riskScorer   *ai.RiskScorer
-	docGenerator *ai.DocGenerator
-	costAdvisor  *ai.CostAdvisor
+	riskScorer    *ai.RiskScorer
+	docGenerator  *ai.DocGenerator
+	costAdvisor   *ai.CostAdvisor
 	staleDetector *ai.StaleDetector
-	tenantID     uuid.UUID
 }
 
-// NewProactiveAIHandlers creates new proactive AI handlers.
-func NewProactiveAIHandlers(riskScorer *ai.RiskScorer, docGen *ai.DocGenerator, costAdv *ai.CostAdvisor, staleDet *ai.StaleDetector, tenantID uuid.UUID) *ProactiveAIHandlers {
+// NewProactiveAIHandlers creates new proactive AI handlers. Any component may be
+// nil (no AI provider configured), which the handlers report as 503.
+func NewProactiveAIHandlers(riskScorer *ai.RiskScorer, docGen *ai.DocGenerator, costAdv *ai.CostAdvisor, staleDet *ai.StaleDetector) *ProactiveAIHandlers {
 	return &ProactiveAIHandlers{
 		riskScorer:    riskScorer,
 		docGenerator:  docGen,
 		costAdvisor:   costAdv,
 		staleDetector: staleDet,
-		tenantID:      tenantID,
 	}
 }
 
@@ -45,7 +43,7 @@ func (h *ProactiveAIHandlers) AssessDeploymentRisk(c *gin.Context) {
 		return
 	}
 
-	assessment, err := h.riskScorer.AssessDeployment(c.Request.Context(), req.ServiceName, req.Version)
+	assessment, err := h.riskScorer.AssessDeployment(agentContext(c), req.ServiceName, req.Version)
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -73,7 +71,7 @@ func (h *ProactiveAIHandlers) GenerateServiceDocs(c *gin.Context) {
 		serviceName = req.ServiceName
 	}
 
-	doc, err := h.docGenerator.GenerateServiceDocs(c.Request.Context(), serviceName)
+	doc, err := h.docGenerator.GenerateServiceDocs(agentContext(c), serviceName)
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -89,7 +87,7 @@ func (h *ProactiveAIHandlers) AnalyzeCosts(c *gin.Context) {
 		return
 	}
 
-	recommendations, err := h.costAdvisor.AnalyzeCosts(c.Request.Context())
+	recommendations, err := h.costAdvisor.AnalyzeCosts(agentContext(c))
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -109,7 +107,7 @@ func (h *ProactiveAIHandlers) DetectStaleResources(c *gin.Context) {
 		return
 	}
 
-	stale, err := h.staleDetector.DetectStaleResources(c.Request.Context())
+	stale, err := h.staleDetector.DetectStaleResources(agentContext(c))
 	if err != nil {
 		respondInternalError(c, err)
 		return

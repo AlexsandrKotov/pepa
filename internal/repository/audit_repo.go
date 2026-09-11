@@ -33,11 +33,13 @@ func (r *AuditRepository) Create(ctx context.Context, entry *models.AuditLog) er
 	return err
 }
 
-// List returns audit log entries matching the filter.
-func (r *AuditRepository) List(ctx context.Context, filter models.AuditFilter) (*models.AuditListResponse, error) {
-	where := []string{}
-	args := []interface{}{}
-	argIdx := 0
+// List returns audit log entries matching the filter, scoped to a single
+// tenant. tenantID is mandatory: audit_log is never queryable across tenants,
+// so callers must pass the tenant taken from the authenticated principal.
+func (r *AuditRepository) List(ctx context.Context, filter models.AuditFilter, tenantID uuid.UUID) (*models.AuditListResponse, error) {
+	where := []string{"tenant_id = $1"}
+	args := []interface{}{tenantID}
+	argIdx := 1
 
 	if filter.Action != "" {
 		argIdx++
@@ -82,13 +84,8 @@ func (r *AuditRepository) List(ctx context.Context, filter models.AuditFilter) (
 		return nil, err
 	}
 
-	// Apply pagination
-	if filter.Page < 1 {
-		filter.Page = 1
-	}
-	if filter.PerPage < 1 {
-		filter.PerPage = 50
-	}
+	// Apply pagination (perPage capped at maxPerPage)
+	filter.Page, filter.PerPage = ClampPagination(filter.Page, filter.PerPage, 50)
 	offset := (filter.Page - 1) * filter.PerPage
 
 	argIdx++
@@ -132,10 +129,10 @@ func (r *AuditRepository) List(ctx context.Context, filter models.AuditFilter) (
 	}, rows.Err()
 }
 
-// CountByAction returns counts grouped by action type.
-func (r *AuditRepository) CountByAction(ctx context.Context) (map[string]int64, error) {
-	query := `SELECT action, COUNT(*) as cnt FROM audit_log GROUP BY action ORDER BY cnt DESC LIMIT 20`
-	rows, err := r.db.Pool.Query(ctx, query)
+// CountByAction returns counts grouped by action type for one tenant.
+func (r *AuditRepository) CountByAction(ctx context.Context, tenantID uuid.UUID) (map[string]int64, error) {
+	query := `SELECT action, COUNT(*) as cnt FROM audit_log WHERE tenant_id = $1 GROUP BY action ORDER BY cnt DESC LIMIT 20`
+	rows, err := r.db.Pool.Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,10 +150,10 @@ func (r *AuditRepository) CountByAction(ctx context.Context) (map[string]int64, 
 	return result, rows.Err()
 }
 
-// CountByResource returns counts grouped by resource type.
-func (r *AuditRepository) CountByResource(ctx context.Context) (map[string]int64, error) {
-	query := `SELECT entity_type, COUNT(*) as cnt FROM audit_log WHERE entity_type != '' GROUP BY entity_type ORDER BY cnt DESC LIMIT 20`
-	rows, err := r.db.Pool.Query(ctx, query)
+// CountByResource returns counts grouped by resource type for one tenant.
+func (r *AuditRepository) CountByResource(ctx context.Context, tenantID uuid.UUID) (map[string]int64, error) {
+	query := `SELECT entity_type, COUNT(*) as cnt FROM audit_log WHERE tenant_id = $1 AND entity_type != '' GROUP BY entity_type ORDER BY cnt DESC LIMIT 20`
+	rows, err := r.db.Pool.Query(ctx, query, tenantID)
 	if err != nil {
 		return nil, err
 	}

@@ -30,12 +30,7 @@ func NewPipelineSourceRepository(db *database.DB) *PipelineSourceRepository {
 
 // List returns pipeline sources with pagination.
 func (r *PipelineSourceRepository) List(ctx context.Context, tenantID uuid.UUID, page, perPage int) ([]models.PipelineSource, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 20
-	}
+	page, perPage = ClampPagination(page, perPage, 20)
 	offset := (page - 1) * perPage
 
 	var total int64
@@ -425,12 +420,7 @@ func NewPipelineRunRepository(db *database.DB) *PipelineRunRepository {
 
 // List returns runs for a source with pagination.
 func (r *PipelineRunRepository) List(ctx context.Context, sourceID uuid.UUID, page, perPage int) ([]models.PipelineRun, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 20
-	}
+	page, perPage = ClampPagination(page, perPage, 20)
 	offset := (page - 1) * perPage
 
 	var total int64

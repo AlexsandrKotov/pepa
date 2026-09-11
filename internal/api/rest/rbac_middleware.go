@@ -1,7 +1,9 @@
 package rest
 
 import (
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,64 +16,71 @@ import (
 // resource name used in the permissions table (must be PLURAL, matching the
 // seeded permissions in the RBAC engine).
 var rbacResourceMap = map[string]string{
-	"entities":            "entities",
-	"entity-types":        "entities",
-	"plugins":             "plugins",
-	"providers":           "plugins",
-	"marketplace":         "plugins",
-	"storage":             "plugins",
-	"workflows":           "workflows",
-	"team-workflows":      "workflows",
-	"scorecards":          "scorecards",
-	"audit":               "audit",
-	"roles":               "roles",
-	"role-assignments":    "roles",
-	"teams":               "roles",
-	"organization":        "roles",
-	"workspaces":          "roles",
-	"clusters":            "clusters",
-	"deployments":         "deployments",
-	"jira":                "jira",
-	"connections":         "connections",
-	"services":            "services",
-	"catalog":             "services",
-	"blueprints":          "services",
-	"gitops":              "gitops",
-	"settings":            "settings",
-	"setup":               "settings",
-	"environments":        "environments",
-	"discovery":           "discovery",
-	"docker-hosts":        "docker",
-	"docker-services":     "docker",
-	"helm-repositories":   "helm",
+	"entities":              "entities",
+	"entity-types":          "entities",
+	"plugins":               "plugins",
+	"providers":             "plugins",
+	"marketplace":           "plugins",
+	"storage":               "plugins",
+	"workflows":             "workflows",
+	"team-workflows":        "workflows",
+	"scorecards":            "scorecards",
+	"audit":                 "audit",
+	"roles":                 "roles",
+	"role-assignments":      "roles",
+	"teams":                 "roles",
+	"organization":          "roles",
+	"workspaces":            "roles",
+	"clusters":              "clusters",
+	"deployments":           "deployments",
+	"jira":                  "jira",
+	"connections":           "connections",
+	"services":              "services",
+	"catalog":               "services",
+	"blueprints":            "services",
+	"gitops":                "gitops",
+	"settings":              "settings",
+	"setup":                 "settings",
+	"environments":          "environments",
+	"discovery":             "discovery",
+	"docker-hosts":          "docker",
+	"docker-services":       "docker",
+	"helm-repositories":     "helm",
 	"registry-repositories": "registry",
-	"pipeline-sources":    "pipelines",
-	"vault":               "vault",
-	"ai":                  "ai",
-	"credentials":         "credentials",
-	"user-credentials":    "credentials",
-	"service-blueprints":  "services",
-	"blueprint-groups":    "services",
-	"pipeline-blueprints": "pipelines",
-	"virtualization":      "virtualization",
-	"s3-browser":          "connections",
-	"observability":       "observability",
-	"plugin-activity":    "audit",
-	"ssh-hosts":          "audit",
-	"ssh-host-groups":    "audit",
-	"ssh-terminal":       "audit",
-	"security":           "security",
-	"deployment-windows": "deployments",
-	"batch-operations":   "deployments",
-	"compliance-policies": "deployments",
-	"security-findings":  "security",
-	"secret-rotations":   "vault",
-	"deployment-audit":   "audit",
-	"pre-deploy-gate":    "deployments",
-	"notifications":      "notifications",
-	"self-service":       "self_service",
-	"auto-deploy-rules":  "auto_deploy_rules",
-	"webhooks":           "auto_deploy_rules",
+	"pipeline-sources":      "pipelines",
+	"vault":                 "vault",
+	"ai":                    "ai",
+	"credentials":           "credentials",
+	"user-credentials":      "credentials",
+	"service-blueprints":    "services",
+	"blueprint-groups":      "services",
+	"pipeline-blueprints":   "pipelines",
+	"virtualization":        "virtualization",
+	"s3-browser":            "connections",
+	"observability":         "observability",
+	"plugin-activity":       "audit",
+	"ssh-hosts":             "audit",
+	"ssh-host-groups":       "audit",
+	"ssh-terminal":          "audit",
+	"security":              "security",
+	"deployment-windows":    "deployments",
+	"batch-operations":      "deployments",
+	"compliance-policies":   "deployments",
+	"security-findings":     "security",
+	"secret-rotations":      "vault",
+	"deployment-audit":      "audit",
+	"pre-deploy-gate":       "deployments",
+	"notifications":         "notifications",
+	"self-service":          "self_service",
+	"auto-deploy-rules":     "auto_deploy_rules",
+	"webhooks":              "auto_deploy_rules",
+	// Step executions of a workflow run — same resource as workflows. This
+	// prefix was previously absent, so GET /executions/:id/steps skipped RBAC.
+	"executions":        "workflows",
+	"service-templates": "services",
+	// RAG knowledge base lives next to the AI assistant; documents are
+	// tenant-scoped and writable, so they must not fall through unmapped.
+	"rag": "ai",
 }
 
 // rbacSkipPrefixes are paths that only require authentication, not a
@@ -134,6 +143,11 @@ func (rc *rbacCache) set(key string, allowed bool) {
 // for a short TTL.
 func rbacMiddleware(deps Dependencies) gin.HandlerFunc {
 	cache := newRBACCache()
+	// In production an unmapped prefix is treated as a hard denial for every
+	// method, so a newly added endpoint can never be silently readable.
+	// Outside production it stays read-permissive to avoid breaking local
+	// development while `verifyRBACCoverage` reports the gap at startup.
+	failClosedReads := deps.Config != nil && deps.Config.Server.Env == "production"
 
 	return func(c *gin.Context) {
 		// No RBAC engine configured — fail closed on writes, allow reads.
@@ -156,12 +170,9 @@ func rbacMiddleware(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Admin bypass — role comes from the verified JWT.
-		for _, r := range auth.GetRoles(c) {
-			lower := strings.ToLower(r)
-			if lower == "admin" || lower == "super_admin" || lower == "platform admin" || lower == "platform_admin" {
-				c.Next()
-				return
-			}
+		if auth.IsPlatformAdmin(c) {
+			c.Next()
+			return
 		}
 
 		// Derive resource from the first path segment after /api/v1.
@@ -183,8 +194,12 @@ func rbacMiddleware(deps Dependencies) gin.HandlerFunc {
 
 		resource, ok := rbacResourceMap[prefix]
 		if !ok {
-			// Fail closed for unknown resources on mutating methods.
-			if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead && c.Request.Method != http.MethodOptions {
+			// Fail closed for unknown resources. Writes always; reads too in
+			// production, so an unmapped prefix can never become a data leak.
+			isRead := c.Request.Method == http.MethodGet ||
+				c.Request.Method == http.MethodHead ||
+				c.Request.Method == http.MethodOptions
+			if !isRead || failClosedReads {
 				c.JSON(http.StatusForbidden, gin.H{"error": "permission denied"})
 				c.Abort()
 				return
@@ -243,4 +258,61 @@ func rbacMiddleware(deps Dependencies) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// rbacAuthOnlyPrefixes lists first path segments under /api/v1 that are served
+// without the RBAC middleware (they are registered directly on the engine).
+// They are exempt from the coverage check below.
+var rbacAuthOnlyPrefixes = map[string]bool{
+	"events": true, // SSE group has its own auth middleware, no RBAC
+}
+
+// rbacRouteLister is the part of gin.Engine this check needs; taking the
+// interface keeps the startup call and the unit test on the same code path.
+type rbacRouteLister interface {
+	Routes() gin.RoutesInfo
+}
+
+// verifyRBACCoverage walks every registered route and returns the
+// "/api/v1/..." routes whose first path segment is neither mapped to an RBAC
+// resource nor explicitly exempt. An unmapped prefix means the request bypasses
+// the permission check, which is how /audit-logs and /rag silently leaked data.
+//
+// It is called once at startup (any gap is logged as an error so CI/review
+// catches it before a deployment does) and from the coverage unit test.
+func verifyRBACCoverage(r rbacRouteLister) []string {
+	var gaps []string
+	seen := map[string]bool{}
+	for _, rt := range r.Routes() {
+		path := rt.Path
+		if !strings.HasPrefix(path, "/api/v1/") {
+			continue
+		}
+		// Authentication endpoints live on the engine itself, not in the RBAC
+		// group: the public ones cannot require a permission (there is no token
+		// yet) and the protected ones carry their own auth + admin middleware.
+		if path == "/api/v1/auth" || strings.HasPrefix(path, "/api/v1/auth/") {
+			continue
+		}
+		rel := strings.TrimPrefix(path, "/api/v1/")
+		segments := strings.Split(strings.Trim(rel, "/"), "/")
+		if len(segments) == 0 || segments[0] == "" {
+			continue
+		}
+		prefix := segments[0]
+		if rbacAuthOnlyPrefixes[prefix] || rbacSkipPrefixes[prefix] {
+			continue
+		}
+		if _, ok := rbacResourceMap[prefix]; ok {
+			continue
+		}
+		key := prefix + "|" + rt.Method
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		gaps = append(gaps, fmt.Sprintf("%s %s (unmapped prefix %q)", rt.Method, path, prefix))
+	}
+	sort.Strings(gaps)
+	return gaps
 }

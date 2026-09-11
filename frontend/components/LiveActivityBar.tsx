@@ -38,7 +38,7 @@ function LiveActivityBarInner() {
   // Poll for active deployments
   const { data } = useSWR<{ items?: ActiveDeployment[] }>(
     `${getBase()}/api/v1/deployments?status=running&per_page=5`,
-    (url: string) => fetch(url, { headers: { Authorization: `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('pepa-token') || '' : ''}` } }).then(r => r.ok ? r.json() : { items: [] }),
+    (url: string) => fetch(url, { credentials: 'include' }).then(r => r.ok ? r.json() : { items: [] }),
     { refreshInterval: POLL_INTERVAL, revalidateOnFocus: false, dedupingInterval: 10_000 }
   );
 

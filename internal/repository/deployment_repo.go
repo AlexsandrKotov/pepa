@@ -177,12 +177,7 @@ func (r *DeploymentRepository) ListFiltered(ctx context.Context, f DeploymentFil
 		return nil, fmt.Errorf("count deployments: %w", err)
 	}
 
-	if f.Page < 1 {
-		f.Page = 1
-	}
-	if f.PerPage < 1 {
-		f.PerPage = 20
-	}
+	f.Page, f.PerPage = ClampPagination(f.Page, f.PerPage, 20)
 	offset := (f.Page - 1) * f.PerPage
 
 	query += " ORDER BY created_at DESC"

@@ -2,16 +2,20 @@ package rest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/ai"
+	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/pkg/utils"
 )
 
 // RAGHandlers handles RAG knowledge base endpoints.
@@ -20,16 +24,46 @@ type RAGHandlers struct {
 	aiManager  *ai.Manager
 	ingestion  *ai.IngestionEngine
 	pipeline   *ai.RAGPipeline
-	tenantID   uuid.UUID
+	deps       Dependencies
+	// platformTenant owns the seeded, read-only corpus (PEPA docs, runbooks).
+	// It is a read scope for every workspace, never a write target for a
+	// caller whose token carries a different tenant.
+	platformTenant uuid.UUID
 }
 
 // NewRAGHandlers creates new RAG handlers.
-func NewRAGHandlers(ragRepo *repository.RAGRepository, aiMgr *ai.Manager, tenantID uuid.UUID) *RAGHandlers {
+func NewRAGHandlers(ragRepo *repository.RAGRepository, aiMgr *ai.Manager, platformTenant uuid.UUID, deps Dependencies) *RAGHandlers {
 	return &RAGHandlers{
-		ragRepo:   ragRepo,
-		aiManager: aiMgr,
-		tenantID:  tenantID,
+		ragRepo:        ragRepo,
+		aiManager:      aiMgr,
+		platformTenant: platformTenant,
+		deps:           deps,
 	}
+}
+
+// readScope is the set of tenants whose documents the caller may read: their own
+// workspace plus the platform-seeded corpus. The tenant always comes from the
+// verified JWT, never from a request parameter.
+func (h *RAGHandlers) readScope(c *gin.Context) []uuid.UUID {
+	return repository.TenantScope(auth.GetTenantID(c), h.platformTenant)
+}
+
+// writeTenant is the single tenant the caller may create, update or delete
+// documents in. Platform admins keep managing the seeded corpus in the platform
+// tenant; everyone else can only touch their own workspace's rows.
+func (h *RAGHandlers) writeTenant(c *gin.Context) uuid.UUID {
+	return auth.GetTenantID(c)
+}
+
+// respondRAGError maps the not-found sentinel to 404 and anything else to a
+// generic 500, so a foreign or deleted document UUID never surfaces as a
+// database error.
+func respondRAGError(c *gin.Context, err error) {
+	if errors.Is(err, repository.ErrRAGNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+	respondInternalError(c, err)
 }
 
 // SetIngestionEngine sets the ingestion engine (called after bootstrap).
@@ -75,12 +109,13 @@ func (h *RAGHandlers) IngestDocument(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
-	if err := h.ingestion.IngestDocument(ctx, doc, h.tenantID); err != nil {
+	tenantID := h.writeTenant(c)
+	if err := h.ingestion.IngestDocument(ctx, doc, tenantID); err != nil {
 		respondInternalError(c, err)
 		return
 	}
 
-	logAudit(h.deps(), c, "rag_ingest", "rag_document", doc.ID, nil, gin.H{
+	logAudit(h.deps, c, "rag_ingest", "rag_document", doc.ID, nil, gin.H{
 		"source": req.Source, "source_type": req.SourceType,
 	})
 
@@ -108,33 +143,52 @@ func (h *RAGHandlers) Search(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	scope := h.readScope(c)
 	var results []repository.RAGSearchResult
 	var err error
 
-	switch req.Mode {
-	case "keyword":
-		results, err = h.ragRepo.KeywordSearch(ctx, req.Query, h.tenantID, req.TopK, req.Filters)
-	case "vector":
-		// For vector-only, we need to embed first
+	// embedQuery turns the query text into a vector using the default provider.
+	// It is best-effort: without a configured embedding model the callers fall
+	// back to keyword-only retrieval instead of failing the request.
+	embedQuery := func() []float32 {
 		provider, pErr := h.aiManager.DefaultProvider()
 		if pErr != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI provider not configured"})
-			return
+			return nil
 		}
 		embedResp, eErr := provider.Embed(ctx, []string{req.Query}, &ai.EmbedOptions{})
 		if eErr != nil || len(embedResp.Vectors) == 0 {
-			respondInternalError(c, fmt.Errorf("embedding failed: %v", eErr))
+			if eErr != nil {
+				slog.Warn("RAG: query embedding failed", "error", eErr)
+			}
+			return nil
+		}
+		return embedResp.Vectors[0]
+	}
+
+	switch req.Mode {
+	case "keyword":
+		results, err = h.ragRepo.KeywordSearch(ctx, req.Query, scope, req.TopK, req.Filters)
+	case "vector":
+		queryVector := embedQuery()
+		if queryVector == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI provider not configured"})
 			return
 		}
-		results, err = h.ragRepo.VectorSearch(ctx, embedResp.Vectors[0], h.tenantID, req.TopK, req.Filters)
-	default: // hybrid
-		results, err = h.ragRepo.VectorSearch(ctx, nil, h.tenantID, req.TopK, req.Filters)
-		if err == nil {
-			keywordResults, kErr := h.ragRepo.KeywordSearch(ctx, req.Query, h.tenantID, req.TopK, req.Filters)
-			if kErr == nil && len(keywordResults) > 0 {
-				results = append(results, keywordResults...)
-			}
+		results, err = h.ragRepo.VectorSearch(ctx, queryVector, scope, req.TopK, req.Filters)
+	default: // hybrid — vector half is optional, keyword half always runs
+		var vectorResults []repository.RAGSearchResult
+		if queryVector := embedQuery(); queryVector != nil {
+			vectorResults, err = h.ragRepo.VectorSearch(ctx, queryVector, scope, req.TopK, req.Filters)
 		}
+		keywordResults, kErr := h.ragRepo.KeywordSearch(ctx, req.Query, scope, req.TopK, req.Filters)
+		if kErr != nil {
+			if err == nil {
+				err = kErr
+			}
+		} else {
+			vectorResults = mergeSearchResults(vectorResults, keywordResults, req.TopK)
+		}
+		results = vectorResults
 	}
 
 	if err != nil {
@@ -149,13 +203,36 @@ func (h *RAGHandlers) Search(c *gin.Context) {
 	})
 }
 
+// mergeSearchResults concatenates two ranked result lists, dropping duplicate
+// chunks (a chunk retrieved by both search halves keeps its better rank) and
+// capping the total.
+func mergeSearchResults(primary, secondary []repository.RAGSearchResult, topK int) []repository.RAGSearchResult {
+	merged := make([]repository.RAGSearchResult, 0, len(primary)+len(secondary))
+	seen := make(map[uuid.UUID]bool, len(primary)+len(secondary))
+	for _, list := range [][]repository.RAGSearchResult{primary, secondary} {
+		for _, r := range list {
+			if seen[r.ChunkID] {
+				continue
+			}
+			seen[r.ChunkID] = true
+			merged = append(merged, r)
+			if topK > 0 && len(merged) >= topK {
+				return merged
+			}
+		}
+	}
+	return merged
+}
+
 // ListDocuments returns all documents in the knowledge base.
 func (h *RAGHandlers) ListDocuments(c *gin.Context) {
 	source := c.Query("source")
-	limit := 50
-	offset := 0
+	page, _ := strconv.Atoi(c.Query("page"))
+	perPage, _ := strconv.Atoi(c.Query("per_page"))
+	page, perPage = repository.ClampPagination(page, perPage, 50)
+	offset := (page - 1) * perPage
 
-	docs, total, err := h.ragRepo.ListDocuments(c.Request.Context(), h.tenantID, source, limit, offset)
+	docs, total, err := h.ragRepo.ListDocuments(c.Request.Context(), h.readScope(c), source, perPage, offset)
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -164,7 +241,8 @@ func (h *RAGHandlers) ListDocuments(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"documents": docs,
 		"total":     total,
-		"limit":     limit,
+		"page":      page,
+		"per_page":  perPage,
 		"offset":    offset,
 	})
 }
@@ -178,12 +256,12 @@ func (h *RAGHandlers) DeleteDocument(c *gin.Context) {
 		return
 	}
 
-	if err := h.ragRepo.DeleteDocument(c.Request.Context(), id); err != nil {
-		respondInternalError(c, err)
+	if err := h.ragRepo.DeleteDocument(c.Request.Context(), id, h.writeTenant(c)); err != nil {
+		respondRAGError(c, err)
 		return
 	}
 
-	logAudit(h.deps(), c, "rag_delete", "rag_document", idStr, nil, nil)
+	logAudit(h.deps, c, "rag_delete", "rag_document", idStr, nil, nil)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Document deleted", "id": idStr})
 }
@@ -197,9 +275,9 @@ func (h *RAGHandlers) GetDocument(c *gin.Context) {
 		return
 	}
 
-	doc, err := h.ragRepo.GetDocument(c.Request.Context(), id)
+	doc, err := h.ragRepo.GetDocument(c.Request.Context(), id, h.readScope(c))
 	if err != nil {
-		respondInternalError(c, err)
+		respondRAGError(c, err)
 		return
 	}
 
@@ -232,9 +310,11 @@ func (h *RAGHandlers) UpdateDocument(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
+	tenantID := h.writeTenant(c)
+
 	// Update the document content
-	if err := h.ragRepo.UpdateDocumentContent(ctx, id, req.Content, req.Metadata); err != nil {
-		respondInternalError(c, err)
+	if err := h.ragRepo.UpdateDocumentContent(ctx, id, tenantID, req.Content, req.Metadata); err != nil {
+		respondRAGError(c, err)
 		return
 	}
 
@@ -242,9 +322,9 @@ func (h *RAGHandlers) UpdateDocument(c *gin.Context) {
 	_ = h.ragRepo.DeleteChunksByDocument(ctx, id)
 
 	// Re-fetch the updated document to get the new content for ingestion
-	doc, err := h.ragRepo.GetDocument(ctx, id)
+	doc, err := h.ragRepo.GetDocument(ctx, id, repository.TenantScope(tenantID))
 	if err != nil {
-		respondInternalError(c, err)
+		respondRAGError(c, err)
 		return
 	}
 
@@ -255,11 +335,11 @@ func (h *RAGHandlers) UpdateDocument(c *gin.Context) {
 		Content:  doc.Content,
 		Metadata: toStringMap(doc.Metadata),
 	}
-	if err := h.ingestion.IngestDocument(ctx, aiDoc, h.tenantID); err != nil {
+	if err := h.ingestion.IngestDocument(ctx, aiDoc, tenantID); err != nil {
 		slog.Warn("RAG: re-ingestion after update failed", "error", err)
 	}
 
-	logAudit(h.deps(), c, "rag_update", "rag_document", idStr, nil, gin.H{"content_length": len(req.Content)})
+	logAudit(h.deps, c, "rag_update", "rag_document", idStr, nil, gin.H{"content_length": len(req.Content)})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Document updated and re-indexed", "id": idStr})
 }
@@ -309,12 +389,12 @@ func (h *RAGHandlers) CreateDocument(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 	defer cancel()
 
-	if err := h.ingestion.IngestDocument(ctx, doc, h.tenantID); err != nil {
+	if err := h.ingestion.IngestDocument(ctx, doc, h.writeTenant(c)); err != nil {
 		respondInternalError(c, err)
 		return
 	}
 
-	logAudit(h.deps(), c, "rag_create", "rag_document", doc.ID, nil, gin.H{
+	logAudit(h.deps, c, "rag_create", "rag_document", doc.ID, nil, gin.H{
 		"title": req.Title, "source": source,
 	})
 
@@ -359,7 +439,7 @@ func toStringMap(m map[string]interface{}) map[string]string {
 
 // GetStats returns knowledge base statistics.
 func (h *RAGHandlers) GetStats(c *gin.Context) {
-	stats, err := h.ragRepo.GetDocumentStats(c.Request.Context(), h.tenantID)
+	stats, err := h.ragRepo.GetDocumentStats(c.Request.Context(), h.readScope(c))
 	if err != nil {
 		respondInternalError(c, err)
 		return
@@ -396,17 +476,26 @@ func (h *RAGHandlers) Reindex(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
-	defer cancel()
+	tenantID := h.writeTenant(c)
+	if tenantID == uuid.Nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "tenant scope required"})
+		return
+	}
 
-	// Run re-index in background to avoid blocking
+	// Run re-index in background to avoid blocking. The response is 202, so the
+	// request context is cancelled while the work is still running: detach from
+	// cancellation and give the job its own deadline instead. The request context
+	// is read here, before the handler returns and gin reuses the context object.
+	reqCtx := c.Request.Context()
 	go func() {
-		if err := ai.IngestAll(ctx, h.ingestion, h.tenantID); err != nil {
-			slog.Warn("RAG: manual re-index failed", "error", err)
+		ctx, cancel := utils.DetachContext(reqCtx, 5*time.Minute)
+		defer cancel()
+		if err := ai.IngestAll(ctx, h.ingestion, tenantID); err != nil {
+			slog.Warn("RAG: manual re-index failed", "error", err, "tenant_id", tenantID.String())
 		}
 	}()
 
-	logAudit(h.deps(), c, "rag_reindex", "rag_document", "all", nil, gin.H{"sources": req.Sources})
+	logAudit(h.deps, c, "rag_reindex", "rag_document", "all", nil, gin.H{"sources": req.Sources})
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"message": "Re-indexing started in background",
@@ -437,7 +526,8 @@ func (h *RAGHandlers) ChatWithRAG(c *gin.Context) {
 
 	query := &ai.RAGQuery{
 		Text:        req.Message,
-		TenantID:    h.tenantID.String(),
+		TenantID:    auth.GetTenantID(c).String(),
+		TenantIDs:   h.readScope(c),
 		TopK:        req.TopK,
 		EnableTools: req.EnableTools,
 		Filters:     req.Filters,
@@ -449,9 +539,9 @@ func (h *RAGHandlers) ChatWithRAG(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.deps(), c, "rag_chat", "ai_message", uuid.NewString(), nil, map[string]interface{}{
-		"query":      req.Message,
-		"sources":    len(resp.Sources),
+	logAudit(h.deps, c, "rag_chat", "ai_message", uuid.NewString(), nil, map[string]interface{}{
+		"query":       req.Message,
+		"sources":     len(resp.Sources),
 		"tokens_used": resp.TokensUsed.TotalTokens,
 	})
 
@@ -497,7 +587,8 @@ func (h *RAGHandlers) ChatStreamWithRAG(c *gin.Context) {
 
 	query := &ai.RAGQuery{
 		Text:        req.Message,
-		TenantID:    h.tenantID.String(),
+		TenantID:    auth.GetTenantID(c).String(),
+		TenantIDs:   h.readScope(c),
 		TopK:        req.TopK,
 		EnableTools: req.EnableTools,
 		Filters:     req.Filters,
@@ -505,7 +596,8 @@ func (h *RAGHandlers) ChatStreamWithRAG(c *gin.Context) {
 
 	stream, err := h.pipeline.StreamQuery(c.Request.Context(), query)
 	if err != nil {
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": err.Error()}))
+		slog.Warn("RAG: streaming query failed", "error", err)
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(gin.H{"type": "error", "error": "RAG query failed"}))
 		flusher.Flush()
 		return
 	}
@@ -520,10 +612,4 @@ func (h *RAGHandlers) ChatStreamWithRAG(c *gin.Context) {
 		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", mustJSON(chunk))
 		flusher.Flush()
 	}
-}
-
-// deps returns the Dependencies for audit logging.
-// This is a workaround since RAGHandlers doesn't store deps directly.
-func (h *RAGHandlers) deps() Dependencies {
-	return Dependencies{}
 }

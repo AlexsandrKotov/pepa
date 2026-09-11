@@ -87,9 +87,16 @@ func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFun
 	return context.WithTimeout(ctx, DefaultQueryTimeout)
 }
 
-// SetTenant sets the current tenant for RLS policies.
+// SetTenant sets the RLS tenant GUC on one pooled connection.
+//
+// Deprecated: this cannot work as intended. The setting is transaction-local, so
+// outside an explicit transaction it is discarded immediately, and a pooled pool
+// hands the next caller a different connection anyway. Use SetTenantInTx with a
+// transaction that runs the whole request, or keep relying on the explicit
+// tenant_id filters in the repositories (which is what actually isolates
+// tenants today). Kept so existing call sites fail loudly rather than silently.
 func (d *DB) SetTenant(ctx context.Context, tenantID string) error {
-	_, err := d.Pool.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID)
+	_, err := d.Pool.Exec(ctx, "SELECT set_config($1, $2, true)", TenantGUC, tenantID)
 	return err
 }
 

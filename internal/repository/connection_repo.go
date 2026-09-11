@@ -179,12 +179,7 @@ func (r *ConnectionRepository) ListFiltered(ctx context.Context, f ConnectionFil
 		return nil, fmt.Errorf("count connections: %w", err)
 	}
 
-	if f.Page < 1 {
-		f.Page = 1
-	}
-	if f.PerPage < 1 {
-		f.PerPage = 20
-	}
+	f.Page, f.PerPage = ClampPagination(f.Page, f.PerPage, 20)
 	offset := (f.Page - 1) * f.PerPage
 
 	query += " ORDER BY created_at DESC"

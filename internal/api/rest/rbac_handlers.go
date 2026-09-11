@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -79,6 +80,10 @@ func createRole(deps Dependencies) gin.HandlerFunc {
 
 		role, err := deps.RBAC.CreateRole(c.Request.Context(), tenantID, req.Name, req.Slug, req.Description, req.Scope)
 		if err != nil {
+			if errors.Is(err, rbacengine.ErrReservedRoleSlug) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "this role name is reserved for the built-in administrator role"})
+				return
+			}
 			respondInternalError(c, err)
 			return
 		}

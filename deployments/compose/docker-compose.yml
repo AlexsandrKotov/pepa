@@ -157,6 +157,9 @@ services:
       TRIVY_VEX_DIR: /etc/trivy/vex
       # VEX repository URI (auto-fetched VEX documents)
       TRIVY_VEX_REPOSITORY_URI: ${TRIVY_VEX_REPOSITORY_URI:-}
+      # GOMEMLIMIT soft-cap keeps the Go runtime from consuming memory needed
+      # by the Trivy DB download subprocess (~600 MB during Java DB fetch).
+      GOMEMLIMIT: "768MiB"
       # OpenTelemetry — PEPA exports traces/logs/metrics via OTLP directly.
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
       OTEL_ENDPOINT: ${OTEL_ENDPOINT:-}
@@ -198,7 +201,7 @@ services:
       resources:
         limits:
           cpus: '${API_CPUS_LIMIT:-2.0}'
-          memory: ${API_MEMORY_LIMIT:-1G}
+          memory: ${API_MEMORY_LIMIT:-2G}
 
   # ── PEPA Background Worker ─────────────────────────────────
   worker:

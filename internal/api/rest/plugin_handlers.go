@@ -637,7 +637,7 @@ func listStepExecutions(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		steps, err := deps.Repos.Workflow.ListStepExecutions(c.Request.Context(), execID)
+		steps, err := deps.Repos.Workflow.ListStepExecutions(c.Request.Context(), execID, auth.GetTenantID(c))
 		if err != nil {
 			respondInternalError(c, err)
 			return

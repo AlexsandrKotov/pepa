@@ -37,7 +37,7 @@ func (h *WorkflowBuilderHandlers) BuildWorkflow(c *gin.Context) {
 		req.Environment = "default"
 	}
 
-	workflow, err := h.builder.BuildWorkflow(c.Request.Context(), req.Description, req.Environment)
+	workflow, err := h.builder.BuildWorkflow(agentContext(c), req.Description, req.Environment)
 	if err != nil {
 		respondInternalError(c, err)
 		return

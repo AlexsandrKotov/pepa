@@ -309,7 +309,14 @@ func analyzeProjectType(repoURL, branch string) map[string]interface{} {
 	return result
 }
 
+// containsRole reports whether the caller's JWT role list contains role. The
+// "admin" question is answered by auth.IsAdminRoles instead, so that a holder of
+// "super_admin"/"platform_admin" is not treated as an ordinary developer here
+// while being granted the platform-wide bypass by rbacMiddleware at the same time.
 func containsRole(roles []string, role string) bool {
+	if strings.EqualFold(role, "admin") {
+		return auth.IsAdminRoles(roles)
+	}
 	for _, r := range roles {
 		if strings.EqualFold(r, role) {
 			return true

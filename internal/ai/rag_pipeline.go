@@ -36,7 +36,7 @@ func NewRAGPipeline(embedder, generator LLMProvider, tools *ToolRegistry, ragRep
 // Query executes a RAG query with hybrid retrieval (vector + keyword + RRF fusion).
 func (p *RAGPipeline) Query(ctx context.Context, query *RAGQuery) (*RAGResponse, error) {
 	// 1. Retrieve relevant chunks via hybrid search
-	results, err := p.hybridSearch(ctx, query.Text, query.TopK, query.Filters)
+	results, err := p.hybridSearch(ctx, query.Text, p.scopeFor(query), query.TopK, query.Filters)
 	if err != nil {
 		return nil, fmt.Errorf("hybrid search: %w", err)
 	}
@@ -92,7 +92,7 @@ func (p *RAGPipeline) Query(ctx context.Context, query *RAGQuery) (*RAGResponse,
 // StreamQuery executes a streaming RAG query.
 func (p *RAGPipeline) StreamQuery(ctx context.Context, query *RAGQuery) (<-chan *StreamChunk, error) {
 	// 1. Retrieve relevant chunks
-	results, err := p.hybridSearch(ctx, query.Text, query.TopK, query.Filters)
+	results, err := p.hybridSearch(ctx, query.Text, p.scopeFor(query), query.TopK, query.Filters)
 	if err != nil {
 		return nil, fmt.Errorf("hybrid search: %w", err)
 	}
@@ -175,10 +175,30 @@ func (p *RAGPipeline) StreamQuery(ctx context.Context, query *RAGQuery) (<-chan 
 	return ch, nil
 }
 
+// scopeFor resolves the tenant set a retrieval may read.
+//
+// The handler supplies an explicit TenantIDs scope derived from the verified
+// token. Callers that only set the legacy TenantID string still work; when
+// neither is usable the scope degrades to the platform corpus only, never to
+// "all tenants", because rag_search fails closed on an empty array.
+func (p *RAGPipeline) scopeFor(query *RAGQuery) []uuid.UUID {
+	if scope := repository.TenantScope(query.TenantIDs...); len(scope) > 0 {
+		return scope
+	}
+	if id, err := uuid.Parse(query.TenantID); err == nil {
+		return repository.TenantScope(id, p.tenantID)
+	}
+	return repository.TenantScope(p.tenantID)
+}
+
 // hybridSearch combines vector and keyword search with Reciprocal Rank Fusion.
-func (p *RAGPipeline) hybridSearch(ctx context.Context, query string, topK int, filters map[string]string) ([]repository.RAGSearchResult, error) {
+// tenantIDs is the read scope of the caller; an empty scope returns no results.
+func (p *RAGPipeline) hybridSearch(ctx context.Context, query string, tenantIDs []uuid.UUID, topK int, filters map[string]string) ([]repository.RAGSearchResult, error) {
 	if topK <= 0 {
 		topK = 10
+	}
+	if len(tenantIDs) == 0 {
+		return nil, nil
 	}
 
 	// Fetch more candidates than needed for fusion
@@ -209,13 +229,13 @@ func (p *RAGPipeline) hybridSearch(ctx context.Context, query string, topK int, 
 			vectorCh <- searchResult{nil, nil}
 			return
 		}
-		results, err := p.ragRepo.VectorSearch(ctx, embedResp.Vectors[0], p.tenantID, candidateK, filters)
+		results, err := p.ragRepo.VectorSearch(ctx, embedResp.Vectors[0], tenantIDs, candidateK, filters)
 		vectorCh <- searchResult{results, err}
 	}()
 
 	// Keyword search
 	go func() {
-		results, err := p.ragRepo.KeywordSearch(ctx, query, p.tenantID, candidateK, filters)
+		results, err := p.ragRepo.KeywordSearch(ctx, query, tenantIDs, candidateK, filters)
 		keywordCh <- searchResult{results, err}
 	}()
 
