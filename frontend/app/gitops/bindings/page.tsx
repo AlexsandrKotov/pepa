@@ -164,6 +164,18 @@ export default function GitOpsBindingsPage() {
     unbound: bindings.filter(b => !b.environment_id).length,
   }), [bindings]);
 
+  // Group label depends on the active groupBy mode; must be declared before
+  // groupedBindings, which is evaluated during the very first render.
+  const getGroupLabel = useCallback((key: string) => {
+    switch (groupBy) {
+      case 'cluster': return connName(key);
+      case 'namespace': return key;
+      case 'engine': return key === 'argocd' ? 'ArgoCD' : key === 'fluxcd' ? 'FluxCD' : key;
+      case 'environment': return key;
+      default: return key;
+    }
+  }, [groupBy, connName]);
+
   // Grouped bindings
   const groupedBindings = useMemo(() => {
     if (groupBy === 'none') return null;
@@ -199,17 +211,7 @@ export default function GitOpsBindingsPage() {
         if (b.key === 'unknown' || b.key === 'Unassigned') return -1;
         return a.label.localeCompare(b.label);
       });
-  }, [filteredBindings, groupBy, connName]);
-
-  const getGroupLabel = (key: string) => {
-    switch (groupBy) {
-      case 'cluster': return connName(key);
-      case 'namespace': return key;
-      case 'engine': return key === 'argocd' ? 'ArgoCD' : key === 'fluxcd' ? 'FluxCD' : key;
-      case 'environment': return key;
-      default: return key;
-    }
-  };
+  }, [filteredBindings, groupBy, getGroupLabel]);
 
   const toggleGroup = (key: string) => {
     setCollapsedGroups(prev => {
