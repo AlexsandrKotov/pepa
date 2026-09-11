@@ -5,6 +5,8 @@ import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { services, discovery, clusters as clustersApi, environments as environmentsApi, gitopsBindings, type Service, type ServiceDeployment, type Cluster, type Environment, type GitOpsBinding } from '@/lib/api';
+import BindingWizard from '@/components/BindingWizard';
+import { useSSERefresh } from '@/hooks/useSSEStream';
 
 export default function ServiceDetailPage() {
   const searchParams = useSearchParams();
@@ -24,6 +26,7 @@ export default function ServiceDetailPage() {
   const [envList, setEnvList] = useState<Environment[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [bindings, setBindings] = useState<GitOpsBinding[]>([]);
+  const [showBindingWizard, setShowBindingWizard] = useState(false);
 
   useEscapeKey(() => {
     if (showDeleteConfirm && !deleting) setShowDeleteConfirm(false);
@@ -56,9 +59,12 @@ export default function ServiceDetailPage() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10000);
+    const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [loadData]);
+
+  // Real-time refresh on deployment and gitops events via SSE
+  useSSERefresh(['deployment', 'gitops', 'drift'], loadData);
 
   const handleDeploy = async (environment: string) => {
     setActionFeedback(null);
@@ -500,13 +506,31 @@ export default function ServiceDetailPage() {
       )}
 
       {/* GitOps Bindings */}
-      {bindings.length > 0 && (
-        <div className="card">
-          <div className="card-header flex items-center justify-between">
-            <h2 className="text-[13px] font-medium text-[var(--text-primary)]">GitOps Bindings</h2>
+      <div className="card">
+        <div className="card-header flex items-center justify-between">
+          <h2 className="text-[13px] font-medium text-[var(--text-primary)]">GitOps Bindings</h2>
+          <div className="flex items-center gap-2">
             <span className="text-[11px] text-[var(--text-tertiary)]">{bindings.length} binding{bindings.length !== 1 ? 's' : ''}</span>
+            <button
+              onClick={() => setShowBindingWizard(true)}
+              className="text-[11px] px-2 py-1 bg-[var(--accent)] text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              + Bind App
+            </button>
           </div>
-          <div className="card-body">
+        </div>
+        <div className="card-body">
+          {bindings.length === 0 ? (
+            <div className="text-center py-4">
+              <p className="text-[12px] text-[var(--text-tertiary)]">No GitOps applications bound to this service.</p>
+              <button
+                onClick={() => setShowBindingWizard(true)}
+                className="text-[11px] text-[var(--accent)] hover:underline mt-1"
+              >
+                Create a binding
+              </button>
+            </div>
+          ) : (
             <div className="space-y-3">
               {bindings.map(b => {
                 const engineLabel = b.engine_type === 'fluxcd' ? 'FluxCD' : 'ArgoCD';
@@ -551,8 +575,20 @@ export default function ServiceDetailPage() {
                 );
               })}
             </div>
-          </div>
+          )}
         </div>
+      </div>
+
+      {/* Binding Wizard */}
+      {serviceId && (
+        <BindingWizard
+          open={showBindingWizard}
+          onClose={() => setShowBindingWizard(false)}
+          preselectedServiceId={serviceId}
+          onCreated={() => {
+            gitopsBindings.byService(serviceId).then(r => setBindings(r.bindings || [])).catch(() => {});
+          }}
+        />
       )}
 
       {/* Deployments Section */}

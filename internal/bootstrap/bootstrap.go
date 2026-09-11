@@ -82,6 +82,7 @@ type Components struct {
 	DriftScheduleRepo    *gitops.DriftScheduleRepository
 	EnvironmentOverviewRepo *repository.EnvironmentOverviewRepository
 	SelfServiceRepo      *repository.SelfServiceDeploymentRepository
+	AutoDeployRuleRepo   *repository.AutoDeployRuleRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -353,6 +354,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		DriftScheduleRepo:    gitops.NewDriftScheduleRepository(db),
 		EnvironmentOverviewRepo: repository.NewEnvironmentOverviewRepository(db.Pool),
 		SelfServiceRepo:      repository.NewSelfServiceDeploymentRepository(db.Pool),
+		AutoDeployRuleRepo:   repository.NewAutoDeployRuleRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry

@@ -11,6 +11,7 @@ const tabs = [
   { key: 'auth', label: 'Authentication', href: '/settings/authentication', icon: 'shield' },
   { key: 'organization', label: 'Organization', href: '/settings/users', icon: 'users' },
   { key: 'workspaces', label: 'Workspaces', href: '/settings/workspaces', icon: 'workspace' },
+  { key: 'auto-deploy', label: 'Auto-Deploy', href: '/settings/auto-deploy', icon: 'rocket' },
   { key: 'observability', label: 'Observability', href: '/settings/observability', icon: 'chart' },
 ];
 
@@ -25,6 +26,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     if (pathname.startsWith('/settings/users') || pathname.startsWith('/settings/teams')) return 'organization';
     if (pathname.startsWith('/settings/observability')) return 'observability';
     if (pathname.startsWith('/settings/workspaces')) return 'workspaces';
+    if (pathname.startsWith('/settings/auto-deploy')) return 'auto-deploy';
     return 'general';
   })();
 

@@ -136,7 +136,6 @@ func (r *SelfServiceDeploymentRepository) List(ctx context.Context, tenantID uui
 	if status != "" {
 		query += fmt.Sprintf(" AND status = $%d", argIdx)
 		args = append(args, status)
-		argIdx++
 	}
 
 	query += " ORDER BY created_at DESC"

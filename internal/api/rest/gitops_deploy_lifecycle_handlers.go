@@ -106,6 +106,14 @@ func completePromotion(deps Dependencies, c *gin.Context, d *repository.Deployme
 		Status:            "pending",
 		CreatedBy:         user,
 	}
+
+	// Auto-resolve environment_id for the next stage
+	if deps.Repos.Environment != nil && next.Key != "" {
+		if env, err := deps.Repos.Environment.GetBySlug(ctx, d.TenantID, next.Key); err == nil && env != nil {
+			promoted.EnvironmentID = &env.ID
+		}
+	}
+
 	if err := deps.Repos.Deployment.Create(ctx, promoted); err != nil {
 		respondInternalError(c, err)
 		return

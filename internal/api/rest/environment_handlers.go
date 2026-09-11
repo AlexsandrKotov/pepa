@@ -458,13 +458,14 @@ func registerEnvironmentRoutes(r *gin.RouterGroup, deps Dependencies) {
 				serviceDeployments = []models.ServiceDeployment{}
 			}
 
-			// Also get GitOps workflow deployments by stage matching environment slug
+			// Also get GitOps workflow deployments by environment_id or stage matching
 			var gitopsDeployments []gin.H
 			if deps.Repos.Deployment != nil {
 				allDeployments, err := deps.Repos.Deployment.List(c.Request.Context(), tenantID)
 				if err == nil {
 					for _, d := range allDeployments {
-						if d.Stage == env.Slug {
+						// Match by environment_id first, fall back to stage slug
+						if (d.EnvironmentID != nil && *d.EnvironmentID == id) || (d.EnvironmentID == nil && d.Stage == env.Slug) {
 							gitopsDeployments = append(gitopsDeployments, gin.H{
 								"id":               d.ID,
 								"project_name":     d.GitlabProjectName,

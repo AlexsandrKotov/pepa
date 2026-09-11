@@ -5412,5 +5412,59 @@ export const gitopsBindings = {
 
   byEnvironment: (envId: string) =>
     fetchAPI<{ bindings: GitOpsBinding[]; total: number }>(`/api/v1/gitops/bindings/by-environment/${envId}`),
+
+  writeBack: (id: string, data: { image_tag: string; image_name?: string; commit_message?: string; branch?: string; dry_run?: boolean }) =>
+    fetchAPI<{ result: WriteBackResult; message: string }>(`/api/v1/gitops/bindings/${id}/write-back`, { method: 'POST', body: JSON.stringify(data) }),
+
+  writeBackPreview: (id: string, data: { image_tag: string; image_name?: string }) =>
+    fetchAPI<{ diff: string; file_path: string; strategy: string }>(`/api/v1/gitops/bindings/${id}/write-back/preview`, { method: 'POST', body: JSON.stringify(data) }),
+};
+
+export interface WriteBackResult {
+  commit_sha: string;
+  branch: string;
+  diff: string;
+  mr_needed: boolean;
+  mr_url?: string;
+  file_path: string;
+  strategy: string;
+}
+
+// ── Auto-Deploy Rules ────────────────────────────────────────────
+
+export interface AutoDeployRule {
+  id: string;
+  tenant_id: string;
+  pipeline_source_id?: string;
+  project_id?: string;
+  project_path?: string;
+  branch_pattern: string;
+  environment_id: string;
+  image_tag_source: string; // branch_name, ci_variable, regex
+  image_tag_regex?: string;
+  image_name?: string;
+  enabled: boolean;
+  require_pipeline_success: boolean;
+  auto_create_deployment: boolean;
+  created_at: string;
+  updated_at: string;
+  env_name?: string;
+  env_slug?: string;
+  env_color?: string;
+  source_name?: string;
+}
+
+export const autoDeployRules = {
+  list: () =>
+    fetchAPI<{ rules: AutoDeployRule[]; total: number }>('/api/v1/auto-deploy-rules'),
+
+  create: (data: Partial<AutoDeployRule>) =>
+    fetchAPI<{ rule: AutoDeployRule }>('/api/v1/auto-deploy-rules', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: string, data: Partial<AutoDeployRule>) =>
+    fetchAPI<{ rule: AutoDeployRule }>(`/api/v1/auto-deploy-rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  delete: (id: string) =>
+    fetchAPI<{ message: string }>(`/api/v1/auto-deploy-rules/${id}`, { method: 'DELETE' }),
 };
 

@@ -1,13 +1,17 @@
 package rest
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/gitops/engine"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/internal/service"
 )
 
 // discoverGitOpsApplications scans all ArgoCD and FluxCD connections for a tenant
@@ -471,6 +475,124 @@ func listBindingsByService(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// writeBackBinding updates the image tag in the GitOps manifest repo based on
+// the binding's update_strategy. This enables GitOps-native deploys: PEPA writes
+// the new image tag to Git, and FluxCD/ArgoCD reconciles the change.
+func writeBackBinding(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		tenantID := getTenantID(c)
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid binding ID"})
+			return
+		}
+
+		var req struct {
+			ImageTag      string `json:"image_tag" binding:"required"`
+			ImageName     string `json:"image_name"`
+			CommitMessage string `json:"commit_message"`
+			Branch        string `json:"branch"`
+			DryRun        bool   `json:"dry_run"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.Repos.GitopsRepo == nil || deps.Repos.GitOpsBinding == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "gitops subsystem not configured"})
+			return
+		}
+
+		writer := service.NewManifestWriter(deps.Repos.GitopsRepo, deps.Repos.GitOpsBinding)
+		writeCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+		defer cancel()
+
+		result, writeErr := writer.WriteBack(writeCtx, tenantID, &service.WriteBackRequest{
+			BindingID:     id,
+			ImageTag:      req.ImageTag,
+			ImageName:     req.ImageName,
+			CommitMessage: req.CommitMessage,
+			Branch:        req.Branch,
+			DryRun:        req.DryRun,
+		})
+		if writeErr != nil {
+			slog.Error("write-back failed", "binding_id", id, "error", writeErr)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": writeErr.Error()})
+			return
+		}
+
+		// Resolve connection token for the repo (used for MR URL if needed)
+		if result.MRNeeded && deps.Repos.GitopsRepo != nil {
+			binding, bErr := deps.Repos.GitOpsBinding.Get(ctx, id, tenantID)
+			if bErr == nil && binding != nil && binding.RepoID != nil {
+				repo, rErr := deps.Repos.GitopsRepo.Get(ctx, *binding.RepoID)
+				if rErr == nil && repo != nil {
+					resolveConnectionToken(ctx, deps, repo, auth.GetUserID(c), tenantID)
+				}
+			}
+		}
+
+		slog.Info("write-back complete", "binding_id", id, "commit", result.CommitSHA, "branch", result.Branch, "strategy", result.Strategy)
+
+		c.JSON(http.StatusOK, gin.H{
+			"result":  result,
+			"message": "image tag written to GitOps manifest repository",
+		})
+	}
+}
+
+// previewWriteBackDiff returns a diff preview without committing.
+func previewWriteBackDiff(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := c.Request.Context()
+		tenantID := getTenantID(c)
+
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid binding ID"})
+			return
+		}
+
+		var req struct {
+			ImageTag  string `json:"image_tag" binding:"required"`
+			ImageName string `json:"image_name"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if deps.Repos.GitopsRepo == nil || deps.Repos.GitOpsBinding == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "gitops subsystem not configured"})
+			return
+		}
+
+		writer := service.NewManifestWriter(deps.Repos.GitopsRepo, deps.Repos.GitOpsBinding)
+		previewCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+
+		result, previewErr := writer.WriteBack(previewCtx, tenantID, &service.WriteBackRequest{
+			BindingID: id,
+			ImageTag:  req.ImageTag,
+			ImageName: req.ImageName,
+			DryRun:    true,
+		})
+		if previewErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": previewErr.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"diff":      result.Diff,
+			"file_path": result.FilePath,
+			"strategy":  result.Strategy,
+		})
+	}
+}
+
 // registerGitOpsBindingRoutes registers all GitOps binding routes.
 func registerGitOpsBindingRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 	bindings := v1.Group("/gitops/bindings")
@@ -488,5 +610,9 @@ func registerGitOpsBindingRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 		bindings.POST("", createGitOpsBinding(deps))
 		bindings.PUT("/:id", updateGitOpsBinding(deps))
 		bindings.DELETE("/:id", deleteGitOpsBinding(deps))
+
+		// Write-back (image-tag → Git)
+		bindings.POST("/:id/write-back", writeBackBinding(deps))
+		bindings.POST("/:id/write-back/preview", previewWriteBackDiff(deps))
 	}
 }

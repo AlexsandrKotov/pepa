@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { gitopsBindings, environments, GitOpsBinding, DiscoveredApp, Environment } from '@/lib/api';
+import { gitopsBindings, environments, GitOpsBinding, DiscoveredApp, Environment, WriteBackResult } from '@/lib/api';
+import BindingWizard from '@/components/BindingWizard';
 
 export default function GitOpsBindingsPage() {
   const [bindings, setBindings] = useState<GitOpsBinding[]>([]);
@@ -20,6 +21,15 @@ export default function GitOpsBindingsPage() {
 
   // Set environment modal
   const [settingEnv, setSettingEnv] = useState<GitOpsBinding | null>(null);
+  const [showWizard, setShowWizard] = useState(false);
+
+  // Write-back modal
+  const [writeBackBinding, setWriteBackBinding] = useState<GitOpsBinding | null>(null);
+  const [writeBackTag, setWriteBackTag] = useState('');
+  const [writeBackName, setWriteBackName] = useState('');
+  const [writeBackLoading, setWriteBackLoading] = useState(false);
+  const [writeBackResult, setWriteBackResult] = useState<WriteBackResult | null>(null);
+  const [writeBackError, setWriteBackError] = useState('');
 
   const loadBindings = async () => {
     try {
@@ -91,6 +101,33 @@ export default function GitOpsBindingsPage() {
     }
   };
 
+  const handleWriteBack = async (dryRun: boolean) => {
+    if (!writeBackBinding || !writeBackTag) return;
+    setWriteBackLoading(true);
+    setWriteBackError('');
+    setWriteBackResult(null);
+    try {
+      const res = await gitopsBindings.writeBack(writeBackBinding.id, {
+        image_tag: writeBackTag,
+        image_name: writeBackName || undefined,
+        dry_run: dryRun,
+      });
+      setWriteBackResult(res.result);
+    } catch (err) {
+      setWriteBackError(err instanceof Error ? err.message : 'Write-back failed');
+    } finally {
+      setWriteBackLoading(false);
+    }
+  };
+
+  const openWriteBack = (binding: GitOpsBinding) => {
+    setWriteBackBinding(binding);
+    setWriteBackTag('');
+    setWriteBackName('');
+    setWriteBackResult(null);
+    setWriteBackError('');
+  };
+
   // Filtered bindings
   const filteredBindings = useMemo(() => {
     return bindings.filter(b => {
@@ -139,6 +176,12 @@ export default function GitOpsBindingsPage() {
           >
             Applications
           </Link>
+          <button
+            onClick={() => setShowWizard(true)}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
+            Create Binding
+          </button>
           <button
             onClick={handleDiscover}
             disabled={discovering}
@@ -365,12 +408,21 @@ export default function GitOpsBindingsPage() {
                     {binding.update_strategy}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <button
-                      onClick={() => handleDelete(binding.id)}
-                      className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-sm"
-                    >
-                      Delete
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button
+                        onClick={() => openWriteBack(binding)}
+                        className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 text-sm font-medium"
+                        title="Write image tag back to Git"
+                      >
+                        Write Back
+                      </button>
+                      <button
+                        onClick={() => handleDelete(binding.id)}
+                        className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -381,6 +433,97 @@ export default function GitOpsBindingsPage() {
           </div>
         </div>
       )}
+
+      {/* Write-Back Modal */}
+      {writeBackBinding && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-lg w-full mx-4">
+            <h2 className="text-lg font-bold mb-1 text-gray-900 dark:text-white">
+              Write Image Tag to Git
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Update the image tag in the manifest repo for &ldquo;{writeBackBinding.app_name}&rdquo; ({writeBackBinding.update_strategy})
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Image Tag *</label>
+                <input
+                  type="text"
+                  value={writeBackTag}
+                  onChange={e => setWriteBackTag(e.target.value)}
+                  placeholder="e.g. v1.2.3, sha-abc1234"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Image Name (optional)</label>
+                <input
+                  type="text"
+                  value={writeBackName}
+                  onChange={e => setWriteBackName(e.target.value)}
+                  placeholder="e.g. registry.example.com/myapp"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {writeBackError && (
+              <div className="mt-3 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+                {writeBackError}
+              </div>
+            )}
+
+            {writeBackResult && (
+              <div className="mt-3 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 text-sm space-y-1">
+                <div className="font-medium">Write-back successful</div>
+                <div>Commit: <code className="text-xs">{writeBackResult.commit_sha?.slice(0, 8) || 'preview'}</code></div>
+                <div>Branch: {writeBackResult.branch}</div>
+                <div>File: {writeBackResult.file_path}</div>
+                {writeBackResult.mr_needed && (
+                  <div className="text-amber-600 dark:text-amber-400">MR needed — push was rejected, branch created</div>
+                )}
+                {writeBackResult.diff && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs">View diff</summary>
+                    <pre className="mt-1 text-xs overflow-x-auto bg-gray-100 dark:bg-gray-900 p-2 rounded">{writeBackResult.diff}</pre>
+                  </details>
+                )}
+              </div>
+            )}
+
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                onClick={() => handleWriteBack(false)}
+                disabled={!writeBackTag || writeBackLoading}
+                className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+              >
+                {writeBackLoading ? 'Writing...' : 'Commit to Git'}
+              </button>
+              <button
+                onClick={() => handleWriteBack(true)}
+                disabled={!writeBackTag || writeBackLoading}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 text-sm"
+              >
+                Preview
+              </button>
+              <button
+                onClick={() => { setWriteBackBinding(null); setWriteBackResult(null); }}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 text-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Binding Wizard */}
+      <BindingWizard
+        open={showWizard}
+        onClose={() => setShowWizard(false)}
+        onCreated={() => loadBindings()}
+      />
     </div>
   );
 }

@@ -75,6 +75,7 @@ type Repositories struct {
 	DriftSchedule    *gitops.DriftScheduleRepository
 	EnvironmentOverview *repository.EnvironmentOverviewRepository
 	SelfService      *repository.SelfServiceDeploymentRepository
+	AutoDeployRule   *repository.AutoDeployRuleRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -169,8 +170,9 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		// Trust only loopback and private RFC1918 ranges (typical reverse-proxy setups).
 		_ = r.SetTrustedProxies([]string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"})
 	} else {
-		// In development, trust all proxies for convenience.
-		_ = r.SetTrustedProxies(nil)
+		// In development, trust only loopback to prevent X-Forwarded-For spoofing
+		// from non-local sources while still supporting localhost reverse proxies.
+		_ = r.SetTrustedProxies([]string{"127.0.0.0/8", "::1"})
 	}
 
 	// Health check (no auth)
@@ -236,6 +238,10 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	// Public auth routes (no JWT required)
 	registerAuthRoutes(r, deps)
 
+	// Public webhook endpoints (no JWT, verified by webhook secret)
+	webhookHandlers := NewWebhookHandlers(deps)
+	r.POST("/api/v1/webhooks/gitlab", webhookHandlers.handleGitLabPush())
+
 	// API v1 routes with JWT auth
 	v1 := r.Group("/api/v1")
 	v1.Use(bootstrapGuardMiddleware(deps))
@@ -287,6 +293,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerSecurityScanRoutes(v1, deps)
 		registerDevOpsRoutes(v1, deps)
 		registerNotificationRoutes(v1, deps)
+		registerAutoDeployRoutes(v1, deps)
 
 		// System info
 		v1.GET("/system/info", func(c *gin.Context) {

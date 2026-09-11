@@ -60,19 +60,25 @@ CREATE INDEX IF NOT EXISTS idx_drift_logs_status ON drift_detection_logs(status)
 -- RBAC permissions for drift schedules
 -- ============================================================
 
--- Admin: full CRUD on drift schedules
-INSERT INTO permissions (role_id, resource, action, effect)
-SELECT '20000000-0000-0000-0000-000000000001', 'drift_schedules', a, 'allow'
-FROM unnest(ARRAY['create','read','update','delete']) AS a
-ON CONFLICT DO NOTHING;
+-- Only insert permissions if the table exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'permissions') THEN
+        -- Admin: full CRUD on drift schedules
+        INSERT INTO permissions (role_id, resource, action, effect)
+        SELECT '20000000-0000-0000-0000-000000000001', 'drift_schedules', a, 'allow'
+        FROM unnest(ARRAY['create','read','update','delete']) AS a
+        ON CONFLICT DO NOTHING;
 
--- Developer: read and execute (can trigger manual runs)
-INSERT INTO permissions (role_id, resource, action, effect)
-SELECT '20000000-0000-0000-0000-000000000002', 'drift_schedules', a, 'allow'
-FROM unnest(ARRAY['read','execute']) AS a
-ON CONFLICT DO NOTHING;
+        -- Developer: read and execute (can trigger manual runs)
+        INSERT INTO permissions (role_id, resource, action, effect)
+        SELECT '20000000-0000-0000-0000-000000000002', 'drift_schedules', a, 'allow'
+        FROM unnest(ARRAY['read','execute']) AS a
+        ON CONFLICT DO NOTHING;
 
--- Viewer: read-only
-INSERT INTO permissions (role_id, resource, action, effect)
-VALUES ('20000000-0000-0000-0000-000000000003', 'drift_schedules', 'read', 'allow')
-ON CONFLICT DO NOTHING;
+        -- Viewer: read-only
+        INSERT INTO permissions (role_id, resource, action, effect)
+        VALUES ('20000000-0000-0000-0000-000000000003', 'drift_schedules', 'read', 'allow')
+        ON CONFLICT DO NOTHING;
+    END IF;
+END $$;

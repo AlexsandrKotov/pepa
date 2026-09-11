@@ -166,6 +166,7 @@ func main() {
 			DriftSchedule:    comp.DriftScheduleRepo,
 			EnvironmentOverview: comp.EnvironmentOverviewRepo,
 			SelfService:      comp.SelfServiceRepo,
+			AutoDeployRule:   comp.AutoDeployRuleRepo,
 		},
 		Services: &rest.Services{
 			Deployment: func() *service.DeploymentService {

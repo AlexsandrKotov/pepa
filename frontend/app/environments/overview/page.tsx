@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { environments, type EnvironmentOverviewResponse, type EnvironmentOverviewCell, type EnvironmentProblem } from '@/lib/api';
+import { environments, gitopsApplications, deployments, type EnvironmentOverviewResponse, type EnvironmentOverviewCell, type EnvironmentProblem, type GitOpsAppSummary, type Deployment } from '@/lib/api';
 import PermissionGuard from '@/components/PermissionGuard';
 
 export default function EnvironmentOverviewPage() {
@@ -18,12 +18,20 @@ function EnvironmentOverviewContent() {
   const [error, setError] = useState<string | null>(null);
   const [selectedProblem, setSelectedProblem] = useState<EnvironmentProblem | null>(null);
   const [filterSeverity, setFilterSeverity] = useState<string>('');
+  const [gitopsApps, setGitopsApps] = useState<GitOpsAppSummary[]>([]);
+  const [recentDeploys, setRecentDeploys] = useState<Deployment[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const overview = await environments.overview();
+      const [overview, appsResult, deployResult] = await Promise.all([
+        environments.overview(),
+        gitopsApplications.list().catch(() => ({ applications: [], total: 0 })),
+        deployments.list({ per_page: '10' }).catch(() => ({ deployments: [], total: 0, page: 1, per_page: 10, total_pages: 0 })),
+      ]);
       setData(overview);
+      setGitopsApps(appsResult.applications || []);
+      setRecentDeploys(deployResult.deployments || []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load overview');
@@ -74,9 +82,9 @@ function EnvironmentOverviewContent() {
         {/* Header */}
         <div className="page-animate flex items-center justify-between">
           <div>
-            <h1 className="page-title-modern">Environment Overview</h1>
+            <h1 className="page-title-modern">DevOps Overview</h1>
             <p className="page-subtitle-modern">
-              Unified view of all services across environments
+              Cluster health, GitOps applications, deployments and environment matrix
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -179,6 +187,110 @@ function EnvironmentOverviewContent() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* GitOps Applications + Recent Deployments — side by side */}
+        {(gitopsApps.length > 0 || recentDeploys.length > 0) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* GitOps Applications */}
+            {gitopsApps.length > 0 && (
+              <div className="card" style={{ borderRadius: '12px' }}>
+                <div className="card-header flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                    </svg>
+                    <h3 className="text-[14px] font-medium text-[var(--text-primary)]">GitOps Applications</h3>
+                  </div>
+                  <Link href="/gitops/applications" className="text-[11px] text-[var(--accent)] hover:underline">View all</Link>
+                </div>
+                <div className="card-body pt-0">
+                  <div className="space-y-1.5">
+                    {gitopsApps.slice(0, 8).map((app, i) => (
+                      <Link
+                        key={`${app.connection_id}-${app.namespace}-${app.name}-${i}`}
+                        href={`/gitops/applications/${app.connection_id}/${app.namespace}/${app.name}`}
+                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--bg)] transition-colors"
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${
+                          app.health === 'healthy' || app.health === 'Healthy' || app.health === 'Ready' ? 'bg-emerald-500' :
+                          app.health === 'degraded' || app.health === 'Degraded' || app.health === 'NotReady' ? 'bg-red-500' :
+                          app.health === 'progressing' || app.health === 'Progressing' || app.health === 'Reconciling' ? 'bg-blue-500' :
+                          app.health === 'suspended' || app.health === 'Suspended' ? 'bg-yellow-500' :
+                          'bg-[var(--text-tertiary)]'
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">{app.name}</p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">{app.namespace}</p>
+                        </div>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                          app.engine_type === 'fluxcd' ? 'bg-purple-500/15 text-purple-600' : 'bg-orange-500/15 text-orange-600'
+                        }`}>
+                          {app.engine_type === 'fluxcd' ? 'FluxCD' : 'ArgoCD'}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                  {gitopsApps.length > 8 && (
+                    <p className="text-[11px] text-[var(--text-tertiary)] mt-2 text-center">
+                      +{gitopsApps.length - 8} more
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Recent Deployments */}
+            {recentDeploys.length > 0 && (
+              <div className="card" style={{ borderRadius: '12px' }}>
+                <div className="card-header flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-[var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    <h3 className="text-[14px] font-medium text-[var(--text-primary)]">Recent Deployments</h3>
+                  </div>
+                  <Link href="/deployments" className="text-[11px] text-[var(--accent)] hover:underline">View all</Link>
+                </div>
+                <div className="card-body pt-0">
+                  <div className="space-y-1.5">
+                    {recentDeploys.slice(0, 8).map(dep => (
+                      <Link
+                        key={dep.id}
+                        href={`/deployments?id=${dep.id}`}
+                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-[var(--bg)] transition-colors"
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${
+                          dep.status === 'deployed' || dep.status === 'promoted' ? 'bg-emerald-500' :
+                          dep.status === 'deploying' || dep.status === 'syncing' ? 'bg-blue-500 animate-pulse' :
+                          dep.status === 'failed' ? 'bg-red-500' :
+                          dep.status === 'rolled_back' ? 'bg-orange-500' :
+                          'bg-[var(--text-tertiary)]'
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">
+                            {dep.team_name || dep.target_namespace || 'Deployment'}
+                          </p>
+                          <p className="text-[10px] text-[var(--text-tertiary)]">
+                            {dep.image_tag && <span className="mr-1">{dep.image_tag}</span>}
+                            {dep.stage && <span className="capitalize">{dep.stage}</span>}
+                          </p>
+                        </div>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                          dep.status === 'deployed' || dep.status === 'promoted' ? 'bg-emerald-500/15 text-emerald-600' :
+                          dep.status === 'deploying' || dep.status === 'syncing' ? 'bg-blue-500/15 text-blue-500' :
+                          dep.status === 'failed' ? 'bg-red-500/15 text-red-500' :
+                          'bg-[var(--border-light)] text-[var(--text-secondary)]'
+                        }`}>
+                          {dep.status}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

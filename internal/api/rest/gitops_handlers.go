@@ -216,6 +216,14 @@ func manualDeploy(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
+
+		// Auto-resolve environment_id from stage slug
+		if deps.Repos.Environment != nil && stage != "" {
+			if env, err := deps.Repos.Environment.GetBySlug(ctx, tenantID, stage); err == nil && env != nil {
+				deployment.EnvironmentID = &env.ID
+			}
+		}
+
 		if err := deps.Repos.Deployment.Create(ctx, deployment); err != nil {
 			respondInternalError(c, err)
 			return

@@ -48,6 +48,7 @@ type Deployment struct {
 	TimeoutSeconds    int             `json:"timeout_seconds,omitempty"`
 	TeamName          string          `json:"team_name,omitempty"`
 	Stage             string          `json:"stage,omitempty"`
+	EnvironmentID     *uuid.UUID      `json:"environment_id,omitempty"`
 	CreatedAt         time.Time       `json:"created_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
 }
@@ -66,6 +67,7 @@ func (r *DeploymentRepository) List(ctx context.Context, tenantID uuid.UUID) ([]
 		       COALESCE(promoted_by,''), promoted_at,
 		       COALESCE(created_by,''), COALESCE(timeout_seconds,300),
 		       COALESCE(team_name,''), COALESCE(stage,'dev'),
+		       environment_id,
 		       created_at, updated_at
 		FROM deployments WHERE tenant_id = $1
 		ORDER BY created_at DESC
@@ -86,6 +88,7 @@ func (r *DeploymentRepository) List(ctx context.Context, tenantID uuid.UUID) ([]
 			&d.PromotedBy, &d.PromotedAt, &d.CreatedBy,
 			&d.TimeoutSeconds,
 			&d.TeamName, &d.Stage,
+			&d.EnvironmentID,
 			&d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan deployment: %w", err)
 		}
@@ -130,6 +133,7 @@ func (r *DeploymentRepository) ListFiltered(ctx context.Context, f DeploymentFil
 		       COALESCE(promoted_by,''), promoted_at,
 		       COALESCE(created_by,''), COALESCE(timeout_seconds,300),
 		       COALESCE(team_name,''), COALESCE(stage,'dev'),
+		       environment_id,
 		       created_at, updated_at
 		FROM deployments WHERE tenant_id = $1`
 	args := []interface{}{f.TenantID}
@@ -202,6 +206,7 @@ func (r *DeploymentRepository) ListFiltered(ctx context.Context, f DeploymentFil
 			&d.PromotedBy, &d.PromotedAt, &d.CreatedBy,
 			&d.TimeoutSeconds,
 			&d.TeamName, &d.Stage,
+			&d.EnvironmentID,
 			&d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan deployment: %w", err)
 		}
@@ -236,6 +241,7 @@ func (r *DeploymentRepository) Get(ctx context.Context, id uuid.UUID) (*Deployme
 		       COALESCE(promoted_by,''), promoted_at,
 		       COALESCE(created_by,''), COALESCE(timeout_seconds,300),
 		       COALESCE(team_name,''), COALESCE(stage,'dev'),
+		       environment_id,
 		       created_at, updated_at
 		FROM deployments WHERE id = $1
 	`, id)
@@ -249,6 +255,7 @@ func (r *DeploymentRepository) Get(ctx context.Context, id uuid.UUID) (*Deployme
 		&d.PromotedBy, &d.PromotedAt, &d.CreatedBy,
 		&d.TimeoutSeconds,
 		&d.TeamName, &d.Stage,
+		&d.EnvironmentID,
 		&d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("get deployment: %w", err)
 	}
@@ -267,13 +274,13 @@ func (r *DeploymentRepository) Create(ctx context.Context, d *Deployment) error 
 			gitlab_project_id, gitlab_project_name, gitlab_mr_id, gitlab_mr_url,
 			target_cluster_id, target_namespace, image_tag, image_repository,
 			deploy_type, replicas, strategy, spec,
-			status, error_message, logs, created_by, timeout_seconds, team_name, stage, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+			status, error_message, logs, created_by, timeout_seconds, team_name, stage, environment_id, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
 	`, d.ID, d.TenantID, d.JiraIssueKey, d.JiraSummary,
 		d.GitlabProjectID, d.GitlabProjectName, d.GitlabMRID, d.GitlabMRURL,
 		d.TargetClusterID, d.TargetNamespace, d.ImageTag, d.ImageRepository,
 		d.DeployType, d.Replicas, d.Strategy, d.Spec,
-		d.Status, d.ErrorMessage, d.Logs, d.CreatedBy, d.TimeoutSeconds, d.TeamName, d.Stage, d.CreatedAt, d.UpdatedAt)
+		d.Status, d.ErrorMessage, d.Logs, d.CreatedBy, d.TimeoutSeconds, d.TeamName, d.Stage, d.EnvironmentID, d.CreatedAt, d.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create deployment: %w", err)
 	}
@@ -357,6 +364,7 @@ func (r *DeploymentRepository) History(ctx context.Context, tenantID uuid.UUID, 
 		       COALESCE(promoted_by,''), promoted_at,
 		       COALESCE(created_by,''), COALESCE(timeout_seconds,300),
 		       COALESCE(team_name,''), COALESCE(stage,'dev'),
+		       environment_id,
 		       created_at, updated_at
 		FROM deployments
 		WHERE tenant_id = $1 AND gitlab_project_name = $2 AND target_namespace = $3
@@ -379,6 +387,7 @@ func (r *DeploymentRepository) History(ctx context.Context, tenantID uuid.UUID, 
 			&d.PromotedBy, &d.PromotedAt, &d.CreatedBy,
 			&d.TimeoutSeconds,
 			&d.TeamName, &d.Stage,
+			&d.EnvironmentID,
 			&d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan deployment: %w", err)
 		}

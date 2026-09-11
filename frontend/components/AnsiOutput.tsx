@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import DOMPurify from 'dompurify';
 
 // ANSI color code to CSS color mapping
 const ANSI_COLORS: Record<number, string> = {
@@ -147,7 +148,7 @@ export default function AnsiOutput({ text, mode = 'auto', maxHeight = '320px', c
     const lines = text.split('\n');
     const highlightFn = effectiveMode === 'iac' ? highlightIac : highlightAnsible;
     return lines.map((line, i) => (
-      <span key={i} dangerouslySetInnerHTML={{ __html: highlightFn(line) + '\n' }} />
+      <span key={i} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightFn(line)) + '\n' }} />
     ));
   }, [text, mode]);
 

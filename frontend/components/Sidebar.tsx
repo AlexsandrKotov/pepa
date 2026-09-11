@@ -120,7 +120,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
           { href: '/deployments', label: 'Deployments', permission: 'deployments' },
           { href: '/deployments/timeline', label: 'Timeline', permission: 'deployments' },
           { href: '/environments', label: 'Environments', permission: 'environments' },
-          { href: '/environments/overview', label: 'Overview', permission: 'environments' },
+          { href: '/environments/overview', label: 'DevOps Overview', permission: 'environments' },
         ],
       },
       {
@@ -128,6 +128,7 @@ const collapsibleSections: ({ title: string; icon: string; adminOnly?: boolean; 
         items: [
           { href: '/gitops', label: 'Overview', permission: 'gitops' },
           { href: '/gitops/applications', label: 'Applications', permission: 'gitops' },
+          { href: '/gitops/bindings', label: 'Bindings', permission: 'gitops' },
           { href: '/gitops/drift', label: 'Drift Detection', permission: 'gitops' },
         ],
       },

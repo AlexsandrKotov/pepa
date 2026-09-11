@@ -455,6 +455,17 @@ const BRAND_ICONS: Record<string, React.ReactNode> = {
       <rect x="14" y="14" width="7" height="7" rx="1.5" fill="#6366F1" />
     </>
   ),
+
+  // Rocket — auto-deploy / launch in emerald
+  rocket: (
+    <>
+      <path d="M12 2c-1.5 3-2 6-2 9a4 4 0 004 4c0-3-.5-6-2-9z" fill="#10B981" />
+      <path d="M10 15l-3 3 2 2 3-3" fill="#059669" />
+      <path d="M14 15l3 3-2 2-3-3" fill="#059669" />
+      <circle cx="12" cy="10" r="1.5" fill="white" />
+      <path d="M9 19l3 3 3-3" fill="#F59E0B" />
+    </>
+  ),
 };
 
 /**

@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { deployments, clusters, type Deployment, type Cluster } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useSSERefresh } from '@/hooks/useSSEStream';
 
 interface LogEntry {
   timestamp: string;
@@ -52,9 +53,12 @@ export default function DeploymentDetailPage() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10000);
+    const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [loadData]);
+
+  // Real-time refresh on deployment events via SSE
+  useSSERefresh(['deployment', 'gitops'], loadData);
 
   const handlePromote = async () => {
     try { await deployments.promote(id); await loadData(); } catch { /* ignore */ }

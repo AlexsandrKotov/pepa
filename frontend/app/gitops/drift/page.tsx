@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { gitops, clusters, type GitopsRepo, type GitopsDriftResult, type GitopsDriftEntry, type Cluster, type DriftSchedule, type DriftDetectionLog, type CreateDriftScheduleInput } from '@/lib/api';
+import { gitops, gitopsApplications, clusters, type GitopsRepo, type GitopsDriftResult, type GitopsDriftEntry, type Cluster, type DriftSchedule, type DriftDetectionLog, type CreateDriftScheduleInput } from '@/lib/api';
 
 type SeverityFilter = '' | 'critical' | 'warning' | 'info';
 type DriftTypeFilter = '' | 'suspended' | 'resumed' | 'version' | 'missing' | 'orphaned';
@@ -36,6 +36,8 @@ export default function DriftDetectionPage() {
   const [error, setError] = useState('');
   const [mappingRepoId, setMappingRepoId] = useState<string | null>(null);
   const [mappings, setMappings] = useState<Record<string, RepoMapping>>({});
+  const [remediating, setRemediating] = useState<Set<string>>(new Set());
+  const [remedyResult, setRemedyResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Schedule state
   const [schedules, setSchedules] = useState<DriftSchedule[]>([]);
@@ -294,6 +296,40 @@ export default function DriftDetectionPage() {
     });
   };
 
+  const handleRescan = async (repoId: string) => {
+    const key = `rescan-${repoId}`;
+    setRemediating(prev => new Set(prev).add(key));
+    setRemedyResult(null);
+    try {
+      const mapping = mappings[repoId];
+      const result = await gitops.detectDrift(repoId, mapping?.clusterId, mapping?.overlayPath || undefined);
+      setDriftResults(prev => {
+        const next = new Map(prev);
+        next.set(repoId, result);
+        return next;
+      });
+      setRemedyResult({ ok: true, text: 'Drift re-scan completed' });
+    } catch (err) {
+      setRemedyResult({ ok: false, text: 'Re-scan failed: ' + (err instanceof Error ? err.message : 'unknown') });
+    } finally {
+      setRemediating(prev => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  };
+
+  const handleSyncApp = async (connectionId: string, namespace: string, name: string) => {
+    const key = `sync-${connectionId}-${namespace}-${name}`;
+    setRemediating(prev => new Set(prev).add(key));
+    setRemedyResult(null);
+    try {
+      await gitopsApplications.sync(connectionId, namespace, name);
+      setRemedyResult({ ok: true, text: `Sync triggered for ${name}` });
+    } catch (err) {
+      setRemedyResult({ ok: false, text: 'Sync failed: ' + (err instanceof Error ? err.message : 'unknown') });
+    } finally {
+      setRemediating(prev => { const n = new Set(prev); n.delete(key); return n; });
+    }
+  };
+
   // Summary counts
   const allEntries: Array<{ repo: GitopsRepo; entry: GitopsDriftEntry }> = [];
   driftResults.forEach((result, repoId) => {
@@ -377,6 +413,17 @@ export default function DriftDetectionPage() {
       {error && (
         <div className="px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/20 text-[12px] text-red-500">
           {error}
+        </div>
+      )}
+
+      {remedyResult && (
+        <div className={`px-4 py-3 rounded-lg border text-[12px] ${
+          remedyResult.ok
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
+            : 'bg-red-500/10 border-red-500/20 text-red-500'
+        }`}>
+          {remedyResult.ok ? '\u2713' : '\u26A0'} {remedyResult.text}
+          <button onClick={() => setRemedyResult(null)} className="ml-2 text-[11px] underline">dismiss</button>
         </div>
       )}
 
@@ -1051,6 +1098,23 @@ export default function DriftDetectionPage() {
                                   <span className="text-[10px] text-[var(--text-tertiary)] font-mono">{entry.file_path}</span>
                                 </div>
                               )}
+                              {/* Remediation Actions */}
+                              <div className="flex items-center gap-2 mt-2">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleRescan(repo.id); }}
+                                  disabled={remediating.has(`rescan-${repo.id}`)}
+                                  className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--border-light)] transition-colors disabled:opacity-50"
+                                >
+                                  {remediating.has(`rescan-${repo.id}`) ? 'Scanning...' : 'Re-scan'}
+                                </button>
+                                <Link
+                                  href={`/gitops/applications`}
+                                  className="text-[10px] px-2 py-1 rounded border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--border-light)] transition-colors"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  View Apps
+                                </Link>
+                              </div>
                             </div>
                           </div>
                         );
