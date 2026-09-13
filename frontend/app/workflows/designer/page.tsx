@@ -457,28 +457,30 @@ function DesignerCanvas() {
   );
 
   const addStep = useCallback((def: StepDef, position?: { x: number; y: number }) => {
-    const existingNames = nodes.map(n => (n.data as WorkflowStepData).name);
-    const base = def.label.toLowerCase().replace(/\s+/g, '-');
-    const name = generateStepName(existingNames, base);
-    const pos = position ?? {
-      x: 60 + (nodes.length % 3) * 260,
-      y: 60 + Math.floor(nodes.length / 3) * 140,
-    };
-    const newNode: Node = {
-      id: `${def.stepType}-${Date.now()}`,
-      type: 'workflow',
-      position: pos,
-      data: {
-        name,
-        stepType: def.stepType,
-        plugin: def.plugin || '',
-        action: def.action || '',
-        params: { ...(def.defaultParams || {}) },
-      } as WorkflowStepData,
-    };
-    setNodes(nds => [...nds, newNode]);
-    setSelectedId(newNode.id);
-  }, [nodes, setNodes]);
+    setNodes(nds => {
+      const existingNames = nds.map(n => (n.data as WorkflowStepData).name);
+      const base = def.label.toLowerCase().replace(/\s+/g, '-');
+      const name = generateStepName(existingNames, base);
+      const pos = position ?? {
+        x: 60 + (nds.length % 3) * 260,
+        y: 60 + Math.floor(nds.length / 3) * 140,
+      };
+      const newNode: Node = {
+        id: `${def.stepType}-${Date.now()}`,
+        type: 'workflow',
+        position: pos,
+        data: {
+          name,
+          stepType: def.stepType,
+          plugin: def.plugin || '',
+          action: def.action || '',
+          params: { ...(def.defaultParams || {}) },
+        } as WorkflowStepData,
+      };
+      setSelectedId(newNode.id);
+      return [...nds, newNode];
+    });
+  }, [setNodes]);
 
   // Drag from palette
   const onPaletteDragStart = (e: React.DragEvent, def: StepDef) => {

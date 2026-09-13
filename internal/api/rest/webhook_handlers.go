@@ -38,9 +38,9 @@ type gitlabPushEvent struct {
 	UserName     string `json:"user_name"`
 	UserUsername string `json:"user_username"`
 	Project      struct {
-		ID        int    `json:"id"`
+		ID                int    `json:"id"`
 		PathWithNamespace string `json:"path_with_namespace"`
-		WebURL    string `json:"web_url"`
+		WebURL            string `json:"web_url"`
 	} `json:"project"`
 	Commits []struct {
 		ID      string `json:"id"`
@@ -126,10 +126,10 @@ func (h *WebhookHandlers) handleGitLabPush() gin.HandlerFunc {
 		go h.processRules(context.Background(), tenantID, rules, event, imageTag)
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":      "webhook accepted",
-			"branch":       event.Branch,
+			"message":       "webhook accepted",
+			"branch":        event.Branch,
 			"matched_rules": len(rules),
-			"image_tag":    imageTag,
+			"image_tag":     imageTag,
 		})
 	}
 }
@@ -236,8 +236,8 @@ func (h *WebhookHandlers) verifyWebhookSecret(provided string) bool {
 
 	stored, err := h.deps.Repos.Settings.Get(ctx, "webhook_secret")
 	if err != nil || len(stored) == 0 {
-		// No secret configured — allow (first-run setup)
-		return true
+		// No secret configured — fail closed to prevent unauthenticated access
+		return false
 	}
 
 	// A secret IS configured: require a non-empty matching token

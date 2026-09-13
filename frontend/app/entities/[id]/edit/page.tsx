@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { entities, entityTypes, type EntityType, type Entity } from '@/lib/api';
 import { Toast } from '@/components/Interactive';
@@ -23,8 +23,8 @@ export default function EditEntityPage() {
 
 function EditEntityForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const entityId = searchParams.get('id');
+  const params = useParams();
+  const entityId = params.id as string;
 
   const [types, setTypes] = useState<EntityType[]>([]);
   const [entity, setEntity] = useState<Entity | null>(null);

@@ -2,9 +2,11 @@ package rest
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +32,7 @@ func registerSecurityScanRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 	scans.GET("/scans", listScanRuns(deps))
 	scans.GET("/scans/:id", getScanRun(deps))
 	scans.POST("/scans/:id/cancel", cancelScanRun(deps))
+	scans.GET("/scans/:id/report", getScanReport(deps))
 
 	// Scan Schedules
 	scans.GET("/schedules", listScanSchedules(deps))
@@ -41,6 +44,11 @@ func registerSecurityScanRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 	// Dashboard & bulk operations
 	scans.GET("/dashboard-v2", getDashboardV2(deps))
 	scans.POST("/scan-all", scanAllTargets(deps))
+
+	// SonarQube project lookup — feeds the Project Key picker of a SonarQube target
+	scans.GET("/sonar/projects", listSonarProjects(deps))
+	// SonarQube issue transitions are applied upstream, PEPA just proxies the verb
+	scans.POST("/sonar/issues/transition", transitionSonarIssue(deps))
 
 	// Database status
 	scans.GET("/db-status", getDatabaseStatus(deps))
@@ -135,11 +143,103 @@ func createScanTarget(deps Dependencies) gin.HandlerFunc {
 			CreatedBy:    userID,
 		}
 
+		if msg, ok := validateScanTargetShape(c.Request.Context(), deps, target); !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
+		}
+
 		if err := deps.Repos.SecurityScan.CreateScanTarget(c.Request.Context(), target); err != nil {
 			respondInternalError(c, err)
 			return
 		}
 		c.JSON(http.StatusCreated, target)
+	}
+}
+
+// validateScanTargetShape enforces the scanner ↔ target contract. Without it the
+// server accepted combinations that can never work — a SonarQube target pointing
+// at a git URL, a Trivy image target pointing at a SonarQube project — and the
+// breakage only surfaced as a failed scan minutes later.
+func validateScanTargetShape(ctx context.Context, deps Dependencies, target *repository.ScanTarget) (string, bool) {
+	if err := validateScannerTargetPair(target.ScannerType, target.TargetType); err != nil {
+		return err.Error(), false
+	}
+	if err := security.ValidateScanConfig(target.ScannerType, target.ScanConfig); err != nil {
+		return err.Error(), false
+	}
+	if target.ScannerType != "sonarqube" {
+		return "", true
+	}
+	if err := security.ValidateSonarProjectKey(target); err != nil {
+		return err.Error(), false
+	}
+	if target.ConnectionID == nil {
+		return "SonarQube credentials come from a Connection — add one in Connections and select it here", false
+	}
+	if deps.Repos.Connection == nil {
+		return "connection repository not available", false
+	}
+	conn, err := deps.Repos.Connection.Get(ctx, *target.ConnectionID, target.TenantID)
+	if err != nil {
+		return "the selected Connection was not found in this tenant", false
+	}
+	if conn.Type != repository.ConnectionSonarQube {
+		return "the selected Connection must be of type 'sonarqube' (got '" + string(conn.Type) + "')", false
+	}
+	return "", true
+}
+
+// validateScannerTargetPair documents which target types each scanner can act
+// on. SonarQube analyses a project it already owns, addressed by its key — never
+// by a git URL or a filesystem path. Trivy scans images and registries, and
+// fetches code itself for git_repo/filesystem targets.
+func validateScannerTargetPair(scannerType, targetType string) error {
+	switch scannerType {
+	case "sonarqube":
+		if targetType != "sonarqube_project" {
+			return fmt.Errorf("scanner_type 'sonarqube' requires target_type 'sonarqube_project' — " +
+				"SonarQube analyses a project by its key; git URLs and filesystem paths are scanned by Trivy")
+		}
+	case "trivy":
+		// "service" is kept for legacy targets: it refers to an image name.
+		switch targetType {
+		case "image", "registry", "container", "git_repo", "filesystem", "service":
+		default:
+			return fmt.Errorf("scanner_type 'trivy' does not support target_type %q", targetType)
+		}
+	case "both":
+		switch targetType {
+		case "git_repo", "filesystem":
+		default:
+			return fmt.Errorf("scanner_type 'both' requires target_type 'git_repo' or 'filesystem'")
+		}
+	}
+	return nil
+}
+
+// ── SonarQube Helpers ─────────────────────────────────────────
+
+// listSonarProjects returns the projects of a SonarQube Connection so the target
+// form can offer real project keys. SonarQube is an external service, so its own
+// error is passed through — a silently empty list would look like "no projects".
+func listSonarProjects(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Scanner == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "security scanner not available"})
+			return
+		}
+		connectionID, err := uuid.Parse(c.Query("connection_id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "connection_id query parameter is required"})
+			return
+		}
+		projects, truncated, err := deps.Scanner.ListSonarProjects(
+			c.Request.Context(), connectionID, auth.GetTenantID(c), c.Query("q"))
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"projects": projects, "truncated": truncated})
 	}
 }
 
@@ -232,6 +332,13 @@ func updateScanTarget(deps Dependencies) gin.HandlerFunc {
 		}
 		if input.Enabled != nil {
 			existing.Enabled = *input.Enabled
+		}
+
+		// Re-check the whole shape after applying the patch: a target may become
+		// invalid by changing only one side of the scanner ↔ target pair.
+		if msg, ok := validateScanTargetShape(c.Request.Context(), deps, existing); !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg})
+			return
 		}
 
 		if err := deps.Repos.SecurityScan.UpdateScanTarget(c.Request.Context(), existing); err != nil {
@@ -780,11 +887,32 @@ func createScanIgnore(deps Dependencies) gin.HandlerFunc {
 		tenantID := auth.GetTenantID(c)
 
 		var input struct {
-			CveID  string  `json:"cve_id" binding:"required"`
-			Reason *string `json:"reason"`
+			CveID    string  `json:"cve_id"`
+			IssueKey *string `json:"issue_key"`
+			Reason   *string `json:"reason"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Trivy findings are suppressed by CVE, SonarQube findings by issue key
+		// (or "rule:<rule>" for a whole rule). Exactly one identifier per ignore.
+		cveID := strings.TrimSpace(input.CveID)
+		issueKey := ""
+		if input.IssueKey != nil {
+			issueKey = strings.TrimSpace(*input.IssueKey)
+		}
+		if cveID == "" && issueKey == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "either cve_id (Trivy) or issue_key (SonarQube) is required"})
+			return
+		}
+		if len(cveID) > 50 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cve_id is too long (max 50 characters)"})
+			return
+		}
+		if len(issueKey) > 255 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "issue_key is too long (max 255 characters)"})
 			return
 		}
 
@@ -793,12 +921,19 @@ func createScanIgnore(deps Dependencies) gin.HandlerFunc {
 			ID:        uuid.New(),
 			TenantID:  tenantID,
 			TargetID:  targetID,
-			CveID:     input.CveID,
+			CveID:     cveID,
 			Reason:    input.Reason,
 			CreatedBy: userID,
 		}
+		if issueKey != "" {
+			ignore.IssueKey = &issueKey
+		}
 
 		if err := deps.Repos.ScanIgnore.Create(c.Request.Context(), ignore); err != nil {
+			if strings.Contains(err.Error(), "duplicate key") {
+				c.JSON(http.StatusConflict, gin.H{"error": "this finding is already ignored for the target"})
+				return
+			}
 			respondInternalError(c, err)
 			return
 		}

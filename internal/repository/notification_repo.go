@@ -14,36 +14,36 @@ import (
 
 // NotificationRule represents a routing rule that maps event types to a notification connection.
 type NotificationRule struct {
-	ID              uuid.UUID         `json:"id"`
-	TenantID        uuid.UUID         `json:"tenant_id"`
-	Name            string            `json:"name"`
-	Description     string            `json:"description"`
-	Enabled         bool              `json:"enabled"`
-	EventTypes      []string          `json:"event_types"`
-	ConnectionID    uuid.UUID         `json:"connection_id"`
-	SubjectTemplate string            `json:"subject_template,omitempty"`
-	BodyTemplate    string            `json:"body_template"`
-	FormatConfig    map[string]any    `json:"format_config"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	ID              uuid.UUID      `json:"id"`
+	TenantID        uuid.UUID      `json:"tenant_id"`
+	Name            string         `json:"name"`
+	Description     string         `json:"description"`
+	Enabled         bool           `json:"enabled"`
+	EventTypes      []string       `json:"event_types"`
+	ConnectionID    uuid.UUID      `json:"connection_id"`
+	SubjectTemplate string         `json:"subject_template,omitempty"`
+	BodyTemplate    string         `json:"body_template"`
+	FormatConfig    map[string]any `json:"format_config"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // NotificationLog represents a single delivery attempt in the notification history.
 type NotificationLog struct {
-	ID              uuid.UUID  `json:"id"`
-	TenantID        uuid.UUID  `json:"tenant_id"`
-	RuleID          *uuid.UUID `json:"rule_id,omitempty"`
-	ConnectionID    uuid.UUID  `json:"connection_id"`
-	EventType       string     `json:"event_type"`
+	ID              uuid.UUID      `json:"id"`
+	TenantID        uuid.UUID      `json:"tenant_id"`
+	RuleID          *uuid.UUID     `json:"rule_id,omitempty"`
+	ConnectionID    uuid.UUID      `json:"connection_id"`
+	EventType       string         `json:"event_type"`
 	EventPayload    map[string]any `json:"event_payload,omitempty"`
-	RenderedSubject string     `json:"rendered_subject,omitempty"`
-	RenderedBody    string     `json:"rendered_body"`
-	Provider        string     `json:"provider"`
-	Status          string     `json:"status"` // pending, delivered, failed
-	ResponseText    string     `json:"response_text,omitempty"`
-	ErrorText       string     `json:"error_text,omitempty"`
-	SentAt          time.Time  `json:"sent_at"`
-	DeliveredAt     *time.Time `json:"delivered_at,omitempty"`
+	RenderedSubject string         `json:"rendered_subject,omitempty"`
+	RenderedBody    string         `json:"rendered_body"`
+	Provider        string         `json:"provider"`
+	Status          string         `json:"status"` // pending, delivered, failed
+	ResponseText    string         `json:"response_text,omitempty"`
+	ErrorText       string         `json:"error_text,omitempty"`
+	SentAt          time.Time      `json:"sent_at"`
+	DeliveredAt     *time.Time     `json:"delivered_at,omitempty"`
 }
 
 // NotificationStat holds aggregated delivery statistics for a connection.
@@ -208,9 +208,9 @@ func (r *NotificationRuleRepository) Update(ctx context.Context, rule *Notificat
 	return nil
 }
 
-// Delete removes a notification rule.
-func (r *NotificationRuleRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM notification_rules WHERE id = $1`, id)
+// Delete removes a notification rule, scoped to the given tenant.
+func (r *NotificationRuleRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM notification_rules WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("delete notification rule: %w", err)
 	}

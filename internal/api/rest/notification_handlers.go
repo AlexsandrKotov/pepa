@@ -161,7 +161,7 @@ func deleteNotificationRule(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := deps.Repos.NotificationRule.Delete(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.NotificationRule.Delete(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}

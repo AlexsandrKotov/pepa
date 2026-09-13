@@ -35,47 +35,47 @@ import (
 
 // Repositories groups all repository instances.
 type Repositories struct {
-	Entity          *repository.EntityRepository
-	Workflow        *repository.WorkflowRepository
-	Plugin          *repository.PluginRepository
-	Scorecard       *repository.ScorecardRepository
-	Audit           *repository.AuditRepository
-	Cluster         *repository.ClusterRepository
-	Deployment      *repository.DeploymentRepository
-	Jira            *repository.JiraRepository
-	Connection      *repository.ConnectionRepository
-	Service         *repository.ServiceRepository
-	Settings        *repository.SettingsRepository
-	Environment     *repository.EnvironmentRepository
-	EnvVariable     *repository.EnvironmentVariableRepository
-	DockerHost      *repository.DockerHostRepository
-	Helm            *repository.HelmRepository
-	Registry        *repository.RegistryRepository
-	PipelineSource  *repository.PipelineSourceRepository
-	PipelinePreset  *repository.PipelinePresetRepository
-	PipelineRun     *repository.PipelineRunRepository
-	Vault           *repository.VaultRepository
-	VaultConfig     *repository.VaultConfigRepository
-	Auth            *repository.AuthRepository
-	TeamWorkflow    *repository.TeamWorkflowRepository
-	GitopsRepo      *gitops.Repository
-	UserCredential  *repository.UserCredentialRepository
-	CredentialShare *repository.CredentialShareRepository
-	Organization    *repository.OrganizationRepository
-	RAG             *repository.RAGRepository
-	SSHHost         *repository.SSHHostRepository
-	SSHHostGroup    *repository.SSHHostGroupRepository
-	PluginActivity  *repository.PluginActivityRepository
-	SecurityScan    *repository.SecurityScanRepository
-	ScanIgnore      *repository.ScanIgnoreRepository
-	DevOps          *repository.DevOpsRepository
-	NotificationRule *repository.NotificationRuleRepository
-	NotificationLog  *repository.NotificationLogRepository
-	GitOpsBinding    *repository.GitOpsBindingRepository
-	DriftSchedule    *gitops.DriftScheduleRepository
+	Entity              *repository.EntityRepository
+	Workflow            *repository.WorkflowRepository
+	Plugin              *repository.PluginRepository
+	Scorecard           *repository.ScorecardRepository
+	Audit               *repository.AuditRepository
+	Cluster             *repository.ClusterRepository
+	Deployment          *repository.DeploymentRepository
+	Jira                *repository.JiraRepository
+	Connection          *repository.ConnectionRepository
+	Service             *repository.ServiceRepository
+	Settings            *repository.SettingsRepository
+	Environment         *repository.EnvironmentRepository
+	EnvVariable         *repository.EnvironmentVariableRepository
+	DockerHost          *repository.DockerHostRepository
+	Helm                *repository.HelmRepository
+	Registry            *repository.RegistryRepository
+	PipelineSource      *repository.PipelineSourceRepository
+	PipelinePreset      *repository.PipelinePresetRepository
+	PipelineRun         *repository.PipelineRunRepository
+	Vault               *repository.VaultRepository
+	VaultConfig         *repository.VaultConfigRepository
+	Auth                *repository.AuthRepository
+	TeamWorkflow        *repository.TeamWorkflowRepository
+	GitopsRepo          *gitops.Repository
+	UserCredential      *repository.UserCredentialRepository
+	CredentialShare     *repository.CredentialShareRepository
+	Organization        *repository.OrganizationRepository
+	RAG                 *repository.RAGRepository
+	SSHHost             *repository.SSHHostRepository
+	SSHHostGroup        *repository.SSHHostGroupRepository
+	PluginActivity      *repository.PluginActivityRepository
+	SecurityScan        *repository.SecurityScanRepository
+	ScanIgnore          *repository.ScanIgnoreRepository
+	DevOps              *repository.DevOpsRepository
+	NotificationRule    *repository.NotificationRuleRepository
+	NotificationLog     *repository.NotificationLogRepository
+	GitOpsBinding       *repository.GitOpsBindingRepository
+	DriftSchedule       *gitops.DriftScheduleRepository
 	EnvironmentOverview *repository.EnvironmentOverviewRepository
-	SelfService      *repository.SelfServiceDeploymentRepository
-	AutoDeployRule   *repository.AutoDeployRuleRepository
+	SelfService         *repository.SelfServiceDeploymentRepository
+	AutoDeployRule      *repository.AutoDeployRuleRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
@@ -99,14 +99,14 @@ type Dependencies struct {
 	CostAdvisor     *ai.CostAdvisor
 	StaleDetector   *ai.StaleDetector
 	WorkflowBuilder *ai.WorkflowBuilder
-	RBAC             *rbacengine.Engine
-	Storage          storage.Storage
-	LoginLimiter     *auth.LoginRateLimiter
-	Scanner          *security.Scanner
-	DriftScheduler   *gitops.DriftScheduler
-	ScanScheduler    *security.Scheduler
-	Version          string
-	BuildTime        string
+	RBAC            *rbacengine.Engine
+	Storage         storage.Storage
+	LoginLimiter    *auth.LoginRateLimiter
+	Scanner         *security.Scanner
+	DriftScheduler  *gitops.DriftScheduler
+	ScanScheduler   *security.Scheduler
+	Version         string
+	BuildTime       string
 }
 
 // Services groups all service layer instances.
@@ -248,6 +248,9 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	// Public webhook endpoints (no JWT, verified by webhook secret)
 	webhookHandlers := NewWebhookHandlers(deps)
 	r.POST("/api/v1/webhooks/gitlab", webhookHandlers.handleGitLabPush())
+	// SonarQube Compute Operator webhook: PEPA collects a report of the analysis
+	// that just finished. Authenticated by the SONAR_WEBHOOK_TOKEN shared secret.
+	r.POST("/api/v1/security/sonar/webhook", sonarWebhook(deps))
 
 	// API v1 routes with JWT auth
 	v1 := r.Group("/api/v1")

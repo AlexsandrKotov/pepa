@@ -240,18 +240,14 @@ function NavItem({ item, active, collapsed }: { item: { href: string; label: str
     <Link
       href={item.href}
       prefetch={true}
-      className={`group relative flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-        active
-          ? 'bg-white/10 text-white'
-          : 'text-white/40 hover:text-white/80 hover:bg-white/[0.06]'
-      }`}
+      className={`sb-link ${active ? 'is-active' : ''}`}
       title={collapsed ? item.label : undefined}
     >
       {/* Active indicator — left accent bar */}
       {active && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full bg-white/80" />
+        <span className="sb-accent-bar" />
       )}
-      <svg className={`w-[17px] h-[17px] shrink-0 transition-colors ${active ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <svg className="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d={item.icon} />
       </svg>
       {!collapsed && <span className="truncate">{item.label}</span>}
@@ -278,20 +274,16 @@ function CollapsibleSection({ section, collapsed, expandedSections, toggleSectio
     <div className="space-y-0.5">
       <button
         onClick={() => toggleSection(section.title)}
-        className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 w-full outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-          hasActiveChild
-            ? 'text-white/70'
-            : 'text-white/40 hover:text-white/80 hover:bg-white/[0.04]'
-        }`}
+        className={`sb-link ${hasActiveChild ? 'has-active-child' : ''}`}
         title={collapsed ? section.title : undefined}
       >
-        <svg className={`w-[17px] h-[17px] shrink-0 ${hasActiveChild ? 'text-white/50' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <svg className="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d={section.icon} />
         </svg>
         {!collapsed && (
           <>
             <span className="truncate flex-1 text-left">{section.title}</span>
-            <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`sb-chevron ${isExpanded ? 'is-open' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           </>
@@ -302,23 +294,17 @@ function CollapsibleSection({ section, collapsed, expandedSections, toggleSectio
           {section.subGroups ? (
             <>
               {section.subGroups.map((sg, sgIdx) => (
-                <div key={sg.label} className={sgIdx > 0 ? 'mt-3 pt-3 border-t border-white/[0.06]' : ''}>
-                  <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-white/30">
-                    {sg.label}
-                  </div>
+                <div key={sg.label} className={sgIdx > 0 ? 'sb-subgroup-divided' : ''}>
+                  <div className="sb-group-label">{sg.label}</div>
                   {sg.items.map((item) => {
                     const itemActive = isPathActive(pathname, item.href, allHrefs);
                     return (
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`relative flex items-center gap-2 pl-4 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-                          itemActive
-                            ? 'bg-white/10 text-white font-medium'
-                            : 'text-white/30 hover:text-white/70 hover:bg-white/[0.06]'
-                        }`}
+                        className={`sb-sublink ${itemActive ? 'is-active' : ''}`}
                       >
-                        {itemActive && <span className="absolute left-1 top-1/2 -translate-y-1/2 w-[3px] h-3 rounded-r-full bg-white/60" />}
+                        {itemActive && <span className="sb-accent-bar" />}
                         <span className="truncate">{item.label}</span>
                       </Link>
                     );
@@ -333,13 +319,9 @@ function CollapsibleSection({ section, collapsed, expandedSections, toggleSectio
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`relative flex items-center gap-2 pl-4 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-                    itemActive
-                      ? 'bg-white/10 text-white font-medium'
-                      : 'text-white/30 hover:text-white/70 hover:bg-white/[0.06]'
-                  }`}
+                  className={`sb-sublink ${itemActive ? 'is-active' : ''}`}
                 >
-                  {itemActive && <span className="absolute left-1 top-1/2 -translate-y-1/2 w-[3px] h-3 rounded-r-full bg-white/60" />}
+                  {itemActive && <span className="sb-accent-bar" />}
                   <span className="truncate">{item.label}</span>
                 </Link>
               );
@@ -574,7 +556,7 @@ function Sidebar() {
   }, [enabledPluginSet, connectionTypeSet, hasPermission, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <aside className={`flex flex-col h-full bg-[#1e2128] text-white transition-all duration-300 ease-in-out ${collapsed ? 'w-[56px]' : 'w-[190px]'}`}>
+    <aside className={`sidebar transition-all duration-300 ease-in-out ${collapsed ? 'w-[56px]' : 'w-[190px]'}`}>
       {/* Logo */}
       <div className="flex items-center h-[52px] px-3.5 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -598,8 +580,8 @@ function Sidebar() {
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="font-semibold text-sm leading-tight">{platformName}</span>
-              <span className="text-[9px] text-white/30 leading-tight">Platform Engine</span>
+              <span className="sidebar-brand leading-tight">{platformName}</span>
+              <span className="sidebar-brand-sub leading-tight">Platform Engine</span>
             </div>
           )}
         </div>
@@ -610,13 +592,9 @@ function Sidebar() {
         <div className="px-2 pb-2 shrink-0">
           <Link
             href="/credentials"
-            className={`group flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[12px] transition-all duration-150 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-              isPathActive(pathname, '/credentials', allNavHrefs)
-                ? 'bg-white/10 text-white'
-                : 'text-white/40 hover:text-white/70 hover:bg-white/[0.04]'
-            }`}
+            className={`sb-link sb-link-sm ${isPathActive(pathname, '/credentials', allNavHrefs) ? 'is-active' : ''}`}
           >
-            <svg className={`w-4 h-4 shrink-0 ${isPathActive(pathname, '/credentials') ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="sb-icon sb-icon-sm" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
             </svg>
             <span className="truncate">My Credentials</span>
@@ -631,14 +609,11 @@ function Sidebar() {
           <Link
             href="/ai"
             prefetch={true}
-            className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 mb-1 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-              isPathActive(pathname, '/ai')
-                ? 'bg-white/10 text-white shadow-sm'
-                : 'text-white/40 hover:text-white/80 hover:bg-white/[0.04]'
-            }`}
+            className={`sb-link mb-1 ${isPathActive(pathname, '/ai') ? 'is-active' : ''}`}
             title={collapsed ? 'AI Platform' : undefined}
           >
-            <svg className={`w-[17px] h-[17px] shrink-0 ${isPathActive(pathname, '/ai') ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            {isPathActive(pathname, '/ai') && <span className="sb-accent-bar" />}
+            <svg className="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
             </svg>
             {!collapsed && <span className="truncate">AI Platform</span>}
@@ -650,14 +625,11 @@ function Sidebar() {
           <Link
             href="/knowledge-base"
             prefetch={true}
-            className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 mb-1 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-              isPathActive(pathname, '/knowledge-base')
-                ? 'bg-white/10 text-white shadow-sm'
-                : 'text-white/40 hover:text-white/80 hover:bg-white/[0.04]'
-            }`}
+            className={`sb-link mb-1 ${isPathActive(pathname, '/knowledge-base') ? 'is-active' : ''}`}
             title={collapsed ? 'Knowledge Base' : undefined}
           >
-            <svg className={`w-[17px] h-[17px] shrink-0 ${isPathActive(pathname, '/knowledge-base') ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            {isPathActive(pathname, '/knowledge-base') && <span className="sb-accent-bar" />}
+            <svg className="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
             </svg>
             {!collapsed && <span className="truncate">Knowledge Base</span>}
@@ -668,14 +640,11 @@ function Sidebar() {
         {tourStatus !== 'done' && (
         <Link
           href="/get-started"
-          className={`group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 mb-1 outline-none focus-visible:ring-1 focus-visible:ring-white/20 ${
-            isPathActive(pathname, '/get-started')
-              ? 'bg-white/10 text-white shadow-sm'
-              : 'text-white/40 hover:text-white/80 hover:bg-white/[0.04]'
-          }`}
+          className={`sb-link mb-1 ${isPathActive(pathname, '/get-started') ? 'is-active' : ''}`}
           title={collapsed ? 'Get Started' : undefined}
         >
-          <svg className={`w-[17px] h-[17px] shrink-0 ${isPathActive(pathname, '/get-started') ? 'text-white' : 'text-white/30 group-hover:text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          {isPathActive(pathname, '/get-started') && <span className="sb-accent-bar" />}
+          <svg className="sb-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           {!collapsed && (
@@ -693,7 +662,7 @@ function Sidebar() {
         
         {/* Collapsible Sections */}
         {!collapsed && (
-          <div className="mt-4 pt-4 border-t border-white/[0.06] space-y-0.5">
+          <div className="mt-4 pt-4 sb-divider space-y-0.5">
             {dynamicSections.map((section) => (
               <CollapsibleSection
                 key={section.title}
@@ -710,12 +679,12 @@ function Sidebar() {
 
       {/* Footer */}
       <div className="px-2 pb-3 shrink-0">
-        <div className="border-t border-white/[0.06] pt-2 space-y-0.5">
+        <div className="sb-divider pt-2 space-y-0.5">
           <button
             onClick={toggle}
-            className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[12px] text-white/20 hover:text-white/50 hover:bg-white/[0.03] w-full transition-colors"
+            className="sb-link sb-link-sm sb-collapse"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="sb-icon sb-icon-sm" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               {collapsed ? (
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
               ) : (

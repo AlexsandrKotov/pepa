@@ -34,6 +34,7 @@ export default function VirtualizationDashboard() {
 
   useEffect(() => {
     if (availableProviders.length > 0) loadData();
+    else setLoading(false);
   }, [provider, availableProviders]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = async () => {

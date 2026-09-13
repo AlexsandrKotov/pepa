@@ -16,7 +16,7 @@ import (
 // jiraResolvedConfig returns the merged Jira plugin config with per-user credential override.
 // Resolution order: user personal > shared > admin fallback.
 func jiraResolvedConfig(deps Dependencies, c *gin.Context) map[string]string {
-	mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, c.Request.Context())
+	mergedConfig := mergeStoredPluginConfig(deps, "jira", nil, auth.GetTenantID(c), c.Request.Context())
 
 	userID := auth.GetUserID(c)
 	tenantID := auth.GetTenantID(c)
@@ -174,7 +174,7 @@ func getJiraIssue(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
@@ -362,16 +362,16 @@ func createInJira(deps Dependencies) gin.HandlerFunc {
 		// Cache locally
 		tenantID := auth.GetTenantID(c)
 		issue := &repository.JiraIssue{
-			TenantID:   tenantID,
-			IssueKey:   createdKey,
-			ProjectKey: req.ProjectKey,
-			Summary:    createdSummary,
+			TenantID:    tenantID,
+			IssueKey:    createdKey,
+			ProjectKey:  req.ProjectKey,
+			Summary:     createdSummary,
 			Description: req.Description,
-			IssueType:  req.IssueType,
-			Priority:   req.Priority,
-			Assignee:   req.Assignee,
-			Labels:     req.Labels,
-			Status:     "Open",
+			IssueType:   req.IssueType,
+			Priority:    req.Priority,
+			Assignee:    req.Assignee,
+			Labels:      req.Labels,
+			Status:      "Open",
 		}
 		if issue.Labels == nil {
 			issue.Labels = []string{}
@@ -420,12 +420,12 @@ func updateJiraIssue(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := deps.Repos.Jira.Update(c.Request.Context(), id, req.Summary, req.Description, req.Assignee, req.Priority, req.Status, req.Labels); err != nil {
+		if err := deps.Repos.Jira.Update(c.Request.Context(), id, auth.GetTenantID(c), req.Summary, req.Description, req.Assignee, req.Priority, req.Status, req.Labels); err != nil {
 			respondInternalError(c, err)
 			return
 		}
 
-		issue, _ := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, _ := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		logAudit(deps, c, "update", "jira_issue", id.String(), nil, nil)
 		c.JSON(http.StatusOK, issue)
 	}
@@ -442,7 +442,7 @@ func deleteJiraIssue(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		if err := deps.Repos.Jira.Delete(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.Jira.Delete(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}
@@ -473,7 +473,7 @@ func linkJiraDeployment(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
-		issue, _ := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, _ := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		c.JSON(http.StatusOK, issue)
 	}
 }
@@ -492,7 +492,7 @@ func listJiraComments(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
 			return
@@ -521,7 +521,7 @@ func addJiraComment(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
 			return
@@ -590,11 +590,11 @@ func transitionJiraIssue(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Update status locally
-		if err := deps.Repos.Jira.Update(c.Request.Context(), id, "", "", "", "", req.Status, nil); err != nil {
+		if err := deps.Repos.Jira.Update(c.Request.Context(), id, auth.GetTenantID(c), "", "", "", "", req.Status, nil); err != nil {
 			respondInternalError(c, err)
 			return
 		}
-		issue, _ := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, _ := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		c.JSON(http.StatusOK, gin.H{"issue": issue, "message": "transitioned to " + req.Status})
 	}
 }
@@ -962,7 +962,7 @@ func listJiraWorklogs(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
 			return
@@ -992,7 +992,7 @@ func addJiraWorklog(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
 			return
@@ -1046,7 +1046,7 @@ func listJiraIssueLinks(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue ID"})
 			return
 		}
-		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id)
+		issue, err := deps.Repos.Jira.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "issue not found"})
 			return

@@ -731,7 +731,7 @@ func deleteDockerService(deps Dependencies) gin.HandlerFunc {
 		client, err := dockerClientForService(deps, svc, tenantID)
 		if err != nil {
 			// If host is gone, still allow DB cleanup
-			_ = deps.Repos.DockerHost.DeleteService(c.Request.Context(), id)
+			_ = deps.Repos.DockerHost.DeleteService(c.Request.Context(), id, tenantID)
 			c.JSON(http.StatusOK, gin.H{"status": "deleted"})
 			return
 		}
@@ -741,7 +741,7 @@ func deleteDockerService(deps Dependencies) gin.HandlerFunc {
 
 		_ = client.ComposeDown(ctx, svc.Name) // best-effort
 
-		if err := deps.Repos.DockerHost.DeleteService(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.DockerHost.DeleteService(c.Request.Context(), id, tenantID); err != nil {
 			respondInternalError(c, err)
 			return
 		}

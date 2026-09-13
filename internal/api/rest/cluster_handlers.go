@@ -406,7 +406,7 @@ func deleteCluster(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cluster ID"})
 			return
 		}
-		if err := deps.Repos.Cluster.Delete(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.Cluster.Delete(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}
@@ -414,7 +414,7 @@ func deleteCluster(deps Dependencies) gin.HandlerFunc {
 		// Clean up auto-created kubernetes connection linked to this cluster
 		if deps.Repos.Connection != nil {
 			if conn, _ := deps.Repos.Connection.GetByClusterID(c.Request.Context(), id); conn != nil {
-				_ = deps.Repos.Connection.Delete(c.Request.Context(), conn.ID)
+				_ = deps.Repos.Connection.Delete(c.Request.Context(), conn.ID, auth.GetTenantID(c))
 			}
 		}
 

@@ -132,17 +132,17 @@ type JiraSprint struct {
 
 // JiraWorklog represents a cached Jira worklog entry.
 type JiraWorklog struct {
-	ID             uuid.UUID `json:"id"`
-	TenantID       uuid.UUID `json:"tenant_id"`
-	IssueKey       string    `json:"issue_key"`
-	JiraWorklogID  string    `json:"jira_worklog_id"`
-	Author         string    `json:"author"`
-	TimeSpent      string    `json:"time_spent"`
-	TimeSpentSecs  int       `json:"time_spent_secs"`
-	Comment        string    `json:"comment,omitempty"`
-	StartedAt      time.Time `json:"started_at"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	TenantID      uuid.UUID `json:"tenant_id"`
+	IssueKey      string    `json:"issue_key"`
+	JiraWorklogID string    `json:"jira_worklog_id"`
+	Author        string    `json:"author"`
+	TimeSpent     string    `json:"time_spent"`
+	TimeSpentSecs int       `json:"time_spent_secs"`
+	Comment       string    `json:"comment,omitempty"`
+	StartedAt     time.Time `json:"started_at"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // JiraIssueLink represents a link between two Jira issues.
@@ -310,8 +310,8 @@ func (r *JiraRepository) ListWithFilters(ctx context.Context, tenantID uuid.UUID
 	return items, total, nil
 }
 
-// Get returns a Jira issue by ID.
-func (r *JiraRepository) Get(ctx context.Context, id uuid.UUID) (*JiraIssue, error) {
+// Get returns a Jira issue by ID, scoped to the given tenant.
+func (r *JiraRepository) Get(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) (*JiraIssue, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, issue_key, COALESCE(issue_id,''), project_key, summary,
 		       COALESCE(description,''), COALESCE(issue_type,''), COALESCE(priority,''),
@@ -320,8 +320,8 @@ func (r *JiraRepository) Get(ctx context.Context, id uuid.UUID) (*JiraIssue, err
 		       story_points, COALESCE(parent_key,''), COALESCE(jira_url,''),
 		       linked_mr_id, COALESCE(linked_mr_url,''), deployment_id,
 		       synced_at, created_at, updated_at
-		FROM jira_issues WHERE id = $1
-	`, id)
+		FROM jira_issues WHERE id = $1 AND tenant_id = $2
+	`, id, tenantID)
 
 	var j JiraIssue
 	if err := row.Scan(&j.ID, &j.TenantID, &j.IssueKey, &j.IssueID, &j.ProjectKey,
@@ -397,22 +397,22 @@ func (r *JiraRepository) Upsert(ctx context.Context, j *JiraIssue) error {
 	return nil
 }
 
-// Update updates mutable fields of a Jira issue.
-func (r *JiraRepository) Update(ctx context.Context, id uuid.UUID, summary, description, assignee, priority, status string, labels []string) error {
+// Update updates mutable fields of a Jira issue, scoped to the given tenant.
+func (r *JiraRepository) Update(ctx context.Context, id uuid.UUID, tenantID uuid.UUID, summary, description, assignee, priority, status string, labels []string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE jira_issues SET summary=$2, description=$3, assignee=$4, priority=$5,
-		       status=$6, labels=$7, updated_at=NOW()
-		WHERE id=$1
-	`, id, summary, description, assignee, priority, status, labels)
+		UPDATE jira_issues SET summary=$3, description=$4, assignee=$5, priority=$6,
+		       status=$7, labels=$8, updated_at=NOW()
+		WHERE id=$1 AND tenant_id=$2
+	`, id, tenantID, summary, description, assignee, priority, status, labels)
 	if err != nil {
 		return fmt.Errorf("update jira issue: %w", err)
 	}
 	return nil
 }
 
-// Delete removes a Jira issue from the local DB.
-func (r *JiraRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM jira_issues WHERE id=$1`, id)
+// Delete removes a Jira issue from the local DB, scoped to the given tenant.
+func (r *JiraRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM jira_issues WHERE id=$1 AND tenant_id=$2`, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("delete jira issue: %w", err)
 	}

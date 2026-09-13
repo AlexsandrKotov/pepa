@@ -72,7 +72,7 @@ func proxmoxExec(deps Dependencies, c *gin.Context, action string, params json.R
 	}
 
 	// Merge stored plugin config from DB with request config
-	mergedConfig := mergeStoredPluginConfig(deps, "proxmox", nil, c.Request.Context())
+	mergedConfig := mergeStoredPluginConfig(deps, "proxmox", nil, auth.GetTenantID(c), c.Request.Context())
 
 	// Resolve per-user credential override.
 	userID := auth.GetUserID(c)
@@ -320,7 +320,7 @@ func proxmoxGetPermissions(deps Dependencies) gin.HandlerFunc {
 // so the frontend can build "Open in Proxmox" links.
 func proxmoxConnectionInfo(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		config := mergeStoredPluginConfig(deps, "proxmox", nil, c.Request.Context())
+		config := mergeStoredPluginConfig(deps, "proxmox", nil, auth.GetTenantID(c), c.Request.Context())
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"url": config["url"]}})
 	}
 }

@@ -56,8 +56,8 @@ type DeploymentResult struct {
 }
 
 // updateStatusWithLogs updates deployment status with logs.
-func (s *DeploymentService) updateStatusWithLogs(deploymentID uuid.UUID, status, logs string) {
-	deployment, err := s.deploymentRepo.Get(context.Background(), deploymentID)
+func (s *DeploymentService) updateStatusWithLogs(deploymentID uuid.UUID, tenantID uuid.UUID, status, logs string) {
+	deployment, err := s.deploymentRepo.Get(context.Background(), deploymentID, tenantID)
 	if err != nil {
 		slog.Info("ERROR: deployment : get for status update", "id", deploymentID, "error", err)
 		return
@@ -70,8 +70,8 @@ func (s *DeploymentService) updateStatusWithLogs(deploymentID uuid.UUID, status,
 }
 
 // updateStatusWithError updates deployment status with error message and logs.
-func (s *DeploymentService) updateStatusWithError(deploymentID uuid.UUID, status, errorMsg, logs string) {
-	deployment, err := s.deploymentRepo.Get(context.Background(), deploymentID)
+func (s *DeploymentService) updateStatusWithError(deploymentID uuid.UUID, tenantID uuid.UUID, status, errorMsg, logs string) {
+	deployment, err := s.deploymentRepo.Get(context.Background(), deploymentID, tenantID)
 	if err != nil {
 		slog.Info("ERROR: deployment : get for status update", "id", deploymentID, "error", err)
 		return
@@ -88,7 +88,7 @@ func (s *DeploymentService) updateStatusWithError(deploymentID uuid.UUID, status
 // This is the main business logic extracted from the HTTP handler.
 func (s *DeploymentService) PerformDeployment(
 	ctx context.Context,
-	deploymentID, clusterID uuid.UUID,
+	deploymentID, clusterID, tenantID uuid.UUID,
 	namespace, releaseName string,
 	replicas int,
 	specJSON []byte,
@@ -106,15 +106,15 @@ func (s *DeploymentService) PerformDeployment(
 	// Helper to update deployment status
 	updateStatus := func(status, errorMsg, logs string) {
 		if errorMsg != "" {
-			s.updateStatusWithError(deploymentID, status, errorMsg, logs)
+			s.updateStatusWithError(deploymentID, tenantID, status, errorMsg, logs)
 		} else {
-			s.updateStatusWithLogs(deploymentID, status, logs)
+			s.updateStatusWithLogs(deploymentID, tenantID, status, logs)
 		}
 	}
 
 	// Helper to check if deployment was cancelled
 	isCancelled := func() bool {
-		d, err := s.deploymentRepo.Get(context.Background(), deploymentID)
+		d, err := s.deploymentRepo.Get(context.Background(), deploymentID, tenantID)
 		return err == nil && d.Status == "cancelled"
 	}
 
@@ -124,7 +124,7 @@ func (s *DeploymentService) PerformDeployment(
 
 	// Get kubeconfig for the target cluster (via executor)
 	logsBuilder.WriteString(fmt.Sprintf("Getting kubeconfig for cluster %s...\n", clusterID))
-	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, clusterID)
+	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, clusterID, tenantID)
 	if err != nil {
 		slog.Info("ERROR: deployment : get kubeconfig", "id", deploymentID, "error", err)
 		updateStatus("failed", fmt.Sprintf("Failed to get kubeconfig: %v", err), logsBuilder.String())
@@ -144,7 +144,7 @@ func (s *DeploymentService) PerformDeployment(
 	}
 
 	// Create k8s client (via executor)
-	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, clusterID)
+	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, clusterID, tenantID)
 	if err != nil {
 		slog.Info("ERROR: deployment : create k8s client", "id", deploymentID, "error", err)
 		updateStatus("failed", fmt.Sprintf("Failed to create k8s client: %v", err), logsBuilder.String())
@@ -184,7 +184,7 @@ func (s *DeploymentService) PerformDeployment(
 	}
 
 	logsBuilder.WriteString("Deploy initiated...\n")
-	deployResult, err := s.executor.ExecuteDeploy(ctx, client, deploySpec, releaseName, namespace, replicas, timeoutSeconds)
+	deployResult, err := s.executor.ExecuteDeploy(ctx, client, deploySpec, tenantID, releaseName, namespace, replicas, timeoutSeconds)
 	if err != nil {
 		errMsg := fmt.Sprintf("Deploy failed: %v", err)
 		slog.Info("ERROR: deployment", "id", deploymentID, "error", errMsg)
@@ -223,6 +223,7 @@ func (s *DeploymentService) PerformDeployment(
 func (s *DeploymentService) PerformRollback(
 	ctx context.Context,
 	deploymentID uuid.UUID,
+	tenantID uuid.UUID,
 	rolledBackBy string,
 ) *DeploymentResult {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -232,14 +233,14 @@ func (s *DeploymentService) PerformRollback(
 
 	updateStatus := func(status, errorMsg, logs string) {
 		if errorMsg != "" {
-			s.updateStatusWithError(deploymentID, status, errorMsg, logs)
+			s.updateStatusWithError(deploymentID, tenantID, status, errorMsg, logs)
 		} else {
-			s.updateStatusWithLogs(deploymentID, status, logs)
+			s.updateStatusWithLogs(deploymentID, tenantID, status, logs)
 		}
 	}
 
 	// Get the current deployment
-	current, err := s.deploymentRepo.Get(ctx, deploymentID)
+	current, err := s.deploymentRepo.Get(ctx, deploymentID, tenantID)
 	if err != nil {
 		return &DeploymentResult{Success: false, Message: fmt.Sprintf("get deployment: %v", err)}
 	}
@@ -269,7 +270,7 @@ func (s *DeploymentService) PerformRollback(
 	// If no target cluster, just do a DB-only rollback
 	if current.TargetClusterID == nil {
 		logsBuilder.WriteString("No target cluster — performing DB-only rollback.\n")
-		if err := s.deploymentRepo.Rollback(ctx, deploymentID, rolledBackBy); err != nil {
+		if err := s.deploymentRepo.Rollback(ctx, deploymentID, tenantID, rolledBackBy); err != nil {
 			return &DeploymentResult{Success: false, Message: err.Error(), Logs: logsBuilder.String()}
 		}
 		logsBuilder.WriteString("DB rollback completed.\n")
@@ -279,7 +280,7 @@ func (s *DeploymentService) PerformRollback(
 
 	// Get kubeconfig for the target cluster
 	logsBuilder.WriteString(fmt.Sprintf("Getting kubeconfig for cluster %s...\n", *current.TargetClusterID))
-	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, *current.TargetClusterID)
+	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, *current.TargetClusterID, tenantID)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to get kubeconfig: %v", err)
 		logsBuilder.WriteString(errMsg + "\n")
@@ -288,7 +289,7 @@ func (s *DeploymentService) PerformRollback(
 	}
 
 	// Create k8s client
-	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, *current.TargetClusterID)
+	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, *current.TargetClusterID, tenantID)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to create k8s client: %v", err)
 		logsBuilder.WriteString(errMsg + "\n")
@@ -334,7 +335,7 @@ func (s *DeploymentService) PerformRollback(
 	}
 
 	// Update current deployment status to rolled_back
-	if err := s.deploymentRepo.Rollback(ctx, deploymentID, rolledBackBy); err != nil {
+	if err := s.deploymentRepo.Rollback(ctx, deploymentID, tenantID, rolledBackBy); err != nil {
 		logsBuilder.WriteString(fmt.Sprintf("Warning: DB rollback failed: %v\n", err))
 	}
 
@@ -384,11 +385,11 @@ func containsHelmChart(specJSON json.RawMessage) bool {
 
 // DryRunResult represents the result of a dry-run deployment preview.
 type DryRunResult struct {
-	Resources  string `json:"resources"`
-	Manifests  string `json:"manifests,omitempty"`
-	DeployType string `json:"deploy_type"`
+	Resources   string `json:"resources"`
+	Manifests   string `json:"manifests,omitempty"`
+	DeployType  string `json:"deploy_type"`
 	ReleaseName string `json:"release_name"`
-	Namespace  string `json:"namespace"`
+	Namespace   string `json:"namespace"`
 }
 
 // PerformDryRun executes a dry-run deployment preview without creating a record
@@ -397,6 +398,7 @@ type DryRunResult struct {
 func (s *DeploymentService) PerformDryRun(
 	ctx context.Context,
 	clusterID uuid.UUID,
+	tenantID uuid.UUID,
 	namespace, releaseName string,
 	replicas int,
 	specJSON []byte,
@@ -430,7 +432,7 @@ func (s *DeploymentService) PerformDryRun(
 				DeployType:  "helm",
 				ReleaseName: releaseName,
 				Namespace:   namespace,
-				Resources:   fmt.Sprintf("Helm chart: %s/%s v%s\nRelease: %s\nNamespace: %s",
+				Resources: fmt.Sprintf("Helm chart: %s/%s v%s\nRelease: %s\nNamespace: %s",
 					deploySpec.Chart.ChartURL, deploySpec.Chart.ChartName, deploySpec.Chart.ChartVersion,
 					releaseName, namespace),
 			}, nil
@@ -453,11 +455,11 @@ func (s *DeploymentService) PerformDryRun(
 	}
 
 	// Get kubeconfig and create client
-	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, clusterID)
+	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, clusterID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("get kubeconfig: %w", err)
 	}
-	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, clusterID)
+	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, clusterID, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("create k8s client: %w", err)
 	}
@@ -473,7 +475,7 @@ func (s *DeploymentService) PerformDryRun(
 			Namespace:      namespace,
 			TimeoutSeconds: timeoutSeconds,
 		}
-		username, password, token := s.executor.ResolveHelmCredentials(ctx, deploySpec.Chart.ChartURL)
+		username, password, token := s.executor.ResolveHelmCredentials(ctx, deploySpec.Chart.ChartURL, tenantID)
 		helmSpec.Username = username
 		helmSpec.Password = password
 		helmSpec.Token = token
@@ -487,7 +489,7 @@ func (s *DeploymentService) PerformDryRun(
 			ReleaseName: releaseName,
 			Namespace:   namespace,
 			Manifests:   manifests,
-			Resources:   fmt.Sprintf("Helm chart: %s/%s v%s\nRelease: %s\nNamespace: %s\n\nRendered manifests (%d bytes)",
+			Resources: fmt.Sprintf("Helm chart: %s/%s v%s\nRelease: %s\nNamespace: %s\n\nRendered manifests (%d bytes)",
 				deploySpec.Chart.ChartURL, deploySpec.Chart.ChartName, deploySpec.Chart.ChartVersion,
 				releaseName, namespace, len(manifests)),
 		}, nil

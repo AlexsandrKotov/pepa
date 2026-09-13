@@ -337,10 +337,10 @@ func uninstallPlugin(deps Dependencies) gin.HandlerFunc {
 
 			if len(dependentConns) > 0 && !force {
 				c.JSON(http.StatusConflict, gin.H{
-					"error":              "plugin has dependent connections",
-					"dependent_count":    len(dependentConns),
+					"error":                 "plugin has dependent connections",
+					"dependent_count":       len(dependentConns),
 					"dependent_connections": dependentConns,
-					"message":            "This plugin is used by connections. Use ?force=true to uninstall anyway.",
+					"message":               "This plugin is used by connections. Use ?force=true to uninstall anyway.",
 				})
 				return
 			}
@@ -353,8 +353,8 @@ func uninstallPlugin(deps Dependencies) gin.HandlerFunc {
 				return
 			}
 			logAudit(deps, c, "uninstall", "plugin", p.ID.String(), nil, gin.H{
-				"name":                name,
-				"force":               force,
+				"name":                  name,
+				"force":                 force,
 				"dependent_connections": len(dependentConns),
 			})
 		}
@@ -410,7 +410,7 @@ func executePluginAction(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Merge stored plugin config from DB with request config (request takes priority)
-		mergedConfig := mergeStoredPluginConfig(deps, name, req.Config, c.Request.Context())
+		mergedConfig := mergeStoredPluginConfig(deps, name, req.Config, auth.GetTenantID(c), c.Request.Context())
 
 		resp, err := deps.PluginMgr.Execute(c.Request.Context(), name, req.Action, req.Params, mergedConfig)
 		if err != nil {
@@ -507,7 +507,7 @@ func executeProviderAction(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Merge stored plugin config from DB with request config (request takes priority)
-		mergedConfig := mergeStoredPluginConfig(deps, name, req.Config, c.Request.Context())
+		mergedConfig := mergeStoredPluginConfig(deps, name, req.Config, auth.GetTenantID(c), c.Request.Context())
 
 		resp, err := deps.ProviderRegistry.ExecuteAction(c.Request.Context(), name, req.Action, req.Params, mergedConfig)
 		if err != nil {
@@ -561,12 +561,12 @@ var pluginToConnType = map[string]string{
 //  1. Connection config (from Connections page — the single source of truth for credentials)
 //  2. Plugin stored config (from Plugins page Configuration section)
 //  3. Request config (per-call overrides from Test Actions UI)
-func mergeStoredPluginConfig(deps Dependencies, name string, reqConfig map[string]string, requestCtx context.Context) map[string]string {
+func mergeStoredPluginConfig(deps Dependencies, name string, reqConfig map[string]string, tenantID uuid.UUID, requestCtx context.Context) map[string]string {
 	merged := make(map[string]string)
 
 	// 1. Pull from matching connection (single source of truth)
 	if connType, ok := pluginToConnType[name]; ok && deps.Repos.Connection != nil {
-		if conns, err := deps.Repos.Connection.FindByTypeDecrypted(requestCtx, connType); err == nil && len(conns) > 0 {
+		if conns, err := deps.Repos.Connection.FindByTypeDecrypted(requestCtx, connType, tenantID); err == nil && len(conns) > 0 {
 			// For git-type connections, match by provider in config
 			var conn *repository.Connection
 			if connType == "git" {

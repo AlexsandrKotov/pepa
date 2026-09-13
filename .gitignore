@@ -3,6 +3,12 @@ frontend/node_modules/
 
 # Build output
 frontend/.next/
+
+# Binary artifacts (should not be tracked in git)
+argocd
+fluxcd
+.tmp-patch/
+.tmp-frontend-patch/
 frontend/out/
 bin/
 dist/

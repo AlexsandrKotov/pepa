@@ -593,8 +593,10 @@ func (s *ConnectionService) TestS3Credential(ctx context.Context, endpoint, acce
 	return TestResult{Status: "error", Message: "S3 credentials rejected by server"}
 }
 
-// TestSonarQubeConnection tests a SonarQube connection.
-func (s *ConnectionService) TestSonarQubeConnection(ctx context.Context, url, token string) TestResult {
+// TestSonarQubeConnection tests a SonarQube connection. Internal instances commonly
+// serve self-signed certificates, so the connection's `insecure` flag is honoured here
+// exactly as it is by the sonarqube plugin during a scan.
+func (s *ConnectionService) TestSonarQubeConnection(ctx context.Context, url, token string, insecure bool) TestResult {
 	if url == "" {
 		return TestResult{Status: "error", Message: "SonarQube URL is required"}
 	}
@@ -602,15 +604,25 @@ func (s *ConnectionService) TestSonarQubeConnection(ctx context.Context, url, to
 		return TestResult{Status: "error", Message: "SonarQube token is required"}
 	}
 
+	client := s.httpClient
+	if insecure {
+		client = &http.Client{
+			Timeout: s.httpClient.Timeout,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // #nosec // G402: admin-provided endpoint, opt-in per connection
+			},
+		}
+	}
+
 	// Call /api/system/status endpoint
-	req, err := http.NewRequestWithContext(ctx, "GET", url+"/api/system/status", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(url, "/")+"/api/system/status", nil)
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Failed to create request: %v", err)}
 	}
 	// SonarQube uses Basic Auth with token as username and empty password
 	req.SetBasicAuth(token, "")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach SonarQube: %v", err)}
 	}

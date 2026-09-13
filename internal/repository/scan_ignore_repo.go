@@ -3,18 +3,22 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/database"
 )
 
-// ScanIgnore represents a CVE to ignore for a scan target.
+// ScanIgnore represents a finding suppressed for a scan target. Trivy findings
+// are identified by CVE, SonarQube findings by issue key (or "rule:<rule>" to
+// silence a whole rule) — exactly one of the two is set per row.
 type ScanIgnore struct {
 	ID        uuid.UUID  `json:"id"`
 	TenantID  uuid.UUID  `json:"tenant_id"`
 	TargetID  uuid.UUID  `json:"target_id"`
 	CveID     string     `json:"cve_id"`
+	IssueKey  *string    `json:"issue_key,omitempty"`
 	Reason    *string    `json:"reason,omitempty"`
 	CreatedBy *uuid.UUID `json:"created_by,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -36,7 +40,7 @@ func NewScanIgnoreRepository(db *database.DB) *ScanIgnoreRepository {
 // List returns all scan ignores for a tenant.
 func (r *ScanIgnoreRepository) List(ctx context.Context, tenantID uuid.UUID) ([]*ScanIgnore, error) {
 	query := `
-		SELECT si.id, si.tenant_id, si.target_id, si.cve_id, si.reason, si.created_by, si.created_at,
+		SELECT si.id, si.tenant_id, si.target_id, si.cve_id, si.issue_key, si.reason, si.created_by, si.created_at,
 		       COALESCE(st.name, '') as target_name, COALESCE(st.target_ref, '') as target_ref
 		FROM scan_ignores si
 		LEFT JOIN scan_targets st ON st.id = si.target_id
@@ -54,7 +58,7 @@ func (r *ScanIgnoreRepository) List(ctx context.Context, tenantID uuid.UUID) ([]
 	for rows.Next() {
 		ignore := &ScanIgnore{}
 		if err := rows.Scan(
-			&ignore.ID, &ignore.TenantID, &ignore.TargetID, &ignore.CveID,
+			&ignore.ID, &ignore.TenantID, &ignore.TargetID, &ignore.CveID, &ignore.IssueKey,
 			&ignore.Reason, &ignore.CreatedBy, &ignore.CreatedAt,
 			&ignore.TargetName, &ignore.TargetRef,
 		); err != nil {
@@ -69,7 +73,7 @@ func (r *ScanIgnoreRepository) List(ctx context.Context, tenantID uuid.UUID) ([]
 // ListByTarget returns all scan ignores for a specific target.
 func (r *ScanIgnoreRepository) ListByTarget(ctx context.Context, targetID, tenantID uuid.UUID) ([]*ScanIgnore, error) {
 	query := `
-		SELECT id, tenant_id, target_id, cve_id, reason, created_by, created_at
+		SELECT id, tenant_id, target_id, cve_id, issue_key, reason, created_by, created_at
 		FROM scan_ignores
 		WHERE target_id = $1 AND tenant_id = $2
 		ORDER BY created_at DESC
@@ -85,7 +89,7 @@ func (r *ScanIgnoreRepository) ListByTarget(ctx context.Context, targetID, tenan
 	for rows.Next() {
 		ignore := &ScanIgnore{}
 		if err := rows.Scan(
-			&ignore.ID, &ignore.TenantID, &ignore.TargetID, &ignore.CveID,
+			&ignore.ID, &ignore.TenantID, &ignore.TargetID, &ignore.CveID, &ignore.IssueKey,
 			&ignore.Reason, &ignore.CreatedBy, &ignore.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan ignore row: %w", err)
@@ -99,14 +103,14 @@ func (r *ScanIgnoreRepository) ListByTarget(ctx context.Context, targetID, tenan
 // Create adds a new scan ignore.
 func (r *ScanIgnoreRepository) Create(ctx context.Context, ignore *ScanIgnore) error {
 	query := `
-		INSERT INTO scan_ignores (id, tenant_id, target_id, cve_id, reason, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO scan_ignores (id, tenant_id, target_id, cve_id, issue_key, reason, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at
 	`
 
 	return r.db.Pool.QueryRow(
 		ctx, query,
-		ignore.ID, ignore.TenantID, ignore.TargetID, ignore.CveID,
+		ignore.ID, ignore.TenantID, ignore.TargetID, ignore.CveID, ignore.IssueKey,
 		ignore.Reason, ignore.CreatedBy,
 	).Scan(&ignore.CreatedAt)
 }
@@ -125,25 +129,40 @@ func (r *ScanIgnoreRepository) DeleteByTargetAndCVE(ctx context.Context, targetI
 	return err
 }
 
+// DeleteByTargetAndIssueKey removes a SonarQube ignore by issue key (a
+// "rule:<rule>" entry removes the rule-level ignore).
+func (r *ScanIgnoreRepository) DeleteByTargetAndIssueKey(ctx context.Context, targetID uuid.UUID, issueKey string, tenantID uuid.UUID) error {
+	query := `DELETE FROM scan_ignores WHERE target_id = $1 AND issue_key = $2 AND tenant_id = $3`
+	_, err := r.db.Pool.Exec(ctx, query, targetID, issueKey, tenantID)
+	return err
+}
+
 // GetIgnoreFileContent generates .trivyignore file content for a target.
+// SonarQube ignores carry no CVE and must not leak into the Trivy ignore file.
 func (r *ScanIgnoreRepository) GetIgnoreFileContent(ctx context.Context, targetID, tenantID uuid.UUID) (string, error) {
 	ignores, err := r.ListByTarget(ctx, targetID, tenantID)
 	if err != nil {
 		return "", err
 	}
 
-	if len(ignores) == 0 {
+	var lines []string
+	for _, ignore := range ignores {
+		if ignore.CveID == "" {
+			continue
+		}
+		if ignore.Reason != nil && *ignore.Reason != "" {
+			lines = append(lines, fmt.Sprintf("# %s", *ignore.Reason))
+		}
+		lines = append(lines, ignore.CveID)
+	}
+
+	if len(lines) == 0 {
 		return "", nil
 	}
 
-	content := "# Auto-generated .trivyignore\n"
-	content += "# Ignored CVEs for this scan target\n\n"
-	for _, ignore := range ignores {
-		if ignore.Reason != nil && *ignore.Reason != "" {
-			content += fmt.Sprintf("# %s\n", *ignore.Reason)
-		}
-		content += fmt.Sprintf("%s\n", ignore.CveID)
-	}
+	content := "# Auto-generated .trivyignore\n" +
+		"# Ignored CVEs for this scan target\n\n" +
+		strings.Join(lines, "\n") + "\n"
 
 	return content, nil
 }

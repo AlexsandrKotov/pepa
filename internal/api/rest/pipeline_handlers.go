@@ -185,7 +185,7 @@ func deletePipelineSource(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := deps.Repos.PipelineSource.Delete(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.PipelineSource.Delete(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}
@@ -1033,7 +1033,7 @@ func deletePipelinePreset(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := deps.Repos.PipelinePreset.Delete(c.Request.Context(), presetID); err != nil {
+		if err := deps.Repos.PipelinePreset.Delete(c.Request.Context(), presetID, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}

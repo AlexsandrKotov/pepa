@@ -10,15 +10,17 @@ html {
 }
 
 :root {
-  --bg: #fafafa;
+  /* Canvas is a muted cool gray, surfaces stay white — this gives depth
+     without turning the whole UI into a glare of pure white. */
+  --bg: #edf0f4;
   --surface: #ffffff;
-  --border: #e5e5e5;
-  --border-light: #f0f0f0;
-  --text-primary: #171717;
-  --text-secondary: #525252;
-  --text-tertiary: #a3a3a3;
+  --border: #d5dbe4;
+  --border-light: #e5e9f0;
+  --text-primary: #171d26;
+  --text-secondary: #4a5567;
+  --text-tertiary: #727e90;
   --accent: #0066ff;
-  --accent-subtle: #eff6ff;
+  --accent-subtle: #e4edfd;
 
   /* Radii */
   --radius-sm: 8px;
@@ -43,8 +45,19 @@ html {
   --info-subtle: #dbeafe;
 
   /* Surface states */
-  --surface-hover: #f5f5f5;
-  --surface-active: #f0f0f0;
+  --surface-hover: #f4f6fa;
+  --surface-active: #eaeef4;
+
+  /* Sidebar — a mid-tone chrome panel, never a dark slab in light theme */
+  --sidebar-bg: #e0e5ee;
+  --sidebar-bg-end: #d8dee8;
+  --sidebar-fg: #141b26;
+  --sidebar-fg-muted: #333d4b;
+  --sidebar-fg-dim: #5c6775;
+  --sidebar-hover: rgba(255, 255, 255, 0.55);
+  --sidebar-active: rgba(255, 255, 255, 0.9);
+  --sidebar-border: rgba(20, 27, 38, 0.1);
+  --sidebar-ring: rgba(20, 27, 38, 0.28);
 
   /* iOS spring easing curves */
   --ease-ios: cubic-bezier(0.25, 0.1, 0.25, 1);
@@ -83,6 +96,17 @@ html {
   /* Surface states */
   --surface-hover: #2a2f38;
   --surface-active: #323842;
+
+  /* Sidebar — keeps the dark panel look */
+  --sidebar-bg: #1e2128;
+  --sidebar-bg-end: #1a1d24;
+  --sidebar-fg: #f1f3f5;
+  --sidebar-fg-muted: rgba(255, 255, 255, 0.68);
+  --sidebar-fg-dim: rgba(255, 255, 255, 0.38);
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+  --sidebar-border: rgba(255, 255, 255, 0.07);
+  --sidebar-ring: rgba(255, 255, 255, 0.24);
 }
 
 * {
@@ -101,6 +125,72 @@ svg {
 
 .divide-y > :not([hidden]) ~ :not([hidden]) {
   border-color: var(--border);
+}
+
+/* ── Legacy neutral utilities → tokens ──────────────────────
+   Older pages still hardcode light-mode hexes (bg-white, bg-[#fafafa],
+   text-[#525252]). Resolving them to tokens in *both* themes keeps the
+   light palette coherent — otherwise a hardcoded #fafafa sits brighter
+   than the light canvas and the grey hierarchy breaks. */
+
+.bg-white {
+  background: var(--surface) !important;
+}
+
+.bg-\[\#fafafa\],
+.bg-\[\#f9fafb\] {
+  background: var(--bg) !important;
+}
+
+.bg-\[\#f5f5f5\] {
+  background: var(--surface-hover) !important;
+}
+
+.bg-\[\#f0f0f0\] {
+  background: var(--surface-active) !important;
+}
+
+.bg-\[\#e5e5e5\] {
+  background: var(--border) !important;
+}
+
+.bg-\[\#ebebeb\] {
+  background: var(--border-light) !important;
+}
+
+.hover\:bg-\[\#f5f5f5\]:hover,
+.hover\:bg-\[\#fafafa\]:hover {
+  background: var(--surface-hover) !important;
+}
+
+.hover\:bg-\[\#f0f0f0\]:hover,
+.hover\:bg-\[\#ebebeb\]:hover {
+  background: var(--surface-active) !important;
+}
+
+.border-\[\#e5e5e5\],
+.border-\[\#ebebeb\] {
+  border-color: var(--border) !important;
+}
+
+.border-\[\#f0f0f0\] {
+  border-color: var(--border-light) !important;
+}
+
+.text-\[\#171717\],
+.hover\:text-\[\#171717\]:hover,
+.text-black {
+  color: var(--text-primary) !important;
+}
+
+.text-\[\#525252\],
+.text-\[\#737373\],
+.hover\:text-\[\#525252\]:hover {
+  color: var(--text-secondary) !important;
+}
+
+.text-\[\#a3a3a3\] {
+  color: var(--text-tertiary) !important;
 }
 
 body {
@@ -1120,6 +1210,187 @@ main {
 aside {
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ── Sidebar — theme-aware navigation chrome ──────────────── */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-end) 100%);
+  color: var(--sidebar-fg-muted);
+  border-right: 1px solid var(--sidebar-border);
+}
+
+.sidebar-brand {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--sidebar-fg);
+}
+
+.sidebar-brand-sub {
+  font-size: 9px;
+  line-height: 1.2;
+  color: var(--sidebar-fg-dim);
+}
+
+/* Nav rows, section toggles and the collapse button share this row style */
+.sb-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  text-align: left;
+  color: var(--sidebar-fg-muted);
+  transition: background 0.15s var(--ease-ios), color 0.15s var(--ease-ios);
+}
+
+.sb-link:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-fg);
+}
+
+.sb-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--sidebar-ring);
+}
+
+.sb-link.is-active {
+  background: var(--sidebar-active);
+  color: var(--sidebar-fg);
+  font-weight: 500;
+}
+
+.sb-link-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.sb-icon {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  color: var(--sidebar-fg-dim);
+  transition: color 0.15s var(--ease-ios);
+}
+
+.sb-icon-sm {
+  width: 16px;
+  height: 16px;
+}
+
+.sb-link:hover .sb-icon {
+  color: var(--sidebar-fg-muted);
+}
+
+.sb-link.is-active .sb-icon {
+  color: var(--accent);
+}
+
+/* Left accent bar marks the active route */
+.sb-accent-bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 0 9999px 9999px 0;
+  background: var(--accent);
+}
+
+/* Section toggles — tinted when a child route is active, but never filled */
+.sb-link.has-active-child {
+  color: var(--sidebar-fg);
+}
+
+.sb-link.has-active-child .sb-icon {
+  color: var(--accent);
+}
+
+.sb-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--sidebar-fg-dim);
+  transition: transform 0.2s var(--ease-ios);
+}
+
+.sb-chevron.is-open {
+  transform: rotate(180deg);
+}
+
+.sb-group-label {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sidebar-fg-dim);
+}
+
+.sb-subgroup-divided {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.sb-sublink {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--sidebar-fg-dim);
+  transition: background 0.15s var(--ease-ios), color 0.15s var(--ease-ios);
+}
+
+.sb-sublink:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-fg-muted);
+}
+
+.sb-sublink:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--sidebar-ring);
+}
+
+.sb-sublink.is-active {
+  background: var(--sidebar-active);
+  color: var(--sidebar-fg);
+  font-weight: 500;
+}
+
+.sb-sublink .sb-accent-bar {
+  left: 4px;
+  height: 12px;
+}
+
+.sb-divider {
+  border-top: 1px solid var(--sidebar-border);
+}
+
+.sb-collapse {
+  color: var(--sidebar-fg-dim);
+  font-size: 12px;
+}
+
+.sb-collapse:hover {
+  background: var(--sidebar-hover);
+  color: var(--sidebar-fg-muted);
+}
+
+/* Scrollbar inside the sidebar follows the panel tone, not the page tone */
+.sidebar ::-webkit-scrollbar-thumb {
+  background: var(--sidebar-fg-dim);
 }
 
 /* ── View Transitions — smooth page switches ──────────── */

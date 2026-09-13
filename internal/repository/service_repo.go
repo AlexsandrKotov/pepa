@@ -321,9 +321,15 @@ func (r *ServiceRepository) Update(ctx context.Context, id uuid.UUID, req models
 	return r.Get(ctx, id)
 }
 
-// Delete removes a service.
-func (r *ServiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM services WHERE id = $1", id)
+// Delete removes a service, scoped to the given tenant.
+func (r *ServiceRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	query := "DELETE FROM services WHERE id = $1"
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += " AND tenant_id = $2"
+		args = append(args, tenantID)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete service: %w", err)
 	}
@@ -333,10 +339,16 @@ func (r *ServiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// SetStatus updates the service status.
-func (r *ServiceRepository) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
+// SetStatus updates the service status, scoped to the given tenant.
+func (r *ServiceRepository) SetStatus(ctx context.Context, id uuid.UUID, status string, tenantID uuid.UUID) error {
 	now := time.Now().UTC()
-	_, err := r.pool.Exec(ctx, "UPDATE services SET status = $2, updated_at = $3 WHERE id = $1", id, status, now)
+	query := "UPDATE services SET status = $2, updated_at = $3 WHERE id = $1"
+	args := []interface{}{id, status, now}
+	if tenantID != uuid.Nil {
+		query += " AND tenant_id = $4"
+		args = append(args, tenantID)
+	}
+	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("set service status: %w", err)
 	}

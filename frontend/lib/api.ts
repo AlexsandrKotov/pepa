@@ -4832,12 +4832,49 @@ export interface ScanIgnore {
   tenant_id: string;
   target_id: string;
   cve_id: string;
+  /** SonarQube issue key, or "rule:<rule>" to suppress a whole rule. */
+  issue_key?: string;
   reason?: string;
   created_by?: string;
   created_at: string;
   target_name?: string;
   target_ref?: string;
 }
+
+/** One quality gate condition as evaluated by SonarQube. */
+export interface SonarQualityGateCondition {
+  status: string;
+  metric_key: string;
+  comparator: string;
+  error_threshold?: string;
+  actual_value?: string;
+}
+
+/** Project metrics collected with a SonarQube report. */
+export interface SonarScanMetrics {
+  quality_gate_status?: string;
+  quality_gate_conditions?: SonarQualityGateCondition[];
+  bugs?: number;
+  vulnerabilities?: number;
+  code_smells?: number;
+  coverage?: number;
+  duplicated_lines_density?: number;
+  technical_debt?: string;
+  project_key?: string;
+  branch?: string;
+  last_analysis_at?: string;
+  truncated?: boolean;
+}
+
+/** An analysable project inside an external SonarQube instance. */
+export interface SonarProject {
+  key: string;
+  name: string;
+  qualifier: string;
+}
+
+/** Issue workflow changes SonarQube accepts, mirrored by its plugin. */
+export type SonarIssueTransition = 'falsepositive' | 'wontfix' | 'reopen' | 'accept' | 'confirm';
 
 export const securityScan = {
   // Scan Targets
@@ -4896,16 +4933,42 @@ export const securityScan = {
     trivy_version: string;
   }>('/api/v1/security/db-status'),
 
-  // Scan Ignores (CVE ignore lists)
+  // Scan Ignores (CVE ignore lists for Trivy, issue keys for SonarQube)
   listIgnores: () => fetchAPI<ScanIgnore[]>('/api/v1/security/ignores'),
   
   listTargetIgnores: (targetId: string) => fetchAPI<ScanIgnore[]>(`/api/v1/security/targets/${targetId}/ignores`),
   
-  createIgnore: (targetId: string, data: { cve_id: string; reason?: string }) =>
+  createIgnore: (targetId: string, data: { cve_id?: string; issue_key?: string; reason?: string }) =>
     fetchAPI<ScanIgnore>(`/api/v1/security/targets/${targetId}/ignores`, { method: 'POST', body: JSON.stringify(data) }),
   
   deleteIgnore: (ignoreId: string) =>
     fetchAPI<{ message: string }>(`/api/v1/security/ignores/${ignoreId}`, { method: 'DELETE' }),
+
+  // SonarQube project lookup — feeds the Project Key picker of a SonarQube target
+  listSonarProjects: (connectionId: string, q?: string) =>
+    fetchAPI<{ projects: SonarProject[]; truncated: boolean }>(
+      `/api/v1/security/sonar/projects?connection_id=${encodeURIComponent(connectionId)}${q ? `&q=${encodeURIComponent(q)}` : ''}`
+    ),
+
+  /** Apply an issue transition in the external SonarQube that owns the issue. */
+  sonarTransitionIssue: (data: { connection_id: string; issue_key: string; transition: SonarIssueTransition }) =>
+    fetchAPI<{ message: string; issue_key: string }>('/api/v1/security/sonar/issues/transition', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Server-rendered report of a stored scan run, as text (html or json). */
+  downloadScanReport: async (scanId: string, format: 'html' | 'json'): Promise<string> => {
+    const res = await fetch(
+      `${getBase()}/api/v1/security/scans/${encodeURIComponent(scanId)}/report?format=${format}`,
+      { headers: authHeaders(), credentials: 'include', cache: 'no-store' },
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as { error?: string }));
+      throw new Error(body.error || `Failed to load report: ${res.status}`);
+    }
+    return res.text();
+  },
 };
 
 // ── DevOps & DevSecOps Types ──────────────────────────────────
@@ -4957,13 +5020,16 @@ export interface CompliancePolicy {
   tenant_id: string;
   name: string;
   description: string;
-  policy_type: 'resource_limits' | 'security_scan' | 'required_labels' | 'custom';
-  environment: string;
-  service_ids: string[] | null;
-  severity: 'critical' | 'high' | 'medium' | 'low';
+  policy_type: 'resource_limits' | 'security_scan' | 'approval' | 'custom';
+  policy_spec: Record<string, unknown>;
+  severity: 'block' | 'warn' | 'info';
   blocking: boolean;
+  environments: string[];
+  service_ids: string[] | null;
   enabled: boolean;
-  config: Record<string, unknown>;
+  last_evaluated_at: string | null;
+  last_violation_count: number;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }

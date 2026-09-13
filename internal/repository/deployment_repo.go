@@ -222,8 +222,8 @@ func (r *DeploymentRepository) ListFiltered(ctx context.Context, f DeploymentFil
 	}, nil
 }
 
-// Get returns a deployment by ID.
-func (r *DeploymentRepository) Get(ctx context.Context, id uuid.UUID) (*Deployment, error) {
+// Get returns a deployment by ID, scoped to the given tenant.
+func (r *DeploymentRepository) Get(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) (*Deployment, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, COALESCE(jira_issue_key,''), COALESCE(jira_summary,''),
 		       gitlab_project_id, COALESCE(gitlab_project_name,''),
@@ -238,8 +238,8 @@ func (r *DeploymentRepository) Get(ctx context.Context, id uuid.UUID) (*Deployme
 		       COALESCE(team_name,''), COALESCE(stage,'dev'),
 		       environment_id,
 		       created_at, updated_at
-		FROM deployments WHERE id = $1
-	`, id)
+		FROM deployments WHERE id = $1 AND tenant_id = $2
+	`, id, tenantID)
 
 	var d Deployment
 	if err := row.Scan(&d.ID, &d.TenantID, &d.JiraIssueKey, &d.JiraSummary,
@@ -283,12 +283,12 @@ func (r *DeploymentRepository) Create(ctx context.Context, d *Deployment) error 
 }
 
 // Promote marks a deployment as promoted to the next environment.
-func (r *DeploymentRepository) Promote(ctx context.Context, id uuid.UUID, promotedBy string) error {
+func (r *DeploymentRepository) Promote(ctx context.Context, id uuid.UUID, tenantID uuid.UUID, promotedBy string) error {
 	now := time.Now().UTC()
 	_, err := r.pool.Exec(ctx, `
-		UPDATE deployments SET status='promoted', promoted_by=$2, promoted_at=$3, updated_at=$3
-		WHERE id=$1
-	`, id, promotedBy, now)
+		UPDATE deployments SET status='promoted', promoted_by=$3, promoted_at=$4, updated_at=$4
+		WHERE id=$1 AND tenant_id=$2
+	`, id, tenantID, promotedBy, now)
 	if err != nil {
 		return fmt.Errorf("promote deployment: %w", err)
 	}
@@ -296,12 +296,12 @@ func (r *DeploymentRepository) Promote(ctx context.Context, id uuid.UUID, promot
 }
 
 // Rollback reverts a deployment status to rolled_back and creates a new rollback entry.
-func (r *DeploymentRepository) Rollback(ctx context.Context, id uuid.UUID, rolledBackBy string) error {
+func (r *DeploymentRepository) Rollback(ctx context.Context, id uuid.UUID, tenantID uuid.UUID, rolledBackBy string) error {
 	now := time.Now().UTC()
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE deployments SET status='rolled_back', promoted_by=$2, updated_at=$3
-		WHERE id=$1 AND status IN ('deployed','promoted')
-	`, id, rolledBackBy, now)
+		UPDATE deployments SET status='rolled_back', promoted_by=$3, updated_at=$4
+		WHERE id=$1 AND tenant_id=$2 AND status IN ('deployed','promoted')
+	`, id, tenantID, rolledBackBy, now)
 	if err != nil {
 		return fmt.Errorf("rollback deployment: %w", err)
 	}
@@ -312,12 +312,12 @@ func (r *DeploymentRepository) Rollback(ctx context.Context, id uuid.UUID, rolle
 }
 
 // Cancel marks a deployment as cancelled.
-func (r *DeploymentRepository) Cancel(ctx context.Context, id uuid.UUID) error {
+func (r *DeploymentRepository) Cancel(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
 	now := time.Now().UTC()
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE deployments SET status='cancelled', updated_at=$2
-		WHERE id=$1 AND status IN ('pending','syncing')
-	`, id, now)
+		UPDATE deployments SET status='cancelled', updated_at=$3
+		WHERE id=$1 AND tenant_id=$2 AND status IN ('pending','syncing')
+	`, id, tenantID, now)
 	if err != nil {
 		return fmt.Errorf("cancel deployment: %w", err)
 	}
@@ -327,15 +327,15 @@ func (r *DeploymentRepository) Cancel(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Update updates a deployment's mutable fields.
+// Update updates a deployment's mutable fields, scoped to the deployment's tenant.
 func (r *DeploymentRepository) Update(ctx context.Context, d *Deployment) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE deployments SET status=$2, target_namespace=$3, image_tag=$4,
 		       image_repository=$5, promoted_by=$6, updated_at=$7,
 		       replicas=$8, strategy=$9, spec=$10, error_message=$11, logs=$12
-		WHERE id=$1
+		WHERE id=$1 AND tenant_id=$13
 	`, d.ID, d.Status, d.TargetNamespace, d.ImageTag, d.ImageRepository, d.PromotedBy, d.UpdatedAt,
-		d.Replicas, d.Strategy, d.Spec, d.ErrorMessage, d.Logs)
+		d.Replicas, d.Strategy, d.Spec, d.ErrorMessage, d.Logs, d.TenantID)
 	if err != nil {
 		return fmt.Errorf("update deployment: %w", err)
 	}
@@ -391,9 +391,9 @@ func (r *DeploymentRepository) History(ctx context.Context, tenantID uuid.UUID, 
 	return items, nil
 }
 
-// Delete removes a deployment by ID.
-func (r *DeploymentRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM deployments WHERE id=$1`, id)
+// Delete removes a deployment by ID, scoped to the given tenant.
+func (r *DeploymentRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM deployments WHERE id=$1 AND tenant_id=$2`, id, tenantID)
 	if err != nil {
 		return fmt.Errorf("delete deployment: %w", err)
 	}

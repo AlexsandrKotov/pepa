@@ -362,7 +362,15 @@ func processDeploymentExecute(ctx context.Context, job *queue.Job, deploymentSvc
 
 	slog.Info("executing deployment", "deployment", deploymentID, "cluster", clusterID, "namespace", namespace)
 
-	result := deploymentSvc.PerformDeployment(ctx, deploymentID, clusterID, namespace, releaseName, replicas, specJSON, timeoutSeconds)
+	// Parse tenant ID from the job for tenant-scoped repository calls.
+	tenantID := uuid.MustParse(database.DefaultTenantID)
+	if job.TenantID != "" {
+		if parsed, perr := uuid.Parse(job.TenantID); perr == nil {
+			tenantID = parsed
+		}
+	}
+
+	result := deploymentSvc.PerformDeployment(ctx, deploymentID, clusterID, tenantID, namespace, releaseName, replicas, specJSON, timeoutSeconds)
 	if !result.Success {
 		return fmt.Errorf("deployment failed: %s", result.Message)
 	}

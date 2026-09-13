@@ -57,7 +57,7 @@ func vmwareExec(deps Dependencies, c *gin.Context, action string, params json.Ra
 		return
 	}
 
-	mergedConfig := mergeStoredPluginConfig(deps, "vmware", nil, c.Request.Context())
+	mergedConfig := mergeStoredPluginConfig(deps, "vmware", nil, auth.GetTenantID(c), c.Request.Context())
 
 	// Resolve per-user credential override.
 	userID := auth.GetUserID(c)
@@ -315,7 +315,7 @@ func vmwareRevertSnapshot(deps Dependencies) gin.HandlerFunc {
 // so the frontend can build "Open in vCenter" links.
 func vmwareConnectionInfo(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		config := mergeStoredPluginConfig(deps, "vmware", nil, c.Request.Context())
+		config := mergeStoredPluginConfig(deps, "vmware", nil, auth.GetTenantID(c), c.Request.Context())
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"url": config["url"]}})
 	}
 }

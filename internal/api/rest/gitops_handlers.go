@@ -270,7 +270,7 @@ func triggerGitOpsSync(deps Dependencies, deployment *repository.Deployment) {
 		defer cancel()
 
 		// Fetch fresh copy to avoid race condition
-		d, err := deps.Repos.Deployment.Get(ctx, deploymentID)
+		d, err := deps.Repos.Deployment.Get(ctx, deploymentID, tenantID)
 		if err != nil {
 			slog.Warn("triggerGitOpsSync: failed to fetch deployment", "error", err)
 			return
@@ -471,7 +471,7 @@ func verifyWorkflowDeployment(deps Dependencies) gin.HandlerFunc {
 
 		ctx := c.Request.Context()
 		tenantID := getTenantID(c)
-		d, err := deps.Repos.Deployment.Get(ctx, id)
+		d, err := deps.Repos.Deployment.Get(ctx, id, tenantID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
@@ -607,7 +607,7 @@ func getWorkflowTimeline(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		d, err := deps.Repos.Deployment.Get(ctx, id)
+		d, err := deps.Repos.Deployment.Get(ctx, id, getTenantID(c))
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
@@ -749,15 +749,15 @@ func gitopsCreateRepo(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		var req struct {
-			Name             string `json:"name" binding:"required"`
-			ConnectionID     string `json:"connection_id"`
-			RepoURL          string `json:"repo_url" binding:"required"`
-			Branch           string `json:"branch"`
-			Path             string `json:"path"`
-			EngineType       string `json:"engine_type"`
-			Token            string `json:"token"`
-			ArgoServerURL    string `json:"argocd_server_url"`
-			ArgoAuthToken    string `json:"argocd_auth_token"`
+			Name          string `json:"name" binding:"required"`
+			ConnectionID  string `json:"connection_id"`
+			RepoURL       string `json:"repo_url" binding:"required"`
+			Branch        string `json:"branch"`
+			Path          string `json:"path"`
+			EngineType    string `json:"engine_type"`
+			Token         string `json:"token"`
+			ArgoServerURL string `json:"argocd_server_url"`
+			ArgoAuthToken string `json:"argocd_auth_token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -864,15 +864,15 @@ func gitopsUpdateRepo(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name             string `json:"name"`
-			RepoURL          string `json:"repo_url"`
-			Branch           string `json:"branch"`
-			Path             string `json:"path"`
-			EngineType       string `json:"engine_type"`
-			Token            string `json:"token"`
-			ConnectionID     string `json:"connection_id"`
-			ArgoServerURL    string `json:"argocd_server_url"`
-			ArgoAuthToken    string `json:"argocd_auth_token"`
+			Name          string `json:"name"`
+			RepoURL       string `json:"repo_url"`
+			Branch        string `json:"branch"`
+			Path          string `json:"path"`
+			EngineType    string `json:"engine_type"`
+			Token         string `json:"token"`
+			ConnectionID  string `json:"connection_id"`
+			ArgoServerURL string `json:"argocd_server_url"`
+			ArgoAuthToken string `json:"argocd_auth_token"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1057,8 +1057,9 @@ func gitopsScanRepo(deps Dependencies) gin.HandlerFunc {
 
 		result, scanErr := scanner.Scan(scanCtx, repo)
 		if scanErr != nil {
-			_ = deps.Repos.GitopsRepo.UpdateScanStatus(ctx, id, "error", scanErr.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+			slog.Error("git scan failed", "repo_id", id, "error", scanErr)
+			_ = deps.Repos.GitopsRepo.UpdateScanStatus(ctx, id, "error", "scan failed")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "scan failed, check logs"})
 			return
 		}
 
@@ -1115,7 +1116,8 @@ func gitopsListResources(deps Dependencies) gin.HandlerFunc {
 
 		result, scanErr := scanner.Scan(scanCtx, repo)
 		if scanErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+			slog.Error("git scan failed", "repo_id", id, "error", scanErr)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "scan failed, check logs"})
 			return
 		}
 
@@ -1431,7 +1433,8 @@ func gitopsListClusters(deps Dependencies) gin.HandlerFunc {
 
 		result, scanErr := scanner.Scan(scanCtx, repo)
 		if scanErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+			slog.Error("git scan failed", "repo_id", id, "error", scanErr)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "scan failed, check logs"})
 			return
 		}
 
@@ -1493,11 +1496,11 @@ func gitopsCreateResource(deps Dependencies) gin.HandlerFunc {
 			Values    map[string]interface{} `json:"values"`
 			CommitMsg string                 `json:"commit_message"`
 			// ArgoCD-specific fields
-			RepoURL        string `json:"repo_url"`         // ArgoCD: source.repoURL
-			Path           string `json:"path"`             // ArgoCD: source.path
-			TargetRevision string `json:"target_revision"`  // ArgoCD: source.targetRevision
-			DestServer     string `json:"dest_server"`      // ArgoCD: destination.server
-			DestNamespace  string `json:"dest_namespace"`   // ArgoCD: destination.namespace
+			RepoURL        string `json:"repo_url"`        // ArgoCD: source.repoURL
+			Path           string `json:"path"`            // ArgoCD: source.path
+			TargetRevision string `json:"target_revision"` // ArgoCD: source.targetRevision
+			DestServer     string `json:"dest_server"`     // ArgoCD: destination.server
+			DestNamespace  string `json:"dest_namespace"`  // ArgoCD: destination.namespace
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1788,7 +1791,8 @@ func gitopsTopology(deps Dependencies) gin.HandlerFunc {
 
 		result, scanErr := scanner.Scan(scanCtx, repo)
 		if scanErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": scanErr.Error()})
+			slog.Error("git scan failed", "repo_id", id, "error", scanErr)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "scan failed, check logs"})
 			return
 		}
 
@@ -1898,6 +1902,7 @@ func gitopsDeleteMapping(deps Dependencies) gin.HandlerFunc {
 // Query params:
 //   - cluster_id (optional): specific cluster to compare against
 //   - If omitted, compares against all clusters with kubeconfig
+//
 // gitopsLiveStatus returns live cluster health/sync status for each resource in a repo.
 // It queries the cluster(s) and returns a map of resource key -> {health, sync_status, revision}.
 func gitopsLiveStatus(deps Dependencies) gin.HandlerFunc {
@@ -2039,7 +2044,8 @@ func gitopsDetectDrift(deps Dependencies) gin.HandlerFunc {
 			defer cancel()
 			result, scanErr := scanner.Scan(scanCtx, repo)
 			if scanErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "git scan failed: " + scanErr.Error()})
+				slog.Error("git scan failed", "error", scanErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "scan failed, check logs"})
 				return
 			}
 			gitResources = result.Resources
@@ -2284,9 +2290,9 @@ func queryLiveArgoResources(ctx context.Context, deps Dependencies, cl *reposito
 
 		// Store health and sync status in labels for drift comparison
 		r.Labels = map[string]string{
-			"health":     health,
+			"health":      health,
 			"sync_status": syncStatus,
-			"revision":   item.Status.Sync.Revision,
+			"revision":    item.Status.Sync.Revision,
 		}
 
 		resources = append(resources, r)
@@ -2519,15 +2525,15 @@ func gitopsCreateDriftSchedule(deps Dependencies) gin.HandlerFunc {
 		tenantID := auth.GetTenantID(c)
 
 		var req struct {
-			RepoID               string  `json:"repo_id" binding:"required"`
-			ClusterID            string  `json:"cluster_id" binding:"required"`
-			ScopePath            *string `json:"scope_path"`
-			Name                 string  `json:"name" binding:"required"`
-			Description          *string `json:"description"`
-			CronExpression       string  `json:"cron_expression"`
-			Enabled              bool    `json:"enabled"`
-			AlertOnDrift         bool    `json:"alert_on_drift"`
-			AlertSeverityThreshold string `json:"alert_severity_threshold"`
+			RepoID                 string  `json:"repo_id" binding:"required"`
+			ClusterID              string  `json:"cluster_id" binding:"required"`
+			ScopePath              *string `json:"scope_path"`
+			Name                   string  `json:"name" binding:"required"`
+			Description            *string `json:"description"`
+			CronExpression         string  `json:"cron_expression"`
+			Enabled                bool    `json:"enabled"`
+			AlertOnDrift           bool    `json:"alert_on_drift"`
+			AlertSeverityThreshold string  `json:"alert_severity_threshold"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -2570,18 +2576,18 @@ func gitopsCreateDriftSchedule(deps Dependencies) gin.HandlerFunc {
 		userID := auth.GetUserID(c)
 
 		schedule := &gitops.DriftSchedule{
-			TenantID:             tenantID,
-			RepoID:               repoID,
-			ClusterID:            clusterID,
-			ScopePath:            req.ScopePath,
-			Name:                 req.Name,
-			Description:          req.Description,
-			CronExpression:       cronExpr,
-			Enabled:              req.Enabled,
-			AlertOnDrift:         req.AlertOnDrift,
+			TenantID:               tenantID,
+			RepoID:                 repoID,
+			ClusterID:              clusterID,
+			ScopePath:              req.ScopePath,
+			Name:                   req.Name,
+			Description:            req.Description,
+			CronExpression:         cronExpr,
+			Enabled:                req.Enabled,
+			AlertOnDrift:           req.AlertOnDrift,
 			AlertSeverityThreshold: alertThreshold,
-			NextRunAt:            &nextRun,
-			CreatedBy:            userID,
+			NextRunAt:              &nextRun,
+			CreatedBy:              userID,
 		}
 
 		if err := deps.Repos.DriftSchedule.Create(ctx, schedule); err != nil {
@@ -2622,14 +2628,14 @@ func gitopsUpdateDriftSchedule(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			RepoID               *string `json:"repo_id"`
-			ClusterID            *string `json:"cluster_id"`
-			ScopePath            *string `json:"scope_path"`
-			Name                 *string `json:"name"`
-			Description          *string `json:"description"`
-			CronExpression       *string `json:"cron_expression"`
-			Enabled              *bool   `json:"enabled"`
-			AlertOnDrift         *bool   `json:"alert_on_drift"`
+			RepoID                 *string `json:"repo_id"`
+			ClusterID              *string `json:"cluster_id"`
+			ScopePath              *string `json:"scope_path"`
+			Name                   *string `json:"name"`
+			Description            *string `json:"description"`
+			CronExpression         *string `json:"cron_expression"`
+			Enabled                *bool   `json:"enabled"`
+			AlertOnDrift           *bool   `json:"alert_on_drift"`
 			AlertSeverityThreshold *string `json:"alert_severity_threshold"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {

@@ -24,13 +24,13 @@ type ConfigResolver func(ctx context.Context, pluginName string, tenantID uuid.U
 
 // Engine executes workflow DAGs step by step.
 type Engine struct {
-	workflowRepo       *repository.WorkflowRepository
-	entityRepo         *repository.EntityRepository
-	deploymentRepo     *repository.DeploymentRepository
-	deploymentService  *service.DeploymentService
-	eventBus           *events.Bus
-	providerRegistry   *provider.Registry
-	ConfigResolver     ConfigResolver
+	workflowRepo      *repository.WorkflowRepository
+	entityRepo        *repository.EntityRepository
+	deploymentRepo    *repository.DeploymentRepository
+	deploymentService *service.DeploymentService
+	eventBus          *events.Bus
+	providerRegistry  *provider.Registry
+	ConfigResolver    ConfigResolver
 }
 
 // NewEngine creates a new workflow execution engine.
@@ -292,17 +292,17 @@ func (e *Engine) executeEntityUpdate(ctx context.Context, step *models.StepSpec,
 // straight to "deployed") for demo mode.
 func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenantID uuid.UUID) (json.RawMessage, error) {
 	var params struct {
-		ProjectName     string     `json:"project_name"`
-		ImageTag        string     `json:"image_tag"`
-		ImageRepository string     `json:"image_repository"`
-		Stage           string     `json:"stage"`
-		TeamName        string     `json:"team_name"`
-		Namespace       string     `json:"namespace"`
-		JiraIssueKey    string     `json:"jira_issue_key"`
-		JiraSummary     string     `json:"jira_summary"`
-		TargetClusterID *uuid.UUID `json:"target_cluster_id"`
-		Replicas        int        `json:"replicas"`
-		TimeoutSeconds  int        `json:"timeout_seconds"`
+		ProjectName     string          `json:"project_name"`
+		ImageTag        string          `json:"image_tag"`
+		ImageRepository string          `json:"image_repository"`
+		Stage           string          `json:"stage"`
+		TeamName        string          `json:"team_name"`
+		Namespace       string          `json:"namespace"`
+		JiraIssueKey    string          `json:"jira_issue_key"`
+		JiraSummary     string          `json:"jira_summary"`
+		TargetClusterID *uuid.UUID      `json:"target_cluster_id"`
+		Replicas        int             `json:"replicas"`
+		TimeoutSeconds  int             `json:"timeout_seconds"`
 		Spec            json.RawMessage `json:"spec"`
 	}
 	if step.Params != nil {
@@ -333,10 +333,10 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 	}
 
 	// Determine initial status: if we have a cluster and service, deployment will be real
-	initialStatus := "deployed" // simulated mode
-	if params.TargetClusterID != nil && e.deploymentService != nil {
-		initialStatus = "pending"
+	if params.TargetClusterID == nil {
+		return nil, fmt.Errorf("no target cluster specified for deployment step %q", step.Name)
 	}
+	initialStatus := "pending"
 
 	deployment := &repository.Deployment{
 		TenantID:          tenantID,
@@ -359,9 +359,8 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 		return nil, fmt.Errorf("create deployment: %w", err)
 	}
 
-	// If a target cluster is specified and deployment service is available,
-	// perform the actual Kubernetes deployment
-	if params.TargetClusterID != nil && e.deploymentService != nil {
+	// If deployment service is available, perform the actual Kubernetes deployment
+	if e.deploymentService != nil {
 		slog.Info("performing real deployment via DeploymentService", "step", step.Name, "deployment_id", deployment.ID)
 		deployCtx := context.WithoutCancel(ctx)
 		go func() {
@@ -369,6 +368,7 @@ func (e *Engine) executeDeploy(ctx context.Context, step *models.StepSpec, tenan
 				deployCtx,
 				deployment.ID,
 				*params.TargetClusterID,
+				tenantID,
 				params.Namespace,
 				params.ProjectName,
 				params.Replicas,
@@ -448,21 +448,16 @@ func (e *Engine) executePluginAction(ctx context.Context, step *models.StepSpec,
 			return json.RawMessage(resp.Output), nil
 		}
 		if err != nil {
-			slog.Warn("plugin dispatch failed, falling back to simulated", "step", step.Name, "plugin", pluginName, "error", err)
-		} else {
-			// The plugin reported failure — log but do not silently succeed.
-			slog.Warn("plugin action reported failure, falling back to simulated", "step", step.Name, "plugin", pluginName, "action", actionName, "error", resp.Error)
+			slog.Error("plugin dispatch failed", "step", step.Name, "plugin", pluginName, "error", err)
+			return nil, fmt.Errorf("plugin action %q failed: %w", step.Plugin, err)
 		}
+		// The plugin reported failure — treat as hard error.
+		slog.Error("plugin action reported failure", "step", step.Name, "plugin", pluginName, "action", actionName, "error", resp.Error)
+		return nil, fmt.Errorf("plugin action %q reported failure: %s", step.Plugin, resp.Error)
 	}
 
-	// Fallback: simulated execution
-	out, _ := json.Marshal(map[string]interface{}{
-		"plugin": pluginName,
-		"action": actionName,
-		"params": json.RawMessage(step.Params),
-		"status": "simulated",
-	})
-	return out, nil
+	// No provider registry available — fail loudly instead of simulating success.
+	return nil, fmt.Errorf("no provider registry available for plugin action %q", step.Plugin)
 }
 
 // executeStepWithConditions handles skip/run_when conditions and executes the step.

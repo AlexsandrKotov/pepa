@@ -36,14 +36,14 @@ func NewServiceDeploymentService(
 // PerformServiceDeployment executes a service deployment to a Kubernetes cluster.
 func (s *ServiceDeploymentService) PerformServiceDeployment(
 	ctx context.Context,
-	deploymentID, serviceID, clusterID uuid.UUID,
+	deploymentID, serviceID, clusterID, tenantID uuid.UUID,
 	namespace, releaseName string,
 	specJSON json.RawMessage,
 ) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, clusterID)
+	kubeconfig, err := s.executor.ResolveKubeconfig(ctx, clusterID, tenantID)
 	if err != nil {
 		slog.Info("ERROR: service deployment : get kubeconfig", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {
@@ -52,7 +52,7 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 		return fmt.Errorf("get kubeconfig: %w", err)
 	}
 
-	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, clusterID)
+	client, err := s.executor.CreateK8sClient(ctx, kubeconfig, clusterID, tenantID)
 	if err != nil {
 		slog.Info("ERROR: service deployment : create k8s client", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {
@@ -78,7 +78,7 @@ func (s *ServiceDeploymentService) PerformServiceDeployment(
 	}
 
 	// Execute deploy via shared executor (handles Helm vs Raw routing + credentials)
-	result, err := s.executor.ExecuteDeploy(ctx, client, deploySpec, releaseName, namespace, 1, 300)
+	result, err := s.executor.ExecuteDeploy(ctx, client, deploySpec, tenantID, releaseName, namespace, 1, 300)
 	if err != nil {
 		slog.Info("ERROR: service deployment", "id", deploymentID, "error", err)
 		if s.serviceRepo != nil {

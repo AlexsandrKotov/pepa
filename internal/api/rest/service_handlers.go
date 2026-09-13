@@ -204,7 +204,7 @@ func (h *ServiceHandlers) CreateService(c *gin.Context) {
 			go func() {
 				if err := h.deps.Services.ServiceDeployment.PerformServiceDeployment(
 					context.Background(),
-					deployment.ID, service.ID, clusterUUID, service.Namespace,
+					deployment.ID, service.ID, clusterUUID, tenantID, service.Namespace,
 					service.Name, spec,
 				); err != nil {
 					slog.Info("ERROR: service deployment failed", "id", deployment.ID, "error", err)
@@ -250,7 +250,7 @@ func (h *ServiceHandlers) DeleteService(c *gin.Context) {
 		return
 	}
 
-	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
+	if err := h.repo.Delete(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 		respondInternalError(c, err)
 		return
 	}
@@ -290,14 +290,14 @@ func (h *ServiceHandlers) DeployService(c *gin.Context) {
 			clusterUUID, parseErr := uuid.Parse(req.ClusterID)
 			if parseErr == nil {
 				// Update service status to deploying
-				_ = h.repo.SetStatus(c.Request.Context(), serviceID, "deploying")
+				_ = h.repo.SetStatus(c.Request.Context(), serviceID, "deploying", tenantID)
 				// Build deployment spec from service configuration
 				spec := buildServiceDeploySpec(svc, req)
 				releaseName := svc.Name
 				go func() {
 					if err := h.deps.Services.ServiceDeployment.PerformServiceDeployment(
 						context.Background(),
-						deployment.ID, serviceID, clusterUUID, svc.Namespace,
+						deployment.ID, serviceID, clusterUUID, tenantID, svc.Namespace,
 						releaseName, spec,
 					); err != nil {
 						slog.Info("ERROR: service deployment failed", "id", deployment.ID, "error", err)

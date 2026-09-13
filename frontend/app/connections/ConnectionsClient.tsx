@@ -20,11 +20,15 @@ const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; col
   { type: 'git', label: 'Git', icon: 'git', color: '#F05032', description: 'GitHub, GitLab, Gitea, Bitbucket, local' },
   { type: 'gitlab', label: 'GitLab', icon: 'gitlab', color: '#FC6D26', description: 'Source code and CI/CD', requiredPlugins: ['gitlab'] },
   { type: 'jira', label: 'Jira', icon: 'jira', color: '#0052CC', description: 'Issue tracking and project management', requiredPlugins: ['jira'] },
+  { type: 'kubernetes', label: 'Kubernetes', icon: 'kubernetes', color: '#326CE5', description: 'Kubernetes cluster kubeconfig for GitOps and service discovery' },
+  { type: 'argocd', label: 'ArgoCD', icon: 'argocd', color: '#EF7B4D', description: 'GitOps continuous delivery for Kubernetes', requiredPlugins: ['argocd'] },
+  { type: 'fluxcd', label: 'FluxCD', icon: 'fluxcd', color: '#5468D3', description: 'GitOps toolkit for Kubernetes, CRD mode', requiredPlugins: ['fluxcd'] },
+  { type: 'docker', label: 'Docker', icon: 'docker', color: '#2496ED', description: 'Docker host for container management' },
   { type: 'ai', label: 'AI Provider', icon: 'ai', color: '#8B5CF6', description: 'AI and LLM services' },
   { type: 'storage', label: 'Storage', icon: 'storage', color: '#F59E0B', description: 'Object storage (S3, MinIO)', requiredPlugins: ['s3'] },
+  { type: 'secret', label: 'Vault / Secrets', icon: 'vault', color: '#FFD814', description: 'HashiCorp Vault for secret management' },
   { type: 'proxmox', label: 'Proxmox VE', icon: 'proxmox', color: '#E57000', description: 'Virtual machines and LXC containers', requiredPlugins: ['proxmox'] },
   { type: 'vmware', label: 'VMware vCenter', icon: 'vmware', color: '#607D8B', description: 'ESXi virtual machines via vCenter', requiredPlugins: ['vmware'] },
-  { type: 'kubernetes', label: 'Kubernetes', icon: 'kubernetes', color: '#326CE5', description: 'Kubernetes cluster kubeconfig for GitOps and service discovery' },
   { type: 'notification', label: 'Notifications', icon: 'slack', color: '#E01E5A', description: 'Email, Webhook, Slack, Telegram, Microsoft Teams' },
   { type: 'sonarqube', label: 'SonarQube', icon: 'sonarqube', color: '#4E9BCD', description: 'Code quality and security analysis', requiredPlugins: ['sonarqube'] },
 ];
@@ -1011,6 +1015,54 @@ function AddConnectionModal({
                     : 'Provide a kubeconfig for CRD mode (direct Kubernetes API access). Leave Server URL empty to use CRD mode exclusively.'}
                 </p>
               </div>
+            </>
+          )}
+
+          {selectedType === 'sonarqube' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">SonarQube URL *</label>
+                <input
+                  type="url"
+                  value={config.url || ''}
+                  onChange={e => setConfig({ ...config, url: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                  placeholder="https://sonarqube.example.com"
+                />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  Base URL of your SonarQube instance. PEPA only reads its REST API — the analysis itself runs in your CI or on the SonarQube server.
+                </p>
+              </div>
+              <VaultInput
+                label="Token *"
+                field="token"
+                value={config.token || ''}
+                onChange={v => setConfig({ ...config, token: v })}
+                vaultRef={vaultRefs.token}
+                onOpenVault={onOpenVaultPicker}
+                onRemoveVault={onRemoveVault}
+                placeholder="sqp_... (generate in SonarQube → My Account → Security)"
+                required
+              />
+              <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+                Create the token in SonarQube under My Account → Security → Generate Token. Read access to <code className="bg-[var(--border-light)] px-1 rounded">projects</code>, <code className="bg-[var(--border-light)] px-1 rounded">issues</code> and <code className="bg-[var(--border-light)] px-1 rounded">measures</code> is enough to collect reports; marking an issue as false positive requires permission to edit issues.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="sonar_insecure"
+                  checked={config.insecure === 'true'}
+                  onChange={e => setConfig({ ...config, insecure: e.target.checked ? 'true' : 'false' })}
+                  className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                />
+                <label htmlFor="sonar_insecure" className="text-sm text-[var(--text-secondary)]">
+                  Skip TLS verification (for self-signed certificates)
+                </label>
+              </div>
+              <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+                Scan targets pick up this connection under Security → Code Quality; tokens are never stored in the target configuration.
+              </p>
             </>
           )}
 

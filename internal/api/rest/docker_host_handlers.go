@@ -240,7 +240,7 @@ func deleteDockerHost(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 			return
 		}
-		if err := deps.Repos.DockerHost.DeleteHost(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.DockerHost.DeleteHost(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}

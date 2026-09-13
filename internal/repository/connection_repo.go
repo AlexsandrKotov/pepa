@@ -32,26 +32,26 @@ const (
 	ConnectionNotification ConnectionType = "notification"
 	ConnectionSonarQube    ConnectionType = "sonarqube"
 	ConnectionKubernetes   ConnectionType = "kubernetes"
-	ConnectionArgoCD       ConnectionType = "argocd"   // legacy — use ConnectionKubernetes for new connections
-	ConnectionFluxCD       ConnectionType = "fluxcd"   // legacy — use ConnectionKubernetes for new connections
+	ConnectionArgoCD       ConnectionType = "argocd" // legacy — use ConnectionKubernetes for new connections
+	ConnectionFluxCD       ConnectionType = "fluxcd" // legacy — use ConnectionKubernetes for new connections
 )
 
 // Connection represents an external service connection.
 type Connection struct {
-	ID               uuid.UUID         `json:"id"`
-	TenantID         uuid.UUID         `json:"tenant_id"`
-	OwnerID          *uuid.UUID        `json:"owner_id,omitempty"`
-	Type             ConnectionType    `json:"type"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description"`
-	Config           map[string]any    `json:"config"`
-	Status           string            `json:"status"`
-	LastCheckAt      *time.Time        `json:"last_check_at,omitempty"`
-	Labels           map[string]string `json:"labels"`
-	Notes            string            `json:"notes"`
-	FallbackToAdmin  bool              `json:"fallback_to_admin"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+	ID              uuid.UUID         `json:"id"`
+	TenantID        uuid.UUID         `json:"tenant_id"`
+	OwnerID         *uuid.UUID        `json:"owner_id,omitempty"`
+	Type            ConnectionType    `json:"type"`
+	Name            string            `json:"name"`
+	Description     string            `json:"description"`
+	Config          map[string]any    `json:"config"`
+	Status          string            `json:"status"`
+	LastCheckAt     *time.Time        `json:"last_check_at,omitempty"`
+	Labels          map[string]string `json:"labels"`
+	Notes           string            `json:"notes"`
+	FallbackToAdmin bool              `json:"fallback_to_admin"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // ConnectionRepository handles connection persistence.
@@ -424,13 +424,16 @@ func isSensitiveKey(key string) bool {
 	return utils.IsSensitiveKey(key)
 }
 
-// Delete removes a connection.
-func (r *ConnectionRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM connections WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("delete connection: %w", err)
+// Delete removes a connection, scoped to the given tenant.
+func (r *ConnectionRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	query := `DELETE FROM connections WHERE id = $1`
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += ` AND tenant_id = $2`
+		args = append(args, tenantID)
 	}
-	return nil
+	_, err := r.pool.Exec(ctx, query, args...)
+	return err
 }
 
 // UpdateStatus updates the status and last_check_at of a connection.
@@ -469,7 +472,7 @@ func (r *ConnectionRepository) CountByType(ctx context.Context, tenantID uuid.UU
 
 // FindByType returns all connections of a given type across all tenants.
 // Used by the plugin system to resolve connection credentials for plugins.
-func (r *ConnectionRepository) FindByType(ctx context.Context, connType string) ([]Connection, error) {
+func (r *ConnectionRepository) FindByType(ctx context.Context, connType string, tenantID uuid.UUID) ([]Connection, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
 		       type, name, COALESCE(description,''),
@@ -477,9 +480,9 @@ func (r *ConnectionRepository) FindByType(ctx context.Context, connType string) 
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
 		       COALESCE(fallback_to_admin, true),
 		       created_at, updated_at
-		FROM connections WHERE type = $1 AND status = 'connected'
+		FROM connections WHERE type = $1 AND tenant_id = $2 AND status = 'connected'
 		ORDER BY updated_at DESC
-	`, connType)
+	`, connType, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("find connections by type: %w", err)
 	}
@@ -512,9 +515,9 @@ func (r *ConnectionRepository) FindByType(ctx context.Context, connType string) 
 	return items, nil
 }
 
-// FindByTypeDecrypted returns connections of a given type with decrypted config.
-func (r *ConnectionRepository) FindByTypeDecrypted(ctx context.Context, connType string) ([]Connection, error) {
-	conns, err := r.FindByType(ctx, connType)
+// FindByTypeDecrypted returns connections of a given type with decrypted config, scoped to tenant.
+func (r *ConnectionRepository) FindByTypeDecrypted(ctx context.Context, connType string, tenantID uuid.UUID) ([]Connection, error) {
+	conns, err := r.FindByType(ctx, connType, tenantID)
 	if err != nil {
 		return nil, err
 	}

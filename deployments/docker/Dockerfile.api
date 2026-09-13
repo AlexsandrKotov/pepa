@@ -64,5 +64,6 @@ COPY deployments/docker/entrypoint.api.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8080
+USER pepa
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/api-server"]

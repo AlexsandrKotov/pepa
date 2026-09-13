@@ -3,7 +3,7 @@
 -- Supports Trivy and SonarQube integration with scheduling and reporting
 
 -- scan_targets: what to scan
-CREATE TABLE scan_targets (
+CREATE TABLE IF NOT EXISTS scan_targets (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL,
   name TEXT NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE scan_targets (
 );
 
 -- scan_runs: individual scan executions with persisted results
-CREATE TABLE scan_runs (
+CREATE TABLE IF NOT EXISTS scan_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL,
   target_id UUID REFERENCES scan_targets(id) ON DELETE CASCADE,
@@ -40,7 +40,7 @@ CREATE TABLE scan_runs (
 );
 
 -- scan_schedules: cron-based recurring scan configs
-CREATE TABLE scan_schedules (
+CREATE TABLE IF NOT EXISTS scan_schedules (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL,
   target_id UUID NOT NULL REFERENCES scan_targets(id) ON DELETE CASCADE,

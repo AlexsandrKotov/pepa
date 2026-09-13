@@ -105,7 +105,7 @@ interface EntitySource {
 // Lightweight fetch that uses the httpOnly cookie auth (same origin)
 async function apiFetch<T>(path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${getBase()}${path}`);
+    const res = await fetch(`${getBase()}${path}`, { credentials: 'include' });
     if (!res.ok) return null;
     return res.json() as Promise<T>;
   } catch {

@@ -42,63 +42,63 @@ type Components struct {
 	JobQueue         *queue.Queue
 
 	// Repositories
-	EntityRepo          *repository.EntityRepository
-	WorkflowRepo        *repository.WorkflowRepository
-	PluginRepo          *repository.PluginRepository
-	ScorecardRepo       *repository.ScorecardRepository
-	AuditRepo           *repository.AuditRepository
-	ClusterRepo         *repository.ClusterRepository
-	DeploymentRepo      *repository.DeploymentRepository
-	JiraRepo            *repository.JiraRepository
-	ConnectionRepo      *repository.ConnectionRepository
-	ServiceRepo         *repository.ServiceRepository
-	SettingsRepo        *repository.SettingsRepository
-	EnvironmentRepo     *repository.EnvironmentRepository
-	EnvVariableRepo     *repository.EnvironmentVariableRepository
-	DockerHostRepo      *repository.DockerHostRepository
-	HelmRepo            *repository.HelmRepository
-	RegistryRepo        *repository.RegistryRepository
-	PipelineSourceRepo  *repository.PipelineSourceRepository
-	PipelinePresetRepo  *repository.PipelinePresetRepository
-	PipelineRunRepo     *repository.PipelineRunRepository
-	VaultRepo           *repository.VaultRepository
-	VaultConfigRepo     *repository.VaultConfigRepository
-	AuthRepo            *repository.AuthRepository
-	TeamWorkflowRepo    *repository.TeamWorkflowRepository
-	GitopsRepo          *gitops.Repository
-	UserCredentialRepo  *repository.UserCredentialRepository
-	CredentialShareRepo *repository.CredentialShareRepository
-	OrganizationRepo    *repository.OrganizationRepository
-	RAGRepo             *repository.RAGRepository
-	SSHHostRepo         *repository.SSHHostRepository
-	SSHHostGroupRepo    *repository.SSHHostGroupRepository
-	PluginActivityRepo  *repository.PluginActivityRepository
-	SecurityScanRepo    *repository.SecurityScanRepository
-	ScanIgnoreRepo      *repository.ScanIgnoreRepository
-	DevOpsRepo          *repository.DevOpsRepository
-	NotificationRuleRepo *repository.NotificationRuleRepository
-	NotificationLogRepo  *repository.NotificationLogRepository
-	GitOpsBindingRepo    *repository.GitOpsBindingRepository
-	DriftScheduleRepo    *gitops.DriftScheduleRepository
+	EntityRepo              *repository.EntityRepository
+	WorkflowRepo            *repository.WorkflowRepository
+	PluginRepo              *repository.PluginRepository
+	ScorecardRepo           *repository.ScorecardRepository
+	AuditRepo               *repository.AuditRepository
+	ClusterRepo             *repository.ClusterRepository
+	DeploymentRepo          *repository.DeploymentRepository
+	JiraRepo                *repository.JiraRepository
+	ConnectionRepo          *repository.ConnectionRepository
+	ServiceRepo             *repository.ServiceRepository
+	SettingsRepo            *repository.SettingsRepository
+	EnvironmentRepo         *repository.EnvironmentRepository
+	EnvVariableRepo         *repository.EnvironmentVariableRepository
+	DockerHostRepo          *repository.DockerHostRepository
+	HelmRepo                *repository.HelmRepository
+	RegistryRepo            *repository.RegistryRepository
+	PipelineSourceRepo      *repository.PipelineSourceRepository
+	PipelinePresetRepo      *repository.PipelinePresetRepository
+	PipelineRunRepo         *repository.PipelineRunRepository
+	VaultRepo               *repository.VaultRepository
+	VaultConfigRepo         *repository.VaultConfigRepository
+	AuthRepo                *repository.AuthRepository
+	TeamWorkflowRepo        *repository.TeamWorkflowRepository
+	GitopsRepo              *gitops.Repository
+	UserCredentialRepo      *repository.UserCredentialRepository
+	CredentialShareRepo     *repository.CredentialShareRepository
+	OrganizationRepo        *repository.OrganizationRepository
+	RAGRepo                 *repository.RAGRepository
+	SSHHostRepo             *repository.SSHHostRepository
+	SSHHostGroupRepo        *repository.SSHHostGroupRepository
+	PluginActivityRepo      *repository.PluginActivityRepository
+	SecurityScanRepo        *repository.SecurityScanRepository
+	ScanIgnoreRepo          *repository.ScanIgnoreRepository
+	DevOpsRepo              *repository.DevOpsRepository
+	NotificationRuleRepo    *repository.NotificationRuleRepository
+	NotificationLogRepo     *repository.NotificationLogRepository
+	GitOpsBindingRepo       *repository.GitOpsBindingRepository
+	DriftScheduleRepo       *gitops.DriftScheduleRepository
 	EnvironmentOverviewRepo *repository.EnvironmentOverviewRepository
-	SelfServiceRepo      *repository.SelfServiceDeploymentRepository
-	AutoDeployRuleRepo   *repository.AutoDeployRuleRepository
+	SelfServiceRepo         *repository.SelfServiceDeploymentRepository
+	AutoDeployRuleRepo      *repository.AutoDeployRuleRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
 
 	// AI
-	AIManager        *ai.Manager
-	RAGPipeline      *ai.RAGPipeline
-	IngestionEngine  *ai.IngestionEngine
-	RAGWatcher       *ai.RAGWatcher
-	RiskScorer       *ai.RiskScorer
-	DocGenerator     *ai.DocGenerator
-	CostAdvisor      *ai.CostAdvisor
-	StaleDetector    *ai.StaleDetector
-	WorkflowBuilder  *ai.WorkflowBuilder
-	Specialists      *ai.SpecialistRegistry
-	Coordinator      *ai.AgentCoordinator
+	AIManager       *ai.Manager
+	RAGPipeline     *ai.RAGPipeline
+	IngestionEngine *ai.IngestionEngine
+	RAGWatcher      *ai.RAGWatcher
+	RiskScorer      *ai.RiskScorer
+	DocGenerator    *ai.DocGenerator
+	CostAdvisor     *ai.CostAdvisor
+	StaleDetector   *ai.StaleDetector
+	WorkflowBuilder *ai.WorkflowBuilder
+	Specialists     *ai.SpecialistRegistry
+	Coordinator     *ai.AgentCoordinator
 
 	// Observability
 	TracingShutdown func(context.Context) error
@@ -305,56 +305,56 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 
 	// Initialize all repositories
 	c := &Components{
-		Config:              cfg,
-		DB:                  db,
-		Redis:               redis,
-		Storage:             pluginStorage,
-		PluginMgr:           pluginMgr,
-		ProviderRegistry:    providerRegistry,
-		EventBus:            eventBus,
-		JobQueue:            jobQueue,
-		TracingShutdown:     otelShutdown,
-		EntityRepo:          repository.NewEntityRepository(db),
-		WorkflowRepo:        repository.NewWorkflowRepository(db),
-		PluginRepo:          repository.NewPluginRepository(db),
-		ScorecardRepo:       repository.NewScorecardRepository(db),
-		AuditRepo:           repository.NewAuditRepository(db),
-		ClusterRepo:         repository.NewClusterRepository(db),
-		DeploymentRepo:      repository.NewDeploymentRepository(db),
-		JiraRepo:            repository.NewJiraRepository(db),
-		ConnectionRepo:      repository.NewConnectionRepository(db),
-		ServiceRepo:         repository.NewServiceRepository(db),
-		SettingsRepo:        settingsRepo,
-		EnvironmentRepo:     repository.NewEnvironmentRepository(db),
-		EnvVariableRepo:     repository.NewEnvironmentVariableRepository(db),
-		DockerHostRepo:      repository.NewDockerHostRepository(db),
-		HelmRepo:            repository.NewHelmRepository(db),
-		RegistryRepo:        repository.NewRegistryRepository(db),
-		PipelineSourceRepo:  repository.NewPipelineSourceRepository(db),
-		PipelinePresetRepo:  repository.NewPipelinePresetRepository(db),
-		PipelineRunRepo:     repository.NewPipelineRunRepository(db),
-		VaultRepo:           repository.NewVaultRepository(db),
-		VaultConfigRepo:     repository.NewVaultConfigRepository(db.Pool),
-		AuthRepo:            repository.NewAuthRepository(db.Pool),
-		TeamWorkflowRepo:    repository.NewTeamWorkflowRepository(db),
-		GitopsRepo:          gitops.NewRepository(db),
-		UserCredentialRepo:  repository.NewUserCredentialRepository(db.Pool),
-		CredentialShareRepo: repository.NewCredentialShareRepository(db.Pool),
-		OrganizationRepo:    repository.NewOrganizationRepository(db.Pool),
-		RAGRepo:             repository.NewRAGRepository(db),
-		SSHHostRepo:         repository.NewSSHHostRepository(db.Pool),
-		SSHHostGroupRepo:    repository.NewSSHHostGroupRepository(db.Pool),
-		PluginActivityRepo:  repository.NewPluginActivityRepository(db),
-		SecurityScanRepo:    repository.NewSecurityScanRepository(db),
-		ScanIgnoreRepo:      repository.NewScanIgnoreRepository(db),
-		DevOpsRepo:          repository.NewDevOpsRepository(db),
-		NotificationRuleRepo: repository.NewNotificationRuleRepository(db),
-		NotificationLogRepo:  repository.NewNotificationLogRepository(db),
-		GitOpsBindingRepo:    repository.NewGitOpsBindingRepository(db.Pool),
-		DriftScheduleRepo:    gitops.NewDriftScheduleRepository(db),
+		Config:                  cfg,
+		DB:                      db,
+		Redis:                   redis,
+		Storage:                 pluginStorage,
+		PluginMgr:               pluginMgr,
+		ProviderRegistry:        providerRegistry,
+		EventBus:                eventBus,
+		JobQueue:                jobQueue,
+		TracingShutdown:         otelShutdown,
+		EntityRepo:              repository.NewEntityRepository(db),
+		WorkflowRepo:            repository.NewWorkflowRepository(db),
+		PluginRepo:              repository.NewPluginRepository(db),
+		ScorecardRepo:           repository.NewScorecardRepository(db),
+		AuditRepo:               repository.NewAuditRepository(db),
+		ClusterRepo:             repository.NewClusterRepository(db),
+		DeploymentRepo:          repository.NewDeploymentRepository(db),
+		JiraRepo:                repository.NewJiraRepository(db),
+		ConnectionRepo:          repository.NewConnectionRepository(db),
+		ServiceRepo:             repository.NewServiceRepository(db),
+		SettingsRepo:            settingsRepo,
+		EnvironmentRepo:         repository.NewEnvironmentRepository(db),
+		EnvVariableRepo:         repository.NewEnvironmentVariableRepository(db),
+		DockerHostRepo:          repository.NewDockerHostRepository(db),
+		HelmRepo:                repository.NewHelmRepository(db),
+		RegistryRepo:            repository.NewRegistryRepository(db),
+		PipelineSourceRepo:      repository.NewPipelineSourceRepository(db),
+		PipelinePresetRepo:      repository.NewPipelinePresetRepository(db),
+		PipelineRunRepo:         repository.NewPipelineRunRepository(db),
+		VaultRepo:               repository.NewVaultRepository(db),
+		VaultConfigRepo:         repository.NewVaultConfigRepository(db.Pool),
+		AuthRepo:                repository.NewAuthRepository(db.Pool),
+		TeamWorkflowRepo:        repository.NewTeamWorkflowRepository(db),
+		GitopsRepo:              gitops.NewRepository(db),
+		UserCredentialRepo:      repository.NewUserCredentialRepository(db.Pool),
+		CredentialShareRepo:     repository.NewCredentialShareRepository(db.Pool),
+		OrganizationRepo:        repository.NewOrganizationRepository(db.Pool),
+		RAGRepo:                 repository.NewRAGRepository(db),
+		SSHHostRepo:             repository.NewSSHHostRepository(db.Pool),
+		SSHHostGroupRepo:        repository.NewSSHHostGroupRepository(db.Pool),
+		PluginActivityRepo:      repository.NewPluginActivityRepository(db),
+		SecurityScanRepo:        repository.NewSecurityScanRepository(db),
+		ScanIgnoreRepo:          repository.NewScanIgnoreRepository(db),
+		DevOpsRepo:              repository.NewDevOpsRepository(db),
+		NotificationRuleRepo:    repository.NewNotificationRuleRepository(db),
+		NotificationLogRepo:     repository.NewNotificationLogRepository(db),
+		GitOpsBindingRepo:       repository.NewGitOpsBindingRepository(db.Pool),
+		DriftScheduleRepo:       gitops.NewDriftScheduleRepository(db),
 		EnvironmentOverviewRepo: repository.NewEnvironmentOverviewRepository(db.Pool),
-		SelfServiceRepo:      repository.NewSelfServiceDeploymentRepository(db.Pool),
-		AutoDeployRuleRepo:   repository.NewAutoDeployRuleRepository(db.Pool),
+		SelfServiceRepo:         repository.NewSelfServiceDeploymentRepository(db.Pool),
+		AutoDeployRuleRepo:      repository.NewAutoDeployRuleRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry
@@ -451,7 +451,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	// Configure AI providers from AI connections. The Connections page is the
 	// single place to configure AI providers, and connections take precedence
 	// over legacy settings. The most recently created connection wins as default.
-	if aiConns, err := c.ConnectionRepo.FindByTypeDecrypted(context.Background(), string(repository.ConnectionAI)); err == nil {
+	if aiConns, err := c.ConnectionRepo.FindByTypeDecrypted(context.Background(), string(repository.ConnectionAI), uuid.MustParse(database.DefaultTenantID)); err == nil {
 		sort.Slice(aiConns, func(i, j int) bool { return aiConns[i].CreatedAt.Before(aiConns[j].CreatedAt) })
 		applied := 0
 		for i := range aiConns {
@@ -514,17 +514,17 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	// so the Knowledge Base has default documents available. Embeddings require a provider,
 	// but documents are still stored and keyword-searchable without one.
 	tenantID := uuid.MustParse(database.DefaultTenantID)
-	
+
 	// Try to get an AI provider for embeddings (optional)
 	provider, providerErr := aiManager.DefaultProvider()
 	if providerErr != nil {
 		slog.Warn("RAG: no AI provider configured, documents will be stored without embeddings")
 	}
-	
+
 	// Always create ingestion engine (provider may be nil)
 	ingestionEngine := ai.NewIngestionEngine(db.Pool, c.RAGRepo, provider)
 	c.IngestionEngine = ingestionEngine
-	
+
 	// Always seed knowledge base with built-in documentation (runs in background)
 	go func() {
 		seedCtx, seedCancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -533,7 +533,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 			slog.Warn("RAG: documentation seeding failed", "error", err)
 		}
 	}()
-	
+
 	// RAG pipeline, watcher, and proactive AI components require an AI provider
 	if provider != nil {
 		// RAG query pipeline

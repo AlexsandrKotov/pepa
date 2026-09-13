@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { clusters, Cluster, ClusterHealth, ClusterNode, K8sNamespace, K8sResource, FluxResource, ArgoResource } from '@/lib/api';
 import { Toast } from '@/components/Interactive';
@@ -9,8 +9,9 @@ import Tabs from '@/components/Tabs';
 
 export default function ClusterDetailPage() {
   const searchParams = useSearchParams();
+  const params = useParams();
   const router = useRouter();
-  const clusterId = searchParams.get('id') as string;
+  const clusterId = (params?.id as string) || (searchParams.get('id') as string);
   const [cluster, setCluster] = useState<Cluster | null>(null);
   const [health, setHealth] = useState<ClusterHealth | null>(null);
   const [nodes, setNodes] = useState<ClusterNode[]>([]);

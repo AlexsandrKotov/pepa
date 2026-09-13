@@ -304,7 +304,7 @@ func deleteConnection(deps Dependencies) gin.HandlerFunc {
 			_ = deps.Repos.Cluster.DeleteByConnectionID(c.Request.Context(), id)
 		}
 
-		if err := deps.Repos.Connection.Delete(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.Connection.Delete(c.Request.Context(), id, tenantID); err != nil {
 			respondInternalError(c, err)
 			return
 		}
@@ -312,7 +312,7 @@ func deleteConnection(deps Dependencies) gin.HandlerFunc {
 		// Auto-sync: unregister AI provider if no other connection backs it
 		if existing != nil && existing.Type == repository.ConnectionAI {
 			provider, _ := existing.Config["provider"].(string)
-			resyncAIProviderAfterDelete(deps, c.Request.Context(), provider)
+			resyncAIProviderAfterDelete(deps, c.Request.Context(), auth.GetTenantID(c), provider)
 		}
 
 		logAudit(deps, c, "delete", "connection", id.String(), nil, nil)
@@ -356,11 +356,11 @@ func applyAIConnection(deps Dependencies, ctx context.Context, conn *repository.
 // resyncAIProviderAfterDelete keeps the AI manager in sync after an AI
 // connection was deleted: if another connection backs the same provider it is
 // applied, otherwise the provider is unregistered.
-func resyncAIProviderAfterDelete(deps Dependencies, ctx context.Context, provider string) {
+func resyncAIProviderAfterDelete(deps Dependencies, ctx context.Context, tenantID uuid.UUID, provider string) {
 	if deps.AIManager == nil || provider == "" || deps.Repos.Connection == nil {
 		return
 	}
-	conns, err := deps.Repos.Connection.FindByTypeDecrypted(ctx, string(repository.ConnectionAI))
+	conns, err := deps.Repos.Connection.FindByTypeDecrypted(ctx, string(repository.ConnectionAI), tenantID)
 	if err == nil {
 		for i := range conns {
 			if p, _ := conns[i].Config["provider"].(string); p == provider {
@@ -510,7 +510,12 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 				status = "error"
 				message = "No token configured"
 			} else {
-				result := deps.Services.Connection.TestSonarQubeConnection(ctx, url, token)
+				// The Connections form stores the flag as a string; the API also accepts a boolean.
+				insecure := conn.Config["insecure"] == true
+				if raw, ok := conn.Config["insecure"].(string); ok {
+					insecure = raw == "true" || raw == "1"
+				}
+				result := deps.Services.Connection.TestSonarQubeConnection(ctx, url, token, insecure)
 				status, message = result.Status, result.Message
 			}
 		case repository.ConnectionKubernetes:
@@ -1186,15 +1191,15 @@ func connectionHealthDashboard(deps Dependencies) gin.HandlerFunc {
 		}
 
 		type connHealth struct {
-			ID           uuid.UUID  `json:"id"`
-			Name         string     `json:"name"`
-			Type         string     `json:"type"`
-			Status       string     `json:"status"`
-			LastCheckAt  *time.Time `json:"last_check_at,omitempty"`
-			Fallback     bool       `json:"fallback_to_admin"`
-			OwnerID      *uuid.UUID `json:"owner_id,omitempty"`
-			UserCount    int        `json:"user_credential_count"`
-			SharedCount  int        `json:"shared_credential_count"`
+			ID          uuid.UUID  `json:"id"`
+			Name        string     `json:"name"`
+			Type        string     `json:"type"`
+			Status      string     `json:"status"`
+			LastCheckAt *time.Time `json:"last_check_at,omitempty"`
+			Fallback    bool       `json:"fallback_to_admin"`
+			OwnerID     *uuid.UUID `json:"owner_id,omitempty"`
+			UserCount   int        `json:"user_credential_count"`
+			SharedCount int        `json:"shared_credential_count"`
 		}
 
 		result := make([]connHealth, 0, len(items))

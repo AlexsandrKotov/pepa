@@ -53,12 +53,13 @@ func approveDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		d, err := deps.Repos.Deployment.Get(ctx, id)
+		tenantID := auth.GetTenantID(c)
+		d, err := deps.Repos.Deployment.Get(ctx, id, tenantID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
-		if d.TenantID != auth.GetTenantID(c) {
+		if d.TenantID != tenantID {
 			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
@@ -84,7 +85,7 @@ func completePromotion(deps Dependencies, c *gin.Context, d *repository.Deployme
 	ctx := c.Request.Context()
 	user := currentUserLabel(c)
 
-	if err := deps.Repos.Deployment.Promote(ctx, d.ID, user); err != nil {
+	if err := deps.Repos.Deployment.Promote(ctx, d.ID, d.TenantID, user); err != nil {
 		respondInternalError(c, err)
 		return
 	}

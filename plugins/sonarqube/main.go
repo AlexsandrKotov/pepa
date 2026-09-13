@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 )
 
 // SonarQubePlugin implements provider.Provider for SonarQube code quality analysis.
+// The plugin is a pure REST client: SonarQube is an external application and the
+// analysis itself is produced there (CI or manually). PEPA never executes a scanner.
 type SonarQubePlugin struct {
 	url        string
 	token      string
@@ -27,43 +30,57 @@ type SonarQubePlugin struct {
 	httpClient *http.Client
 }
 
+// Paging limits for issue fetching. SonarQube caps deep paging, so we stop at a
+// hard ceiling and report the result as truncated instead of looping forever.
+const (
+	issuesPageSize        = 500
+	issuesMaxFetch        = 5000
+	projectsPageSize      = 50
+	projectsMaxFetch      = 500
+	validIssueTransitions = "falsepositive,wontfix,reopen,accept,confirm"
+)
+
 // QualityGate represents a SonarQube quality gate status.
 type QualityGate struct {
-	Status    string          `json:"status"` // OK, ERROR, WARN, NONE
+	Status     string          `json:"status"` // OK, ERROR, WARN, NONE
 	Conditions []GateCondition `json:"conditions"`
 }
 
 // GateCondition represents a single quality gate condition.
 type GateCondition struct {
-	Status        string `json:"status"`
-	MetricKey     string `json:"metric_key"`
-	Comparator    string `json:"comparator"`
-	PeriodIndex   int    `json:"period_index"`
+	Status         string `json:"status"`
+	MetricKey      string `json:"metric_key"`
+	Comparator     string `json:"comparator"`
+	PeriodIndex    int    `json:"period_index"`
 	ErrorThreshold string `json:"error_threshold"`
-	ActualValue   string `json:"actual_value"`
+	ActualValue    string `json:"actual_value"`
 }
 
 // Issue represents a SonarQube issue (bug, vulnerability, or code smell).
 type Issue struct {
-	Key         string `json:"key"`
-	Rule        string `json:"rule"`
-	Severity    string `json:"severity"`
-	Status      string `json:"status"`
-	Message     string `json:"message"`
-	Component   string `json:"component"`
-	Project     string `json:"project"`
-	Line        int    `json:"line,omitempty"`
-	Type        string `json:"type"`
-	Tags        []string `json:"tags,omitempty"`
-	CreationAt  string `json:"creation_date"`
-	UpdateAt    string `json:"update_date"`
+	Key           string   `json:"key"`
+	Rule          string   `json:"rule"`
+	Severity      string   `json:"severity"`
+	Status        string   `json:"status"`
+	Message       string   `json:"message"`
+	Component     string   `json:"component"`
+	ComponentPath string   `json:"component_path,omitempty"`
+	Project       string   `json:"project"`
+	Line          int      `json:"line,omitempty"`
+	Type          string   `json:"type"`
+	Tags          []string `json:"tags,omitempty"`
+	Effort        string   `json:"effort,omitempty"`
+	Debt          string   `json:"debt,omitempty"`
+	URL           string   `json:"url,omitempty"`
+	CreationAt    string   `json:"creation_date"`
+	UpdateAt      string   `json:"update_date"`
 }
 
 // Measures represents project metrics.
 type Measures struct {
-	Component  string         `json:"component"`
-	Branch     string         `json:"branch,omitempty"`
-	Metrics    []Metric       `json:"metrics"`
+	Component string   `json:"component"`
+	Branch    string   `json:"branch,omitempty"`
+	Metrics   []Metric `json:"metrics"`
 }
 
 // Metric represents a single metric value.
@@ -75,20 +92,82 @@ type Metric struct {
 
 // ProjectSummary is a comprehensive quality summary.
 type ProjectSummary struct {
-	ProjectKey   string       `json:"project_key"`
-	Branch       string       `json:"branch"`
-	QualityGate  *QualityGate `json:"quality_gate"`
-	Measures     *Measures    `json:"measures"`
+	ProjectKey   string        `json:"project_key"`
+	Branch       string        `json:"branch"`
+	QualityGate  *QualityGate  `json:"quality_gate"`
+	Measures     *Measures     `json:"measures"`
 	IssueSummary *IssueSummary `json:"issue_summary"`
-	FetchedAt    string       `json:"fetched_at"`
+	// AnalysisDate is when SonarQube last computed this project. PEPA does not
+	// trigger analyses, so consumers use this to judge report freshness.
+	AnalysisDate string `json:"analysis_date,omitempty"`
+	FetchedAt    string `json:"fetched_at"`
+	// Warnings collects non-fatal collection problems (e.g. measures endpoint
+	// unavailable while the quality gate is fine). The report stays valid.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // IssueSummary holds issue counts by type and severity.
 type IssueSummary struct {
-	Bugs          int `json:"bugs"`
-	Vulnerabilities int `json:"vulnerabilities"`
-	CodeSmells    int `json:"code_smells"`
-	BySeverity    map[string]int `json:"by_severity"`
+	Total           int            `json:"total"`
+	Bugs            int            `json:"bugs"`
+	Vulnerabilities int            `json:"vulnerabilities"`
+	CodeSmells      int            `json:"code_smells"`
+	BySeverity      map[string]int `json:"by_severity"`
+}
+
+// issueFacet is one facet group returned by /api/issues/search.
+type issueFacet struct {
+	Property string            `json:"property"`
+	Values   []issueFacetValue `json:"values"`
+}
+
+// issueFacetValue is a single bucket inside a facet group.
+type issueFacetValue struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+// rawIssue mirrors the issue object as returned by the SonarQube API, using
+// SonarQube's own camelCase field names (additionalFields adds the rest).
+type rawIssue struct {
+	Key           string   `json:"key"`
+	Rule          string   `json:"rule"`
+	Severity      string   `json:"severity"`
+	Status        string   `json:"status"`
+	Message       string   `json:"message"`
+	Component     string   `json:"component"`
+	ComponentPath string   `json:"componentPath"`
+	Project       string   `json:"project"`
+	Line          int      `json:"line"`
+	Type          string   `json:"type"`
+	Tags          []string `json:"tags"`
+	Effort        string   `json:"effort"`
+	Debt          string   `json:"debt"`
+	URL           string   `json:"url"`
+	CreationDate  string   `json:"creationDate"`
+	UpdateDate    string   `json:"updateDate"`
+}
+
+// toIssue maps the API shape onto the plugin's public Issue type.
+func (r rawIssue) toIssue() Issue {
+	return Issue{
+		Key:           r.Key,
+		Rule:          r.Rule,
+		Severity:      r.Severity,
+		Status:        r.Status,
+		Message:       r.Message,
+		Component:     r.Component,
+		ComponentPath: r.ComponentPath,
+		Project:       r.Project,
+		Line:          r.Line,
+		Type:          r.Type,
+		Tags:          r.Tags,
+		Effort:        r.Effort,
+		Debt:          r.Debt,
+		URL:           r.URL,
+		CreationAt:    r.CreationDate,
+		UpdateAt:      r.UpdateDate,
+	}
 }
 
 // validateSonarQubeURL performs basic safety checks on the SonarQube URL.
@@ -128,6 +207,8 @@ func validateSonarQubeURL(rawURL string) error {
 }
 
 // NewSonarQubePlugin creates a new SonarQube plugin instance.
+// Only url and token are mandatory: the project key is per-target, not
+// per-connection, and is normally supplied with each action's params.
 func NewSonarQubePlugin(config map[string]string) (*SonarQubePlugin, error) {
 	sqURL := config["url"]
 	if sqURL == "" {
@@ -138,18 +219,24 @@ func NewSonarQubePlugin(config map[string]string) (*SonarQubePlugin, error) {
 		return nil, fmt.Errorf("sonarqube plugin requires token")
 	}
 	projectKey := config["project_key"]
-	if projectKey == "" {
-		return nil, fmt.Errorf("sonarqube plugin requires project_key")
-	}
 
 	// Validate URL to prevent SSRF
 	if err := validateSonarQubeURL(sqURL); err != nil {
 		return nil, fmt.Errorf("invalid SonarQube URL: %w", err)
 	}
 
+	// Branch stays empty unless explicitly configured: omitting the branch
+	// parameter makes SonarQube use the project's main branch, whereas a wrong
+	// guess such as "main" on a "master"-based project fails the request.
 	branch := config["branch"]
-	if branch == "" {
-		branch = "main"
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// Internal SonarQube instances frequently use self-signed certificates. The
+	// endpoint and this opt-in flag are both provided by a platform admin through
+	// a Connection, never by an end user, so skipping verification is a deliberate
+	// deployment choice rather than user-controlled input.
+	if config["insecure"] == "true" {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // #nosec G402: admin-provided SonarQube endpoint
 	}
 
 	return &SonarQubePlugin{
@@ -158,7 +245,8 @@ func NewSonarQubePlugin(config map[string]string) (*SonarQubePlugin, error) {
 		projectKey: projectKey,
 		branch:     branch,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: transport,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
 					return fmt.Errorf("too many redirects")
@@ -173,10 +261,12 @@ func NewSonarQubePlugin(config map[string]string) (*SonarQubePlugin, error) {
 	}, nil
 }
 
-func (p *SonarQubePlugin) Name() string        { return "sonarqube" }
-func (p *SonarQubePlugin) Version() string     { return "0.1.0" }
-func (p *SonarQubePlugin) Description() string { return "SonarQube code quality scanner — bugs, vulnerabilities, code smells, and coverage analysis" }
-func (p *SonarQubePlugin) PluginType() string  { return "security_scanner" }
+func (p *SonarQubePlugin) Name() string    { return "sonarqube" }
+func (p *SonarQubePlugin) Version() string { return "0.1.0" }
+func (p *SonarQubePlugin) Description() string {
+	return "SonarQube code quality scanner — bugs, vulnerabilities, code smells, and coverage analysis"
+}
+func (p *SonarQubePlugin) PluginType() string { return "security_scanner" }
 
 func (p *SonarQubePlugin) Actions() []string {
 	return []string{
@@ -186,17 +276,29 @@ func (p *SonarQubePlugin) Actions() []string {
 		"get_coverage",
 		"get_measures",
 		"get_project_summary",
+		"list_projects",
+		"get_analysis_status",
+		"transition_issue",
 	}
 }
 
 func (p *SonarQubePlugin) Execute(ctx context.Context, action string, params []byte, config map[string]string) ([]byte, error) {
-	// Allow per-request config override
-	if config != nil && config["url"] != "" && config["token"] != "" && config["project_key"] != "" {
+	// Allow per-request config override. Credentials come from the linked
+	// Connection (url + token); project_key is optional here because most
+	// actions pass it through params.
+	if config != nil && config["url"] != "" && config["token"] != "" {
 		plugin, err := NewSonarQubePlugin(config)
 		if err != nil {
 			return nil, err
 		}
 		return plugin.Execute(ctx, action, params, nil)
+	}
+
+	// The plugin is served with a zero-value struct when unconfigured, so a
+	// missing HTTP client means nobody supplied url/token — fail explicitly
+	// instead of dereferencing a nil client.
+	if p.httpClient == nil {
+		return nil, fmt.Errorf("sonarqube plugin not configured: url and token are required (link a SonarQube connection)")
 	}
 
 	var paramMap map[string]interface{}
@@ -219,6 +321,12 @@ func (p *SonarQubePlugin) Execute(ctx context.Context, action string, params []b
 		return p.getMeasures(ctx, paramMap)
 	case "get_project_summary":
 		return p.getProjectSummary(ctx, paramMap)
+	case "list_projects":
+		return p.listProjects(ctx, paramMap)
+	case "get_analysis_status":
+		return p.getAnalysisStatus(ctx, paramMap)
+	case "transition_issue":
+		return p.transitionIssue(ctx, paramMap)
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
@@ -230,6 +338,16 @@ func (p *SonarQubePlugin) resolveProjectKey(params map[string]interface{}) strin
 		return pk
 	}
 	return p.projectKey
+}
+
+// requireProjectKey fails fast instead of sending an empty componentKeys value,
+// which SonarQube answers with an unrelated "resource not found" error.
+func (p *SonarQubePlugin) requireProjectKey(params map[string]interface{}) (string, error) {
+	key := p.resolveProjectKey(params)
+	if key == "" {
+		return "", fmt.Errorf("project_key is required — set the SonarQube project key on the scan target")
+	}
+	return key, nil
 }
 
 // resolveBranch returns the override or default branch.
@@ -249,6 +367,11 @@ func (p *SonarQubePlugin) apiGet(ctx context.Context, path string, queryParams m
 
 	q := u.Query()
 	for k, v := range queryParams {
+		// Empty values are skipped: SonarQube rejects parameters like "branch="
+		// rather than treating them as absent.
+		if v == "" {
+			continue
+		}
 		q.Set(k, v)
 	}
 	u.RawQuery = q.Encode()
@@ -283,6 +406,60 @@ func (p *SonarQubePlugin) apiGet(ctx context.Context, path string, queryParams m
 	return body, nil
 }
 
+// apiPost performs an authenticated form-encoded POST request to the SonarQube API.
+// SonarQube's write endpoints accept parameters as application/x-www-form-urlencoded.
+func (p *SonarQubePlugin) apiPost(ctx context.Context, path string, form url.Values) ([]byte, error) {
+	u, err := url.Parse(p.url + path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.SetBasicAuth(p.token, "")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sonarqube API request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("authentication failed (401) — check SonarQube token")
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("permission denied (403) — the SonarQube token cannot perform this operation")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("sonarqube API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+}
+
+// parseIssueFacets extracts a counts map from a single facet property of an
+// /api/issues/search response (e.g. "severities" or "types").
+func parseIssueFacets(facets []issueFacet, property string) map[string]int {
+	out := map[string]int{}
+	for _, f := range facets {
+		if f.Property != property {
+			continue
+		}
+		for _, v := range f.Values {
+			out[v.Value] = v.Count
+		}
+	}
+	return out
+}
+
 // analyze fetches the project summary as the main analysis action.
 func (p *SonarQubePlugin) analyze(ctx context.Context, params map[string]interface{}) ([]byte, error) {
 	summary, err := p.fetchProjectSummary(ctx, params)
@@ -294,7 +471,10 @@ func (p *SonarQubePlugin) analyze(ctx context.Context, params map[string]interfa
 
 // getQualityGate fetches the quality gate status.
 func (p *SonarQubePlugin) getQualityGate(ctx context.Context, params map[string]interface{}) ([]byte, error) {
-	projectKey := p.resolveProjectKey(params)
+	projectKey, err := p.requireProjectKey(params)
+	if err != nil {
+		return nil, err
+	}
 	branch := p.resolveBranch(params)
 
 	qp := map[string]string{
@@ -313,12 +493,12 @@ func (p *SonarQubePlugin) getQualityGate(ctx context.Context, params map[string]
 		ProjectStatus struct {
 			Status     string `json:"status"`
 			Conditions []struct {
-				Status        string `json:"status"`
-				MetricKey     string `json:"metricKey"`
-				Comparator    string `json:"comparator"`
-				PeriodIndex   int    `json:"periodIndex"`
+				Status         string `json:"status"`
+				MetricKey      string `json:"metricKey"`
+				Comparator     string `json:"comparator"`
+				PeriodIndex    int    `json:"periodIndex"`
 				ErrorThreshold string `json:"errorThreshold"`
-				ActualValue   string `json:"actualValue"`
+				ActualValue    string `json:"actualValue"`
 			} `json:"conditions"`
 		} `json:"projectStatus"`
 	}
@@ -332,27 +512,29 @@ func (p *SonarQubePlugin) getQualityGate(ctx context.Context, params map[string]
 	}
 	for _, c := range result.ProjectStatus.Conditions {
 		gate.Conditions = append(gate.Conditions, GateCondition{
-			Status:        c.Status,
-			MetricKey:     c.MetricKey,
-			Comparator:    c.Comparator,
-			PeriodIndex:   c.PeriodIndex,
+			Status:         c.Status,
+			MetricKey:      c.MetricKey,
+			Comparator:     c.Comparator,
+			PeriodIndex:    c.PeriodIndex,
 			ErrorThreshold: c.ErrorThreshold,
-			ActualValue:   c.ActualValue,
+			ActualValue:    c.ActualValue,
 		})
 	}
 
 	return json.Marshal(gate)
 }
 
-// getIssues fetches code issues.
-func (p *SonarQubePlugin) getIssues(ctx context.Context, params map[string]interface{}) ([]byte, error) {
-	projectKey := p.resolveProjectKey(params)
-
+// buildIssueSearchParams assembles the shared query for /api/issues/search.
+func (p *SonarQubePlugin) buildIssueSearchParams(params map[string]interface{}) map[string]string {
 	qp := map[string]string{
-		"componentKeys": projectKey,
-		"ps":            "100",
+		"componentKeys":    p.resolveProjectKey(params),
+		"ps":               strconv.Itoa(issuesPageSize),
+		"additionalFields": "_all",
+		"facets":           "severities,types",
 	}
-
+	if branch := p.resolveBranch(params); branch != "" {
+		qp["branch"] = branch
+	}
 	if t, ok := params["types"].(string); ok && t != "" {
 		qp["types"] = t
 	}
@@ -364,68 +546,222 @@ func (p *SonarQubePlugin) getIssues(ctx context.Context, params map[string]inter
 	} else {
 		qp["statuses"] = "OPEN,CONFIRMED,REOPENED"
 	}
-	if ps, ok := params["page_size"].(float64); ok && ps > 0 {
+	if ps, ok := params["page_size"].(float64); ok && ps > 0 && int(ps) <= issuesPageSize {
 		qp["ps"] = strconv.Itoa(int(ps))
 	}
+	return qp
+}
 
-	data, err := p.apiGet(ctx, "/api/issues/search", qp)
+// fetchIssuePages walks /api/issues/search page by page up to issuesMaxFetch.
+func (p *SonarQubePlugin) fetchIssuePages(ctx context.Context, qp map[string]string) ([]Issue, int, []issueFacet, error) {
+	pageSize, _ := strconv.Atoi(qp["ps"])
+	if pageSize <= 0 {
+		pageSize = issuesPageSize
+	}
+
+	var (
+		issues []Issue
+		total  int
+		facets []issueFacet
+	)
+
+	for page := 1; ; page++ {
+		qp["page"] = strconv.Itoa(page)
+		data, err := p.apiGet(ctx, "/api/issues/search", qp)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+
+		var result struct {
+			Total  int          `json:"total"`
+			Facets []issueFacet `json:"facets"`
+			Issues []rawIssue   `json:"issues"`
+		}
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, 0, nil, fmt.Errorf("failed to parse issues: %w", err)
+		}
+
+		total = result.Total
+		if len(facets) == 0 {
+			facets = result.Facets
+		}
+		for _, i := range result.Issues {
+			issues = append(issues, i.toIssue())
+		}
+
+		if len(result.Issues) == 0 || len(issues) >= total || len(issues) >= issuesMaxFetch {
+			break
+		}
+	}
+
+	return issues, total, facets, nil
+}
+
+// getIssues fetches code issues across pages.
+func (p *SonarQubePlugin) getIssues(ctx context.Context, params map[string]interface{}) ([]byte, error) {
+	// Without a project key the query would span every project the token can
+	// see, so refuse instead of sending componentKeys empty.
+	if _, err := p.requireProjectKey(params); err != nil {
+		return nil, err
+	}
+	qp := p.buildIssueSearchParams(params)
+	issues, total, facets, err := p.fetchIssuePages(ctx, qp)
+	if err != nil {
+		return nil, err
+	}
+	if issues == nil {
+		issues = []Issue{}
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"issues":      issues,
+		"total":       total,
+		"fetched":     len(issues),
+		"truncated":   total > len(issues),
+		"by_severity": parseIssueFacets(facets, "severities"),
+		"by_type":     parseIssueFacets(facets, "types"),
+	})
+}
+
+// listProjects returns the analysable projects of the SonarQube instance so the
+// UI can offer project keys instead of making the user guess them.
+func (p *SonarQubePlugin) listProjects(ctx context.Context, params map[string]interface{}) ([]byte, error) {
+	q := ""
+	if s, ok := params["query"].(string); ok {
+		q = s
+	}
+
+	qp := map[string]string{
+		"qualifiers": "TRK",
+		"ps":         strconv.Itoa(projectsPageSize),
+	}
+	if q != "" {
+		qp["q"] = q
+	}
+
+	projects := make([]map[string]string, 0, projectsPageSize)
+	for page := 1; ; page++ {
+		qp["page"] = strconv.Itoa(page)
+		data, err := p.apiGet(ctx, "/api/projects/component_suggestions", qp)
+		if err != nil {
+			return nil, err
+		}
+
+		var result struct {
+			Components []struct {
+				Key       string `json:"key"`
+				Name      string `json:"name"`
+				Qualifier string `json:"qualifier"`
+			} `json:"components"`
+		}
+		if err := json.Unmarshal(data, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse projects: %w", err)
+		}
+		for _, c := range result.Components {
+			projects = append(projects, map[string]string{
+				"key":       c.Key,
+				"name":      c.Name,
+				"qualifier": c.Qualifier,
+			})
+		}
+
+		// A short page is the last one: instances that ignore the page parameter
+		// would otherwise be walked until the ceiling.
+		if len(result.Components) == 0 || len(result.Components) < projectsPageSize || len(projects) >= projectsMaxFetch {
+			break
+		}
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"projects":  projects,
+		"truncated": len(projects) >= projectsMaxFetch,
+	})
+}
+
+// getAnalysisStatus reports whether SonarQube has ever analysed the project.
+// A missing endpoint (older or restricted instances) is reported as unknown
+// rather than an error, so the report can still be collected.
+func (p *SonarQubePlugin) getAnalysisStatus(ctx context.Context, params map[string]interface{}) ([]byte, error) {
+	projectKey, err := p.requireProjectKey(params)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := p.apiGet(ctx, "/api/analysis_reports/has_been_analyzed", map[string]string{
+		"project": projectKey,
+	})
+	if err != nil {
+		return json.Marshal(map[string]interface{}{
+			"has_been_analyzed": nil,
+			"warning":           err.Error(),
+		})
+	}
+
+	// The endpoint returns a bare JSON boolean.
+	var analyzed bool
+	if err := json.Unmarshal(data, &analyzed); err != nil {
+		return json.Marshal(map[string]interface{}{
+			"has_been_analyzed": nil,
+			"warning":           "unexpected response from has_been_analyzed",
+		})
+	}
+
+	return json.Marshal(map[string]interface{}{"has_been_analyzed": analyzed})
+}
+
+// transitionIssue applies an official transition to an issue (e.g. mark as false
+// positive). Transitions are whitelisted — the value is passed straight to the API.
+func (p *SonarQubePlugin) transitionIssue(ctx context.Context, params map[string]interface{}) ([]byte, error) {
+	issueKey, _ := params["issue_key"].(string)
+	transition, _ := params["transition"].(string)
+	if issueKey == "" {
+		return nil, fmt.Errorf("issue_key is required")
+	}
+
+	allowed := false
+	for _, t := range strings.Split(validIssueTransitions, ",") {
+		if t == transition {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return nil, fmt.Errorf("invalid transition %q (must be one of: %s)", transition, validIssueTransitions)
+	}
+
+	data, err := p.apiPost(ctx, "/api/issues/do_transition", url.Values{
+		"issue":      []string{issueKey},
+		"transition": []string{transition},
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	var result struct {
-		Total  int `json:"total"`
-		Paging struct {
-			PageIndex int `json:"pageIndex"`
-			Total     int `json:"total"`
-		} `json:"paging"`
-		Issues []struct {
-			Key        string   `json:"key"`
-			Rule       string   `json:"rule"`
-			Severity   string   `json:"severity"`
-			Status     string   `json:"status"`
-			Message    string   `json:"message"`
-			Component  string   `json:"component"`
-			Project    string   `json:"project"`
-			Line       int      `json:"line"`
-			Type       string   `json:"type"`
-			Tags       []string `json:"tags"`
-			CreationAt string   `json:"creationDate"`
-			UpdateAt   string   `json:"updateDate"`
-		} `json:"issues"`
+		Issue struct {
+			Key    string `json:"key"`
+			Status string `json:"status"`
+		} `json:"issue"`
 	}
-
 	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse issues: %w", err)
-	}
-
-	issues := make([]Issue, 0, len(result.Issues))
-	for _, i := range result.Issues {
-		issues = append(issues, Issue{
-			Key:        i.Key,
-			Rule:       i.Rule,
-			Severity:   i.Severity,
-			Status:     i.Status,
-			Message:    i.Message,
-			Component:  i.Component,
-			Project:    i.Project,
-			Line:       i.Line,
-			Type:       i.Type,
-			Tags:       i.Tags,
-			CreationAt: i.CreationAt,
-			UpdateAt:   i.UpdateAt,
-		})
+		// A successful transition with an unparseable body is still a success;
+		// report the echo we have rather than failing the user's action.
+		return json.Marshal(map[string]interface{}{"ok": true})
 	}
 
 	return json.Marshal(map[string]interface{}{
-		"issues": issues,
-		"total":  result.Total,
+		"ok":     true,
+		"key":    result.Issue.Key,
+		"status": result.Issue.Status,
 	})
 }
 
 // getCoverage fetches code coverage metrics.
 func (p *SonarQubePlugin) getCoverage(ctx context.Context, params map[string]interface{}) ([]byte, error) {
-	projectKey := p.resolveProjectKey(params)
+	projectKey, err := p.requireProjectKey(params)
+	if err != nil {
+		return nil, err
+	}
 	branch := p.resolveBranch(params)
 
 	qp := map[string]string{
@@ -475,7 +811,10 @@ func (p *SonarQubePlugin) getCoverage(ctx context.Context, params map[string]int
 
 // getMeasures fetches project metrics.
 func (p *SonarQubePlugin) getMeasures(ctx context.Context, params map[string]interface{}) ([]byte, error) {
-	projectKey := p.resolveProjectKey(params)
+	projectKey, err := p.requireProjectKey(params)
+	if err != nil {
+		return nil, err
+	}
 
 	metricKeys := "ncloc,complexity,violations,bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density"
 	if mk, ok := params["metric_keys"].(string); ok && mk != "" {
@@ -533,7 +872,10 @@ func (p *SonarQubePlugin) getProjectSummary(ctx context.Context, params map[stri
 
 // fetchProjectSummary gathers quality gate, measures, and issue counts.
 func (p *SonarQubePlugin) fetchProjectSummary(ctx context.Context, params map[string]interface{}) (*ProjectSummary, error) {
-	projectKey := p.resolveProjectKey(params)
+	projectKey, err := p.requireProjectKey(params)
+	if err != nil {
+		return nil, err
+	}
 	branch := p.resolveBranch(params)
 
 	summary := &ProjectSummary{
@@ -552,12 +894,12 @@ func (p *SonarQubePlugin) fetchProjectSummary(ctx context.Context, params map[st
 			ProjectStatus struct {
 				Status     string `json:"status"`
 				Conditions []struct {
-					Status        string `json:"status"`
-					MetricKey     string `json:"metricKey"`
-					Comparator    string `json:"comparator"`
-					PeriodIndex   int    `json:"periodIndex"`
+					Status         string `json:"status"`
+					MetricKey      string `json:"metricKey"`
+					Comparator     string `json:"comparator"`
+					PeriodIndex    int    `json:"periodIndex"`
 					ErrorThreshold string `json:"errorThreshold"`
-					ActualValue   string `json:"actualValue"`
+					ActualValue    string `json:"actualValue"`
 				} `json:"conditions"`
 			} `json:"projectStatus"`
 		}
@@ -565,25 +907,30 @@ func (p *SonarQubePlugin) fetchProjectSummary(ctx context.Context, params map[st
 			gate := &QualityGate{Status: qgResult.ProjectStatus.Status}
 			for _, c := range qgResult.ProjectStatus.Conditions {
 				gate.Conditions = append(gate.Conditions, GateCondition{
-					Status:        c.Status,
-					MetricKey:     c.MetricKey,
-					Comparator:    c.Comparator,
-					PeriodIndex:   c.PeriodIndex,
+					Status:         c.Status,
+					MetricKey:      c.MetricKey,
+					Comparator:     c.Comparator,
+					PeriodIndex:    c.PeriodIndex,
 					ErrorThreshold: c.ErrorThreshold,
-					ActualValue:   c.ActualValue,
+					ActualValue:    c.ActualValue,
 				})
 			}
 			summary.QualityGate = gate
 		}
+	} else {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("quality gate unavailable: %v", err))
 	}
 
-	// Fetch measures
+	// Fetch measures. analysis_date tells the caller how fresh the report is,
+	// since PEPA collects analyses rather than producing them.
 	measuresData, err := p.apiGet(ctx, "/api/measures/component", map[string]string{
 		"component":  projectKey,
-		"metricKeys": "ncloc,bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,complexity,violations",
+		"metricKeys": "ncloc,bugs,vulnerabilities,code_smells,coverage,line_coverage,branch_coverage,duplicated_lines_density,complexity,violations,sq_debt,reopened_issues,new_vulnerabilities,analysis_date",
 		"branch":     branch,
 	})
-	if err == nil {
+	if err != nil {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("measures unavailable: %v", err))
+	} else {
 		var mResult struct {
 			Component struct {
 				Key      string `json:"key"`
@@ -595,8 +942,12 @@ func (p *SonarQubePlugin) fetchProjectSummary(ctx context.Context, params map[st
 			} `json:"component"`
 		}
 		if json.Unmarshal(measuresData, &mResult) == nil {
-			m := &Measures{Component: mResult.Component.Key}
+			m := &Measures{Component: mResult.Component.Key, Branch: branch}
 			for _, met := range mResult.Component.Measures {
+				if met.Metric == "analysis_date" {
+					summary.AnalysisDate = met.Value
+					continue
+				}
 				m.Metrics = append(m.Metrics, Metric{
 					Metric:    met.Metric,
 					Value:     met.Value,
@@ -604,70 +955,46 @@ func (p *SonarQubePlugin) fetchProjectSummary(ctx context.Context, params map[st
 				})
 			}
 			summary.Measures = m
+		} else {
+			summary.Warnings = append(summary.Warnings, "measures response could not be parsed")
 		}
 	}
 
-	// Fetch issue summary
+	// Issue summary — one facet request replaces the previous nine.
 	issueData, err := p.apiGet(ctx, "/api/issues/search", map[string]string{
 		"componentKeys": projectKey,
+		"branch":        branch,
 		"ps":            "1",
+		"facets":        "severities,types",
 		"statuses":      "OPEN,CONFIRMED,REOPENED",
 	})
-	if err == nil {
-		var iResult struct {
-			Total int `json:"total"`
-		}
-		if json.Unmarshal(issueData, &iResult) == nil {
-			issueSummary := &IssueSummary{
-				BySeverity: make(map[string]int),
-			}
-
-			// Fetch counts by type
-			for _, issueType := range []string{"BUG", "VULNERABILITY", "CODE_SMELL"} {
-				typeData, err := p.apiGet(ctx, "/api/issues/search", map[string]string{
-					"componentKeys": projectKey,
-					"types":         issueType,
-					"ps":            "1",
-					"statuses":      "OPEN,CONFIRMED,REOPENED",
-				})
-				if err == nil {
-					var tResult struct {
-						Total int `json:"total"`
-					}
-					if json.Unmarshal(typeData, &tResult) == nil {
-						switch issueType {
-						case "BUG":
-							issueSummary.Bugs = tResult.Total
-						case "VULNERABILITY":
-							issueSummary.Vulnerabilities = tResult.Total
-						case "CODE_SMELL":
-							issueSummary.CodeSmells = tResult.Total
-						}
-					}
-				}
-			}
-
-			// Fetch counts by severity
-			for _, sev := range []string{"BLOCKER", "CRITICAL", "MAJOR", "MINOR", "INFO"} {
-				sevData, err := p.apiGet(ctx, "/api/issues/search", map[string]string{
-					"componentKeys": projectKey,
-					"severities":    sev,
-					"ps":            "1",
-					"statuses":      "OPEN,CONFIRMED,REOPENED",
-				})
-				if err == nil {
-					var sResult struct {
-						Total int `json:"total"`
-					}
-					if json.Unmarshal(sevData, &sResult) == nil {
-						issueSummary.BySeverity[strings.ToLower(sev)] = sResult.Total
-					}
-				}
-			}
-
-			summary.IssueSummary = issueSummary
-		}
+	if err != nil {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("issues unavailable: %v", err))
+		return summary, nil
 	}
+
+	var iResult struct {
+		Total  int          `json:"total"`
+		Facets []issueFacet `json:"facets"`
+	}
+	if err := json.Unmarshal(issueData, &iResult); err != nil {
+		summary.Warnings = append(summary.Warnings, "issues response could not be parsed")
+		return summary, nil
+	}
+
+	byType := parseIssueFacets(iResult.Facets, "types")
+	bySeverity := parseIssueFacets(iResult.Facets, "severities")
+	issueSummary := &IssueSummary{
+		Total:           iResult.Total,
+		Bugs:            byType["BUG"],
+		Vulnerabilities: byType["VULNERABILITY"],
+		CodeSmells:      byType["CODE_SMELL"],
+		BySeverity:      make(map[string]int, len(bySeverity)),
+	}
+	for sev, count := range bySeverity {
+		issueSummary.BySeverity[strings.ToLower(sev)] = count
+	}
+	summary.IssueSummary = issueSummary
 
 	return summary, nil
 }
@@ -678,7 +1005,7 @@ func (p *SonarQubePlugin) HealthCheck(ctx context.Context) (*provider.HealthStat
 	if p.httpClient == nil || p.url == "" {
 		return &provider.HealthStatus{
 			Status:  "unhealthy",
-			Message: "sonarqube plugin not configured — set url, token, and project_key",
+			Message: "sonarqube plugin not configured — set url and token (project_key comes per target)",
 		}, nil
 	}
 

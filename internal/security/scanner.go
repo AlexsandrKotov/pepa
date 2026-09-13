@@ -35,10 +35,33 @@ var validSeverities = map[string]bool{
 }
 
 // validScanConfigKeys is the whitelist of allowed scan_config keys per scanner type.
+// Credentials are deliberately absent: SonarQube url/token live in a Connection,
+// and scan_config is stored as plain JSONB.
 var validScanConfigKeys = map[string]map[string]bool{
 	"trivy":     {"scan_type": true, "severity": true, "ignore_unfixed": true, "vex": true, "db_repository": true, "java_db_repository": true},
-	"sonarqube": {"url": true, "token": true, "project_key": true, "branch": true},
-	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "url": true, "token": true, "project_key": true, "branch": true, "vex": true, "db_repository": true, "java_db_repository": true},
+	"sonarqube": {"project_key": true, "branch": true, "severity": true, "stale_after_hours": true, "source_ci_url": true},
+	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "vex": true, "db_repository": true, "java_db_repository": true, "project_key": true, "branch": true, "stale_after_hours": true, "source_ci_url": true},
+}
+
+// ValidateScanConfig reports whether a scan_config uses only keys the scanner
+// understands. It is checked when the target is saved, so an unsupported key (or
+// a leftover url/token credential) is rejected with a clear message instead of
+// failing every later scan.
+func ValidateScanConfig(scannerType string, cfg map[string]any) error {
+	allowed, ok := validScanConfigKeys[scannerType]
+	if !ok {
+		// Unknown scanner types are rejected by the API layer.
+		return nil
+	}
+	for key := range cfg {
+		if !allowed[key] {
+			if key == "url" || key == "token" {
+				return fmt.Errorf("scan_config.%s is not supported: SonarQube url and token live in a Connection", key)
+			}
+			return fmt.Errorf("unknown scan_config key %q for scanner type %q", key, scannerType)
+		}
+	}
+	return nil
 }
 
 // Scanner orchestrates security scans via Trivy and SonarQube.
@@ -54,9 +77,18 @@ type Scanner struct {
 
 	// DB manager fields — the API server acts as the DB cache warmer,
 	// downloading and refreshing Trivy databases without a separate container.
-	dbRepo        string        // OCI registry for trivy-db (env: TRIVY_DB_REPOSITORY)
-	javaDBRepo    string        // OCI registry for trivy-java-db (env: TRIVY_JAVA_DB_REPOSITORY)
+	dbRepo            string        // OCI registry for trivy-db (env: TRIVY_DB_REPOSITORY)
+	javaDBRepo        string        // OCI registry for trivy-java-db (env: TRIVY_JAVA_DB_REPOSITORY)
 	dbRefreshInterval time.Duration // how often to refresh DBs (env: TRIVY_DB_UPDATE_INTERVAL)
+
+	// sonarTimeout bounds a SonarQube report collection. It is a handful of REST
+	// calls, not an analysis, so it is far shorter than the Trivy scan timeout
+	// (env: SONAR_SCAN_TIMEOUT, default 2m).
+	sonarTimeout time.Duration
+
+	// sonarDefaultStaleHours is the freshness budget reported to the UI when the
+	// target does not configure its own (env: SONAR_DEFAULT_STALE_HOURS, default 24).
+	sonarDefaultStaleHours int
 }
 
 // NewScanner creates a new Scanner.
@@ -87,6 +119,25 @@ func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanReposito
 		}
 	}
 	s.dbRefreshInterval = time.Duration(intervalSec) * time.Second
+
+	s.sonarTimeout = 2 * time.Minute
+	if v := os.Getenv("SONAR_SCAN_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			s.sonarTimeout = d
+		} else if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			s.sonarTimeout = time.Duration(n) * time.Second
+		} else {
+			slog.Warn("invalid SONAR_SCAN_TIMEOUT, using default", "value", v, "default", s.sonarTimeout)
+		}
+	}
+	s.sonarDefaultStaleHours = 24
+	if v := os.Getenv("SONAR_DEFAULT_STALE_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			s.sonarDefaultStaleHours = n
+		} else {
+			slog.Warn("invalid SONAR_DEFAULT_STALE_HOURS, using default", "value", v, "default", s.sonarDefaultStaleHours)
+		}
+	}
 
 	return s
 }
@@ -192,19 +243,23 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 	// Execute scan based on scanner type
 	var resultSummary map[string]any
 	var resultFull map[string]any
+	var reportURL string
 	var scanErr error
 
 	switch target.ScannerType {
 	case "trivy":
 		resultSummary, resultFull, scanErr = s.runTrivyScan(scanCtx, target, run.ID)
 	case "sonarqube":
-		resultSummary, resultFull, scanErr = s.runSonarQubeScan(scanCtx, target)
+		resultSummary, resultFull, reportURL, scanErr = s.runSonarQubeScan(scanCtx, target)
 	case "both":
 		// Run both scanners and merge results
 		trivySummary, trivyFull, trivyErr := s.runTrivyScan(scanCtx, target, run.ID)
-		sqSummary, sqFull, sqErr := s.runSonarQubeScan(scanCtx, target)
+		sqSummary, sqFull, sqReportURL, sqErr := s.runSonarQubeScan(scanCtx, target)
+		reportURL = sqReportURL
 
-		resultSummary = mergeMaps(trivySummary, sqSummary, "trivy", "sonarqube")
+		// Severity counters are shared keys and must add up; anything else is
+		// namespaced per scanner so neither report overwrites the other.
+		resultSummary = mergeScanSummaries(trivySummary, sqSummary)
 		resultFull = mergeMaps(trivyFull, sqFull, "trivy", "sonarqube")
 
 		if trivyErr != nil && sqErr != nil {
@@ -246,6 +301,11 @@ func (s *Scanner) RunScan(ctx context.Context, targetID, tenantID uuid.UUID, tri
 		run.Status = "completed"
 		run.ResultSummary = resultSummary
 		run.ResultFull = resultFull
+		// SonarQube findings live in the SonarQube UI; link the project dashboard
+		// so the PEPA report can always be traced back to its source.
+		if reportURL != "" {
+			run.ReportURL = &reportURL
+		}
 	}
 	run.DurationMs = &durationMs
 	run.CompletedAt = &completedAt
@@ -460,9 +520,9 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 			}
 			// Add to full results
 			imgResult := map[string]any{
-				"image":    img + ":" + selectedTag,
-				"summary":  imgSummary,
-				"details":  imgFull,
+				"image":   img + ":" + selectedTag,
+				"summary": imgSummary,
+				"details": imgFull,
 			}
 			if existingImages, ok := aggregateFull["images"].([]any); ok {
 				aggregateFull["images"] = append(existingImages, imgResult)
@@ -982,111 +1042,595 @@ func extractRegistryAuthParam(header, param string) string {
 	return header[start : start+end]
 }
 
-// Falls back to scan_config values if no connection is linked or resolution fails.
-func (s *Scanner) resolveConnectionCredentials(ctx context.Context, target *repository.ScanTarget, url, token string) (string, string) {
-	if target.ConnectionID == nil || s.connectionRepo == nil {
-		return url, token
-	}
-
-	conn, err := s.connectionRepo.GetDecrypted(ctx, *target.ConnectionID, target.TenantID)
-	if err != nil {
-		slog.Warn("failed to resolve connection credentials, falling back to scan_config",
-			"connection_id", target.ConnectionID, "error", err)
-		return url, token
-	}
-
-	// Override with connection values if present
-	if connURL, ok := conn.Config["url"].(string); ok && connURL != "" {
-		url = connURL
-	}
-	if connToken, ok := conn.Config["token"].(string); ok && connToken != "" {
-		token = connToken
-	}
-
-	return url, token
+// sonarEndpoint carries everything the plugin needs to reach one SonarQube server.
+type sonarEndpoint struct {
+	URL      string
+	Token    string
+	Insecure string
 }
 
-// runSonarQubeScan executes a SonarQube scan via the plugin engine.
-func (s *Scanner) runSonarQubeScan(ctx context.Context, target *repository.ScanTarget) (summary, full map[string]any, err error) {
+// resolveSonarCredentials reads SonarQube credentials from the linked Connection.
+// There is deliberately no scan_config fallback: scan_config is stored as plain
+// JSONB, and a silent fallback used to turn a resolution failure into an empty
+// report instead of an error. The tenant is part of the lookup so a connection
+// belonging to another tenant can never be resolved.
+func (s *Scanner) resolveSonarCredentials(ctx context.Context, target *repository.ScanTarget) (*sonarEndpoint, error) {
+	if target.ConnectionID == nil {
+		return nil, fmt.Errorf("SonarQube credentials come from a Connection — link a SonarQube connection to this target")
+	}
+	return s.resolveSonarConnection(ctx, *target.ConnectionID, target.TenantID)
+}
+
+// resolveSonarConnection loads and validates a SonarQube Connection for a tenant.
+// The tenant is part of every lookup so a connection belonging to another tenant
+// can never be resolved.
+func (s *Scanner) resolveSonarConnection(ctx context.Context, connectionID, tenantID uuid.UUID) (*sonarEndpoint, error) {
+	if s.connectionRepo == nil {
+		return nil, fmt.Errorf("connection repository not available")
+	}
+
+	conn, err := s.connectionRepo.GetDecrypted(ctx, connectionID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve SonarQube connection: %w", err)
+	}
+	if conn.Type != repository.ConnectionSonarQube {
+		return nil, fmt.Errorf("connection %q has type %q, expected %q", conn.Name, conn.Type, repository.ConnectionSonarQube)
+	}
+
+	ep := &sonarEndpoint{}
+	ep.URL, _ = conn.Config["url"].(string)
+	ep.Token, _ = conn.Config["token"].(string)
+	// The Connections UI may store the flag as a JSON boolean or a string.
+	switch v := conn.Config["insecure"].(type) {
+	case bool:
+		ep.Insecure = strconv.FormatBool(v)
+	case string:
+		ep.Insecure = v
+	}
+
+	if ep.URL == "" {
+		return nil, fmt.Errorf("connection %q has no SonarQube url configured", conn.Name)
+	}
+	if ep.Token == "" {
+		return nil, fmt.Errorf("connection %q has no SonarQube token configured", conn.Name)
+	}
+	return ep, nil
+}
+
+// SonarProject is one analysable project inside an external SonarQube instance.
+type SonarProject struct {
+	Key       string `json:"key"`
+	Name      string `json:"name"`
+	Qualifier string `json:"qualifier"`
+}
+
+// ListSonarProjects returns the projects of a SonarQube Connection so the UI can
+// offer real project keys instead of asking the user to guess one. The returned
+// flag reports truncation, which the UI must surface rather than presenting a
+// partial list as complete.
+func (s *Scanner) ListSonarProjects(ctx context.Context, connectionID, tenantID uuid.UUID, query string) ([]SonarProject, bool, error) {
 	if s.pluginMgr == nil {
-		return nil, nil, fmt.Errorf("plugin manager not available")
+		return nil, false, fmt.Errorf("plugin manager not available")
+	}
+	ep, err := s.resolveSonarConnection(ctx, connectionID, tenantID)
+	if err != nil {
+		return nil, false, err
 	}
 
-	// Build params from target config
-	url, _ := target.ScanConfig["url"].(string)
-	token, _ := target.ScanConfig["token"].(string)
-
-	// Resolve credentials from linked connection (preferred over scan_config)
-	url, token = s.resolveConnectionCredentials(ctx, target, url, token)
-
-	if url == "" {
-		return nil, nil, fmt.Errorf("sonarqube URL not configured (set url in scan_config or link a SonarQube connection)")
+	config := map[string]string{"url": ep.URL, "token": ep.Token}
+	if ep.Insecure != "" {
+		config["insecure"] = ep.Insecure
 	}
-	if token == "" {
-		return nil, nil, fmt.Errorf("sonarqube token not configured (set token in scan_config or link a SonarQube connection)")
+	paramsJSON, err := json.Marshal(map[string]any{"query": query})
+	if err != nil {
+		return nil, false, fmt.Errorf("marshal list_projects params: %w", err)
 	}
 
-	projectKey, _ := target.ScanConfig["project_key"].(string)
+	listCtx, cancel := context.WithTimeout(ctx, s.sonarTimeout)
+	defer cancel()
+
+	output, err := s.pluginMgr.ExecuteAction(listCtx, "sonarqube", "list_projects", paramsJSON, config)
+	if err != nil {
+		return nil, false, err
+	}
+	var result struct {
+		Projects  []SonarProject `json:"projects"`
+		Truncated bool           `json:"truncated"`
+	}
+	if err := json.Unmarshal(output, &result); err != nil {
+		return nil, false, fmt.Errorf("parse sonarqube projects: %w", err)
+	}
+	if result.Projects == nil {
+		result.Projects = []SonarProject{}
+	}
+	return result.Projects, result.Truncated, nil
+}
+
+// TransitionSonarIssue asks an external SonarQube to move one of its issues —
+// mark it a false positive, won't fix, or reopen it. PEPA keeps no copy of that
+// state: the transition happens upstream and the next collected report reflects it.
+func (s *Scanner) TransitionSonarIssue(ctx context.Context, connectionID, tenantID uuid.UUID, issueKey, transition string) error {
+	if s.pluginMgr == nil {
+		return fmt.Errorf("plugin manager not available")
+	}
+	if strings.TrimSpace(issueKey) == "" {
+		return fmt.Errorf("sonarqube issue key is required")
+	}
+	ep, err := s.resolveSonarConnection(ctx, connectionID, tenantID)
+	if err != nil {
+		return err
+	}
+
+	config := map[string]string{"url": ep.URL, "token": ep.Token}
+	if ep.Insecure != "" {
+		config["insecure"] = ep.Insecure
+	}
+	paramsJSON, err := json.Marshal(map[string]any{
+		"issue_key":  issueKey,
+		"transition": transition,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal transition params: %w", err)
+	}
+
+	actionCtx, cancel := context.WithTimeout(ctx, s.sonarTimeout)
+	defer cancel()
+
+	// The plugin owns the list of transitions SonarQube accepts and rejects
+	// anything else, so an unknown verb surfaces as a clear upstream error here.
+	_, err = s.pluginMgr.ExecuteAction(actionCtx, "sonarqube", "transition_issue", paramsJSON, config)
+	return err
+}
+
+// sonarConfigString reads an optional string from a target's scan_config.
+func sonarConfigString(cfg map[string]any, key string) string {
+	if cfg == nil {
+		return ""
+	}
+	v, _ := cfg[key].(string)
+	return strings.TrimSpace(v)
+}
+
+// sonarConfigInt reads an optional number from scan_config, tolerating the
+// float64/string shapes JSONB decoding produces.
+func sonarConfigInt(cfg map[string]any, key string) int {
+	if cfg == nil {
+		return 0
+	}
+	switch v := cfg[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+// sonarProjectKey resolves which SonarQube project a target refers to.
+// target_ref is only a project key for sonarqube_project targets; for every
+// other type it is a git URL or a filesystem path, which SonarQube would
+// reject with an unrelated "resource not found" error.
+func SonarProjectKey(target *repository.ScanTarget) string {
+	if k := sonarConfigString(target.ScanConfig, "project_key"); k != "" {
+		return k
+	}
+	if target.TargetType == "sonarqube_project" {
+		return strings.TrimSpace(target.TargetRef)
+	}
+	return ""
+}
+
+// ValidateSonarProjectKey checks that a SonarQube target resolves to exactly one
+// project key. Exported for the API layer so a target that can never produce a
+// report is rejected while it is being saved, not on every later scan.
+func ValidateSonarProjectKey(target *repository.ScanTarget) error {
+	if SonarProjectKey(target) == "" {
+		return fmt.Errorf("a SonarQube target needs the project key — it identifies the project inside SonarQube, PEPA does not analyze code itself")
+	}
+	configured := sonarConfigString(target.ScanConfig, "project_key")
+	if configured != "" && target.TargetType == "sonarqube_project" {
+		if ref := strings.TrimSpace(target.TargetRef); ref != "" && ref != configured {
+			return fmt.Errorf("scan_config.project_key %q conflicts with target_ref %q", configured, ref)
+		}
+	}
+	return nil
+}
+
+// sonarGateCondition is one quality gate condition as reported by SonarQube.
+type sonarGateCondition struct {
+	Status         string `json:"status"`
+	MetricKey      string `json:"metric_key"`
+	Comparator     string `json:"comparator"`
+	ErrorThreshold string `json:"error_threshold"`
+	ActualValue    string `json:"actual_value"`
+}
+
+// sonarQualityGate is the project quality gate verdict.
+type sonarQualityGate struct {
+	Status     string               `json:"status"` // OK, WARN, ERROR, NONE
+	Conditions []sonarGateCondition `json:"conditions"`
+}
+
+// sonarMetric is a single project measure.
+type sonarMetric struct {
+	Metric string `json:"metric"`
+	Value  string `json:"value"`
+}
+
+// sonarMeasures holds the project metrics fetched by the plugin.
+type sonarMeasures struct {
+	Metrics []sonarMetric `json:"metrics"`
+}
+
+// sonarIssueSummary counts issues per type and per SonarQube severity.
+type sonarIssueSummary struct {
+	Total           int            `json:"total"`
+	Bugs            int            `json:"bugs"`
+	Vulnerabilities int            `json:"vulnerabilities"`
+	CodeSmells      int            `json:"code_smells"`
+	BySeverity      map[string]int `json:"by_severity"`
+}
+
+// sonarSnapshot mirrors the get_project_summary output of the sonarqube plugin.
+type sonarSnapshot struct {
+	ProjectKey   string             `json:"project_key"`
+	Branch       string             `json:"branch"`
+	QualityGate  *sonarQualityGate  `json:"quality_gate"`
+	Measures     *sonarMeasures     `json:"measures"`
+	IssueSummary *sonarIssueSummary `json:"issue_summary"`
+	AnalysisDate string             `json:"analysis_date"`
+	FetchedAt    string             `json:"fetched_at"`
+	Warnings     []string           `json:"warnings"`
+}
+
+// sonarIssue mirrors one issue from the plugin's get_issues output.
+type sonarIssue struct {
+	Key           string `json:"key"`
+	Rule          string `json:"rule"`
+	Severity      string `json:"severity"`
+	Status        string `json:"status"`
+	Message       string `json:"message"`
+	Component     string `json:"component"`
+	ComponentPath string `json:"component_path"`
+	Line          int    `json:"line"`
+	Type          string `json:"type"`
+	Effort        string `json:"effort"`
+	Debt          string `json:"debt"`
+}
+
+// sonarIssuePage mirrors the paginated get_issues envelope.
+type sonarIssuePage struct {
+	Issues     []sonarIssue   `json:"issues"`
+	Total      int            `json:"total"`
+	Fetched    int            `json:"fetched"`
+	Truncated  bool           `json:"truncated"`
+	BySeverity map[string]int `json:"by_severity"`
+	ByType     map[string]int `json:"by_type"`
+}
+
+// sonarMetricValue returns the raw value of a project measure.
+func (s *sonarSnapshot) sonarMetricValue(name string) string {
+	if s == nil || s.Measures == nil {
+		return ""
+	}
+	for _, m := range s.Measures.Metrics {
+		if m.Metric == name {
+			return m.Value
+		}
+	}
+	return ""
+}
+
+// sonarNumericMetric reads a counter measure, returning 0 when absent or unparsable.
+func (s *sonarSnapshot) sonarNumericMetric(name string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s.sonarMetricValue(name)))
+	return n
+}
+
+// sonarFloatMetric reads a percentage-style measure, returning 0 when absent.
+func (s *sonarSnapshot) sonarFloatMetric(name string) float64 {
+	f, _ := strconv.ParseFloat(strings.TrimSpace(s.sonarMetricValue(name)), 64)
+	return f
+}
+
+// runSonarQubeScan collects a report snapshot from an external SonarQube.
+// PEPA never analyses code itself — no subprocess, no clone, no container: the
+// analysis is produced by SonarQube (normally in CI) and the latest one is read
+// here over REST, then normalised into the same report shape Trivy produces so
+// findings, ignores, exports and dashboards stay scanner-agnostic.
+func (s *Scanner) runSonarQubeScan(ctx context.Context, target *repository.ScanTarget) (summary, full map[string]any, reportURL string, err error) {
+	if s.pluginMgr == nil {
+		return nil, nil, "", fmt.Errorf("plugin manager not available")
+	}
+
+	ep, err := s.resolveSonarCredentials(ctx, target)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	projectKey := SonarProjectKey(target)
 	if projectKey == "" {
-		projectKey = target.TargetRef
+		return nil, nil, "", fmt.Errorf("SonarQube project key is empty — set the Project Key on the target (the identifier of the project inside SonarQube)")
 	}
-	branch, _ := target.ScanConfig["branch"].(string)
+	branch := sonarConfigString(target.ScanConfig, "branch")
 
-	// Call get_project_summary action
-	params := map[string]any{
+	// A snapshot is a handful of API calls, so it gets its own short deadline
+	// instead of the 10-minute budget a Trivy scan is allowed to take.
+	collectCtx, cancel := context.WithTimeout(ctx, s.sonarTimeout)
+	defer cancel()
+
+	// project_key travels with the config: the plugin rebuilds itself from this
+	// map per request, and an incomplete config used to be executed by a
+	// zero-value plugin instance with no HTTP client at all.
+	config := map[string]string{
+		"url":         ep.URL,
+		"token":       ep.Token,
 		"project_key": projectKey,
 	}
-	if url != "" {
-		params["url"] = url
+	if ep.Insecure != "" {
+		config["insecure"] = ep.Insecure
 	}
-	if token != "" {
-		params["token"] = token
+	if branch != "" {
+		config["branch"] = branch
 	}
+
+	params := map[string]any{"project_key": projectKey}
 	if branch != "" {
 		params["branch"] = branch
 	}
-
 	paramsJSON, err := json.Marshal(params)
 	if err != nil {
-		return nil, nil, fmt.Errorf("marshal sonarqube params: %w", err)
+		return nil, nil, "", fmt.Errorf("marshal sonarqube params: %w", err)
 	}
 
-	// Build config from connection if available
-	config := map[string]string{}
-	if url != "" {
-		config["url"] = url
-	}
-	if token != "" {
-		config["token"] = token
-	}
+	slog.Info("collecting sonarqube report", "project_key", projectKey, "branch", branch, "target", target.Name)
 
-	slog.Info("running sonarqube scan", "project_key", projectKey)
-
-	output, err := s.pluginMgr.ExecuteAction(ctx, "sonarqube", "get_project_summary", paramsJSON, config)
+	snapshotRaw, err := s.pluginMgr.ExecuteAction(collectCtx, "sonarqube", "get_project_summary", paramsJSON, config)
 	if err != nil {
-		return nil, nil, fmt.Errorf("sonarqube scan failed: %w", err)
+		return nil, nil, "", fmt.Errorf("sonarqube report collection failed: %w", err)
+	}
+	var snapshot sonarSnapshot
+	if err := json.Unmarshal(snapshotRaw, &snapshot); err != nil {
+		return nil, nil, "", fmt.Errorf("parse sonarqube summary: %w", err)
 	}
 
-	// Parse result
-	var sqResult map[string]any
-	if err := json.Unmarshal(output, &sqResult); err != nil {
-		return nil, nil, fmt.Errorf("parse sonarqube output: %w", err)
+	page, err := s.fetchSonarIssues(collectCtx, paramsJSON, config)
+	if err != nil {
+		// The quality gate and metrics are still a valid report; say so instead
+		// of failing the whole run for one unavailable endpoint.
+		snapshot.Warnings = append(snapshot.Warnings, fmt.Sprintf("issues unavailable: %v", err))
 	}
 
-	// Build summary
-	summaryMap := map[string]any{}
-	if qg, ok := sqResult["quality_gate"].(map[string]any); ok {
-		summaryMap["quality_gate_status"] = qg["status"]
+	summary, full = buildSonarReport(snapshot, page, ep.URL, projectKey, s.sonarIgnoreSet(collectCtx, target))
+	// Staleness is a property of how the target is polled, not of SonarQube itself,
+	// so the report carries the budget for the UI to flag an outdated snapshot.
+	hours := sonarConfigInt(target.ScanConfig, "stale_after_hours")
+	if hours <= 0 {
+		hours = s.sonarDefaultStaleHours
 	}
-	if issues, ok := sqResult["issue_summary"].(map[string]any); ok {
-		summaryMap["issues"] = issues
+	summary["stale_after_hours"] = hours
+	if ciURL := sonarConfigString(target.ScanConfig, "source_ci_url"); ciURL != "" {
+		summary["source_ci_url"] = ciURL
 	}
-	if measures, ok := sqResult["measures"].(map[string]any); ok {
-		summaryMap["coverage"] = measures["coverage"]
-		summaryMap["duplication"] = measures["duplicated_lines_density"]
+	// Issue transitions are addressed by connection, and the report viewer only
+	// has this run to go by.
+	if target.ConnectionID != nil {
+		summary["connection_id"] = target.ConnectionID.String()
+	}
+	return summary, full, sonarDashboardURL(ep.URL, projectKey), nil
+}
+
+// fetchSonarIssues pulls the finding list for a project (already paginated by
+// the plugin).
+func (s *Scanner) fetchSonarIssues(ctx context.Context, paramsJSON []byte, config map[string]string) (sonarIssuePage, error) {
+	var page sonarIssuePage
+	output, err := s.pluginMgr.ExecuteAction(ctx, "sonarqube", "get_issues", paramsJSON, config)
+	if err != nil {
+		return page, err
+	}
+	if err := json.Unmarshal(output, &page); err != nil {
+		return page, fmt.Errorf("parse sonarqube issues: %w", err)
+	}
+	return page, nil
+}
+
+// sonarIgnoreSet collects the suppression keys of a target. Trivy ignores are
+// keyed by CVE, SonarQube ignores by issue key; a "rule:<rule>" entry suppresses
+// every finding of one rule.
+func (s *Scanner) sonarIgnoreSet(ctx context.Context, target *repository.ScanTarget) map[string]bool {
+	set := map[string]bool{}
+	if s.ignoreRepo == nil {
+		return set
+	}
+	ignores, err := s.ignoreRepo.ListByTarget(ctx, target.ID, target.TenantID)
+	if err != nil {
+		// An unreadable ignore list must not silently hide findings.
+		slog.Warn("failed to load ignores for sonarqube scan", "target_id", target.ID, "error", err)
+		return set
+	}
+	for _, ig := range ignores {
+		if ig == nil {
+			continue
+		}
+		if ig.IssueKey != nil && *ig.IssueKey != "" {
+			set[*ig.IssueKey] = true
+		}
+		// cve_id also counts: SonarQube ignores created before issue_key existed
+		// stored the finding key there, and those must keep working.
+		if ig.CveID != "" {
+			set[ig.CveID] = true
+		}
+	}
+	return set
+}
+
+// sonarIssueIgnored reports whether a finding is suppressed for the target.
+func sonarIssueIgnored(ignores map[string]bool, issue sonarIssue) bool {
+	if len(ignores) == 0 {
+		return false
+	}
+	if ignores[issue.Key] {
+		return true
+	}
+	return ignores["rule:"+issue.Rule]
+}
+
+// sonarDashboardURL links to the project overview inside SonarQube.
+func sonarDashboardURL(baseURL, projectKey string) string {
+	return strings.TrimRight(baseURL, "/") + "/dashboard?id=" + url.QueryEscape(projectKey)
+}
+
+// sonarIssueURL links straight to one finding in the project's issue list.
+func sonarIssueURL(baseURL, projectKey, issueKey string) string {
+	return fmt.Sprintf("%s/project/issues?id=%s&open=%s",
+		strings.TrimRight(baseURL, "/"), url.QueryEscape(projectKey), url.QueryEscape(issueKey))
+}
+
+// sonarSeverityToTrivy maps a SonarQube severity onto the Trivy severity scale.
+// The two products name severities differently; the report keeps one scale so
+// severity bars, filters and exports stay shared. The original value is preserved
+// on every finding as SonarSeverity.
+func sonarSeverityToTrivy(severity string) string {
+	switch strings.ToUpper(strings.TrimSpace(severity)) {
+	case "BLOCKER":
+		return "critical"
+	case "CRITICAL":
+		return "high"
+	case "MAJOR":
+		return "medium"
+	case "MINOR":
+		return "low"
+	default: // INFO and anything unrecognised
+		return "unknown"
+	}
+}
+
+// buildSonarReport normalises a SonarQube snapshot into the Trivy report contract:
+// flat severity counters in the summary, and a Results[] list grouped per file so
+// the collapsible finding list works without a scanner-specific branch.
+func buildSonarReport(snapshot sonarSnapshot, page sonarIssuePage, baseURL, projectKey string, ignores map[string]bool) (map[string]any, map[string]any) {
+	counts := map[string]int{"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0, "total": 0}
+
+	type findingGroup struct{ path, kind string }
+	grouped := map[findingGroup][]map[string]any{}
+	var order []findingGroup
+
+	for _, issue := range page.Issues {
+		if sonarIssueIgnored(ignores, issue) {
+			continue
+		}
+		path := issue.ComponentPath
+		if path == "" {
+			path = issue.Component
+		}
+		if path == "" {
+			path = projectKey
+		}
+		kind := strings.ToUpper(strings.TrimSpace(issue.Type))
+		if kind == "" {
+			kind = "CODE_SMELL"
+		}
+		location := path
+		if issue.Line > 0 {
+			location = fmt.Sprintf("%s:%d", path, issue.Line)
+		}
+		bucket := sonarSeverityToTrivy(issue.Severity)
+		counts[bucket]++
+		counts["total"]++
+
+		group := findingGroup{path: path, kind: kind}
+		if _, seen := grouped[group]; !seen {
+			order = append(order, group)
+		}
+		grouped[group] = append(grouped[group], map[string]any{
+			"VulnerabilityID":  issue.Key,
+			"Severity":         strings.ToUpper(bucket),
+			"SonarSeverity":    strings.ToUpper(strings.TrimSpace(issue.Severity)),
+			"PkgName":          issue.Rule,
+			"Title":            issue.Message,
+			"Description":      issue.Rule,
+			"InstalledVersion": location,
+			"PrimaryURL":       sonarIssueURL(baseURL, projectKey, issue.Key),
+			"Status":           issue.Status,
+			"Line":             issue.Line,
+			"Effort":           issue.Effort,
+			"TechnicalDebt":    issue.Debt,
+		})
 	}
 
-	return summaryMap, sqResult, nil
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].path != order[j].path {
+			return order[i].path < order[j].path
+		}
+		return order[i].kind < order[j].kind
+	})
+
+	results := make([]map[string]any, 0, len(order))
+	for _, g := range order {
+		vulns := grouped[g]
+		sort.Slice(vulns, func(i, j int) bool {
+			a, _ := vulns[i]["VulnerabilityID"].(string)
+			b, _ := vulns[j]["VulnerabilityID"].(string)
+			return a < b
+		})
+		results = append(results, map[string]any{
+			"Target":          g.path,
+			"Class":           "sonar",
+			"Type":            g.kind,
+			"Vulnerabilities": vulns,
+		})
+	}
+
+	summary := map[string]any{}
+	for k, v := range counts {
+		summary[k] = v
+	}
+	key := snapshot.ProjectKey
+	if key == "" {
+		key = projectKey
+	}
+	summary["project_key"] = key
+	summary["branch"] = snapshot.Branch
+	summary["last_analysis_at"] = snapshot.AnalysisDate
+	summary["truncated"] = page.Truncated
+	summary["issue_total"] = page.Total
+	if snapshot.QualityGate != nil {
+		summary["quality_gate_status"] = snapshot.QualityGate.Status
+	}
+	bugs, vulnCount, smells := snapshot.sonarNumericMetric("bugs"), snapshot.sonarNumericMetric("vulnerabilities"), snapshot.sonarNumericMetric("code_smells")
+	if snapshot.IssueSummary != nil {
+		bugs, vulnCount, smells = snapshot.IssueSummary.Bugs, snapshot.IssueSummary.Vulnerabilities, snapshot.IssueSummary.CodeSmells
+	}
+	summary["bugs"] = bugs
+	summary["vulnerabilities"] = vulnCount
+	summary["code_smells"] = smells
+	summary["coverage"] = snapshot.sonarFloatMetric("coverage")
+	summary["duplicated_lines_density"] = snapshot.sonarFloatMetric("duplicated_lines_density")
+	summary["technical_debt"] = snapshot.sonarMetricValue("sq_debt")
+
+	var rawSnapshot any
+	if encoded, err := json.Marshal(snapshot); err == nil {
+		if err := json.Unmarshal(encoded, &rawSnapshot); err != nil {
+			slog.Warn("failed to re-encode sonarqube snapshot", "error", err)
+		}
+	}
+
+	full := map[string]any{
+		"Results": results,
+		"sonar":   rawSnapshot,
+	}
+	if len(snapshot.Warnings) > 0 {
+		full["sonar_warnings"] = snapshot.Warnings
+	}
+
+	return summary, full
 }
 
 // ScanAllEnabled runs scans for all enabled targets.
@@ -1127,6 +1671,61 @@ func mergeMaps(a, b map[string]any, keyA, keyB string) map[string]any {
 		result[keyB] = b
 	}
 	return result
+}
+
+// mergeScanSummaries combines two scanner summaries for a "both" target. Shared
+// counters (critical/high/…) must add up — overwriting them would make a
+// combined report claim fewer findings than the two scans found. Anything else
+// is scanner-specific and only copied over when the first summary lacks it.
+func mergeScanSummaries(a, b map[string]any) map[string]any {
+	result := make(map[string]any, len(a)+len(b))
+	for k, v := range a {
+		result[k] = v
+	}
+	for k, v := range b {
+		if existing, ok := result[k]; ok {
+			if summed, isNumber := sumNumeric(existing, v); isNumber {
+				result[k] = summed
+				continue
+			}
+			continue
+		}
+		result[k] = v
+	}
+	return result
+}
+
+// sumNumeric adds two JSON numbers, reporting whether both operands were numeric.
+func sumNumeric(a, b any) (any, bool) {
+	switch av := a.(type) {
+	case int:
+		bv, ok := toFloat(b)
+		if !ok {
+			return nil, false
+		}
+		return av + int(bv), true
+	case float64:
+		bv, ok := toFloat(b)
+		if !ok {
+			return nil, false
+		}
+		return av + bv, true
+	default:
+		return nil, false
+	}
+}
+
+func toFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 // GetDatabaseStatus returns the status of Trivy databases.

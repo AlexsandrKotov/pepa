@@ -30,6 +30,15 @@ var (
 )
 
 func main() {
+	// Support -migrate-only flag: run migrations then exit.
+	migrateOnly := false
+	for _, arg := range os.Args[1:] {
+		if arg == "-migrate-only" || arg == "--migrate-only" {
+			migrateOnly = true
+			break
+		}
+	}
+
 	slog.Info("PEPA API server starting", "version", version, "build_time", buildTime)
 
 	// Create a root context that is cancelled on SIGINT/SIGTERM.
@@ -51,6 +60,15 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("database migrations completed")
+
+	// If -migrate-only, exit successfully after migrations.
+	if migrateOnly {
+		slog.Info("migrate-only mode — exiting after successful migration")
+		if comp.DB.Pool != nil {
+			comp.DB.Pool.Close()
+		}
+		os.Exit(0)
+	}
 
 	// Migrate plain text credentials to encrypted storage
 	// (AutoRegisterPlugins runs asynchronously inside Bootstrap after plugin discovery)
@@ -130,47 +148,47 @@ func main() {
 		Config: comp.Config,
 		DB:     comp.DB,
 		Repos: &rest.Repositories{
-			Entity:           comp.EntityRepo,
-			Workflow:         comp.WorkflowRepo,
-			Plugin:           comp.PluginRepo,
-			Scorecard:        comp.ScorecardRepo,
-			Audit:            comp.AuditRepo,
-			Cluster:          comp.ClusterRepo,
-			Deployment:       comp.DeploymentRepo,
-			Jira:             comp.JiraRepo,
-			Connection:       comp.ConnectionRepo,
-			Service:          comp.ServiceRepo,
-			Settings:         comp.SettingsRepo,
-			Environment:      comp.EnvironmentRepo,
-			EnvVariable:      comp.EnvVariableRepo,
-			DockerHost:       comp.DockerHostRepo,
-			Helm:             comp.HelmRepo,
-			Registry:         comp.RegistryRepo,
-			PipelineSource:   comp.PipelineSourceRepo,
-			PipelinePreset:   comp.PipelinePresetRepo,
-			PipelineRun:      comp.PipelineRunRepo,
-			Vault:            comp.VaultRepo,
-			VaultConfig:      comp.VaultConfigRepo,
-			Auth:             comp.AuthRepo,
-			TeamWorkflow:     comp.TeamWorkflowRepo,
-			GitopsRepo:       comp.GitopsRepo,
-			UserCredential:   comp.UserCredentialRepo,
-			CredentialShare:  comp.CredentialShareRepo,
-			Organization:     comp.OrganizationRepo,
-			RAG:              comp.RAGRepo,
-			SSHHost:          comp.SSHHostRepo,
-			SSHHostGroup:     comp.SSHHostGroupRepo,
-			PluginActivity:   comp.PluginActivityRepo,
-			SecurityScan:     comp.SecurityScanRepo,
-			ScanIgnore:       comp.ScanIgnoreRepo,
-			DevOps:           comp.DevOpsRepo,
-			NotificationRule: comp.NotificationRuleRepo,
-			NotificationLog:  comp.NotificationLogRepo,
-			GitOpsBinding:    comp.GitOpsBindingRepo,
-			DriftSchedule:    comp.DriftScheduleRepo,
+			Entity:              comp.EntityRepo,
+			Workflow:            comp.WorkflowRepo,
+			Plugin:              comp.PluginRepo,
+			Scorecard:           comp.ScorecardRepo,
+			Audit:               comp.AuditRepo,
+			Cluster:             comp.ClusterRepo,
+			Deployment:          comp.DeploymentRepo,
+			Jira:                comp.JiraRepo,
+			Connection:          comp.ConnectionRepo,
+			Service:             comp.ServiceRepo,
+			Settings:            comp.SettingsRepo,
+			Environment:         comp.EnvironmentRepo,
+			EnvVariable:         comp.EnvVariableRepo,
+			DockerHost:          comp.DockerHostRepo,
+			Helm:                comp.HelmRepo,
+			Registry:            comp.RegistryRepo,
+			PipelineSource:      comp.PipelineSourceRepo,
+			PipelinePreset:      comp.PipelinePresetRepo,
+			PipelineRun:         comp.PipelineRunRepo,
+			Vault:               comp.VaultRepo,
+			VaultConfig:         comp.VaultConfigRepo,
+			Auth:                comp.AuthRepo,
+			TeamWorkflow:        comp.TeamWorkflowRepo,
+			GitopsRepo:          comp.GitopsRepo,
+			UserCredential:      comp.UserCredentialRepo,
+			CredentialShare:     comp.CredentialShareRepo,
+			Organization:        comp.OrganizationRepo,
+			RAG:                 comp.RAGRepo,
+			SSHHost:             comp.SSHHostRepo,
+			SSHHostGroup:        comp.SSHHostGroupRepo,
+			PluginActivity:      comp.PluginActivityRepo,
+			SecurityScan:        comp.SecurityScanRepo,
+			ScanIgnore:          comp.ScanIgnoreRepo,
+			DevOps:              comp.DevOpsRepo,
+			NotificationRule:    comp.NotificationRuleRepo,
+			NotificationLog:     comp.NotificationLogRepo,
+			GitOpsBinding:       comp.GitOpsBindingRepo,
+			DriftSchedule:       comp.DriftScheduleRepo,
 			EnvironmentOverview: comp.EnvironmentOverviewRepo,
-			SelfService:      comp.SelfServiceRepo,
-			AutoDeployRule:   comp.AutoDeployRuleRepo,
+			SelfService:         comp.SelfServiceRepo,
+			AutoDeployRule:      comp.AutoDeployRuleRepo,
 		},
 		Services: &rest.Services{
 			Deployment: func() *service.DeploymentService {
@@ -207,7 +225,7 @@ func main() {
 				}
 				return d
 			}(),
-			EntitySync: service.NewEntitySyncService(comp.EntityRepo),
+			EntitySync:    service.NewEntitySyncService(comp.EntityRepo),
 			ScorecardEval: service.NewScorecardEvalService(comp.ScorecardRepo, comp.EntityRepo),
 		},
 		PluginMgr:        comp.PluginMgr,

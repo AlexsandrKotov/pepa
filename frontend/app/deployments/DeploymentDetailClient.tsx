@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useParams } from 'next/navigation';
 import Link from 'next/link';
 import { deployments, clusters, type Deployment, type Cluster } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
@@ -15,7 +15,8 @@ interface LogEntry {
 
 export default function DeploymentDetailPage() {
   const searchParams = useSearchParams();
-  const id = searchParams.get('id') as string;
+  const params = useParams();
+  const id = (params?.id as string) || (searchParams.get('id') as string);
 
   const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [clusterList, setClusterList] = useState<Cluster[]>([]);

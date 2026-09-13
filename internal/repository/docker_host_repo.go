@@ -284,9 +284,15 @@ func (r *DockerHostRepository) GetHostDecrypted(ctx context.Context, id uuid.UUI
 	return h, nil
 }
 
-// DeleteHost removes a Docker host.
-func (r *DockerHostRepository) DeleteHost(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM docker_hosts WHERE id = $1`, id)
+// DeleteHost removes a Docker host, scoped to the given tenant.
+func (r *DockerHostRepository) DeleteHost(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	query := `DELETE FROM docker_hosts WHERE id = $1`
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += ` AND tenant_id = $2`
+		args = append(args, tenantID)
+	}
+	_, err := r.pool.Exec(ctx, query, args...)
 	return err
 }
 
@@ -449,8 +455,14 @@ func (r *DockerHostRepository) UpdateService(ctx context.Context, s *DockerServi
 	return err
 }
 
-// DeleteService removes a Docker service.
-func (r *DockerHostRepository) DeleteService(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM docker_services WHERE id = $1`, id)
+// DeleteService removes a Docker service, scoped to the given tenant.
+func (r *DockerHostRepository) DeleteService(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	query := `DELETE FROM docker_services WHERE id = $1`
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += ` AND tenant_id = $2`
+		args = append(args, tenantID)
+	}
+	_, err := r.pool.Exec(ctx, query, args...)
 	return err
 }

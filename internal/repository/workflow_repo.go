@@ -153,8 +153,8 @@ func (r *WorkflowRepository) Update(ctx context.Context, id uuid.UUID, w *models
 	return nil
 }
 
-// Delete removes a workflow.
-func (r *WorkflowRepository) Delete(ctx context.Context, id uuid.UUID) error {
+// Delete removes a workflow, scoped to the given tenant.
+func (r *WorkflowRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
 	// Delete step executions for all executions of this workflow
 	if _, err := r.pool.Exec(ctx, `
 		DELETE FROM step_executions
@@ -168,7 +168,13 @@ func (r *WorkflowRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("delete workflow executions: %w", err)
 	}
 
-	tag, err := r.pool.Exec(ctx, "DELETE FROM workflows WHERE id = $1", id)
+	query := "DELETE FROM workflows WHERE id = $1"
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += " AND tenant_id = $2"
+		args = append(args, tenantID)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete workflow: %w", err)
 	}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { securityScan, devops, connections, registryRepositories, type ScanTarget, type ScanRun, type ScanSchedule, type SecurityDashboard, type ScannerType, type TargetType, type CompliancePolicy, type SecurityFinding, type SecurityFindingSummary, type RegistryRepository, type Connection } from '@/lib/api';
+import { securityScan, devops, connections, registryRepositories, type ScanTarget, type ScanRun, type ScanSchedule, type SecurityDashboard, type ScannerType, type TargetType, type CompliancePolicy, type SecurityFinding, type SecurityFindingSummary, type RegistryRepository, type Connection, type SonarProject, type SonarQualityGateCondition, type SonarIssueTransition } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import BrandIcon from '@/components/BrandIcon';
 import Tabs from '@/components/Tabs';
@@ -70,7 +70,7 @@ export default function SecurityClient() {
   const [findings, setFindings] = useState<SecurityFinding[]>([]);
   const [findingSummary, setFindingSummary] = useState<SecurityFindingSummary | null>(null);
   const [showPolicyForm, setShowPolicyForm] = useState(false);
-  const [policyForm, setPolicyForm] = useState({ name: '', description: '', policy_type: 'resource_limits' as CompliancePolicy['policy_type'], environment: 'production', severity: 'high' as CompliancePolicy['severity'], blocking: true, enabled: true });
+  const [policyForm, setPolicyForm] = useState({ name: '', description: '', policy_type: 'resource_limits' as CompliancePolicy['policy_type'], environments: ['production'], severity: 'block' as CompliancePolicy['severity'], blocking: true, enabled: true, policy_spec: { require_resource_limits: true } as Record<string, unknown> });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -410,6 +410,9 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
                       <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: `${SCANNER_COLORS[target.scanner_type]}20`, color: SCANNER_COLORS[target.scanner_type] }}>
                         {target.scanner_type}
                       </span>
+                      {target.scanner_type === 'sonarqube' && (
+                        <span className="text-xs text-[var(--text-tertiary)] self-center">report collected from an external SonarQube</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -432,6 +435,9 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={() => handleScan(target.id)}
+                  title={target.scanner_type === 'sonarqube'
+                    ? 'Collect a report of the latest analysis; SonarQube itself runs outside PEPA'
+                    : 'Run a scan now'}
                   className="px-3 py-1.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
                 >
                   Scan Now
@@ -471,15 +477,28 @@ function TargetsTab({ targets, onRefresh }: { targets: ScanTarget[]; onRefresh: 
   );
 }
 
-type ScanCategory = 'code' | 'containers';
+type ScanCategory = 'code' | 'containers' | 'quality';
 type CodeSource = 'local' | 'git_url' | 'connection';
-type ContainerSource = 'image' | 'registry' | 'sonarqube';
+type ContainerSource = 'image' | 'registry';
+
+const DEFAULT_STALE_HOURS = 24;
+
+/** Best-effort read of a scan_config value that the Go side stores as a number. */
+function configNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
 
 function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => void; onCreated: () => void; editTarget?: ScanTarget }) {
   const isEditing = !!editTarget;
   const [name, setName] = useState(editTarget?.name || '');
   const [category, setCategory] = useState<ScanCategory>(() => {
     if (!editTarget) return 'containers';
+    if (editTarget.target_type === 'sonarqube_project') return 'quality';
     if (editTarget.target_type === 'git_repo' || editTarget.target_type === 'filesystem') return 'code';
     return 'containers';
   });
@@ -506,12 +525,32 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
   // Container source state
   const [containerSource, setContainerSource] = useState<ContainerSource>(() => {
     if (!editTarget) return 'image';
-    if (editTarget.target_type === 'sonarqube_project') return 'sonarqube';
     if (editTarget.target_type === 'registry') return 'registry';
     return 'image';
   });
   const [imageRef, setImageRef] = useState(editTarget?.target_type === 'image' ? editTarget.target_ref : '');
-  const [sonarProjectKey, setSonarProjectKey] = useState(editTarget?.target_type === 'sonarqube_project' ? editTarget.target_ref : '');
+
+  // Code Quality (SonarQube) state — the analysis runs outside PEPA, we only collect its report.
+  const sonarConfig = (editTarget?.scan_config || {}) as Record<string, unknown>;
+  const isSonarTarget = editTarget?.target_type === 'sonarqube_project';
+  const [sonarConnections, setSonarConnections] = useState<Connection[]>([]);
+  const [sonarConnectionId, setSonarConnectionId] = useState(isSonarTarget ? (editTarget?.connection_id || '') : '');
+  const [sonarProjectKey, setSonarProjectKey] = useState(isSonarTarget ? (editTarget?.target_ref || '') : '');
+  const [sonarBranch, setSonarBranch] = useState(typeof sonarConfig.branch === 'string' ? sonarConfig.branch : '');
+  const [sonarStaleHours, setSonarStaleHours] = useState(() => {
+    const configured = configNumber(sonarConfig.stale_after_hours);
+    return String(configured ?? DEFAULT_STALE_HOURS);
+  });
+  const [sonarCiLink, setSonarCiLink] = useState(typeof sonarConfig.source_ci_url === 'string' && !!sonarConfig.source_ci_url);
+  const [sonarCiUrl, setSonarCiUrl] = useState(typeof sonarConfig.source_ci_url === 'string' ? sonarConfig.source_ci_url : '');
+  const [sonarProjects, setSonarProjects] = useState<SonarProject[]>([]);
+  const [sonarQuery, setSonarQuery] = useState('');
+  const [sonarSearchOpen, setSonarSearchOpen] = useState(false);
+  const [loadingSonarProjects, setLoadingSonarProjects] = useState(false);
+  const [sonarProjectsError, setSonarProjectsError] = useState('');
+  const [sonarProjectsTruncated, setSonarProjectsTruncated] = useState(false);
+  // Legacy targets kept url/token inside scan_config — the server rejects those keys now.
+  const sonarLegacyConfig = !!(sonarConfig.url || sonarConfig.token);
 
   // Registry cascading selector state
   const [registryRepos, setRegistryRepos] = useState<RegistryRepository[]>([]);
@@ -540,8 +579,42 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
     connections.list().then(res => {
       const allConns = (res as { connections: Connection[] }).connections || [];
       setGitConnections(allConns.filter(c => c.type === 'gitlab' || c.type === 'git'));
+      setSonarConnections(allConns.filter(c => c.type === 'sonarqube'));
     }).catch(() => {});
   }, []);
+
+  // Project key autocomplete: debounce the typed key, then ask the selected SonarQube connection.
+  useEffect(() => {
+    if (!sonarSearchOpen) return;
+    const t = setTimeout(() => setSonarQuery(sonarProjectKey.trim()), 300);
+    return () => clearTimeout(t);
+  }, [sonarSearchOpen, sonarProjectKey]);
+
+  useEffect(() => {
+    if (!sonarSearchOpen || !sonarConnectionId) return;
+    let cancelled = false;
+    setLoadingSonarProjects(true);
+    setSonarProjectsError('');
+    securityScan.listSonarProjects(sonarConnectionId, sonarQuery)
+      .then(res => {
+        if (cancelled) return;
+        setSonarProjects(res.projects || []);
+        setSonarProjectsTruncated(!!res.truncated);
+      })
+      .catch(e => {
+        if (cancelled) return;
+        setSonarProjects([]);
+        setSonarProjectsError(friendlyError(e).message || 'Failed to load projects from SonarQube');
+      })
+      .finally(() => { if (!cancelled) setLoadingSonarProjects(false); });
+    return () => { cancelled = true; };
+  }, [sonarSearchOpen, sonarConnectionId, sonarQuery]);
+
+  const selectedSonarConnection = sonarConnections.find(c => c.id === sonarConnectionId);
+  // Non-secret part of the connection config, used for the "open in SonarQube" links.
+  const sonarBaseUrl = typeof selectedSonarConnection?.config?.url === 'string'
+    ? (selectedSonarConnection.config.url as string).replace(/\/+$/, '')
+    : '';
 
   // Registry cascading handlers
   const handleRepoSelect = async (repoId: string) => {
@@ -614,6 +687,10 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
 
   // Resolve final target_type and target_ref from category/source state
   const resolveTarget = (): { target_type: TargetType; target_ref: string; connection_id?: string } | null => {
+    if (category === 'quality') {
+      const key = sonarProjectKey.trim();
+      return key ? { target_type: 'sonarqube_project', target_ref: key, connection_id: sonarConnectionId || undefined } : null;
+    }
     if (category === 'code') {
       switch (codeSource) {
         case 'local':
@@ -631,35 +708,53 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
           return imageRef ? { target_type: 'image', target_ref: imageRef } : null;
         case 'registry':
           return registryManualRef ? { target_type: 'registry', target_ref: registryManualRef } : null;
-        case 'sonarqube':
-          return sonarProjectKey ? { target_type: 'sonarqube_project', target_ref: sonarProjectKey } : null;
       }
     }
   };
 
-  const resolveScanner = (): ScannerType => {
-    if (category === 'code') return 'sonarqube';
-    return containerSource === 'sonarqube' ? 'sonarqube' : 'trivy';
-  };
+  // SonarQube is only reachable through a Connection; code and container scanning both use Trivy.
+  const resolveScanner = (): ScannerType => (category === 'quality' ? 'sonarqube' : 'trivy');
 
   const handleSubmit = async () => {
     if (!name.trim()) { setError('Name is required'); return; }
-    const resolved = resolveTarget();
-    if (!resolved) { setError('Target reference is required'); return; }
+    const resolvedTarget = resolveTarget();
+    if (!resolvedTarget) { setError('Target reference is required'); return; }
+    if (category === 'quality' && !resolvedTarget.connection_id) {
+      setError('SonarQube credentials come from a Connection — add one in Connections and select it here');
+      return;
+    }
+    const staleHours = configNumber(sonarStaleHours);
+    if (category === 'quality' && (staleHours === null || staleHours <= 0)) {
+      setError('Stale after (hours) must be a positive number');
+      return;
+    }
     setError('');
     setCreating(true);
     try {
       // For registry sources, pass the registry repository ID as connection_id
       // so the backend can look up credentials for private image pulls.
-      const connectionId = resolved.connection_id || (containerSource === 'registry' && selectedRepoId ? selectedRepoId : undefined);
+      const connectionId = resolvedTarget.connection_id
+        || (containerSource === 'registry' && selectedRepoId ? selectedRepoId : undefined);
+      const scanConfig: Record<string, unknown> = { ...(editTarget?.scan_config || {}) };
+      if (category === 'quality') {
+        // Credentials never belong in scan_config; they live in the Connection.
+        delete scanConfig.url;
+        delete scanConfig.token;
+        scanConfig.project_key = resolvedTarget.target_ref;
+        if (sonarBranch.trim()) scanConfig.branch = sonarBranch.trim();
+        else delete scanConfig.branch;
+        scanConfig.stale_after_hours = staleHours ?? DEFAULT_STALE_HOURS;
+        if (sonarCiLink && sonarCiUrl.trim()) scanConfig.source_ci_url = sonarCiUrl.trim();
+        else delete scanConfig.source_ci_url;
+      }
       const targetData = {
         name: name.trim(),
         scanner_type: resolveScanner(),
-        target_type: resolved.target_type,
-        target_ref: resolved.target_ref,
+        target_type: resolvedTarget.target_type,
+        target_ref: resolvedTarget.target_ref,
         connection_id: connectionId,
         enabled: editTarget?.enabled ?? true,
-        scan_config: editTarget?.scan_config || {},
+        scan_config: scanConfig,
       };
       if (isEditing && editTarget) {
         await securityScan.updateTarget(editTarget.id, targetData);
@@ -701,7 +796,7 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
           {/* Category Tabs */}
           <div>
             <label className="label">Scan Category</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => setCategory('code')}
@@ -712,7 +807,7 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
                 }`}
               >
                 <div className="text-[13px] font-medium">Code Scanning</div>
-                <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">SonarQube code quality &amp; security analysis</div>
+                <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">Trivy vulnerability scanning for repositories</div>
               </button>
               <button
                 type="button"
@@ -725,6 +820,18 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
               >
                 <div className="text-[13px] font-medium">Container Scanning</div>
                 <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">Trivy vulnerability scanning for images</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategory('quality')}
+                className={`p-3 rounded-lg border text-left transition-all ${
+                  category === 'quality'
+                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
+                    : 'border-[var(--border)] hover:border-[var(--text-tertiary)]'
+                }`}
+              >
+                <div className="text-[13px] font-medium">Code Quality (SonarQube)</div>
+                <div className="text-[10px] text-[var(--text-tertiary)] mt-0.5">External SonarQube: PEPA collects the analysis report over the URL and token from Connections</div>
               </button>
             </div>
           </div>
@@ -808,7 +915,7 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
             <div className="space-y-4">
               <div>
                 <label className="label">Source</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setContainerSource('image')}
@@ -830,17 +937,6 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
                     }`}
                   >
                     Registry Repo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setContainerSource('sonarqube')}
-                    className={`p-2.5 rounded-lg border text-center transition-all text-[11px] ${
-                      containerSource === 'sonarqube'
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
-                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-tertiary)]'
-                    }`}
-                  >
-                    SonarQube
                   </button>
                 </div>
               </div>
@@ -928,12 +1024,146 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
                 </div>
               )}
 
-              {containerSource === 'sonarqube' && (
-                <div>
-                  <label className="label">SonarQube Project Key *</label>
-                  <input type="text" value={sonarProjectKey} onChange={e => setSonarProjectKey(e.target.value)} className="input font-mono text-[12px]" placeholder="my-project-key" />
-                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Project key from your SonarQube instance</p>
+            </div>
+          )}
+
+          {/* ── QUALITY category (external SonarQube) ── */}
+          {category === 'quality' && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]">
+                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+                  SonarQube analyzes the code outside PEPA — in your CI pipeline or with a manually run{' '}
+                  <code className="font-mono">sonar-scanner</code>. PEPA collects the quality gate, metrics and issues of the latest analysis and shows them like any other scan report.
+                </p>
+              </div>
+
+              {sonarLegacyConfig && (
+                <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/10">
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    This target still stores a SonarQube URL/token in its scan config. Select a Connection below and save — credentials are no longer accepted here.
+                  </p>
                 </div>
+              )}
+
+              {sonarConnections.length === 0 ? (
+                <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/10">
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    No SonarQube connections configured. <a href="/connections" className="underline font-medium">Add a connection</a> first — its URL and token are used for every report.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="label">SonarQube Connection *</label>
+                  <select
+                    value={sonarConnectionId}
+                    onChange={e => { setSonarConnectionId(e.target.value); setSonarProjects([]); setSonarSearchOpen(false); }}
+                    className="input text-[12px]"
+                    style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}
+                  >
+                    <option value="" style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>Select connection...</option>
+                    {sonarConnections.map(conn => (
+                      <option key={conn.id} value={conn.id} style={{ backgroundColor: 'var(--surface)', color: 'var(--text-primary)' }}>
+                        {typeof conn.config?.url === 'string' ? `${conn.name} (${conn.config.url})` : conn.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Credentials come from Connections; this target only points at one of them</p>
+                </div>
+              )}
+
+              <div className="relative">
+                <label className="label">SonarQube Project Key *</label>
+                <input
+                  type="text"
+                  value={sonarProjectKey}
+                  disabled={!sonarConnectionId}
+                  onFocus={() => { if (sonarConnectionId) setSonarSearchOpen(true); }}
+                  onBlur={() => setSonarSearchOpen(false)}
+                  onChange={e => setSonarProjectKey(e.target.value)}
+                  className="input font-mono text-[12px]"
+                  placeholder={sonarConnectionId ? 'my-project-key' : 'Select a connection first'}
+                />
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                  Identifier of the project inside your SonarQube — PEPA does not analyze code itself
+                </p>
+                {sonarSearchOpen && sonarConnectionId && (
+                  <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] shadow-xl">
+                    {loadingSonarProjects ? (
+                      <p className="px-3 py-2 text-[11px] text-[var(--text-tertiary)]">Loading projects from SonarQube…</p>
+                    ) : sonarProjectsError ? (
+                      <div className="px-3 py-2">
+                        <p className="text-[11px] text-red-500 break-words">{sonarProjectsError}</p>
+                        <button
+                          type="button"
+                          onMouseDown={e => { e.preventDefault(); setSonarProjectsError(''); setSonarQuery(sonarProjectKey.trim()); }}
+                          className="text-[10px] px-2 py-1 mt-1 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : sonarProjects.length === 0 ? (
+                      <p className="px-3 py-2 text-[11px] text-[var(--text-tertiary)]">
+                        {sonarProjectKey.trim()
+                          ? `No analysable project matches “${sonarProjectKey.trim()}” — it may not have been analyzed yet`
+                          : 'This SonarQube has no analysable projects yet'}
+                      </p>
+                    ) : (
+                      <>
+                        {sonarProjects.map(proj => (
+                          <button
+                            key={proj.key}
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); setSonarProjectKey(proj.key); setSonarQuery(proj.key); setSonarSearchOpen(false); }}
+                            className="w-full text-left px-3 py-2 hover:bg-[var(--accent-subtle)] border-b border-[var(--border)] last:border-b-0"
+                          >
+                            <span className="block text-[12px] font-mono text-[var(--text-primary)] truncate">{proj.key}</span>
+                            {proj.name && proj.name !== proj.key && (
+                              <span className="block text-[10px] text-[var(--text-tertiary)] truncate">{proj.name}</span>
+                            )}
+                          </button>
+                        ))}
+                        {sonarProjectsTruncated && (
+                          <p className="px-3 py-2 text-[10px] text-[var(--text-tertiary)]">Showing the first results — keep typing to narrow them down.</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {sonarConnectionId && (
+                <div>
+                  <label className="label">Branch</label>
+                  <input type="text" value={sonarBranch} onChange={e => setSonarBranch(e.target.value)} className="input font-mono text-[12px]" placeholder="main (optional)" />
+                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Branch name as SonarQube knows it, empty for the main analysis</p>
+                </div>
+              )}
+
+              <div>
+                <label className="label">Stale after, hours</label>
+                <input type="number" min={1} value={sonarStaleHours} onChange={e => setSonarStaleHours(e.target.value)} className="input text-[12px]" placeholder={String(DEFAULT_STALE_HOURS)} />
+                <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Reports whose last analysis is older than this are flagged as stale</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" checked={sonarCiLink} onChange={e => setSonarCiLink(e.target.checked)} className="mt-0.5" />
+                  <span className="text-[11px] text-[var(--text-secondary)]">Link the CI pipeline that produced the analysis</span>
+                </label>
+                {sonarCiLink && (
+                  <input type="text" value={sonarCiUrl} onChange={e => setSonarCiUrl(e.target.value)} className="input font-mono text-[12px]" placeholder="https://gitlab.example.com/org/repo/-/pipelines/1234" />
+                )}
+              </div>
+
+              {sonarBaseUrl && sonarProjectKey.trim() && (
+                <a
+                  href={`${sonarBaseUrl}/dashboard?id=${encodeURIComponent(sonarProjectKey.trim())}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block text-[11px] text-[var(--accent)] underline"
+                >
+                  Open project in SonarQube
+                </a>
               )}
             </div>
           )}
@@ -975,6 +1205,13 @@ interface TrivyVulnerability {
   Severity: string;
   Title?: string;
   Description?: string;
+  // SonarQube findings are normalised into the same shape by the backend, so the
+  // extra fields only appear on sonar reports.
+  SonarSeverity?: string;
+  Status?: string;
+  Effort?: string;
+  TechnicalDebt?: string;
+  PrimaryURL?: string;
 }
 interface TrivyResult {
   Target: string;
@@ -991,14 +1228,35 @@ const SEVERITY_BG: Record<string, string> = {
   UNKNOWN: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
 };
 
+// SonarQube quality gate states, rendered with the same badge language as severities.
+const GATE_BG: Record<string, string> = {
+  OK: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  WARN: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  ERROR: 'bg-red-500/10 text-red-500 border-red-500/20',
+  NONE: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
+};
+
+// Headline metrics of a SonarQube report; technical debt is rendered separately
+// because SonarQube already formats it as a duration.
+const SONAR_TILES: { key: string; label: string; suffix?: string }[] = [
+  { key: 'bugs', label: 'Bugs' },
+  { key: 'vulnerabilities', label: 'Vulnerabilities' },
+  { key: 'code_smells', label: 'Code smells' },
+  { key: 'coverage', label: 'Coverage', suffix: '%' },
+  { key: 'duplicated_lines_density', label: 'Duplicated lines', suffix: '%' },
+];
+
 function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void }) {
   const [fullScan, setFullScan] = useState<ScanRun | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [expandedContainers, setExpandedContainers] = useState<Set<string>>(new Set());
   const [expandedVulns, setExpandedVulns] = useState<Set<string>>(new Set());
   const [severityFilter, setSeverityFilter] = useState<string>('');
-  const [ignores, setIgnores] = useState<Map<string, string>>(new Map()); // cve_id -> ignore_id
+  const [ignores, setIgnores] = useState<Map<string, string>>(new Map()); // cve_id / sonar issue key -> ignore_id
   const [ignoringCve, setIgnoringCve] = useState<string | null>(null);
+  const [showGateConditions, setShowGateConditions] = useState(false);
+  const [reportBusy, setReportBusy] = useState('');
+  const [transitioningIssue, setTransitioningIssue] = useState<string | null>(null);
 
   // Close on Escape key
   useEffect(() => {
@@ -1024,40 +1282,116 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
     if (!scan.target_id) return;
     securityScan.listTargetIgnores(scan.target_id).then(list => {
       const map = new Map<string, string>();
-      list.forEach(i => map.set(i.cve_id, i.id));
+      list.forEach(i => {
+        if (i.cve_id) map.set(i.cve_id, i.id);
+        if (i.issue_key) map.set(i.issue_key, i.id);
+      });
       setIgnores(map);
     }).catch(() => {});
   }, [scan.target_id]);
 
-  const handleIgnoreCve = async (cveId: string) => {
-    if (!scan.target_id || ignoringCve) return;
-    setIgnoringCve(cveId);
+  // Trivy findings are ignored by CVE id, SonarQube ones by issue key — the backend
+  // stores both kinds in one table and rejects a payload that mixes them up.
+  const handleIgnoreFinding = async (finding: TrivyVulnerability) => {
+    const id = finding.VulnerabilityID;
+    if (!scan.target_id || !id || ignoringCve) return;
+    setIgnoringCve(id);
     try {
-      const created = await securityScan.createIgnore(scan.target_id, { cve_id: cveId });
-      setIgnores(prev => new Map(prev).set(cveId, created.id));
+      const created = await securityScan.createIgnore(
+        scan.target_id,
+        finding.SonarSeverity ? { issue_key: id } : { cve_id: id },
+      );
+      setIgnores(prev => new Map(prev).set(id, created.id));
     } catch (e) {
-      console.error('Failed to ignore CVE:', e);
+      console.error('Failed to ignore finding:', e);
     } finally {
       setIgnoringCve(null);
     }
   };
 
-  const handleUnignoreCve = async (cveId: string) => {
-    const ignoreId = ignores.get(cveId);
+  const handleUnignoreFinding = async (id: string) => {
+    const ignoreId = ignores.get(id);
     if (!ignoreId) return;
     try {
       await securityScan.deleteIgnore(ignoreId);
       setIgnores(prev => {
         const next = new Map(prev);
-        next.delete(cveId);
+        next.delete(id);
         return next;
       });
     } catch (e) {
-      console.error('Failed to unignore CVE:', e);
+      console.error('Failed to unignore finding:', e);
     }
   };
 
   const active = fullScan || scan;
+
+  // SonarQube runs reuse the Trivy report shape, so everything below only adds the
+  // quality-gate context on top of the findings list.
+  const isSonarRun = active.scanner_type === 'sonarqube';
+  const sonarSummary = (active.result_summary || {}) as Record<string, unknown>;
+  const sonarGate = typeof sonarSummary.quality_gate_status === 'string' ? sonarSummary.quality_gate_status : '';
+  const sonarAnalysisAt = typeof sonarSummary.last_analysis_at === 'string' ? sonarSummary.last_analysis_at : '';
+  const sonarProjectKey = typeof sonarSummary.project_key === 'string' ? sonarSummary.project_key : '';
+  const sonarBranch = typeof sonarSummary.branch === 'string' ? sonarSummary.branch : '';
+  const sonarDebt = typeof sonarSummary.technical_debt === 'string' ? sonarSummary.technical_debt : '';
+  const sonarCiUrl = typeof sonarSummary.source_ci_url === 'string' ? sonarSummary.source_ci_url : '';
+  const sonarConnectionId = typeof sonarSummary.connection_id === 'string' ? sonarSummary.connection_id : '';
+  const sonarTruncated = sonarSummary.truncated === true;
+  const sonarIssueTotal = configNumber(sonarSummary.issue_total);
+  const staleHours = configNumber(sonarSummary.stale_after_hours) ?? DEFAULT_STALE_HOURS;
+  const analysisMillis = sonarAnalysisAt ? Date.parse(sonarAnalysisAt) : NaN;
+  const sonarStale = Number.isFinite(analysisMillis) && Date.now() - analysisMillis > staleHours * 3600 * 1000;
+
+  const gateConditions = useMemo<SonarQualityGateCondition[]>(() => {
+    const raw = active.result_full?.sonar as { quality_gate?: { conditions?: SonarQualityGateCondition[] } } | undefined;
+    const list = raw?.quality_gate?.conditions;
+    return Array.isArray(list) ? list : [];
+  }, [active.result_full]);
+
+  const sonarWarnings = useMemo<string[]>(() => {
+    const list = active.result_full?.sonar_warnings;
+    return Array.isArray(list) ? list as string[] : [];
+  }, [active.result_full]);
+
+  const sonarTiles = SONAR_TILES.reduce<{ label: string; value: string }[]>((acc, tile) => {
+    const value = configNumber(sonarSummary[tile.key]);
+    if (value !== null) acc.push({ label: tile.label, value: `${value}${tile.suffix || ''}` });
+    return acc;
+  }, []);
+
+  // Server-rendered report: the same generator serves Trivy and SonarQube runs.
+  const downloadReport = async (format: 'html' | 'json') => {
+    if (reportBusy) return;
+    setReportBusy(format);
+    try {
+      const text = await securityScan.downloadScanReport(active.id, format);
+      const blob = new Blob([text], { type: format === 'html' ? 'text/html' : 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `pepa-scan-report-${active.id}.${format}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Failed to download scan report:', e);
+    } finally {
+      setReportBusy('');
+    }
+  };
+
+  // The issue itself stays in SonarQube; PEPA only forwards the verb.
+  const handleTransitionIssue = async (issueKey: string, transition: SonarIssueTransition) => {
+    if (!sonarConnectionId || transitioningIssue) return;
+    setTransitioningIssue(issueKey);
+    try {
+      await securityScan.sonarTransitionIssue({ connection_id: sonarConnectionId, issue_key: issueKey, transition });
+    } catch (e) {
+      console.error('Failed to transition SonarQube issue:', e);
+    } finally {
+      setTransitioningIssue(null);
+    }
+  };
 
   // Extract containers (Results) from result_full
   const containers = useMemo<TrivyResult[]>(() => {
@@ -1125,9 +1459,27 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
               {active.completed_at && <span>Completed: {new Date(active.completed_at).toLocaleString()}</span>}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-[var(--bg-secondary)] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => downloadReport('html')}
+              disabled={!!reportBusy}
+              className="text-xs px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+              title="Server-rendered HTML report"
+            >
+              {reportBusy === 'html' ? 'Rendering…' : 'HTML report'}
+            </button>
+            <button
+              onClick={() => downloadReport('json')}
+              disabled={!!reportBusy}
+              className="text-xs px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"
+              title="Server-rendered JSON report"
+            >
+              {reportBusy === 'json' ? 'Rendering…' : 'JSON'}
+            </button>
+            <button onClick={onClose} className="p-2 hover:bg-[var(--bg-secondary)] rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -1149,11 +1501,110 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
             </div>
           )}
 
+          {/* SonarQube quality gate & project metrics */}
+          {isSonarRun && active.status !== 'failed' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 flex-wrap p-4 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border)]">
+                <span className={`text-xs px-2 py-0.5 rounded border font-medium ${GATE_BG[sonarGate] || GATE_BG.NONE}`}>
+                  Quality gate: {sonarGate || 'NONE'}
+                </span>
+                {!sonarAnalysisAt && (
+                  <span className="text-xs px-2 py-0.5 rounded border bg-gray-500/10 text-gray-500 border-gray-500/20">Never analyzed</span>
+                )}
+                {sonarStale && (
+                  <span className="text-xs px-2 py-0.5 rounded border bg-amber-500/10 text-amber-600 border-amber-500/20">Stale</span>
+                )}
+                <span className="text-xs text-[var(--text-tertiary)]">
+                  Analysis: {Number.isFinite(analysisMillis) ? new Date(analysisMillis).toLocaleString() : 'not available'}
+                </span>
+                {(sonarProjectKey || active.target_ref) && (
+                  <span className="text-xs font-mono text-[var(--text-secondary)] truncate max-w-[28ch]">
+                    {sonarProjectKey || active.target_ref}{sonarBranch ? ` · ${sonarBranch}` : ''}
+                  </span>
+                )}
+                {sonarTruncated && (
+                  <span className="text-xs px-2 py-0.5 rounded border bg-gray-500/10 text-gray-500 border-gray-500/20" title="SonarQube reported more issues than PEPA collected">
+                    Issue list truncated{sonarIssueTotal !== null ? ` (${sonarIssueTotal} total)` : ''}
+                  </span>
+                )}
+                {sonarCiUrl && (
+                  <a href={sonarCiUrl} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent)] hover:underline">CI pipeline</a>
+                )}
+                {active.report_url && (
+                  <a href={active.report_url} target="_blank" rel="noreferrer" className="ml-auto text-xs text-[var(--accent)] hover:underline shrink-0">Open in SonarQube</a>
+                )}
+              </div>
+
+              {sonarTiles.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                  {sonarTiles.map(tile => (
+                    <div key={tile.label} className="px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)]">
+                      <div className="text-sm font-medium text-[var(--text-primary)]">{tile.value}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">{tile.label}</div>
+                    </div>
+                  ))}
+                  {sonarDebt && (
+                    <div className="px-3 py-2 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)]">
+                      <div className="text-sm font-medium text-[var(--text-primary)]">{sonarDebt}</div>
+                      <div className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)]">Technical debt</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {gateConditions.length > 0 && (
+                <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+                  <button
+                    onClick={() => setShowGateConditions(prev => !prev)}
+                    className="w-full px-4 py-2.5 flex items-center gap-2 text-left bg-[var(--bg-secondary)] hover:bg-[var(--bg-secondary)]/80"
+                  >
+                    <svg className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform ${showGateConditions ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                    <span className="text-sm font-medium text-[var(--text-primary)]">Quality gate conditions</span>
+                    <span className="text-xs text-[var(--text-tertiary)]">({gateConditions.length})</span>
+                  </button>
+                  {showGateConditions && (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[var(--text-tertiary)] border-t border-[var(--border)]">
+                          <th className="px-4 py-2 font-medium">Metric</th>
+                          <th className="px-2 py-2 font-medium">Threshold</th>
+                          <th className="px-2 py-2 font-medium">Actual</th>
+                          <th className="px-4 py-2 font-medium">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border)]">
+                        {gateConditions.map((cond, i) => (
+                          <tr key={`${cond.metric_key}-${i}`}>
+                            <td className="px-4 py-2 font-mono text-[var(--text-primary)]">{cond.metric_key}</td>
+                            <td className="px-2 py-2 text-[var(--text-secondary)]">{cond.comparator} {cond.error_threshold || '-'}</td>
+                            <td className="px-2 py-2 text-[var(--text-secondary)]">{cond.actual_value ?? '-'}</td>
+                            <td className="px-4 py-2">
+                              <span className={`text-xs px-1.5 py-0.5 rounded border ${GATE_BG[cond.status] || GATE_BG.NONE}`}>{cond.status}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {sonarWarnings.length > 0 && (
+                <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/10 space-y-1">
+                  <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Collected with warnings</p>
+                  {sonarWarnings.map((w, i) => (
+                    <p key={`${w}-${i}`} className="text-[11px] text-amber-600/90 dark:text-amber-400/90 break-words">{w}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Severity summary bar */}
           {containers.length > 0 && (
             <>
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-sm font-medium text-[var(--text-primary)]">{containers.length} container{containers.length !== 1 ? 's' : ''}</span>
+                <span className="text-sm font-medium text-[var(--text-primary)]">{containers.length} {isSonarRun ? (containers.length === 1 ? 'file' : 'files') : (containers.length === 1 ? 'container' : 'containers')}</span>
                 <span className="text-xs text-[var(--text-tertiary)]">|</span>
                 {Object.entries(totalSeverities).sort((a, b) => {
                   const order = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
@@ -1227,11 +1678,11 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
                         <div className="border-t border-[var(--border)]">
                           {!hasVulns ? (
                             <div className="px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
-                              No vulnerabilities found in this container.
+                              {isSonarRun ? 'No issues found in this file.' : 'No vulnerabilities found in this container.'}
                             </div>
                           ) : vulns.length === 0 ? (
                             <div className="px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
-                              No vulnerabilities matching the severity filter.
+                              No findings matching the severity filter.
                             </div>
                           ) : (
                             <div className="divide-y divide-[var(--border)]">
@@ -1240,32 +1691,47 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
                                 const isVulnExpanded = expandedVulns.has(vulnKey);
                                 const isIgnored = ignores.has(v.VulnerabilityID);
                                 const isIgnoring = ignoringCve === v.VulnerabilityID;
+                                // SonarQube issues carry their original severity next to the mapped one.
+                                const isSonarFinding = !!v.SonarSeverity;
                                 return (
                                   <div key={vulnKey} className={`px-4 py-2.5 hover:bg-[var(--surface)]/50 ${isIgnored ? 'opacity-50' : ''}`}>
                                     <div
-                                      className="flex items-center justify-between cursor-pointer"
+                                      className="flex items-center justify-between cursor-pointer gap-3"
                                       onClick={() => toggleVuln(vulnKey)}
                                     >
-                                      <div className="flex items-center gap-3">
-                                        <svg className={`w-3 h-3 text-[var(--text-tertiary)] transition-transform ${isVulnExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                                        <span className={`text-xs px-1.5 py-0.5 rounded border ${SEVERITY_BG[v.Severity?.toUpperCase()] || SEVERITY_BG.UNKNOWN}`}>{v.Severity}</span>
-                                        <span className={`text-sm font-mono ${isIgnored ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>{v.VulnerabilityID}</span>
-                                        <span className="text-sm text-[var(--text-secondary)]">{v.PkgName}</span>
-                                        <span className="text-xs text-[var(--text-tertiary)]">{v.InstalledVersion}</span>
-                                        {v.FixedVersion && (
-                                          <span className="text-xs text-emerald-600">→ {v.FixedVersion}</span>
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <svg className={`w-3 h-3 shrink-0 text-[var(--text-tertiary)] transition-transform ${isVulnExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded border shrink-0 ${SEVERITY_BG[v.Severity?.toUpperCase()] || SEVERITY_BG.UNKNOWN}`}>
+                                          {isSonarFinding ? v.SonarSeverity : v.Severity}
+                                        </span>
+                                        {isSonarFinding ? (
+                                          <>
+                                            <span className={`text-sm font-mono shrink-0 ${isIgnored ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>{v.PkgName}</span>
+                                            <span className="text-sm text-[var(--text-secondary)] truncate">{v.Title}</span>
+                                            <span className="text-xs text-[var(--text-tertiary)] font-mono truncate" title={v.InstalledVersion}>{v.InstalledVersion}</span>
+                                            {v.Effort && <span className="text-xs text-[var(--text-tertiary)] shrink-0">est. {v.Effort}</span>}
+                                          </>
+                                        ) : (
+                                          <>
+                                            <span className={`text-sm font-mono shrink-0 ${isIgnored ? 'line-through text-[var(--text-tertiary)]' : 'text-[var(--text-primary)]'}`}>{v.VulnerabilityID}</span>
+                                            <span className="text-sm text-[var(--text-secondary)]">{v.PkgName}</span>
+                                            <span className="text-xs text-[var(--text-tertiary)]">{v.InstalledVersion}</span>
+                                            {v.FixedVersion && (
+                                              <span className="text-xs text-emerald-600">→ {v.FixedVersion}</span>
+                                            )}
+                                          </>
                                         )}
                                         {isIgnored && (
-                                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-500 border border-gray-500/20">Ignored</span>
+                                          <span className="text-xs px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-500 border border-gray-500/20 shrink-0">Ignored</span>
                                         )}
                                       </div>
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           if (isIgnored) {
-                                            handleUnignoreCve(v.VulnerabilityID);
+                                            handleUnignoreFinding(v.VulnerabilityID);
                                           } else {
-                                            handleIgnoreCve(v.VulnerabilityID);
+                                            handleIgnoreFinding(v);
                                           }
                                         }}
                                         disabled={isIgnoring}
@@ -1288,12 +1754,47 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
                                     {isVulnExpanded && (
                                       <div className="mt-2 ml-6 space-y-1.5 text-sm">
                                         {v.Title && <p className="text-[var(--text-primary)] font-medium">{v.Title}</p>}
-                                        {v.Description && <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{v.Description}</p>}
-                                        <div className="flex gap-4 text-xs text-[var(--text-tertiary)]">
-                                          <span>Package: <span className="text-[var(--text-secondary)]">{v.PkgName}</span></span>
-                                          <span>Installed: <span className="text-[var(--text-secondary)]">{v.InstalledVersion}</span></span>
-                                          {v.FixedVersion && <span>Fixed in: <span className="text-emerald-600">{v.FixedVersion}</span></span>}
-                                        </div>
+                                        {!isSonarFinding && v.Description && <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{v.Description}</p>}
+                                        {isSonarFinding ? (
+                                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-tertiary)]">
+                                            <span>Issue: <span className="font-mono text-[var(--text-secondary)]">{v.VulnerabilityID}</span></span>
+                                            <span>Rule: <span className="font-mono text-[var(--text-secondary)]">{v.PkgName}</span></span>
+                                            <span className="min-w-0">Location: <span className="font-mono text-[var(--text-secondary)] break-all">{v.InstalledVersion}</span></span>
+                                            {container.Type && <span>Type: <span className="text-[var(--text-secondary)]">{container.Type.toLowerCase().replace(/_/g, ' ')}</span></span>}
+                                            {v.Status && <span>Status: <span className="text-[var(--text-secondary)]">{v.Status}</span></span>}
+                                            {v.TechnicalDebt && <span>Debt: <span className="text-[var(--text-secondary)]">{v.TechnicalDebt}</span></span>}
+                                          </div>
+                                        ) : (
+                                          <div className="flex gap-4 text-xs text-[var(--text-tertiary)]">
+                                            <span>Package: <span className="text-[var(--text-secondary)]">{v.PkgName}</span></span>
+                                            <span>Installed: <span className="text-[var(--text-secondary)]">{v.InstalledVersion}</span></span>
+                                            {v.FixedVersion && <span>Fixed in: <span className="text-emerald-600">{v.FixedVersion}</span></span>}
+                                          </div>
+                                        )}
+                                        {v.PrimaryURL && (
+                                          <a href={v.PrimaryURL} target="_blank" rel="noreferrer" className="inline-block text-xs text-[var(--accent)] hover:underline">
+                                            Open issue in SonarQube
+                                          </a>
+                                        )}
+                                        {isSonarFinding && sonarConnectionId && (
+                                          <div className="flex flex-wrap gap-2 pt-1">
+                                            <button
+                                              onClick={() => handleTransitionIssue(v.VulnerabilityID, 'falsepositive')}
+                                              disabled={transitioningIssue === v.VulnerabilityID}
+                                              className="text-xs px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface)] disabled:opacity-50"
+                                              title="Changes the issue upstream in SonarQube, not just in this report"
+                                            >
+                                              Mark as false positive in SonarQube
+                                            </button>
+                                            <button
+                                              onClick={() => handleTransitionIssue(v.VulnerabilityID, 'wontfix')}
+                                              disabled={transitioningIssue === v.VulnerabilityID}
+                                              className="text-xs px-2 py-1 rounded border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface)] disabled:opacity-50"
+                                            >
+                                              Won’t fix
+                                            </button>
+                                          </div>
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -1475,7 +1976,14 @@ function ScansTab({ scans, onRefresh }: { scans: ScanRun[]; onRefresh: () => voi
                   <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">
                     {scan.duration_ms ? formatDuration(scan.duration_ms) : '-'}
                   </td>
-                  <td className="px-4 py-3 text-sm text-[var(--text-secondary)]">{scan.trigger_type}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded border bg-[var(--surface)] text-[var(--text-tertiary)] border-[var(--border)]"
+                      title="What started this run"
+                    >
+                      {scan.trigger_type}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -2046,17 +2554,16 @@ function CreateScheduleModal({ targets, onClose, onCreated }: { targets: ScanTar
 // ── Compliance Tab ──────────────────────────────────────────────
 
 const COMPLAINT_SEVERITY_COLORS: Record<string, string> = {
-  critical: 'bg-red-500/10 text-red-500 border-red-500/20',
-  high: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-  medium: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-  low: 'bg-green-500/10 text-green-500 border-green-500/20',
+  block: 'bg-red-500/10 text-red-500 border-red-500/20',
+  warn: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
+  info: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
 };
 
 function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefresh }: {
   policies: CompliancePolicy[];
   showForm: boolean;
   setShowForm: (v: boolean) => void;
-  form: { name: string; description: string; policy_type: CompliancePolicy['policy_type']; environment: string; severity: CompliancePolicy['severity']; blocking: boolean; enabled: boolean };
+  form: { name: string; description: string; policy_type: CompliancePolicy['policy_type']; environments: string[]; severity: CompliancePolicy['severity']; blocking: boolean; enabled: boolean; policy_spec: Record<string, unknown> };
   setForm: (v: typeof form) => void;
   onRefresh: () => void;
 }) {
@@ -2066,7 +2573,7 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
     try {
       await devops.createPolicy(form);
       setShowForm(false);
-      setForm({ name: '', description: '', policy_type: 'resource_limits', environment: 'production', severity: 'high', blocking: true, enabled: true });
+      setForm({ name: '', description: '', policy_type: 'resource_limits', environments: ['production'], severity: 'block', blocking: true, enabled: true, policy_spec: { require_resource_limits: true } });
       onRefresh();
     } catch { /* ignore */ }
   };
@@ -2107,30 +2614,61 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)]">Type</label>
-              <select value={form.policy_type} onChange={e => setForm({ ...form, policy_type: e.target.value as CompliancePolicy['policy_type'] })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
+              <select value={form.policy_type} onChange={e => {
+                const newType = e.target.value as CompliancePolicy['policy_type'];
+                const defaultSpec: Record<string, unknown> = newType === 'resource_limits' ? { require_resource_limits: true } : newType === 'security_scan' ? { require_recent_scan: true, max_critical: 0 } : {};
+                setForm({ ...form, policy_type: newType, policy_spec: defaultSpec });
+              }} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
                 <option value="resource_limits">Resource Limits</option>
                 <option value="security_scan">Security Scan</option>
-                <option value="required_labels">Required Labels</option>
+                <option value="approval">Approval</option>
                 <option value="custom">Custom</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text-secondary)]">Environment</label>
-              <input type="text" value={form.environment} onChange={e => setForm({ ...form, environment: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
+              <label className="text-xs text-[var(--text-secondary)]">Environments (comma-separated)</label>
+              <input type="text" value={form.environments.join(', ')} onChange={e => setForm({ ...form, environments: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" placeholder="production, staging" />
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)]">Severity</label>
               <select value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value as CompliancePolicy['severity'] })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]">
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
+                <option value="block">Block</option>
+                <option value="warn">Warning</option>
+                <option value="info">Info</option>
               </select>
             </div>
             <div className="col-span-2">
               <label className="text-xs text-[var(--text-secondary)]">Description</label>
               <input type="text" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full mt-1 px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" />
             </div>
+          </div>
+          {/* Policy Spec Configuration */}
+          <div className="mt-3">
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Policy Configuration</label>
+            {form.policy_type === 'resource_limits' && (
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={!!form.policy_spec.require_resource_limits} onChange={e => setForm({ ...form, policy_spec: { ...form.policy_spec, require_resource_limits: e.target.checked } })} className="rounded" />
+                <span className="text-sm text-[var(--text-primary)]">Require resource limits</span>
+              </label>
+            )}
+            {form.policy_type === 'security_scan' && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={!!form.policy_spec.require_recent_scan} onChange={e => setForm({ ...form, policy_spec: { ...form.policy_spec, require_recent_scan: e.target.checked } })} className="rounded" />
+                  <span className="text-sm text-[var(--text-primary)]">Require recent security scan</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-[var(--text-primary)]">Max critical vulnerabilities:</span>
+                  <input type="number" value={(form.policy_spec.max_critical as number) || 0} onChange={e => setForm({ ...form, policy_spec: { ...form.policy_spec, max_critical: parseInt(e.target.value) || 0 } })} className="w-20 px-2 py-1 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)]" min="0" />
+                </div>
+              </div>
+            )}
+            {form.policy_type === 'approval' && (
+              <p className="text-xs text-[var(--text-secondary)]">Approval policies require manual sign-off before deployment.</p>
+            )}
+            {form.policy_type === 'custom' && (
+              <textarea value={JSON.stringify(form.policy_spec, null, 2)} onChange={e => { try { setForm({ ...form, policy_spec: JSON.parse(e.target.value) }); } catch { /* ignore invalid JSON */ } }} className="w-full px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] font-mono" rows={4} placeholder='{"key": "value"}' />
+            )}
           </div>
           <div className="flex items-center gap-4 mt-3">
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.blocking} onChange={e => setForm({ ...form, blocking: e.target.checked })} className="rounded" /><span className="text-sm text-[var(--text-secondary)]">Blocking</span></label>
@@ -2151,7 +2689,7 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
                 <div>
                   <div className="text-sm font-medium text-[var(--text-primary)]">{p.name}</div>
                   <div className="text-xs text-[var(--text-secondary)]">
-                    {p.policy_type} · {p.environment}{p.blocking ? ' · Blocking' : ' · Warning'}
+                    {p.policy_type} · {p.environments?.join(', ') || 'All environments'}{p.blocking ? ' · Blocking' : ' · Warning'}
                   </div>
                 </div>
               </div>

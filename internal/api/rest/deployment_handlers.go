@@ -110,6 +110,21 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Pre-validate: target_cluster_id is required for real deployments.
+		if req.TargetClusterID == nil {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "target_cluster_id is required"})
+			return
+		}
+
+		// Pre-validate: cluster exists and belongs to this tenant.
+		if deps.Repos.Cluster != nil {
+			cluster, cerr := deps.Repos.Cluster.Get(c.Request.Context(), *req.TargetClusterID, auth.GetTenantID(c))
+			if cerr != nil || cluster == nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "target cluster not found or does not belong to this tenant"})
+				return
+			}
+		}
+
 		deployType := req.DeployType
 		if deployType == "" {
 			deployType = "helm"
@@ -174,12 +189,12 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 				if err != nil {
 					slog.Info("Failed to enqueue deployment job", "id", d.ID, "error", err)
 					// Fallback to goroutine if queue fails
-					go performDeployment(d.ID, *d.TargetClusterID, d.TargetNamespace,
+					go performDeployment(d.ID, *d.TargetClusterID, d.TenantID, d.TargetNamespace,
 						d.GitlabProjectName, d.Replicas, d.Spec, d.TimeoutSeconds, deps)
 				}
 			} else {
 				// No queue available, fallback to goroutine
-				go performDeployment(d.ID, *d.TargetClusterID, d.TargetNamespace,
+				go performDeployment(d.ID, *d.TargetClusterID, d.TenantID, d.TargetNamespace,
 					d.GitlabProjectName, d.Replicas, d.Spec, d.TimeoutSeconds, deps)
 			}
 		}
@@ -189,12 +204,12 @@ func createDeployment(deps Dependencies) gin.HandlerFunc {
 		// Publish deployment.created event
 		publishDeploymentEvent(deps, "deployment.created", d, nil)
 
-		c.JSON(http.StatusCreated, d)
+		c.JSON(http.StatusAccepted, d)
 	}
 }
 
 // performDeployment runs the actual Kubernetes deployment in the background.
-func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName string, replicas int, specJSON json.RawMessage, timeoutSeconds int, deps Dependencies) {
+func performDeployment(deploymentID, clusterID, tenantID uuid.UUID, namespace, releaseName string, replicas int, specJSON json.RawMessage, timeoutSeconds int, deps Dependencies) {
 	if deps.Services == nil || deps.Services.Deployment == nil {
 		slog.Info("Deployment skipped: deployment service not available", "id", deploymentID)
 		return
@@ -205,6 +220,7 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 		context.Background(),
 		deploymentID,
 		clusterID,
+		tenantID,
 		namespace,
 		releaseName,
 		replicas,
@@ -216,7 +232,7 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 		slog.Info("Deployment failed", "id", deploymentID, "error", result.Message)
 		// Publish deployment.failed event
 		if deps.EventBus != nil {
-			dep, _ := deps.Repos.Deployment.Get(context.Background(), deploymentID)
+			dep, _ := deps.Repos.Deployment.Get(context.Background(), deploymentID, tenantID)
 			if dep != nil {
 				publishDeploymentEvent(deps, "deployment.failed", dep, map[string]interface{}{"error": result.Message})
 			}
@@ -224,7 +240,7 @@ func performDeployment(deploymentID, clusterID uuid.UUID, namespace, releaseName
 	} else {
 		// Publish deployment.succeeded event
 		if deps.EventBus != nil {
-			dep, _ := deps.Repos.Deployment.Get(context.Background(), deploymentID)
+			dep, _ := deps.Repos.Deployment.Get(context.Background(), deploymentID, tenantID)
 			if dep != nil {
 				publishDeploymentEvent(deps, "deployment.succeeded", dep, nil)
 			}
@@ -243,9 +259,9 @@ func getDeployment(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
 			return
 		}
-		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id)
+		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 		c.JSON(http.StatusOK, d)
@@ -265,9 +281,10 @@ func promoteDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		d, err := deps.Repos.Deployment.Get(ctx, id)
+		tenantID := auth.GetTenantID(c)
+		d, err := deps.Repos.Deployment.Get(ctx, id, tenantID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 		if d.Status != "deployed" {
@@ -280,11 +297,11 @@ func promoteDeployment(deps Dependencies) gin.HandlerFunc {
 		if idx < 0 || idx >= len(stages)-1 {
 			// Unknown or final stage — legacy behavior: just mark as promoted.
 			promotedBy := currentUserLabel(c)
-			if err := deps.Repos.Deployment.Promote(ctx, id, promotedBy); err != nil {
+			if err := deps.Repos.Deployment.Promote(ctx, id, tenantID, promotedBy); err != nil {
 				respondInternalError(c, err)
 				return
 			}
-			d, _ = deps.Repos.Deployment.Get(ctx, id)
+			d, _ = deps.Repos.Deployment.Get(ctx, id, tenantID)
 			logAudit(deps, c, "promote", "deployment", id.String(), nil, nil)
 			publishDeploymentEvent(deps, "deployment.promoted", d, nil)
 			c.JSON(http.StatusOK, gin.H{"deployment": d, "awaiting_approval": false})
@@ -327,9 +344,10 @@ func rollbackDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Validate the deployment exists and can be rolled back
-		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id)
+		tenantID := auth.GetTenantID(c)
+		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id, tenantID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 		if d.Status != "deployed" && d.Status != "promoted" {
@@ -342,8 +360,8 @@ func rollbackDeployment(deps Dependencies) gin.HandlerFunc {
 		// Use the DeploymentService for real rollback if available
 		if deps.Services.Deployment != nil && d.TargetClusterID != nil {
 			go func() {
-				result := deps.Services.Deployment.PerformRollback(context.Background(), id, rolledBackBy)
-				dep, _ := deps.Repos.Deployment.Get(context.Background(), id)
+				result := deps.Services.Deployment.PerformRollback(context.Background(), id, tenantID, rolledBackBy)
+				dep, _ := deps.Repos.Deployment.Get(context.Background(), id, tenantID)
 				if !result.Success {
 					slog.Info("Rollback failed", "id", id, "error", result.Message)
 					if dep != nil {
@@ -360,7 +378,7 @@ func rollbackDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Fallback: DB-only rollback (no target cluster)
-		if err := deps.Repos.Deployment.Rollback(c.Request.Context(), id, rolledBackBy); err != nil {
+		if err := deps.Repos.Deployment.Rollback(c.Request.Context(), id, tenantID, rolledBackBy); err != nil {
 			if strings.Contains(err.Error(), "cannot be rolled back") {
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
@@ -368,7 +386,7 @@ func rollbackDeployment(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
-		d, _ = deps.Repos.Deployment.Get(c.Request.Context(), id)
+		d, _ = deps.Repos.Deployment.Get(c.Request.Context(), id, tenantID)
 		logAudit(deps, c, "rollback", "deployment", id.String(), nil, nil)
 		publishDeploymentEvent(deps, "deployment.rolled_back", d, nil)
 		c.JSON(http.StatusOK, gin.H{"deployment": d, "message": "rollback initiated"})
@@ -386,7 +404,8 @@ func cancelDeployment(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
 			return
 		}
-		if err := deps.Repos.Deployment.Cancel(c.Request.Context(), id); err != nil {
+		tenantID := auth.GetTenantID(c)
+		if err := deps.Repos.Deployment.Cancel(c.Request.Context(), id, tenantID); err != nil {
 			if strings.Contains(err.Error(), "cannot be cancelled") {
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
@@ -394,7 +413,7 @@ func cancelDeployment(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
-		d, _ := deps.Repos.Deployment.Get(c.Request.Context(), id)
+		d, _ := deps.Repos.Deployment.Get(c.Request.Context(), id, tenantID)
 		logAudit(deps, c, "cancel", "deployment", id.String(), nil, nil)
 		publishDeploymentEvent(deps, "deployment.cancelled", d, nil)
 		c.JSON(http.StatusOK, gin.H{"deployment": d, "message": "deployment cancelled"})
@@ -413,9 +432,9 @@ func getDeploymentHistory(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		// Get the deployment to find project/namespace context
-		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id)
+		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -439,9 +458,9 @@ func getDeploymentLogs(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
 			return
 		}
-		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id)
+		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 
@@ -508,9 +527,10 @@ func retryDeployment(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		original, err := deps.Repos.Deployment.Get(ctx, id)
+		tenantID := auth.GetTenantID(c)
+		original, err := deps.Repos.Deployment.Get(ctx, id, tenantID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 
@@ -567,7 +587,7 @@ func retryDeployment(deps Dependencies) gin.HandlerFunc {
 					return
 				}
 			} else if deps.Services.Deployment != nil {
-				go performDeployment(newDeploy.ID, *newDeploy.TargetClusterID, newDeploy.TargetNamespace,
+				go performDeployment(newDeploy.ID, *newDeploy.TargetClusterID, newDeploy.TenantID, newDeploy.TargetNamespace,
 					newDeploy.GitlabProjectName, newDeploy.Replicas, newDeploy.Spec, newDeploy.TimeoutSeconds, deps)
 			}
 		}
@@ -606,14 +626,15 @@ func getDeploymentDiff(deps Dependencies) gin.HandlerFunc {
 		}
 
 		ctx := c.Request.Context()
-		d1, err := deps.Repos.Deployment.Get(ctx, id)
+		tenantID := auth.GetTenantID(c)
+		d1, err := deps.Repos.Deployment.Get(ctx, id, tenantID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found: " + err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
-		d2, err := deps.Repos.Deployment.Get(ctx, compareWithID)
+		d2, err := deps.Repos.Deployment.Get(ctx, compareWithID, tenantID)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "comparison deployment not found: " + err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "comparison deployment not found"})
 			return
 		}
 
@@ -853,7 +874,7 @@ func removeDeployment(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment ID"})
 			return
 		}
-		if err := deps.Repos.Deployment.Delete(c.Request.Context(), id); err != nil {
+		if err := deps.Repos.Deployment.Delete(c.Request.Context(), id, auth.GetTenantID(c)); err != nil {
 			respondInternalError(c, err)
 			return
 		}
@@ -933,6 +954,7 @@ func dryRunDeployment(deps Dependencies) gin.HandlerFunc {
 		result, err := deps.Services.Deployment.PerformDryRun(
 			c.Request.Context(),
 			clusterID,
+			auth.GetTenantID(c),
 			req.TargetNamespace,
 			releaseName,
 			replicas,
@@ -962,9 +984,9 @@ func getDeploymentResources(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id)
+		d, err := deps.Repos.Deployment.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 
@@ -973,8 +995,8 @@ func getDeploymentResources(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Get kubeconfig via the cluster repo
-		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), *d.TargetClusterID, uuid.Nil)
+		// Get kubeconfig via the cluster repo — scoped to the deployment's tenant.
+		kubeconfig, err := deps.Repos.Cluster.GetKubeconfig(c.Request.Context(), *d.TargetClusterID, d.TenantID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to get kubeconfig: %v", err)})
 			return
@@ -982,7 +1004,7 @@ func getDeploymentResources(deps Dependencies) gin.HandlerFunc {
 
 		// Create k8s client with server override if available
 		var k8sClient *k8s.Client
-		clusterObj, cerr := deps.Repos.Cluster.Get(c.Request.Context(), *d.TargetClusterID, uuid.Nil)
+		clusterObj, cerr := deps.Repos.Cluster.Get(c.Request.Context(), *d.TargetClusterID, d.TenantID)
 		if cerr == nil && clusterObj != nil && clusterObj.APIServerURL != "" {
 			k8sClient, err = k8s.NewClientWithServerOverride(kubeconfig, clusterObj.APIServerURL)
 		} else {
@@ -1021,9 +1043,9 @@ func getDeploymentTimelineEvents(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Verify deployment exists
-		_, err = deps.Repos.Deployment.Get(c.Request.Context(), id)
+		_, err = deps.Repos.Deployment.Get(c.Request.Context(), id, auth.GetTenantID(c))
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
 			return
 		}
 

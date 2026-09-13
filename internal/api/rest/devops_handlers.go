@@ -145,21 +145,21 @@ func (h *DevOpsHandlers) CreateDeploymentWindow(c *gin.Context) {
 	}
 
 	w := &models.DeploymentWindow{
-		TenantID:      tenantID,
-		Name:          req.Name,
-		Description:   req.Description,
-		WindowType:    req.WindowType,
+		TenantID:       tenantID,
+		Name:           req.Name,
+		Description:    req.Description,
+		WindowType:     req.WindowType,
 		CronExpression: req.CronExpression,
-		StartAt:       req.StartAt,
-		EndAt:         req.EndAt,
-		Timezone:      req.Timezone,
-		Environments:  req.Environments,
-		ServiceIDs:    req.ServiceIDs,
-		Enabled:       true,
-		Priority:      0,
-		Reason:        req.Reason,
-		OverrideRoles: req.OverrideRoles,
-		CreatedBy:     userID,
+		StartAt:        req.StartAt,
+		EndAt:          req.EndAt,
+		Timezone:       req.Timezone,
+		Environments:   req.Environments,
+		ServiceIDs:     req.ServiceIDs,
+		Enabled:        true,
+		Priority:       0,
+		Reason:         req.Reason,
+		OverrideRoles:  req.OverrideRoles,
+		CreatedBy:      userID,
 	}
 
 	if req.Enabled != nil {
@@ -274,7 +274,7 @@ func (h *DevOpsHandlers) CheckDeploymentWindow(c *gin.Context) {
 	tenantID := auth.GetTenantID(c)
 
 	var req struct {
-		Environment string    `json:"environment" binding:"required"`
+		Environment string     `json:"environment" binding:"required"`
 		ServiceID   *uuid.UUID `json:"service_id,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -495,11 +495,11 @@ func (h *DevOpsHandlers) ExecuteBatchOperation(c *gin.Context) {
 					})
 					if err != nil {
 						slog.Info("Failed to enqueue batch deployment", "id", deploy.ID, "error", err)
-						go performDeployment(deploy.ID, *deploy.TargetClusterID, deploy.TargetNamespace,
+						go performDeployment(deploy.ID, *deploy.TargetClusterID, tenantID, deploy.TargetNamespace,
 							deploy.GitlabProjectName, deploy.Replicas, deploy.Spec, deploy.TimeoutSeconds, h.deps)
 					}
 				} else {
-					go performDeployment(deploy.ID, *deploy.TargetClusterID, deploy.TargetNamespace,
+					go performDeployment(deploy.ID, *deploy.TargetClusterID, tenantID, deploy.TargetNamespace,
 						deploy.GitlabProjectName, deploy.Replicas, deploy.Spec, deploy.TimeoutSeconds, h.deps)
 				}
 			}
@@ -893,17 +893,17 @@ func (h *DevOpsHandlers) CreateSecretRotation(c *gin.Context) {
 	}
 
 	rot := &models.SecretRotation{
-		TenantID:             tenantID,
-		Name:                 req.Name,
-		Description:          req.Description,
-		SecretPath:           req.SecretPath,
-		RotationType:         req.RotationType,
-		CronExpression:       req.CronExpression,
-		ExpiresAt:            req.ExpiresAt,
-		ServiceIDs:           req.ServiceIDs,
-		Enabled:              true,
-		Status:               "active",
-		CreatedBy:            userID,
+		TenantID:       tenantID,
+		Name:           req.Name,
+		Description:    req.Description,
+		SecretPath:     req.SecretPath,
+		RotationType:   req.RotationType,
+		CronExpression: req.CronExpression,
+		ExpiresAt:      req.ExpiresAt,
+		ServiceIDs:     req.ServiceIDs,
+		Enabled:        true,
+		Status:         "active",
+		CreatedBy:      userID,
 	}
 
 	if req.RotationIntervalDays != nil {
@@ -1021,7 +1021,7 @@ func (h *DevOpsHandlers) TriggerRotation(c *gin.Context) {
 	log := &models.SecretRotationLog{
 		TenantID:    tenantID,
 		RotationID:  rotation.ID,
-		Status:      "success", // Placeholder — actual rotation would be async
+		Status:      "pending", // Rotation is async — mark as pending until completed
 		TriggeredBy: userID,
 		TriggerType: "manual",
 	}
@@ -1039,7 +1039,7 @@ func (h *DevOpsHandlers) TriggerRotation(c *gin.Context) {
 	}
 
 	logAudit(h.deps, c, "rotate", "secret_rotation", id.String(), nil, gin.H{"trigger": "manual"})
-	c.JSON(http.StatusOK, gin.H{"message": "Secret rotation triggered", "log_id": log.ID})
+	c.JSON(http.StatusAccepted, gin.H{"message": "Secret rotation initiated", "log_id": log.ID, "status": "pending"})
 }
 
 // GetSecretRotationLogs returns rotation execution logs.
@@ -1080,9 +1080,9 @@ func (h *DevOpsHandlers) GetExpiringSecrets(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"secrets":       secrets,
-		"total":         len(secrets),
-		"within_days":   int(within.Hours() / 24),
+		"secrets":     secrets,
+		"total":       len(secrets),
+		"within_days": int(within.Hours() / 24),
 	})
 }
 

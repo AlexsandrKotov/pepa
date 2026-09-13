@@ -188,9 +188,15 @@ func (r *PipelineSourceRepository) UpdateSchema(ctx context.Context, id uuid.UUI
 	return nil
 }
 
-// Delete removes a pipeline source.
-func (r *PipelineSourceRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM pipeline_sources WHERE id = $1", id)
+// Delete removes a pipeline source, scoped to the given tenant.
+func (r *PipelineSourceRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	query := "DELETE FROM pipeline_sources WHERE id = $1"
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += " AND tenant_id = $2"
+		args = append(args, tenantID)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete pipeline source: %w", err)
 	}
@@ -355,9 +361,15 @@ func (r *PipelinePresetRepository) Update(ctx context.Context, id uuid.UUID, p *
 	return nil
 }
 
-// Delete removes a preset.
-func (r *PipelinePresetRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM pipeline_presets WHERE id = $1", id)
+// Delete removes a preset, scoped to the given tenant.
+func (r *PipelinePresetRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
+	query := "DELETE FROM pipeline_presets WHERE id = $1"
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += " AND tenant_id = $2"
+		args = append(args, tenantID)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete preset: %w", err)
 	}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { services, discovery, clusters as clustersApi, environments as environmentsApi, gitopsBindings, type Service, type ServiceDeployment, type Cluster, type Environment, type GitOpsBinding } from '@/lib/api';
 import BindingWizard from '@/components/BindingWizard';
@@ -10,7 +10,8 @@ import { useSSERefresh } from '@/hooks/useSSEStream';
 
 export default function ServiceDetailPage() {
   const searchParams = useSearchParams();
-  const serviceId = searchParams.get('id') as string;
+  const params = useParams();
+  const serviceId = (params?.id as string) || (searchParams.get('id') as string);
 
   const [service, setService] = useState<Service | null>(null);
   const [deployments, setDeployments] = useState<ServiceDeployment[]>([]);

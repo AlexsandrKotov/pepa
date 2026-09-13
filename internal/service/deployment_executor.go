@@ -28,9 +28,9 @@ func NewDeploymentExecutor(clusterRepo *repository.ClusterRepository, helmRepo *
 	}
 }
 
-// ResolveKubeconfig retrieves the kubeconfig for a given cluster.
-func (e *DeploymentExecutor) ResolveKubeconfig(ctx context.Context, clusterID uuid.UUID) (string, error) {
-	kubeconfig, err := e.clusterRepo.GetKubeconfig(ctx, clusterID, uuid.Nil)
+// ResolveKubeconfig retrieves the kubeconfig for a given cluster, scoped to the tenant.
+func (e *DeploymentExecutor) ResolveKubeconfig(ctx context.Context, clusterID uuid.UUID, tenantID uuid.UUID) (string, error) {
+	kubeconfig, err := e.clusterRepo.GetKubeconfig(ctx, clusterID, tenantID)
 	if err != nil {
 		return "", fmt.Errorf("get kubeconfig: %w", err)
 	}
@@ -42,8 +42,8 @@ func (e *DeploymentExecutor) ResolveKubeconfig(ctx context.Context, clusterID uu
 
 // CreateK8sClient creates a Kubernetes client, using the server override from
 // the cluster record if available.
-func (e *DeploymentExecutor) CreateK8sClient(ctx context.Context, kubeconfig string, clusterID uuid.UUID) (*k8s.Client, error) {
-	clusterObj, err := e.clusterRepo.Get(ctx, clusterID, uuid.Nil)
+func (e *DeploymentExecutor) CreateK8sClient(ctx context.Context, kubeconfig string, clusterID uuid.UUID, tenantID uuid.UUID) (*k8s.Client, error) {
+	clusterObj, err := e.clusterRepo.Get(ctx, clusterID, tenantID)
 	if err == nil && clusterObj != nil && clusterObj.APIServerURL != "" {
 		return k8s.NewClientWithServerOverride(kubeconfig, clusterObj.APIServerURL)
 	}
@@ -52,15 +52,15 @@ func (e *DeploymentExecutor) CreateK8sClient(ctx context.Context, kubeconfig str
 
 // ResolveHelmCredentials looks up decrypted credentials for a Helm repository URL.
 // Returns username, password, token (empty strings if no credentials found).
-func (e *DeploymentExecutor) ResolveHelmCredentials(ctx context.Context, chartURL string) (username, password, token string) {
+func (e *DeploymentExecutor) ResolveHelmCredentials(ctx context.Context, chartURL string, tenantID uuid.UUID) (username, password, token string) {
 	if e.helmRepo == nil || chartURL == "" {
 		return "", "", ""
 	}
-	helmRepo, err := e.helmRepo.GetByURL(ctx, chartURL, uuid.Nil)
+	helmRepo, err := e.helmRepo.GetByURL(ctx, chartURL, tenantID)
 	if err != nil || helmRepo == nil {
 		return "", "", ""
 	}
-	decrypted, err := e.helmRepo.GetDecrypted(ctx, helmRepo.ID, uuid.Nil)
+	decrypted, err := e.helmRepo.GetDecrypted(ctx, helmRepo.ID, tenantID)
 	if err != nil || decrypted == nil {
 		return "", "", ""
 	}
@@ -80,6 +80,7 @@ func (e *DeploymentExecutor) ExecuteDeploy(
 	ctx context.Context,
 	client *k8s.Client,
 	deploySpec k8s.DeploySpec,
+	tenantID uuid.UUID,
 	releaseName, namespace string,
 	replicas int,
 	timeoutSeconds int,
@@ -100,7 +101,7 @@ func (e *DeploymentExecutor) ExecuteDeploy(
 		}
 
 		// Resolve Helm credentials
-		username, password, token := e.ResolveHelmCredentials(ctx, deploySpec.Chart.ChartURL)
+		username, password, token := e.ResolveHelmCredentials(ctx, deploySpec.Chart.ChartURL, tenantID)
 		helmSpec.Username = username
 		helmSpec.Password = password
 		helmSpec.Token = token

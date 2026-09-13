@@ -213,7 +213,7 @@ func (t *getDeploymentTool) Execute(ctx context.Context, params json.RawMessage)
 	if err != nil {
 		return "", fmt.Errorf("invalid deployment ID: %w", err)
 	}
-	d, err := t.deps.DeploymentRepo.Get(ctx, uid)
+	d, err := t.deps.DeploymentRepo.Get(ctx, uid, t.deps.tenant(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -1197,20 +1197,20 @@ func (t *createBlueprintTool) Definition() ToolDefinition {
 }
 func (t *createBlueprintTool) Execute(ctx context.Context, params json.RawMessage) (string, error) {
 	var p struct {
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		SourceType   string `json:"source_type"`
-		Image        string `json:"image"`
-		ChartName    string `json:"chart_name"`
-		ChartVersion string `json:"chart_version"`
-		Namespace    string `json:"namespace"`
-		CPU          string `json:"cpu"`
-		Memory       string `json:"memory"`
-		Replicas     int    `json:"replicas"`
-		Ports        []int  `json:"ports"`
-		Category     string `json:"category"`
-		ValuesYAML   string `json:"values_yaml"`
-		ComposeYAML  string `json:"compose_yaml"`
+		Name         string   `json:"name"`
+		Description  string   `json:"description"`
+		SourceType   string   `json:"source_type"`
+		Image        string   `json:"image"`
+		ChartName    string   `json:"chart_name"`
+		ChartVersion string   `json:"chart_version"`
+		Namespace    string   `json:"namespace"`
+		CPU          string   `json:"cpu"`
+		Memory       string   `json:"memory"`
+		Replicas     int      `json:"replicas"`
+		Ports        []int    `json:"ports"`
+		Category     string   `json:"category"`
+		ValuesYAML   string   `json:"values_yaml"`
+		ComposeYAML  string   `json:"compose_yaml"`
 		GroupIDs     []string `json:"group_ids"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {

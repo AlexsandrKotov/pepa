@@ -425,8 +425,8 @@ func (r *ClusterRepository) Update(ctx context.Context, c *Cluster) error {
 	return nil
 }
 
-// Delete removes a cluster and all dependent rows in a transaction.
-func (r *ClusterRepository) Delete(ctx context.Context, id uuid.UUID) error {
+// Delete removes a cluster and all dependent rows in a transaction, scoped to the given tenant.
+func (r *ClusterRepository) Delete(ctx context.Context, id uuid.UUID, tenantID uuid.UUID) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -444,7 +444,13 @@ func (r *ClusterRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 	}
 
-	if _, err := tx.Exec(ctx, `DELETE FROM clusters WHERE id = $1`, id); err != nil {
+	query := `DELETE FROM clusters WHERE id = $1`
+	args := []interface{}{id}
+	if tenantID != uuid.Nil {
+		query += ` AND tenant_id = $2`
+		args = append(args, tenantID)
+	}
+	if _, err := tx.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("delete cluster: %w", err)
 	}
 
