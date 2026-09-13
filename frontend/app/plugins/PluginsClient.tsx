@@ -355,7 +355,7 @@ function PluginCard({
           for (const [k, v] of Object.entries(parsed)) {
             configOverride[k] = String(v);
           }
-        } catch { /* ignore invalid JSON in config override */ }
+        } catch (e) { console.warn("Invalid JSON config:", e); }
       }
       const result = await plugins.execute(plugin.name, selectedAction, params, configOverride);
       setActionResult(JSON.stringify(result, null, 2));

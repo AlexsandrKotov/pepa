@@ -9,6 +9,7 @@ import GearIcon from '@/components/GearIcon';
 import GitRepoPicker from '@/components/GitRepoPicker';
 import { helmRepositories, registryRepositories, blueprints as blueprintsAPI, blueprintGroups as blueprintGroupsAPI, clusters, deployments, type ServiceBlueprint, type HelmRepository, type HelmChart, type HelmChartVersion, type BlueprintGroup, type RegistryRepository, type Cluster } from '@/lib/api';
 import ConfirmModal from '@/components/ConfirmModal';
+import { Toast } from '@/components/Interactive';
 
 const categoryIcons: Record<string, React.ReactNode> = {
   backend: <GearIcon className="w-4 h-4" />, frontend: '🌐', database: '🗄️', messaging: '📨',
@@ -48,6 +49,7 @@ export default function PipelineBlueprintsPage() {
   const [gitInputMode, setGitInputMode] = useState<'picker' | 'manual'>('picker');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Quick Deploy modal state
   const [deployBp, setDeployBp] = useState<ServiceBlueprint | null>(null);
@@ -118,7 +120,7 @@ export default function PipelineBlueprintsPage() {
         setLoadingCharts(true);
         const data = await helmRepositories.listCharts(bp.helm_repo_id);
         setRepoCharts(data.charts || []);
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
       setLoadingCharts(false);
       // Load versions for the current chart
       if (bp.chart_path) {
@@ -126,7 +128,7 @@ export default function PipelineBlueprintsPage() {
           setLoadingVersions(true);
           const vData = await helmRepositories.listChartVersions(bp.helm_repo_id, bp.chart_path);
           setChartVersions(vData.versions || []);
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
         setLoadingVersions(false);
       }
     }
@@ -194,9 +196,10 @@ export default function PipelineBlueprintsPage() {
     try {
       await blueprintsAPI.delete(deleteConfirm);
       setBlueprints(blueprints.filter(b => b.id !== deleteConfirm));
+      setToast({ message: 'Blueprint deleted successfully', type: 'success' });
     } catch (err) {
       console.error('Failed to delete blueprint:', err);
-      alert(err instanceof Error ? err.message : 'Failed to delete blueprint');
+      setToast({ message: err instanceof Error ? err.message : 'Failed to delete blueprint', type: 'error' });
     }
     setDeleting(false);
     setDeleteConfirm(null);
@@ -266,6 +269,7 @@ export default function PipelineBlueprintsPage() {
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       <div className="px-6 py-6 space-y-6">
       {/* Header */}
       <div className="page-animate flex items-center justify-between">
@@ -551,7 +555,7 @@ export default function PipelineBlueprintsPage() {
                               try {
                                 const data = await registryRepositories.listImages(repo.id);
                                 setRegistryImages(prev => ({ ...prev, [repo.id]: data.images || [] }));
-                              } catch { /* ignore */ }
+                              } catch (e) { console.error("Operation failed:", e); }
                               setLoadingRegistryImages(prev => ({ ...prev, [repo.id]: false }));
                             }}
                             className="text-[11px] text-[var(--accent)] hover:underline"

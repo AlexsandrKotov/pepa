@@ -95,7 +95,7 @@ function EntitiesList() {
             const pct = best.max_score > 0 ? Math.round((best.score / best.max_score) * 100) : 0;
             scores[ent.id] = { level: best.level, pct };
           }
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
       }
       setEntityScores(scores);
     };

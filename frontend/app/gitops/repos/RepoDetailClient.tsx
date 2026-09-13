@@ -75,7 +75,7 @@ export default function GitOpsRepoPage() {
       setResources(data.resources || []);
       setTree(data.tree || null);
       setClusterInfo(data.clusters || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   }, [repoId]);
 
   const loadAll = useCallback(async () => {
@@ -91,7 +91,7 @@ export default function GitOpsRepoPage() {
     try {
       await gitops.scanRepo(repoId);
       await loadAll();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setScanning(false);
   };
 
@@ -161,7 +161,7 @@ export default function GitOpsRepoPage() {
       });
       await loadResources();
       setSuspendModal(null);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setSuspending(false);
   };
 
@@ -187,7 +187,7 @@ export default function GitOpsRepoPage() {
       setCommitResult(result);
       setEditMode(false);
       await loadResources();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setCommitting(false);
   };
 

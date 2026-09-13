@@ -35,7 +35,7 @@ export default function AutoDeployPage() {
     try {
       const res = await environments.list();
       setEnvs(res.environments || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   useEffect(() => {

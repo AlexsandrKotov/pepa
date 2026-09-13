@@ -34,7 +34,7 @@ export default function DockerServicesPage() {
       ]);
       setServices(svcRes.docker_services || []);
       setHosts(hostRes.docker_hosts || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   };
 
@@ -52,7 +52,7 @@ export default function DockerServicesPage() {
         } catch { /* skip host errors */ }
       }
       setDiscoveredContainers(results);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setDiscovering(false);
   };
 
@@ -87,7 +87,7 @@ export default function DockerServicesPage() {
         case 'rollback': await dockerServices.rollback(id); break;
       }
       load();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setActionLoading(null);
   };
 
@@ -98,7 +98,7 @@ export default function DockerServicesPage() {
     try {
       await dockerServices.delete(deleteConfirm);
       load();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setActionLoading(null);
     setDeleting(false);
     setDeleteConfirm(null);

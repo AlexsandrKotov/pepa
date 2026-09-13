@@ -112,7 +112,7 @@ export default function ClusterDetailPage() {
         try {
           const g = await clusters.gitops(clusterId);
           setGitops(g);
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
       }
     } catch (err) {
       setToast({ message: 'Failed to load cluster', type: 'error' });

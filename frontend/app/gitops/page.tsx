@@ -149,7 +149,7 @@ export default function GitOpsPage() {
     try {
       const res = await gitops.listRepos();
       setRepos(res.repos || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   }, []);
 
@@ -164,7 +164,7 @@ export default function GitOpsPage() {
           (c: Connection) => c.type === 'git' || c.type === 'gitlab'
         );
         setGitConnections(gitConns);
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
     })();
   }, []);
 
@@ -240,7 +240,7 @@ export default function GitOpsPage() {
         setSelectedResource(null);
       }
       load();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setDeleting(false);
     setDeleteConfirm(null);
   };
@@ -254,7 +254,7 @@ export default function GitOpsPage() {
       if (selectedRepo?.id === repo.id) {
         await loadResources(repo);
       }
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setScanning(null);
   };
 

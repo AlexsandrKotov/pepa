@@ -16,7 +16,7 @@ export default function HostsPage() {
     try {
       const res = await connectionsAPI.list();
       setConnections((res.connections || []).filter(c => c.type === 'proxmox' || c.type === 'vmware'));
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   };
 

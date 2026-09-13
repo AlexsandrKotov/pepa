@@ -187,7 +187,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
       try {
         const res = await vault.engines();
         setEngines(res.engines || []);
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
       loadPaths('');
     } catch (err) {
       showToast(`Failed to save config: ${err}`, 'error');
@@ -262,7 +262,7 @@ function VaultClientContent({ initialPaths, initialEngines }: Props) {
     try {
       const res = await vault.listACL();
       setAclEntries(res.entries || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   }, []);
 
   useEffect(() => { if (canManageACL) loadACL(); }, [loadACL, canManageACL]);

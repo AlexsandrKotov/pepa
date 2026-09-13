@@ -49,7 +49,7 @@ export default function CredentialsPage() {
     try {
       const data = await listSharedCredentials();
       setSharedCreds(data.credentials || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   }
 
   async function handleDelete(id: string) {

@@ -141,7 +141,7 @@ export default function ScorecardsPage() {
       ]);
       setRules(rulesData.rules || []);
       setResults(resultsData.results || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleEvaluate = async () => {

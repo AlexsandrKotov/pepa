@@ -2576,7 +2576,7 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
       setShowForm(false);
       setForm({ name: '', description: '', policy_type: 'resource_limits', environments: ['production'], severity: 'block', blocking: true, enabled: true, policy_spec: { require_resource_limits: true } });
       onRefresh();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleDelete = async (id: string) => {
@@ -2584,14 +2584,14 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
       await devops.deletePolicy(id);
       setDeleting(null);
       onRefresh();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleToggle = async (p: CompliancePolicy) => {
     try {
       await devops.updatePolicy(p.id, { enabled: !p.enabled });
       onRefresh();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   return (
@@ -2668,7 +2668,7 @@ function ComplianceTab({ policies, showForm, setShowForm, form, setForm, onRefre
               <p className="text-xs text-[var(--text-secondary)]">Approval policies require manual sign-off before deployment.</p>
             )}
             {form.policy_type === 'custom' && (
-              <textarea value={JSON.stringify(form.policy_spec, null, 2)} onChange={e => { try { setForm({ ...form, policy_spec: JSON.parse(e.target.value) }); } catch { /* ignore invalid JSON */ } }} className="w-full px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] font-mono" rows={4} placeholder='{"key": "value"}' />
+              <textarea value={JSON.stringify(form.policy_spec, null, 2)} onChange={e => { try { setForm({ ...form, policy_spec: JSON.parse(e.target.value) }); } catch (e) { console.warn("Invalid JSON input:", e); } }} className="w-full px-3 py-1.5 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] font-mono" rows={4} placeholder='{"key": "value"}' />
             )}
           </div>
           <div className="flex items-center gap-4 mt-3">

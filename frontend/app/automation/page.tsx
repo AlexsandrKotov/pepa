@@ -178,7 +178,7 @@ export default function AutomationPage() {
         try {
           const data = await workflows.executions(wf.id);
           execs[wf.id] = (data.executions || []).slice(0, 3);
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
       }));
       setExecutions(execs);
     } finally {
@@ -203,7 +203,7 @@ export default function AutomationPage() {
           const fresh = (data.executions || []).find(e => e.id === exec.id);
           setExecutions(prev => ({ ...prev, [wf.id]: (data.executions || []).slice(0, 3) }));
           if (fresh && fresh.status !== 'running' && fresh.status !== 'pending') break;
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
       }
     } catch (err) {
       const fe = friendlyError(err);
@@ -239,7 +239,7 @@ export default function AutomationPage() {
       try {
         const data = await workflows.stepExecutions(execId);
         setSteps(prev => ({ ...prev, [execId]: data.step_executions || [] }));
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
     }
   };
 

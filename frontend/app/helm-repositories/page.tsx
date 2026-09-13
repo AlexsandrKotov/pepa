@@ -44,7 +44,7 @@ export default function HelmRepositoriesPage() {
     try {
       const res = await helmRepositories.list();
       setRepos(res.helm_repositories || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   };
 
@@ -100,7 +100,7 @@ export default function HelmRepositoriesPage() {
     try {
       await helmRepositories.delete(deleteConfirm);
       load();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setDeleting(false);
     setDeleteConfirm(null);
   };

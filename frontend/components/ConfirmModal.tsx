@@ -43,14 +43,14 @@ export default function ConfirmModal({
         : 'btn btn-primary';
 
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center">
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
       <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-[var(--surface)] rounded-xl shadow-2xl border border-[var(--border)] w-full max-w-sm mx-4 overflow-hidden glass-modal">
         <div className="p-5">
           {icon && (
             <div className="flex justify-center mb-3">{icon}</div>
           )}
-          <h3 className="text-[15px] font-semibold text-[var(--text-primary)] text-center mb-1">{title}</h3>
+          <h3 id="confirm-modal-title" className="text-[15px] font-semibold text-[var(--text-primary)] text-center mb-1">{title}</h3>
           <p className="text-[13px] text-[var(--text-secondary)] text-center">{description}</p>
         </div>
         <div className="flex items-center gap-2 px-5 py-3 bg-[var(--bg)] border-t border-[var(--border)]">

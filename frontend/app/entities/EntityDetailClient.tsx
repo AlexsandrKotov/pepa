@@ -62,7 +62,7 @@ export default function EntityDetailClient({ entityId }: Props) {
       try {
         const data = await entities.list({ per_page: '100' });
         setAllEntities((data.items || []).filter(e => e.id !== entityId));
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
       finally { setLoadingEntities(false); }
     }
   };

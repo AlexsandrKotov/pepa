@@ -75,7 +75,7 @@ function loadChats(): Chat[] | null {
         return [chat];
       }
     }
-  } catch { /* ignore */ }
+  } catch (e) { console.error("Operation failed:", e); }
   return null;
 }
 
@@ -87,7 +87,7 @@ function saveChats(chats: Chat[]) {
     localStorage.setItem(`${AI_CHATS_LS_KEY}-${user.id}`, JSON.stringify(
       chats.map(c => ({ ...c, messages: c.messages.slice(-AI_MAX_MESSAGES) }))
     ));
-  } catch { /* ignore */ }
+  } catch (e) { console.error("Operation failed:", e); }
 }
 
 function loadCurrentChatId(): string | null {
@@ -104,7 +104,7 @@ function saveCurrentChatId(id: string | null) {
   try {
     if (id) localStorage.setItem(`${AI_CURRENT_CHAT_LS_KEY}-${user.id}`, id);
     else localStorage.removeItem(`${AI_CURRENT_CHAT_LS_KEY}-${user.id}`);
-  } catch { /* ignore */ }
+  } catch (e) { console.error("Operation failed:", e); }
 }
 
 function formatChatTime(ts: number): string {
@@ -181,12 +181,12 @@ export default function AIAssistantPage() {
     try {
       const savedInstr = localStorage.getItem(AI_SYSTEM_INSTRUCTION_LS_KEY);
       if (savedInstr) setSystemInstruction(savedInstr);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     // Load saved provider preference
     try {
       const savedProvider = localStorage.getItem('pepa-ai-provider');
       if (savedProvider) setSelectedProvider(savedProvider);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setMounted(true);
     loadSuggestions();
     loadHistory();
@@ -258,11 +258,11 @@ export default function AIAssistantPage() {
   };
 
   const loadSuggestions = async () => {
-    try { const data = await aiExtended.suggestions(); setSuggestions(data.suggestions || []); } catch { /* ignore */ }
+    try { const data = await aiExtended.suggestions(); setSuggestions(data.suggestions || []); } catch (e) { console.error("Operation failed:", e); }
   };
 
   const loadHistory = async () => {
-    try { const data = await aiExtended.history(); setHistory(data.history || []); } catch { /* ignore */ }
+    try { const data = await aiExtended.history(); setHistory(data.history || []); } catch (e) { console.error("Operation failed:", e); }
   };
 
   const loadProviders = async () => {
@@ -270,7 +270,7 @@ export default function AIAssistantPage() {
       const data = await ai.status();
       setProviders(data.providers || []);
       setDefaultProvider(data.default_provider || '');
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleSend = async () => {
@@ -534,7 +534,7 @@ export default function AIAssistantPage() {
                       <div className="absolute right-0 top-full mt-1 w-52 bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-lg z-50 py-1">
                         {/* Default option */}
                         <button
-                          onClick={() => { setSelectedProvider(''); try { localStorage.setItem('pepa-ai-provider', ''); } catch { /* ignore */ } setProviderDropdownOpen(false); }}
+                          onClick={() => { setSelectedProvider(''); try { localStorage.setItem('pepa-ai-provider', ''); } catch (e) { console.error("Operation failed:", e); } setProviderDropdownOpen(false); }}
                           className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[12px] hover:bg-[var(--bg)] transition-colors ${!selectedProvider ? 'bg-[var(--bg)]' : ''}`}
                         >
                           <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />
@@ -545,7 +545,7 @@ export default function AIAssistantPage() {
                         {providers.map(p => (
                           <button
                             key={p.name}
-                            onClick={() => { setSelectedProvider(p.name); try { localStorage.setItem('pepa-ai-provider', p.name); } catch { /* ignore */ } setProviderDropdownOpen(false); }}
+                            onClick={() => { setSelectedProvider(p.name); try { localStorage.setItem('pepa-ai-provider', p.name); } catch (e) { console.error("Operation failed:", e); } setProviderDropdownOpen(false); }}
                             className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[12px] hover:bg-[var(--bg)] transition-colors ${selectedProvider === p.name ? 'bg-[var(--bg)]' : ''}`}
                           >
                             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PROVIDER_COLORS[p.name] || '#8B5CF6' }} />
@@ -676,7 +676,7 @@ export default function AIAssistantPage() {
                       value={systemInstruction}
                       onChange={e => {
                         setSystemInstruction(e.target.value);
-                        try { localStorage.setItem(AI_SYSTEM_INSTRUCTION_LS_KEY, e.target.value); } catch { /* ignore */ }
+                        try { localStorage.setItem(AI_SYSTEM_INSTRUCTION_LS_KEY, e.target.value); } catch (e) { console.error("Operation failed:", e); }
                       }}
                       placeholder="Ты — умный ИИ-агент. Твоя задача — помогать пользователю, отвечать четко, по делу и предлагать решения проблем."
                       rows={4}
@@ -686,7 +686,7 @@ export default function AIAssistantPage() {
                       <button
                         onClick={() => {
                           setSystemInstruction('');
-                          try { localStorage.removeItem(AI_SYSTEM_INSTRUCTION_LS_KEY); } catch { /* ignore */ }
+                          try { localStorage.removeItem(AI_SYSTEM_INSTRUCTION_LS_KEY); } catch (e) { console.error("Operation failed:", e); }
                         }}
                         className="text-[10px] text-[var(--text-tertiary)] hover:text-red-500 transition-colors"
                       >

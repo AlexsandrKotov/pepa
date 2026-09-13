@@ -211,16 +211,16 @@ export default function DashboardClient() {
   // Fetch all dashboard data
   useEffect(() => {
     Promise.all([
-      connections.list({ per_page: '100' }).catch(() => ({ connections: [], total: 0, page: 1, per_page: 100, total_pages: 0 })),
-      clusters.list({ per_page: '100' }).catch(() => ({ clusters: [], total: 0, page: 1, per_page: 100, total_pages: 0 })),
-      deployments.list({ per_page: '10' }).catch(() => ({ deployments: [], total: 0, page: 1, per_page: 10, total_pages: 0 })),
-      audit.list({ per_page: '8' }).catch(() => ({ items: [], total: 0, page: 1, per_page: 8, total_pages: 0 })),
-      services.list({ per_page: '6' }).catch(() => ({ items: [], total: 0 })),
-      environments.list().catch(() => ({ environments: [], total: 0 })),
-      gitops.listRepos().catch(() => ({ repos: [], total: 0 })),
-      pipelineSources.list({ per_page: '5' }).catch(() => ({ sources: [], total: 0 })),
-      dockerServices.list({ per_page: '10' }).catch(() => ({ docker_services: [], total: 0, page: 1, per_page: 10, total_pages: 0 })),
-      vault.getStatus().catch(() => ({ status: { total_secrets: 0, v1_secrets: 0, v2_secrets: 0, encryption_type: '', key_derivation: '', per_path_keys: false, needs_rotation: false, tenant_isolation: false, created_by_tracking: false, argon2_params: { time: 0, memory: 0, threads: 0, keyLen: 0 } }, mode: 'unknown' })),
+      connections.list({ per_page: '100' }).catch(err => { console.error('Dashboard: connections.list failed:', err); return { connections: [], total: 0, page: 1, per_page: 100, total_pages: 0 }; }),
+      clusters.list({ per_page: '100' }).catch(err => { console.error('Dashboard: clusters.list failed:', err); return { clusters: [], total: 0, page: 1, per_page: 100, total_pages: 0 }; }),
+      deployments.list({ per_page: '10' }).catch(err => { console.error('Dashboard: deployments.list failed:', err); return { deployments: [], total: 0, page: 1, per_page: 10, total_pages: 0 }; }),
+      audit.list({ per_page: '8' }).catch(err => { console.error('Dashboard: audit.list failed:', err); return { items: [], total: 0, page: 1, per_page: 8, total_pages: 0 }; }),
+      services.list({ per_page: '6' }).catch(err => { console.error('Dashboard: services.list failed:', err); return { items: [], total: 0 }; }),
+      environments.list().catch(err => { console.error('Dashboard: environments.list failed:', err); return { environments: [], total: 0 }; }),
+      gitops.listRepos().catch(err => { console.error('Dashboard: gitops.listRepos failed:', err); return { repos: [], total: 0 }; }),
+      pipelineSources.list({ per_page: '5' }).catch(err => { console.error('Dashboard: pipelineSources.list failed:', err); return { sources: [], total: 0 }; }),
+      dockerServices.list({ per_page: '10' }).catch(err => { console.error('Dashboard: dockerServices.list failed:', err); return { docker_services: [], total: 0, page: 1, per_page: 10, total_pages: 0 }; }),
+      vault.getStatus().catch(err => { console.error('Dashboard: vault.getStatus failed:', err); return { status: { total_secrets: 0, v1_secrets: 0, v2_secrets: 0, encryption_type: '', key_derivation: '', per_path_keys: false, needs_rotation: false, tenant_isolation: false, created_by_tracking: false, argon2_params: { time: 0, memory: 0, threads: 0, keyLen: 0 } }, mode: 'unknown' }; }),
     ]).then(([connData, clusterData, deploymentData, auditData, serviceData, envData, gitopsData, pipelineData, dockerData, vaultData]) => {
       // Fetch pipeline runs for all sources
       const sources = pipelineData.sources || [];
@@ -265,8 +265,8 @@ export default function DashboardClient() {
         } else if (!dismissed) {
           setShowWelcome(true);
         }
-      }).catch(() => {});
-    } catch { /* ignore */ }
+      }).catch(err => console.error('Dashboard: platformSettings.get failed:', err));
+    } catch (err) { console.error('Dashboard: localStorage check failed:', err); }
   }, []);
 
   // Fetch connection health for admin dashboard
@@ -274,7 +274,7 @@ export default function DashboardClient() {
     if (isAdmin) {
       connections.health()
         .then(data => setConnHealth(data))
-        .catch(() => {});
+        .catch(err => console.error('Dashboard: connections.health failed:', err));
     }
   }, [isAdmin]);
 
@@ -372,7 +372,7 @@ export default function DashboardClient() {
 
       {/* ─── Welcome Banner ─────────────────────────────────── */}
       {showWelcome && (
-        <WelcomeBanner userName={userName} onDismiss={() => { setShowWelcome(false); try { localStorage.setItem('pepa-dashboard-welcome-dismissed', '1'); } catch {} }} />
+        <WelcomeBanner userName={userName} onDismiss={() => { setShowWelcome(false); try { localStorage.setItem('pepa-dashboard-welcome-dismissed', '1'); } catch (err) { console.error('Dashboard: localStorage.setItem failed:', err); } }} />
       )}
 
       {/* ─── Stats Row ──────────────────────────────────────── */}

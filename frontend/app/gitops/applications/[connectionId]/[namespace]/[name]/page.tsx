@@ -149,7 +149,7 @@ export default function ApplicationDetailPage() {
         changes: valuesYaml !== originalYaml ? valuesYaml : undefined,
       });
       if (res.suggested_message) setCommitMsg(res.suggested_message);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const loadTab = useCallback(async (t: Tab) => {

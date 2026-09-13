@@ -75,7 +75,7 @@ function RolesPageContent() {
       );
       setRoles(withPerms);
       setAssignments((assignData.assignments || []) as unknown as Assignment[]);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     finally { setLoading(false); }
   }, []);
 

@@ -62,7 +62,7 @@ export default function DeploymentDetailPage() {
   useSSERefresh(['deployment', 'gitops'], loadData);
 
   const handlePromote = async () => {
-    try { await deployments.promote(id); await loadData(); } catch { /* ignore */ }
+    try { await deployments.promote(id); await loadData(); } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleRollback = async () => {
@@ -71,7 +71,7 @@ export default function DeploymentDetailPage() {
 
   const confirmRollback = async () => {
     setRollingBack(true);
-    try { await deployments.rollback(id); await loadData(); } catch { /* ignore */ }
+    try { await deployments.rollback(id); await loadData(); } catch (e) { console.error("Operation failed:", e); }
     setRollingBack(false);
     setShowRollbackConfirm(false);
   };

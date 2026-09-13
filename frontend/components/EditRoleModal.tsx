@@ -113,11 +113,11 @@ export default function EditRoleModal({ open, role, onClose, onUpdated }: EditRo
   if (!open || !role) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="edit-role-modal-title">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative bg-[var(--surface)] border border-[var(--border)] rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto mx-4">
         <div className="sticky top-0 bg-[var(--surface)] border-b border-[var(--border)] px-5 py-3 flex items-center justify-between z-10">
-          <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Edit Role</h2>
+          <h2 id="edit-role-modal-title" className="text-[15px] font-semibold text-[var(--text-primary)]">Edit Role</h2>
           <button onClick={onClose} className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

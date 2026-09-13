@@ -317,7 +317,7 @@ function DockerTab() {
       const [svcRes, hostRes] = await Promise.all([dockerServices.list(), dockerHosts.list()]);
       setServices(svcRes.docker_services || []);
       setHosts(hostRes.docker_hosts || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   }, []);
 
@@ -352,7 +352,7 @@ function DockerTab() {
         case 'refresh': break;
       }
       await load();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setActionLoading(null);
   };
 

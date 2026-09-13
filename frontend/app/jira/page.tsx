@@ -130,7 +130,7 @@ export default function JiraPage() {
       const data = await jira.list(filters);
       setIssues(data.issues || []);
       setTotal(data.total || 0);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   }, [filters]);
 
@@ -175,7 +175,7 @@ export default function JiraPage() {
       setWorklogs(worklogsData.worklogs || []);
       setTotalTimeSpent(worklogsData.total_seconds || 0);
       setIssueLinks(linksData.links || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleAddComment = async () => {
@@ -302,7 +302,7 @@ export default function JiraPage() {
     try {
       const data = await jira.getAutomationRules();
       setRules(data.rules || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   useEffect(() => { if (activeTab === 'automation') loadRules(); }, [activeTab]);
@@ -382,7 +382,7 @@ export default function JiraPage() {
       const data = await jira.getMyIssues(myTasksAssignee);
       setMyIssues(data.issues || []);
       setMyIssuesTotal(data.total || 0);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   }, [myTasksAssignee]);
 
   useEffect(() => { if (activeTab === 'my-tasks') loadMyIssues(); }, [activeTab, loadMyIssues]);

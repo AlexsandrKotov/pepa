@@ -60,7 +60,7 @@ export default function DockerHostsPage() {
       setHosts(res.docker_hosts || []);
       setTotal(res.total || 0);
       setTotalPages(res.total_pages || 0);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   }, [filters.page, filters.perPage, searchValue, statusValue, hostTypeValue]);
 
@@ -114,7 +114,7 @@ export default function DockerHostsPage() {
     try {
       await dockerHosts.delete(deleteConfirm);
       load();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setDeleting(false);
     setDeleteConfirm(null);
   };

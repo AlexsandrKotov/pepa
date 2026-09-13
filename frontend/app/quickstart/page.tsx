@@ -166,7 +166,7 @@ export default function QuickstartPage() {
           let output = null;
           try {
             output = typeof stepOutput === 'string' ? JSON.parse(stepOutput) : stepOutput;
-          } catch {}
+          } catch (e) { console.error("Operation failed:", e); }
           
           setDeployResult({
             success: true,

@@ -31,7 +31,7 @@ function EnvironmentsClientContent({ initialEnvironments }: { initialEnvironment
     try {
       const res = await environments.list();
       setEnvs(res.environments || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   }, []);
 
   // Fetch on mount — server-side data may be empty due to missing auth token

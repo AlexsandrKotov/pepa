@@ -55,14 +55,14 @@ export default function GitOpsBindingsPage() {
     try {
       const res = await environments.list();
       setEnvs(res.environments || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const loadConnections = async () => {
     try {
       const res = await connections.list({ per_page: '200' });
       setConns(res.connections || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   useEffect(() => {

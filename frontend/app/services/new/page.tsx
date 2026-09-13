@@ -499,7 +499,7 @@ function NewServiceForm() {
         try {
           const parsed = parseYamlToEnvVars(valuesYaml);
           Object.assign(envVarsObj, parsed);
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
       } else {
         envVars.filter(e => e.key).forEach(e => { envVarsObj[e.key] = e.value; });
       }

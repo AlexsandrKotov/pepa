@@ -585,7 +585,7 @@ function PipelinesClientContent({
       try {
         const logData = await pipelineRuns.logs(selectedSource.id, runId);
         setRunLogs(prev => ({ ...prev, [runId]: logData.logs || '' }));
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
       setLoadingRunLogs(null);
     }
   };
@@ -1517,7 +1517,7 @@ function PipelinesClientContent({
                                   try {
                                     const result = await pipelineSources.trivyAutoDiscover();
                                     setTrivyDiscoverResult(result);
-                                  } catch { /* ignore */ }
+                                  } catch (e) { console.error("Operation failed:", e); }
                                   setTrivyDiscovering(false);
                                 }}
                                 disabled={trivyDiscovering}
@@ -1528,7 +1528,7 @@ function PipelinesClientContent({
                               <button
                                 onClick={async () => {
                                   setTrivyScanning(true);
-                                  try { await pipelineSources.trivyScanAll(); } catch { /* ignore */ }
+                                  try { await pipelineSources.trivyScanAll(); } catch (e) { console.error("Operation failed:", e); }
                                   setTrivyScanning(false);
                                 }}
                                 disabled={trivyScanning}
@@ -1867,7 +1867,7 @@ function PipelinesClientContent({
             setShowCreateModal(false);
             await loadSources();
             if (sourceId) {
-              try { await pipelineSources.resolveSchema(sourceId); await loadSources(); } catch {}
+              try { await pipelineSources.resolveSchema(sourceId); await loadSources(); } catch (e) { console.error("Operation failed:", e); }
             }
           }}
         />
@@ -2248,7 +2248,7 @@ function AnsiblePlaybookWizard({ source, onClose, onRunComplete }: {
             try {
               const logData = await pipelineRuns.logs(source.id, run.id);
               setExecOutput(`Playbook triggered. Run ID: ${run.id}\n${logData.logs || ''}`);
-            } catch { /* ignore log fetch errors during polling */ }
+            } catch (e) { console.warn("Log fetch failed:", e); }
           } else {
             if (pollRef.current) clearInterval(pollRef.current);
             pollRef.current = null;
@@ -2537,7 +2537,7 @@ function TerraformExecutionWizard({ source, onClose, onApplyComplete }: {
             try {
               const logData = await pipelineRuns.logs(source.id, run.id);
               setApplyOutput(`Apply triggered. Run ID: ${run.id}\n${logData.logs || ''}`);
-            } catch { /* ignore */ }
+            } catch (e) { console.error("Operation failed:", e); }
           } else {
             if (tfPollRef.current) clearInterval(tfPollRef.current);
             tfPollRef.current = null;

@@ -192,7 +192,7 @@ function TeamDetail({ team, onRefresh, canWrite }: { team: Team; onRefresh: () =
     try {
       const data = await listTeamMembers(team.id);
       setMembers(data.members);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   }
 

@@ -184,7 +184,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
           const chartsData = await helmRepositories.listCharts(repo.id);
           const charts = (chartsData.charts || []).map(c => ({ ...c, repoId: repo.id, repoName: repo.name }));
           allCharts.push(...charts);
-        } catch { /* ignore individual repo errors */ }
+        } catch (e) { console.warn("Helm chart fetch failed", e); }
       }));
       setHelmCharts(allCharts);
     } catch (e) { console.error('Failed to load Helm charts:', e); }
@@ -285,7 +285,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     try {
       const c = await clusters.list();
       setClusterList(c.clusters || []);
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const refresh = async () => {
@@ -303,7 +303,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
       if (c.status === 'fulfilled') setClusterList(c.value.clusters || []);
       // Load DORA metrics
       deployments.metrics('30d').then(m => setDoraMetrics(m)).catch(() => {});
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setLoading(false);
   };
 
@@ -424,7 +424,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   };
 
   const handlePromote = async (id: string) => {
-    try { await deployments.promote(id); await refresh(); } catch { /* ignore */ }
+    try { await deployments.promote(id); await refresh(); } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleRollback = async (id: string) => {
@@ -439,7 +439,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     try {
       await deployments.retry(id);
       await refresh();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
   };
 
   const handleDelete = async (id: string) => {
@@ -458,7 +458,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
         await deployments.delete(actionConfirm.id);
       }
       await refresh();
-    } catch { /* ignore */ }
+    } catch (e) { console.error("Operation failed:", e); }
     setActionProcessing(false);
     setActionConfirm(null);
   };
@@ -493,7 +493,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
           status: res.status || '',
           error_message: res.error_message || '',
         });
-      } catch { /* ignore */ }
+      } catch (e) { console.error("Operation failed:", e); }
     }, 3000);
     return () => clearInterval(interval);
   }, [showLogs, logsData?.status]); // eslint-disable-line react-hooks/exhaustive-deps

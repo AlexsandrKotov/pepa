@@ -133,7 +133,7 @@ export default function GetStartedPage() {
             await loadProgress();
             return;
           }
-        } catch { /* ignore */ }
+        } catch (e) { console.error("Operation failed:", e); }
       }
       setRunState({ running: false, result: 'Execution started. It is still running — check the Automation page.' });
     } catch (err) {
