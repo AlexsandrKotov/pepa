@@ -1563,6 +1563,19 @@ export interface DeploymentSpec {
   chart?: { source_type?: string; chart_url?: string; chart_name?: string; chart_version?: string };
 }
 
+export interface DeploymentPipelineStage {
+  stage: string;
+  status: string;
+  image_tag: string;
+  deployed_at: string;
+  deployment_id: string;
+}
+
+export interface DeploymentPipeline {
+  project: string;
+  stages: DeploymentPipelineStage[];
+}
+
 export const deployments = {
   list: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -1581,8 +1594,14 @@ export const deployments = {
     fetchAPI<{ deployment: Deployment; original_id: string; message: string }>(`/api/v1/deployments/${id}/retry`, { method: 'POST' }),
   diff: (id: string, compareWith: string) =>
     fetchAPI<{ deployment_a: Deployment; deployment_b: Deployment; diffs: { field: string; old_value: unknown; new_value: unknown }[]; total_changes: number }>(`/api/v1/deployments/${id}/diff?compare_with=${compareWith}`),
-  pipeline: (project?: string) =>
-    fetchAPI<{ pipelines: { project: string; stages: { stage: string; status: string; image_tag: string; deployed_at: string; deployment_id: string }[] }[]; projects: string[] }>(`/api/v1/deployments/pipeline${project ? `?project=${encodeURIComponent(project)}` : ''}`),
+  pipeline: async (project?: string): Promise<{ pipelines: DeploymentPipeline[]; projects: string[] }> => {
+    // The backend can serialise empty slices as JSON null, so normalise here.
+    const r = await fetchAPI<{ pipelines: DeploymentPipeline[] | null; projects: string[] | null }>(`/api/v1/deployments/pipeline${project ? `?project=${encodeURIComponent(project)}` : ''}`);
+    return {
+      pipelines: (r?.pipelines ?? []).map(p => ({ ...p, stages: p?.stages ?? [] })),
+      projects: r?.projects ?? [],
+    };
+  },
   metrics: (period = '30d') =>
     fetchAPI<{ period_days: number; total_deployments: number; deployment_frequency: string; avg_lead_time_hours: string; change_failure_rate: string; avg_mttr_minutes: string; successful: number; failed: number }>(`/api/v1/deployments/metrics?period=${period}`),
   history: (id: string) =>

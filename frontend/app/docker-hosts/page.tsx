@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { dockerHosts, type DockerHost, type DockerHostTestResult } from '@/lib/api';
 import { VaultInput, VaultPickerModal, useVaultPicker } from '@/components/VaultInput';
@@ -8,6 +8,12 @@ import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
 import ConfirmModal from '@/components/ConfirmModal';
 import Pagination from '@/components/Pagination';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel, valueLabel } from '@/lib/filter-labels';
 
 const defaultForm = {
   name: '', description: '', host_type: 'local' as DockerHost['host_type'],
@@ -19,20 +25,17 @@ export default function DockerHostsPage() {
   const { isAdmin, hasPermission, loading: permLoading } = usePermission();
   const [hosts, setHosts] = useState<DockerHost[]>([]);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [hostTypeFilter, setHostTypeFilter] = useState('');
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear the debounce timer on unmount to avoid setState after unmount
-  useEffect(() => () => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-  }, []);
+  // Filters — URL-synced so deep links and Back/Forward just work.
+  const filters = useUrlFilters({
+    single: ['search', 'status', 'host_type'],
+  });
+
+  const searchValue = filters.get('search');
+  const statusValue = filters.get('status');
+  const hostTypeValue = filters.get('host_type');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<DockerHost | null>(null);
 
@@ -47,36 +50,21 @@ export default function DockerHostsPage() {
   const [deleting, setDeleting] = useState(false);
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const params: Record<string, string> = { page: String(page), per_page: String(perPage) };
-      if (search) params.search = search;
-      if (statusFilter) params.status = statusFilter;
-      if (hostTypeFilter) params.host_type = hostTypeFilter;
+      const params: Record<string, string> = { page: String(filters.page), per_page: String(filters.perPage) };
+      if (searchValue) params.search = searchValue;
+      if (statusValue) params.status = statusValue;
+      if (hostTypeValue) params.host_type = hostTypeValue;
       const res = await dockerHosts.list(params);
       setHosts(res.docker_hosts || []);
       setTotal(res.total || 0);
       setTotalPages(res.total_pages || 0);
     } catch { /* ignore */ }
     setLoading(false);
-  };
+  }, [filters.page, filters.perPage, searchValue, statusValue, hostTypeValue]);
 
-  useEffect(() => { if (isAdmin) load(); }, [isAdmin, page, perPage, search, statusFilter, hostTypeFilter]);
-
-  // Debounced server-side search
-  const handleSearchChange = (value: string) => {
-    setSearchInput(value);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      setSearch(value);
-      setPage(1);
-    }, 300);
-  };
-
-  const handleFilterChange = (setter: (v: string) => void, value: string) => {
-    setter(value);
-    setPage(1);
-  };
+  useEffect(() => { if (isAdmin) load(); }, [isAdmin, load]);
 
   const openCreate = () => {
     setEditing(null);
@@ -184,40 +172,56 @@ export default function DockerHostsPage() {
         <button onClick={openCreate} className="btn btn-primary">+ Add Docker Host</button>
       </div>
 
-      {/* Search & Filters */}
-      <div className="flex flex-wrap items-center gap-2 page-animate-up page-delay-1">
-        <div className="relative flex-1 min-w-[200px] max-w-[320px] overflow-hidden">
-          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => handleSearchChange(e.target.value)}
+      {/* Filters */}
+      <FilterBar
+        search={
+          <SearchInput
+            value={searchValue}
+            onCommit={value => filters.set('search', value)}
             placeholder="Search hosts..."
-            className="input !pl-9"
+            label="Search hosts"
+            loading={loading}
           />
-        </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => handleFilterChange(setStatusFilter, e.target.value)}
-          className="input w-auto"
-        >
-          <option value="">All Statuses</option>
-          <option value="connected">Connected</option>
-          <option value="error">Error</option>
-        </select>
-        <select
-          value={hostTypeFilter}
-          onChange={(e) => handleFilterChange(setHostTypeFilter, e.target.value)}
-          className="input w-auto"
-        >
-          <option value="">All Types</option>
-          <option value="local">Local</option>
-          <option value="tcp">TCP</option>
-          <option value="ssh">SSH</option>
-        </select>
-      </div>
+        }
+        quick={
+          <>
+            <QuickFilter
+              field="status"
+              label={fieldLabel('status')}
+              options={[
+                { value: 'connected', label: 'Connected', tone: 'success' as const },
+                { value: 'error', label: 'Error', tone: 'danger' as const },
+              ]}
+              value={statusValue}
+              onChange={value => filters.set('status', value)}
+            />
+            <QuickFilter
+              field="host_type"
+              label="Host type"
+              options={[
+                { value: 'local', label: 'Local' },
+                { value: 'tcp', label: 'TCP' },
+                { value: 'ssh', label: 'SSH' },
+              ]}
+              value={hostTypeValue}
+              onChange={value => filters.set('host_type', value)}
+            />
+          </>
+        }
+        chips={
+          <FilterChips
+            chips={(() => {
+              const c: ActiveChip[] = [];
+              if (searchValue) c.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+              if (statusValue) c.push({ id: 'status', field: fieldLabel('status'), label: valueLabel(statusValue), tone: valueLabel(statusValue) === 'Connected' ? 'success' : 'danger', onRemove: () => filters.set('status', '') });
+              if (hostTypeValue) c.push({ id: 'host_type', field: 'Host type', label: valueLabel(hostTypeValue), onRemove: () => filters.set('host_type', '') });
+              return c;
+            })()}
+            onClearAll={() => filters.clear()}
+            summary={`${total} host${total !== 1 ? 's' : ''}`}
+          />
+        }
+      />
 
       {/* Grid */}
       {loading ? (
@@ -310,11 +314,11 @@ export default function DockerHostsPage() {
       {/* Pagination */}
       {totalPages > 1 && (
         <Pagination
-          page={page}
-          perPage={perPage}
+          page={filters.page}
+          perPage={filters.perPage}
           total={total}
-          onPageChange={setPage}
-          onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          onPageChange={filters.setPage}
+          onPerPageChange={(pp) => filters.setPerPage(pp)}
         />
       )}
 

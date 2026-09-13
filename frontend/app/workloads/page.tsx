@@ -4,10 +4,17 @@ import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { discovery, dockerServices, dockerHosts, type DiscoveredService, type DockerService, type DiscoveredDockerContainer, type DockerHost } from '@/lib/api';
-import { useDebounce } from '@/hooks/useDebounce';
 import Tabs from '@/components/Tabs';
 import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import FilterMenu from '@/components/filters/FilterMenu';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import type { FilterGroup } from '@/components/filters/types';
+import { fieldLabel, valueLabel, valueTone } from '@/lib/filter-labels';
 
 function WorkloadsPageContent() {
   const router = useRouter();
@@ -81,19 +88,24 @@ export default function WorkloadsPage() {
 function KubernetesTab() {
   const [services, setServices] = useState<DiscoveredService[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [clusterFilter, setClusterFilter] = useState('');
-  const [namespaceFilter, setNamespaceFilter] = useState('');
-  const [healthFilter, setHealthFilter] = useState('');
-  const debouncedSearch = useDebounce(search, 300);
+
+  const filters = useUrlFilters({
+    single: ['search', 'health'],
+    multi: ['cluster', 'namespace'],
+  });
+
+  const searchValue = filters.get('search');
+  const healthValue = filters.get('health');
+  const clusterValues = filters.getAll('cluster');
+  const namespaceValues = filters.getAll('namespace');
 
   const load = useCallback(async () => {
     try {
       const params: Record<string, string> = {};
-      if (debouncedSearch) params.search = debouncedSearch;
-      if (clusterFilter) params.cluster = clusterFilter;
-      if (namespaceFilter) params.namespace = namespaceFilter;
-      if (healthFilter) params.health = healthFilter;
+      if (searchValue) params.search = searchValue;
+      if (clusterValues.length) params.cluster = clusterValues.join(',');
+      if (namespaceValues.length) params.namespace = namespaceValues.join(',');
+      if (healthValue) params.health = healthValue;
       const data = await discovery.services(params);
       setServices(data.services || []);
     } catch {
@@ -101,7 +113,7 @@ function KubernetesTab() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, clusterFilter, namespaceFilter, healthFilter]);
+  }, [searchValue, clusterValues, namespaceValues, healthValue]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -119,6 +131,42 @@ function KubernetesTab() {
     const c = h === 'healthy' ? 'bg-green-500' : h === 'degraded' || h === 'failed' ? 'bg-red-500' : h === 'progressing' ? 'bg-blue-500' : 'bg-gray-400';
     return <div className={`w-2 h-2 rounded-full ${c}`} />;
   };
+
+  // Filter options derived from loaded data
+  const healthOptions = useMemo(() => [
+    { value: 'healthy', label: 'Healthy', tone: 'success' as const },
+    { value: 'degraded', label: 'Degraded', tone: 'danger' as const },
+    { value: 'progressing', label: 'Progressing', tone: 'info' as const },
+  ], []);
+
+  const filterGroups = useMemo<FilterGroup[]>(() => [
+    { key: 'cluster', label: fieldLabel('cluster'), multi: true,
+      options: clusters.map(c => ({ value: c, label: c })) },
+    { key: 'namespace', label: fieldLabel('namespace'), multi: true, searchable: namespaces.length > 7,
+      options: namespaces.map(n => ({ value: n, label: n })) },
+  ], [clusters, namespaces]);
+
+  const menuValues: Record<string, string[]> = {
+    cluster: clusterValues,
+    namespace: namespaceValues,
+  };
+
+  // Chips
+  const chips: ActiveChip[] = [];
+  if (searchValue) {
+    chips.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+  }
+  if (healthValue) {
+    chips.push({ id: 'health', field: fieldLabel('health'), label: valueLabel(healthValue), tone: valueTone(healthValue), onRemove: () => filters.set('health', '') });
+  }
+  for (const v of clusterValues) {
+    chips.push({ id: `cluster-${v}`, field: fieldLabel('cluster'), label: v, onRemove: () => filters.toggle('cluster', v) });
+  }
+  for (const v of namespaceValues) {
+    chips.push({ id: `namespace-${v}`, field: fieldLabel('namespace'), label: v, onRemove: () => filters.toggle('namespace', v) });
+  }
+
+  const resultSummary = `${services.length} resource${services.length !== 1 ? 's' : ''}`;
 
   return (
     <div className="space-y-4">
@@ -138,23 +186,43 @@ function KubernetesTab() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <input type="text" placeholder="Search resources..." value={search} onChange={e => setSearch(e.target.value)} className="input flex-1 max-w-xs" />
-        <select value={clusterFilter} onChange={e => setClusterFilter(e.target.value)} className="input w-40">
-          <option value="">All Clusters</option>
-          {clusters.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select value={namespaceFilter} onChange={e => setNamespaceFilter(e.target.value)} className="input w-40">
-          <option value="">All Namespaces</option>
-          {namespaces.map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
-        <select value={healthFilter} onChange={e => setHealthFilter(e.target.value)} className="input w-36">
-          <option value="">All Health</option>
-          <option value="healthy">Healthy</option>
-          <option value="degraded">Degraded</option>
-          <option value="progressing">Progressing</option>
-        </select>
-      </div>
+      <FilterBar
+        search={
+          <SearchInput
+            value={searchValue}
+            onCommit={value => filters.set('search', value)}
+            placeholder="Search resources..."
+            label="Search resources"
+            loading={loading}
+          />
+        }
+        quick={
+          <QuickFilter
+            field="health"
+            label={fieldLabel('health')}
+            options={healthOptions}
+            value={healthValue}
+            onChange={value => filters.set('health', value)}
+          />
+        }
+        menu={
+          <FilterMenu
+            groups={filterGroups}
+            values={menuValues}
+            onToggle={(key, value) => filters.toggle(key, value)}
+            onClearGroup={key => filters.remove(key)}
+            triggerLabel={fieldLabel('cluster')}
+            activeCount={clusterValues.length + namespaceValues.length}
+          />
+        }
+        chips={
+          <FilterChips
+            chips={chips}
+            onClearAll={() => filters.clear()}
+            summary={resultSummary}
+          />
+        }
+      />
 
       {/* Table */}
       {loading ? (
@@ -229,13 +297,15 @@ function DockerTab() {
   const [hosts, setHosts] = useState<DockerHost[]>([]);
   const [discoveredContainers, setDiscoveredContainers] = useState<{ hostName: string; containers: DiscoveredDockerContainer[] }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState<string | null>(null);
   const [logs, setLogs] = useState('');
   const [logsLoading, setLogsLoading] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const filters = useUrlFilters({ single: ['search'] });
+  const searchValue = filters.get('search');
 
   const hostName = (id: string | null) => {
     if (!id) return 'Local Docker';
@@ -306,10 +376,10 @@ function DockerTab() {
   };
 
   const filteredServices = useMemo(() => {
-    if (!search) return services;
-    const q = search.toLowerCase();
+    if (!searchValue) return services;
+    const q = searchValue.toLowerCase();
     return services.filter(s => s.name.toLowerCase().includes(q) || (s.containers?.[0]?.image || '').toLowerCase().includes(q));
-  }, [services, search]);
+  }, [services, searchValue]);
 
   const totalDiscovered = discoveredContainers.reduce((sum, dc) => sum + dc.containers.length, 0);
 
@@ -341,9 +411,23 @@ function DockerTab() {
       </div>
 
       {/* Filters */}
-      <div className="flex gap-3">
-        <input type="text" placeholder="Search Docker services..." value={search} onChange={e => setSearch(e.target.value)} className="input flex-1 max-w-xs" />
-      </div>
+      <FilterBar
+        search={
+          <SearchInput
+            value={searchValue}
+            onCommit={value => filters.set('search', value)}
+            placeholder="Search Docker services..."
+            label="Search Docker services"
+          />
+        }
+        chips={
+          <FilterChips
+            chips={searchValue ? [{ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') }] : []}
+            onClearAll={() => filters.clear()}
+            summary={`${filteredServices.length} service${filteredServices.length !== 1 ? 's' : ''}`}
+          />
+        }
+      />
 
       {/* Managed Services */}
       {loading ? (

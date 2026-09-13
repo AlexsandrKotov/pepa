@@ -4,6 +4,14 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { gitopsBindings, environments, connections, GitOpsBinding, DiscoveredApp, Environment, WriteBackResult, Connection } from '@/lib/api';
 import BindingWizard from '@/components/BindingWizard';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import FilterMenu from '@/components/filters/FilterMenu';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import type { FilterGroup, FilterOption } from '@/components/filters/types';
+import { fieldLabel, valueLabel, valueTone } from '@/lib/filter-labels';
 
 export default function GitOpsBindingsPage() {
   const [bindings, setBindings] = useState<GitOpsBinding[]>([]);
@@ -15,12 +23,11 @@ export default function GitOpsBindingsPage() {
   const [showDiscover, setShowDiscover] = useState(false);
   const [error, setError] = useState('');
 
-  // Filters
-  const [filterEnv, setFilterEnv] = useState('');
-  const [filterEngine, setFilterEngine] = useState('');
-  const [filterCluster, setFilterCluster] = useState('');
-  const [filterNamespace, setFilterNamespace] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+  // Filters — URL-synced so deep links and Back/Forward just work.
+  const filters = useUrlFilters({
+    single: ['search', 'engine'],
+    multi: ['cluster', 'namespace', 'environment'],
+  });
 
   // Modals
   const [settingEnv, setSettingEnv] = useState<GitOpsBinding | null>(null);
@@ -76,34 +83,92 @@ export default function GitOpsBindingsPage() {
     return connMap.get(id)?.name || 'Unknown';
   }, [connMap]);
 
-  // Derived filter options
+  // Derived filter options from the loaded data
   const clusterOptions = useMemo(() => {
     const ids = new Set(bindings.map(b => b.argo_connection_id).filter(Boolean));
     return [...ids]
-      .map(id => ({ id: id!, name: connName(id) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [bindings, connName]);
+      .map(id => connMap.get(id!))
+      .filter(Boolean)
+      .sort((a, b) => a!.name.localeCompare(b!.name))
+      .map(c => ({ value: c!.id, label: c!.name }));
+  }, [bindings, connMap]);
 
   const namespaceOptions = useMemo(() => {
-    return [...new Set(bindings.map(b => b.app_namespace))].sort();
+    return [...new Set(bindings.map(b => b.app_namespace))].filter(Boolean).sort();
   }, [bindings]);
 
-  // Filtered bindings
+  const envOptions = useMemo<FilterOption[]>(() => {
+    return envs.map(env => ({ value: env.id, label: env.name, tone: valueTone(env.slug || '') }));
+  }, [envs]);
+
+  const engineOptions = useMemo<FilterOption[]>(() => [
+    { value: 'argocd', label: 'ArgoCD', tone: 'accent' as const },
+    { value: 'fluxcd', label: 'FluxCD', tone: 'info' as const },
+  ], []);
+
+  // Read current filter values from the URL store
+  const searchValue = filters.get('search');
+  const engineValue = filters.get('engine');
+  const clusterValues = filters.getAll('cluster');
+  const namespaceValues = filters.getAll('namespace');
+  const environmentValues = filters.getAll('environment');
+
+  // Filter groups for the FilterMenu
+  const filterGroups = useMemo<FilterGroup[]>(() => [
+    { key: 'cluster', label: fieldLabel('cluster'), multi: true, options: clusterOptions },
+    { key: 'namespace', label: fieldLabel('namespace'), multi: true, searchable: namespaceOptions.length > 7,
+      options: namespaceOptions.map(n => ({ value: n, label: n })) },
+    { key: 'environment', label: fieldLabel('environment'), multi: true, options: envOptions },
+  ], [clusterOptions, namespaceOptions, envOptions]);
+
+  const menuValues: Record<string, string[]> = {
+    cluster: clusterValues,
+    namespace: namespaceValues,
+    environment: environmentValues,
+  };
+
+  const handleMenuSelect = (key: string, value: string) => {
+    filters.toggle(key, value);
+  };
+
+  // Client-side filtering driven by URL state
   const filteredBindings = useMemo(() => {
     return bindings.filter(b => {
-      if (filterEnv && b.environment_id !== filterEnv) return false;
-      if (filterEngine && b.engine_type !== filterEngine) return false;
-      if (filterCluster && b.argo_connection_id !== filterCluster) return false;
-      if (filterNamespace && b.app_namespace !== filterNamespace) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+      if (environmentValues.length && (!b.environment_id || !environmentValues.includes(b.environment_id))) return false;
+      if (engineValue && b.engine_type !== engineValue) return false;
+      if (clusterValues.length && (!b.argo_connection_id || !clusterValues.includes(b.argo_connection_id))) return false;
+      if (namespaceValues.length && !namespaceValues.includes(b.app_namespace)) return false;
+      if (searchValue) {
+        const q = searchValue.toLowerCase();
         if (!b.app_name.toLowerCase().includes(q) &&
             !b.app_namespace.toLowerCase().includes(q) &&
             !b.name.toLowerCase().includes(q)) return false;
       }
       return true;
     });
-  }, [bindings, filterEnv, filterEngine, filterCluster, filterNamespace, searchQuery]);
+  }, [bindings, environmentValues, engineValue, clusterValues, namespaceValues, searchValue]);
+
+  // Active chips
+  const chips: ActiveChip[] = [];
+  if (searchValue) {
+    chips.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+  }
+  if (engineValue) {
+    chips.push({ id: 'engine', field: fieldLabel('engine'), label: valueLabel(engineValue), tone: valueTone(engineValue), onRemove: () => filters.set('engine', '') });
+  }
+  for (const v of clusterValues) {
+    const opt = clusterOptions.find(o => o.value === v);
+    chips.push({ id: `cluster-${v}`, field: fieldLabel('cluster'), label: opt?.label ?? v, onRemove: () => filters.toggle('cluster', v) });
+  }
+  for (const v of namespaceValues) {
+    chips.push({ id: `namespace-${v}`, field: fieldLabel('namespace'), label: v, onRemove: () => filters.toggle('namespace', v) });
+  }
+  for (const v of environmentValues) {
+    const opt = envOptions.find(o => o.value === v);
+    chips.push({ id: `environment-${v}`, field: fieldLabel('environment'), label: opt?.label ?? v, tone: opt?.tone, onRemove: () => filters.toggle('environment', v) });
+  }
+
+  const resultSummary = `${filteredBindings.length} of ${bindings.length} binding${bindings.length !== 1 ? 's' : ''}`;
 
   // ─── Handlers ────────────────────────────────────────────────────────────────
 
@@ -294,7 +359,13 @@ export default function GitOpsBindingsPage() {
 
   // ─── Main render ─────────────────────────────────────────────────────────────
 
-  const hasActiveFilters = filterEnv || filterEngine || filterCluster || filterNamespace || searchQuery;
+  const envFilterCount = environmentValues.length;
+  const clusterFilterCount = clusterValues.length;
+  const namespaceFilterCount = namespaceValues.length;
+  const menuActiveCount = envFilterCount + clusterFilterCount + namespaceFilterCount;
+  const menuTriggerLabel = menuActiveCount > 0
+    ? `${fieldLabel('environment')}${menuActiveCount > 1 ? ` (+${menuActiveCount - 1})` : ''}`
+    : fieldLabel('environment');
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -329,47 +400,43 @@ export default function GitOpsBindingsPage() {
         )}
 
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 page-animate-up page-delay-1">
-          <input
-            type="text"
-            placeholder="Search apps..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            className="input flex-1 min-w-[180px] max-w-xs"
-          />
-          <select value={filterCluster} onChange={e => setFilterCluster(e.target.value)} className="input w-36">
-            <option value="">All Clusters</option>
-            {clusterOptions.map(c => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <select value={filterNamespace} onChange={e => setFilterNamespace(e.target.value)} className="input w-36">
-            <option value="">All Namespaces</option>
-            {namespaceOptions.map(n => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-          <select value={filterEnv} onChange={e => setFilterEnv(e.target.value)} className="input w-36">
-            <option value="">All Environments</option>
-            {envs.map(env => (
-              <option key={env.id} value={env.id}>{env.name}</option>
-            ))}
-          </select>
-          <select value={filterEngine} onChange={e => setFilterEngine(e.target.value)} className="input w-32">
-            <option value="">All Engines</option>
-            <option value="argocd">ArgoCD</option>
-            <option value="fluxcd">FluxCD</option>
-          </select>
-
-          {hasActiveFilters && (
-            <button
-              onClick={() => { setFilterEnv(''); setFilterEngine(''); setFilterCluster(''); setFilterNamespace(''); setSearchQuery(''); }}
-              className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
+        <FilterBar
+          className="page-animate-up page-delay-1"
+          search={
+            <SearchInput
+              value={searchValue}
+              onCommit={value => filters.set('search', value)}
+              placeholder="Search applications..."
+              label="Search applications"
+            />
+          }
+          quick={
+            <QuickFilter
+              field="engine"
+              label={fieldLabel('engine')}
+              options={engineOptions}
+              value={engineValue}
+              onChange={value => filters.set('engine', value)}
+            />
+          }
+          menu={
+            <FilterMenu
+              groups={filterGroups}
+              values={menuValues}
+              onToggle={handleMenuSelect}
+              onClearGroup={key => filters.remove(key)}
+              triggerLabel={menuTriggerLabel}
+              activeCount={menuActiveCount}
+            />
+          }
+          chips={
+            <FilterChips
+              chips={chips}
+              onClearAll={() => filters.clear()}
+              summary={resultSummary}
+            />
+          }
+        />
 
         {/* Discovery Results Modal */}
         {showDiscover && (

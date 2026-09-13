@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, usePathname, useRouter } from 'next/navigation';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import Link from 'next/link';
-import { deployments, clusters, helmRepositories, devops, type Deployment, type DeploymentContainer, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type HelmChartMetadata, type WindowCheckResult, type PreDeployGateResult } from '@/lib/api';
+import { deployments, clusters, helmRepositories, devops, type Deployment, type DeploymentContainer, type DeploymentPipeline, type Cluster, type HelmRepository, type HelmChart as HelmChartType, type HelmChartVersion, type HelmChartMetadata, type WindowCheckResult, type PreDeployGateResult } from '@/lib/api';
 import ConceptHelp from '@/components/ConceptHelp';
 import BrandIcon from '@/components/BrandIcon';
 import DeploymentDetailClient from './DeploymentDetailClient';
@@ -103,7 +103,9 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   const [creating, setCreating] = useState(false);
   const [showLogs, setShowLogs] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'pipeline'>('list');
-  const [pipelineData, setPipelineData] = useState<{ pipelines: { project: string; stages: { stage: string; status: string; image_tag: string; deployed_at: string; deployment_id: string }[] }[]; projects: string[] } | null>(null);
+  const [pipelineData, setPipelineData] = useState<{ pipelines: DeploymentPipeline[]; projects: string[] } | null>(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [doraMetrics, setDoraMetrics] = useState<{ deployment_frequency: string; avg_lead_time_hours: string; change_failure_rate: string; avg_mttr_minutes: string; total_deployments: number } | null>(null);
   const [createFeedback, setCreateFeedback] = useState<{ ok: boolean; text: string } | null>(null);
   const [dryRunResult, setDryRunResult] = useState<{ resources: string; manifests: string; deploy_type: string; release_name: string; namespace: string } | null>(null);
@@ -601,7 +603,14 @@ const filtered = deployList;
         <button
           onClick={() => {
             setViewMode('pipeline');
-            deployments.pipeline().then(setPipelineData).catch(() => {});
+            setPipelineError(null);
+            if (!pipelineData) {
+              setPipelineLoading(true);
+              deployments.pipeline()
+                .then(setPipelineData)
+                .catch(err => setPipelineError(err instanceof Error ? err.message : 'Failed to load deployment pipelines'))
+                .finally(() => setPipelineLoading(false));
+            }
           }}
           className={`text-xs px-3 py-1.5 rounded-lg border ${viewMode === 'pipeline' ? 'bg-blue-500/10 border-blue-500/20 text-blue-500' : 'border-[var(--border)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
         >
@@ -610,7 +619,15 @@ const filtered = deployList;
       </div>
 
       {/* Pipeline View */}
-      {viewMode === 'pipeline' && pipelineData && (
+      {viewMode === 'pipeline' && pipelineLoading && (
+        <div className="text-center py-8 text-[var(--text-tertiary)] text-sm">Loading pipelines…</div>
+      )}
+      {viewMode === 'pipeline' && pipelineError && (
+        <div className="rounded-xl border p-4 flex items-start justify-between gap-3 page-animate-up bg-red-500/10 border-red-500/20">
+          <p className="text-sm font-medium text-red-500">⚠ {pipelineError}</p>
+        </div>
+      )}
+      {viewMode === 'pipeline' && !pipelineLoading && !pipelineError && pipelineData && (
         <div className="space-y-4 page-animate-up">
           {pipelineData.pipelines.map(p => (
             <div key={p.project} className="card">

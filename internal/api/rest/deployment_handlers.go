@@ -622,7 +622,7 @@ func getDeploymentDiff(deps Dependencies) gin.HandlerFunc {
 			OldValue interface{} `json:"old_value"`
 			NewValue interface{} `json:"new_value"`
 		}
-		var diffs []diffEntry
+		diffs := make([]diffEntry, 0)
 
 		if d1.ImageTag != d2.ImageTag {
 			diffs = append(diffs, diffEntry{"image_tag", d2.ImageTag, d1.ImageTag})
@@ -664,7 +664,7 @@ func getDeploymentDiff(deps Dependencies) gin.HandlerFunc {
 func getDeploymentPipeline(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if deps.Repos.Deployment == nil {
-			c.JSON(http.StatusOK, gin.H{"stages": []interface{}{}, "projects": []string{}})
+			c.JSON(http.StatusOK, gin.H{"pipelines": []interface{}{}, "projects": []string{}})
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -700,7 +700,9 @@ func getDeploymentPipeline(deps Dependencies) gin.HandlerFunc {
 			Stages  []stageInfo `json:"stages"`
 		}
 
-		var pipelines []pipelineEntry
+		// Initialise as empty slices so they serialise as [] rather than null —
+		// the frontend pipeline view calls .map() on these unconditionally.
+		pipelines := make([]pipelineEntry, 0)
 		for project, deploys := range projectMap {
 			// Find latest deployment per stage
 			stageMap := make(map[string]*repository.Deployment)
@@ -712,7 +714,7 @@ func getDeploymentPipeline(deps Dependencies) gin.HandlerFunc {
 				}
 			}
 
-			var stages []stageInfo
+			stages := make([]stageInfo, 0)
 			for stageName, d := range stageMap {
 				stages = append(stages, stageInfo{
 					Stage:      stageName,
@@ -725,7 +727,7 @@ func getDeploymentPipeline(deps Dependencies) gin.HandlerFunc {
 			pipelines = append(pipelines, pipelineEntry{Project: project, Stages: stages})
 		}
 
-		var projects []string
+		projects := make([]string, 0)
 		for p := range projectSet {
 			projects = append(projects, p)
 		}
