@@ -3,10 +3,12 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/pepa/pepa/internal/repository"
 )
 
@@ -149,8 +151,22 @@ func (r *OutboxRelay) Stats(ctx context.Context) (pending int64, failed int64, e
 	return r.repo.Stats(ctx)
 }
 
-// InsertOutboxEvent is a helper to insert an event into the outbox within a transaction.
-func InsertOutboxEvent(ctx context.Context, repo *repository.OutboxRepository, aggregateType string, aggregateID uuid.UUID, eventType string, data map[string]any, tenantID uuid.UUID) error {
+// InsertOutboxEvent inserts an outbox event in the SAME transaction as the business operation.
+// The tx parameter MUST NOT be nil — the outbox pattern requires the event and domain
+// changes to commit or roll back together.
+func InsertOutboxEvent(
+	ctx context.Context,
+	repo *repository.OutboxRepository,
+	tx pgx.Tx,
+	aggregateType string,
+	aggregateID uuid.UUID,
+	eventType string,
+	data map[string]any,
+	tenantID uuid.UUID,
+) error {
+	if tx == nil {
+		return fmt.Errorf("InsertOutboxEvent: tx must not be nil — use a transaction from the business operation")
+	}
 	payload := map[string]any{
 		"id":        uuid.New().String(),
 		"type":      eventType,
@@ -158,7 +174,7 @@ func InsertOutboxEvent(ctx context.Context, repo *repository.OutboxRepository, a
 		"timestamp": time.Now().Format(time.RFC3339Nano),
 		"data":      data,
 	}
-	return repo.InsertWithTx(ctx, nil, aggregateType, aggregateID, eventType, payload, tenantID)
+	return repo.Insert(ctx, tx, aggregateType, aggregateID, eventType, payload, tenantID)
 }
 
 // OutboxEventToJSON converts an outbox event to JSON for the event bus.

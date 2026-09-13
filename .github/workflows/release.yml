@@ -148,7 +148,7 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ github.ref_name }}
+          image: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ env.RELEASE_TAG#v }}
           format: spdx-json
           output-file: sbom-${{ matrix.target }}.spdx.json
 
@@ -165,14 +165,16 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
-          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${{ github.ref_name }}"
+          IMAGE_TAG="${RELEASE_TAG#v}"
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${IMAGE_TAG}"
           cosign sign --yes "${IMAGE_REF}"
 
       - name: Attest SBOM
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
-          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${{ github.ref_name }}"
+          IMAGE_TAG="${RELEASE_TAG#v}"
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${IMAGE_TAG}"
           cosign attest --yes --predicate sbom-${{ matrix.target }}.spdx.json --type spdx "${IMAGE_REF}"
 
       - name: Install Trivy

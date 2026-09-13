@@ -209,7 +209,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: e2e/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
 
       - name: Install E2E dependencies
         working-directory: e2e
@@ -217,10 +221,19 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
 
+      - name: Start frontend dev server
+        working-directory: frontend
+        run: npm run dev &
+        env:
+          PORT: 3000
+
+      - name: Wait for frontend
+        run: npx wait-on http://localhost:3000 --timeout 60000
+
       - name: Run E2E tests
         working-directory: e2e
         env:
-          BASE_URL: http://localhost:8088
+          BASE_URL: http://localhost:3000
         run: npx playwright test
 
       - name: Upload test results
