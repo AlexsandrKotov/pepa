@@ -62,13 +62,28 @@ export interface UrlFilters {
   toApiParams: () => Record<string, string>;
 }
 
-function parseSearch(search: string, multi: Set<string>, pageKey: string, perPageKey: string) {
+function parseSearch(
+  search: string,
+  singleKeys: string[],
+  multiKeys: Set<string>,
+  pageKey: string,
+  perPageKey: string,
+) {
   const params = new URLSearchParams(search);
   const values: Record<string, string[]> = {};
-  for (const key of [...multi]) {
+
+  // Single-value keys: read the raw string and wrap it in a one-element array.
+  for (const key of singleKeys) {
+    const raw = params.get(key);
+    values[key] = raw ? [raw] : [];
+  }
+
+  // Multi-value keys: split the comma-separated list.
+  for (const key of multiKeys) {
     const raw = params.get(key);
     values[key] = raw ? raw.split(',').map(v => v.trim()).filter(Boolean) : [];
   }
+
   const page = Number(params.get(pageKey));
   const perPage = Number(params.get(perPageKey));
   return {
@@ -107,9 +122,10 @@ export function useUrlFilters(options: UseUrlFiltersOptions): UrlFilters {
   perPageRef.current = perPage;
 
   // First client read of the URL; everything before this is unhydrated.
+  // Full replace (not merge) — the URL is the source of truth.
   useEffect(() => {
-    const parsed = parseSearch(window.location.search, multiSet, pageKey, perPageKey);
-    setValues(prev => ({ ...prev, ...parsed.values }));
+    const parsed = parseSearch(window.location.search, singleKeys, multiSet, pageKey, perPageKey);
+    setValues(parsed.values);
     setPageState(parsed.page);
     if (parsed.perPage) setPerPageState(parsed.perPage);
     setReady(true);
@@ -141,17 +157,18 @@ export function useUrlFilters(options: UseUrlFiltersOptions): UrlFilters {
     [filterKeys, pageKey, perPageKey, defaultPerPage],
   );
 
-  // Back / forward restores the recorded view.
+  // Back / forward restores the recorded view — full replace from the URL,
+  // because the URL is the single source of truth for filter state.
   useEffect(() => {
     const onPopState = () => {
-      const parsed = parseSearch(window.location.search, multiSet, pageKey, perPageKey);
-      setValues(prev => ({ ...prev, ...parsed.values }));
+      const parsed = parseSearch(window.location.search, singleKeys, multiSet, pageKey, perPageKey);
+      setValues(parsed.values);
       setPageState(parsed.page);
       if (parsed.perPage) setPerPageState(parsed.perPage);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [multiSet, pageKey, perPageKey]);
+  }, [singleKeys, multiSet, pageKey, perPageKey]);
 
   const commit = useCallback(
     (nextValues: Record<string, string[]>, opts?: { keepPage?: boolean; push?: boolean }) => {
