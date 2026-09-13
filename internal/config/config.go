@@ -30,6 +30,8 @@ type ServerConfig struct {
 	LogLevel     string `mapstructure:"log_level"`
 	PlatformName string `mapstructure:"platform_name"`
 	BaseURL      string `mapstructure:"base_url"`
+	PprofEnabled bool   `mapstructure:"pprof_enabled"`
+	PprofPort    int    `mapstructure:"pprof_port"`
 }
 
 type DatabaseConfig struct {
@@ -185,6 +187,8 @@ func DefaultConfig() *Config {
 			LogLevel:     "info",
 			PlatformName: "PEPA",
 			BaseURL:      "http://localhost:8088",
+			PprofEnabled: false,
+			PprofPort:    6060,
 		},
 		Database: DatabaseConfig{
 			Host:     "localhost",

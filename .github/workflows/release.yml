@@ -145,6 +145,36 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
 
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ github.ref_name }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.target }}.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ matrix.target }}
+          path: sbom-${{ matrix.target }}.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${{ github.ref_name }}"
+          cosign sign --yes "${IMAGE_REF}"
+
+      - name: Attest SBOM
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${{ github.ref_name }}"
+          cosign attest --yes --predicate sbom-${{ matrix.target }}.spdx.json --type spdx "${IMAGE_REF}"
+
       - name: Install Trivy
         run: |
           curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | tar -xz -C /usr/local/bin trivy

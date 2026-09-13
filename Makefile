@@ -255,6 +255,23 @@ verify-plugins:
 	@echo "→ Verifying plugin signatures..."
 	@bash scripts/sign-plugin.sh --verify
 
+# ── Image Verification ─────────────────────────────────────────
+
+verify-images:
+	@echo "→ Verifying container image signatures (requires cosign)..."
+	@command -v cosign >/dev/null 2>&1 || { echo "ERROR: cosign not installed. Run: brew install cosign"; exit 1; }
+	@TAG=$(or $(PEPA_IMAGE_TAG),$(shell git describe --tags --always 2>/dev/null || echo "latest")); \
+	echo "  Verifying images with tag: $$TAG"; \
+	for target in api-server worker frontend; do \
+		IMAGE="ghcr.io/alexsandrkotov/pepa/pepa-$$target:$$TAG"; \
+		echo "  Checking $$IMAGE"; \
+		cosign verify "$$IMAGE" \
+			--certificate-identity-regexp='https://github.com/alexsandrkotov/pepa' \
+			--certificate-oidc-issuer='https://token.actions.githubusercontent.com' || \
+		echo "  WARNING: $$IMAGE not signed or verification failed"; \
+	done
+	@echo "  Image verification complete"
+
 # ── Release ────────────────────────────────────────────────────
 
 RELEASE_TAG   ?= $(shell git describe --tags --always 2>/dev/null || echo "v0.0.0")
@@ -351,3 +368,31 @@ release: release-check release-tag
 	@echo "    • Package & push Helm chart"
 	@echo "    • Create GitHub Release with artifacts"
 	@echo ""
+
+# ── Database Backup ────────────────────────────────────────────
+
+db-backup:
+	@bash scripts/db-backup.sh backup
+
+db-restore:
+	@bash scripts/db-backup.sh restore $(BACKUP_FILE)
+
+db-list:
+	@bash scripts/db-backup.sh list
+
+db-verify:
+	@bash scripts/db-backup.sh verify $(BACKUP_FILE)
+
+# ── E2E Tests ──────────────────────────────────────────────────
+
+e2e-install:
+	@echo "→ Installing E2E dependencies..."
+	@cd e2e && npm ci && npx playwright install --with-deps chromium
+
+e2e:
+	@echo "→ Running E2E tests..."
+	@cd e2e && npx playwright test
+
+e2e-ui:
+	@echo "→ Running E2E tests with UI..."
+	@cd e2e && npx playwright test --ui

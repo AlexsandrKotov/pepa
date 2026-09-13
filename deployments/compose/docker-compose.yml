@@ -63,7 +63,7 @@ services:
 
   # ── PostgreSQL + PGvector ──────────────────────────────────
   postgres:
-    image: pgvector/pgvector:pg18
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg18}
     container_name: pepa-postgres
     restart: unless-stopped
     environment:
@@ -104,7 +104,7 @@ services:
 
   # ── Redis ──────────────────────────────────────────────────
   redis:
-    image: redis:7.4-alpine
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
     container_name: pepa-redis
     restart: unless-stopped
     command: >
@@ -133,7 +133,7 @@ services:
 
   # ── PEPA API Server ────────────────────────────────────────
   api-server:
-    image: ghcr.io/alexsandrkotov/pepa/pepa-api-server:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-api-server:${PEPA_IMAGE_TAG:-latest}
     container_name: pepa-api
     restart: unless-stopped
     environment:
@@ -141,6 +141,8 @@ services:
       SERVER_PORT: "8080"
       SERVER_HOST: "0.0.0.0"
       SERVER_ENV: ${SERVER_ENV:-production}
+      SERVER_PPROF_ENABLED: ${SERVER_PPROF_ENABLED:-false}
+      SERVER_PPROF_PORT: ${SERVER_PPROF_PORT:-6060}
       CUSTOM_PLUGIN_DIR: /custom-plugins
       CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost}
       IAC_BINARY: ${IAC_BINARY:-}
@@ -205,13 +207,15 @@ services:
 
   # ── PEPA Background Worker ─────────────────────────────────
   worker:
-    image: ghcr.io/alexsandrkotov/pepa/pepa-worker:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-worker:${PEPA_IMAGE_TAG:-latest}
     container_name: pepa-worker
     restart: unless-stopped
     environment:
       <<: *common-env
       CUSTOM_PLUGIN_DIR: /custom-plugins
       SERVER_ENV: ${SERVER_ENV:-production}
+      SERVER_PPROF_ENABLED: ${SERVER_PPROF_ENABLED:-false}
+      SERVER_PPROF_PORT: ${SERVER_PPROF_PORT:-6060}
       LOG_LEVEL: info
     volumes:
       - ./plugins:/plugins:ro
@@ -241,7 +245,7 @@ services:
 
   # ── Frontend (Next.js) ────────────────────────────────────
   frontend:
-    image: ghcr.io/alexsandrkotov/pepa/pepa-frontend:latest
+    image: ghcr.io/alexsandrkotov/pepa/pepa-frontend:${PEPA_IMAGE_TAG:-latest}
     container_name: pepa-frontend
     restart: unless-stopped
     ports:
@@ -271,7 +275,7 @@ services:
   # ── Nginx Reverse Proxy ────────────────────────────────────
   # Provides TLS termination, rate limiting, and security headers.
   nginx:
-    image: nginx:1.31-alpine
+    image: ${NGINX_IMAGE:-nginx:1.31-alpine}
     container_name: pepa-nginx
     restart: unless-stopped
     ports:

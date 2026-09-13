@@ -51,6 +51,23 @@ jobs:
           files: ./coverage.out
         continue-on-error: true
 
+  # ── API Contract Check ──────────────────────────────────────
+  api-contract:
+    name: API Contract (OpenAPI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check OpenAPI coverage
+        run: ./scripts/openapi-diff/main.sh
+
+      - name: Validate OpenAPI spec with Spectral
+        if: always()
+        uses: stoplightio/spectral-action@latest
+        with:
+          spec-file: docs/openapi.yaml
+        continue-on-error: true
+
   # ── Frontend (Next.js) ─────────────────────────────────────
   frontend:
     name: Frontend (Next.js)
@@ -177,4 +194,39 @@ jobs:
             plugins/builtin/*/plugin.yaml
             plugins/builtin/*/plugin.yaml.checksum
             plugins/builtin/*/plugin.yaml.checksum.sig
+          retention-days: 30
+
+  # ── E2E Tests (Playwright) ──────────────────────────────────
+  e2e:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install E2E dependencies
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: e2e
+        env:
+          BASE_URL: http://localhost:8088
+        run: npx playwright test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
           retention-days: 30

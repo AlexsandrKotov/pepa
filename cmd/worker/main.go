@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -41,6 +43,35 @@ func main() {
 	if err != nil {
 		slog.Error("bootstrap failed", "error", err)
 		os.Exit(1)
+	}
+
+	// Start pprof server on separate port (if enabled)
+	if comp.Config.Server.PprofEnabled {
+		go func() {
+			pprofAddr := fmt.Sprintf("%s:%d", comp.Config.Server.Host, comp.Config.Server.PprofPort)
+			slog.Info("pprof server starting", "addr", pprofAddr)
+			pprofMux := http.NewServeMux()
+			pprofMux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
+			pprofMux.HandleFunc("/debug/pprof/cmdline", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.DefaultServeMux.ServeHTTP(w, r)
+			}))
+			pprofMux.HandleFunc("/debug/pprof/profile", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.DefaultServeMux.ServeHTTP(w, r)
+			}))
+			pprofMux.HandleFunc("/debug/pprof/symbol", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.DefaultServeMux.ServeHTTP(w, r)
+			}))
+			pprofMux.HandleFunc("/debug/pprof/trace", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.DefaultServeMux.ServeHTTP(w, r)
+			}))
+			pprofServer := &http.Server{
+				Addr:    pprofAddr,
+				Handler: pprofMux,
+			}
+			if err := pprofServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("pprof server failed", "error", err)
+			}
+		}()
 	}
 
 	// Start event bus
