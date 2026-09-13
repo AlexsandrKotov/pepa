@@ -82,6 +82,24 @@ if [ ! -f .env ]; then
 fi
 ok ".env found"
 
+# ── TLS certificate ───────────────────────────────────────────
+# nginx mounts ./nginx/ssl for TLS termination, so a key pair must exist.
+# Private keys are never committed — generate a self-signed pair on first run.
+if [ ! -f "nginx/ssl/key.pem" ] || [ ! -f "nginx/ssl/cert.pem" ]; then
+  log "No TLS certificate found. Generating self-signed certificate..."
+  mkdir -p nginx/ssl
+  openssl req -x509 -nodes -days 365 \
+    -newkey rsa:2048 \
+    -keyout nginx/ssl/key.pem \
+    -out nginx/ssl/cert.pem \
+    -subj "/C=US/ST=State/L=City/O=PEPA/CN=localhost" \
+    2>/dev/null
+  chmod 600 nginx/ssl/key.pem
+  ok "Self-signed certificate generated"
+else
+  ok "TLS certificate found in nginx/ssl"
+fi
+
 # ── Stop existing stack ───────────────────────────────────────
 log "Stopping any existing PEPA stack..."
 $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
