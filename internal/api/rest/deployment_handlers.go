@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -731,6 +732,13 @@ func getDeploymentPipeline(deps Dependencies) gin.HandlerFunc {
 		for p := range projectSet {
 			projects = append(projects, p)
 		}
+		sort.Strings(projects)
+
+		// Map iteration order is random — sort so the pipeline list is stable
+		// across refetches.
+		sort.Slice(pipelines, func(i, j int) bool {
+			return pipelines[i].Project < pipelines[j].Project
+		})
 
 		c.JSON(http.StatusOK, gin.H{
 			"pipelines": pipelines,

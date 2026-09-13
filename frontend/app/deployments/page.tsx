@@ -604,13 +604,13 @@ const filtered = deployList;
           onClick={() => {
             setViewMode('pipeline');
             setPipelineError(null);
-            if (!pipelineData) {
-              setPipelineLoading(true);
-              deployments.pipeline()
-                .then(setPipelineData)
-                .catch(err => setPipelineError(err instanceof Error ? err.message : 'Failed to load deployment pipelines'))
-                .finally(() => setPipelineLoading(false));
-            }
+            setPipelineLoading(true);
+            // Always refetch: the pipeline view must reflect promotions/rollbacks
+            // performed since it was last opened.
+            deployments.pipeline()
+              .then(setPipelineData)
+              .catch(err => setPipelineError(err instanceof Error ? err.message : 'Failed to load deployment pipelines'))
+              .finally(() => setPipelineLoading(false));
           }}
           className={`text-xs px-3 py-1.5 rounded-lg border ${viewMode === 'pipeline' ? 'bg-blue-500/10 border-blue-500/20 text-blue-500' : 'border-[var(--border)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
         >
@@ -619,7 +619,7 @@ const filtered = deployList;
       </div>
 
       {/* Pipeline View */}
-      {viewMode === 'pipeline' && pipelineLoading && (
+      {viewMode === 'pipeline' && pipelineLoading && !pipelineData && (
         <div className="text-center py-8 text-[var(--text-tertiary)] text-sm">Loading pipelines…</div>
       )}
       {viewMode === 'pipeline' && pipelineError && (
@@ -627,7 +627,7 @@ const filtered = deployList;
           <p className="text-sm font-medium text-red-500">⚠ {pipelineError}</p>
         </div>
       )}
-      {viewMode === 'pipeline' && !pipelineLoading && !pipelineError && pipelineData && (
+      {viewMode === 'pipeline' && !pipelineError && pipelineData && (
         <div className="space-y-4 page-animate-up">
           {pipelineData.pipelines.map(p => (
             <div key={p.project} className="card">

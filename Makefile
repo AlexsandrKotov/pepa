@@ -89,6 +89,10 @@ test-coverage: test
 	fi; \
 	echo "  PASS: coverage meets minimum threshold"
 
+test-integration:
+	@echo "→ Running integration tests (requires Docker)..."
+	@go test -tags=integration -race -timeout=5m ./internal/testenv/...
+
 lint:
 	@echo "→ Running linter..."
 	@golangci-lint run ./...
