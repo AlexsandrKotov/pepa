@@ -868,16 +868,16 @@ func publishDeploymentEvent(deps Dependencies, eventType string, d *repository.D
 		return
 	}
 	payload := map[string]interface{}{
-		"deployment_id":   d.ID.String(),
-		"service_name":    d.GitlabProjectName,
-		"environment":     d.TargetNamespace,
-		"stage":           d.Stage,
-		"team_name":       d.TeamName,
-		"image_tag":       d.ImageTag,
+		"deployment_id":    d.ID.String(),
+		"service_name":     d.GitlabProjectName,
+		"environment":      d.TargetNamespace,
+		"stage":            d.Stage,
+		"team_name":        d.TeamName,
+		"image_tag":        d.ImageTag,
 		"image_repository": d.ImageRepository,
-		"user":            d.CreatedBy,
-		"status":          d.Status,
-		"url":             "/deployments/" + d.ID.String(),
+		"user":             d.CreatedBy,
+		"status":           d.Status,
+		"url":              "/deployments/" + d.ID.String(),
 	}
 	for k, v := range extra {
 		payload[k] = v
@@ -895,12 +895,12 @@ func publishDeploymentEvent(deps Dependencies, eventType string, d *repository.D
 func dryRunDeployment(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			TargetClusterID *uuid.UUID      `json:"target_cluster_id"`
-			TargetNamespace string          `json:"target_namespace"`
-			GitlabProjectName string        `json:"gitlab_project_name"`
-			Replicas        int             `json:"replicas"`
-			Spec            json.RawMessage `json:"spec"`
-			TimeoutSeconds  int             `json:"timeout_seconds"`
+			TargetClusterID   *uuid.UUID      `json:"target_cluster_id"`
+			TargetNamespace   string          `json:"target_namespace"`
+			GitlabProjectName string          `json:"gitlab_project_name"`
+			Replicas          int             `json:"replicas"`
+			Spec              json.RawMessage `json:"spec"`
+			TimeoutSeconds    int             `json:"timeout_seconds"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1034,11 +1034,11 @@ func getDeploymentTimelineEvents(deps Dependencies) gin.HandlerFunc {
 		}
 
 		type deployEvent struct {
-			ID           uuid.UUID  `json:"id"`
-			DeploymentID uuid.UUID  `json:"deployment_id"`
-			EventType    string     `json:"event_type"`
-			Message      string     `json:"message"`
-			CreatedAt    time.Time  `json:"created_at"`
+			ID           uuid.UUID `json:"id"`
+			DeploymentID uuid.UUID `json:"deployment_id"`
+			EventType    string    `json:"event_type"`
+			Message      string    `json:"message"`
+			CreatedAt    time.Time `json:"created_at"`
 		}
 
 		rows, err := deps.DB.Pool.Query(c.Request.Context(), `
