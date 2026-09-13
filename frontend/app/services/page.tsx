@@ -4,11 +4,16 @@ import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { services, type Service } from '@/lib/api';
-import { useDebounce } from '@/hooks/useDebounce';
 import ConceptHelp from '@/components/ConceptHelp';
 import ConfirmModal from '@/components/ConfirmModal';
 import ServiceDetailClient from './ServiceDetailClient';
 import { SkeletonTable } from '@/components/Skeleton';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel, valueLabel, valueTone } from '@/lib/filter-labels';
 
 function ServicesPageContent() {
   const searchParams = useSearchParams();
@@ -32,26 +37,24 @@ function ServicesList() {
   const router = useRouter();
   const [servicesList, setServicesList] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [sortKey, setSortKey] = useState<string>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [showFilters, setShowFilters] = useState(false);
 
-  const debouncedSearch = useDebounce(search, 300);
+  const filters = useUrlFilters({
+    single: ['search', 'status'],
+  });
+  const searchValue = filters.get('search');
+  const statusValue = filters.get('status');
+
   const [deleteTarget, setDeleteTarget] = useState<Service | null>(null);
   const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    loadData();
-  }, [debouncedSearch, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadData = useCallback(async () => {
     try {
       const params: Record<string, string> = {};
-      if (debouncedSearch) params.search = debouncedSearch;
-      if (statusFilter) params.status = statusFilter;
+      if (searchValue) params.search = searchValue;
+      if (statusValue) params.status = statusValue;
       const data = await services.list(params).catch(() => ({ items: [], total: 0 }));
       setServicesList(data.items || []);
     } catch (err) {
@@ -59,7 +62,11 @@ function ServicesList() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, statusFilter]);
+  }, [searchValue, statusValue]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
@@ -104,7 +111,24 @@ function ServicesList() {
     return counts;
   }, [servicesList]);
 
-  const hasActiveFilters = debouncedSearch || statusFilter;
+  const statusOptions = useMemo(() => [
+    { value: 'active', label: 'Active', tone: 'success' as const },
+    { value: 'running', label: 'Running', tone: 'success' as const },
+    { value: 'deploying', label: 'Deploying', tone: 'info' as const },
+    { value: 'configured', label: 'Configured', tone: 'info' as const },
+    { value: 'error', label: 'Error', tone: 'danger' as const },
+    { value: 'failed', label: 'Failed', tone: 'danger' as const },
+  ], []);
+
+  const chips: ActiveChip[] = [];
+  if (searchValue) {
+    chips.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+  }
+  if (statusValue) {
+    chips.push({ id: 'status', field: fieldLabel('status'), label: valueLabel(statusValue), tone: valueTone(statusValue), onRemove: () => filters.set('status', '') });
+  }
+
+  const resultSummary = `${filteredServices.length} service${filteredServices.length !== 1 ? 's' : ''}`;
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -146,30 +170,38 @@ function ServicesList() {
           ))}
         </div>
 
-        {/* Toolbar */}
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-3 items-center">
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px] overflow-hidden">
-              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Search services..."
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="input !pl-8 flex-1 min-w-[200px]"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
+        {/* Filters */}
+        <FilterBar
+          search={
+            <SearchInput
+              value={searchValue}
+              onCommit={value => filters.set('search', value)}
+              placeholder="Search services..."
+              label="Search services"
+              loading={loading}
+            />
+          }
+          quick={
+            <QuickFilter
+              field="status"
+              label={fieldLabel('status')}
+              options={statusOptions}
+              value={statusValue}
+              onChange={value => filters.set('status', value)}
+            />
+          }
+          chips={
+            <FilterChips
+              chips={chips}
+              onClearAll={() => filters.clear()}
+              summary={resultSummary}
+            />
+          }
+        />
 
+        {/* View mode + sort row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
             {/* View mode switcher */}
             <div className="flex items-center rounded-lg border border-[var(--border)] overflow-hidden">
               {(['table', 'cards'] as const).map(mode => (
@@ -182,80 +214,26 @@ function ServicesList() {
                 </button>
               ))}
             </div>
-
-            {/* Filters toggle */}
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
-                showFilters || hasActiveFilters
-                  ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent-subtle)]'
-                  : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)]'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              Filters
-              {hasActiveFilters && (
-                <span className="w-4 h-4 rounded-full bg-[var(--accent)] text-white text-[9px] flex items-center justify-center font-bold">
-                  {[debouncedSearch, statusFilter].filter(Boolean).length}
-                </span>
-              )}
-            </button>
-
-            {hasActiveFilters && (
-              <button
-                onClick={() => { setStatusFilter(''); setSearch(''); }}
-                className="text-[11px] text-[var(--accent)] hover:underline"
-              >
-                Clear all
-              </button>
-            )}
           </div>
-
-          {/* Expandable filters */}
-          {showFilters && (
-            <div className="flex flex-wrap gap-3 pt-3 border-t border-[var(--border-light)]">
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Status</label>
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="select w-40">
-                  <option value="">All Statuses</option>
-                  <option value="configured">Configured</option>
-                  <option value="active">Active</option>
-                  <option value="running">Running</option>
-                  <option value="deploying">Deploying</option>
-                  <option value="error">Error</option>
-                </select>
-              </div>
+          {viewMode === 'table' && (
+            <div className="flex items-center gap-2 text-[11px]">
+              <span className="text-[var(--text-tertiary)]">Sort:</span>
+              {[
+                { key: 'name', label: 'Name' },
+                { key: 'status', label: 'Status' },
+                { key: 'updated', label: 'Updated' },
+              ].map(col => (
+                <button
+                  key={col.key}
+                  onClick={() => { if (sortKey === col.key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(col.key); setSortDir('asc'); } }}
+                  className={`px-2 py-0.5 rounded transition-colors ${sortKey === col.key ? 'bg-[var(--accent)] text-white font-medium' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)]'}`}
+                >
+                  {col.label}
+                  {sortKey === col.key && (sortDir === 'desc' ? ' \u2193' : ' \u2191')}
+                </button>
+              ))}
             </div>
           )}
-
-          {/* Results count + sort */}
-          <div className="flex items-center justify-between">
-            <div className="text-[12px] text-[var(--text-tertiary)]">
-              {filteredServices.length} services
-              {hasActiveFilters && <span className="ml-1">(filtered from {totalServices})</span>}
-            </div>
-            {viewMode === 'table' && (
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="text-[var(--text-tertiary)]">Sort:</span>
-                {[
-                  { key: 'name', label: 'Name' },
-                  { key: 'status', label: 'Status' },
-                  { key: 'updated', label: 'Updated' },
-                ].map(col => (
-                  <button
-                    key={col.key}
-                    onClick={() => { if (sortKey === col.key) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortKey(col.key); setSortDir('asc'); } }}
-                    className={`px-2 py-0.5 rounded transition-colors ${sortKey === col.key ? 'bg-[var(--accent)] text-white font-medium' : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)]'}`}
-                  >
-                    {col.label}
-                    {sortKey === col.key && (sortDir === 'desc' ? ' \u2193' : ' \u2191')}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Content */}
@@ -263,11 +241,11 @@ function ServicesList() {
           <SkeletonTable rows={6} cols={4} />
         ) : filteredServices.length === 0 ? (
           <div className="card card-body text-center py-12">
-            {hasActiveFilters ? (
+            {(searchValue || statusValue) ? (
               <>
                 <p className="text-[13px] text-[var(--text-secondary)] mb-1">No services match your filters</p>
                 <p className="text-[12px] text-[var(--text-tertiary)] mb-4">Try adjusting your search or filters</p>
-                <button onClick={() => { setStatusFilter(''); setSearch(''); }} className="btn btn-secondary">Clear all filters</button>
+                <button onClick={() => filters.clear()} className="btn btn-secondary">Clear all filters</button>
               </>
             ) : (
               <>

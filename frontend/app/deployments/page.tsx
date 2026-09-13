@@ -10,6 +10,12 @@ import DeploymentDetailClient from './DeploymentDetailClient';
 import ConfirmModal from '@/components/ConfirmModal';
 import HelmValuesEditor, { toYaml, fromYaml } from '@/components/HelmValuesEditor';
 import Pagination from '@/components/Pagination';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel, valueLabel } from '@/lib/filter-labels';
 
 function DeploymentsPageContent() {
   const searchParams = useSearchParams();
@@ -68,19 +74,15 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
   const [deployList, setDeployList] = useState<Deployment[]>([]);
   const [clusterList, setClusterList] = useState<Cluster[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear the debounce timer on unmount to avoid setState after unmount
-  useEffect(() => () => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-  }, []);
+  const filters = useUrlFilters({
+    single: ['search', 'status'],
+  });
+  const searchValue = filters.get('search');
+  const statusValue = filters.get('status');
+
   const [pageTab, setPageTab] = useState<'all' | 'create'>(autoCreate ? 'create' : 'all');
 
   // Switch tab and keep the URL in sync so the sidebar highlight matches.
@@ -288,9 +290,9 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
 
   const refresh = async () => {
     try {
-      const dParams: Record<string, string> = { page: String(page), per_page: String(perPage) };
-      if (statusFilter) dParams.status = statusFilter;
-      if (search) dParams.search = search;
+      const dParams: Record<string, string> = { page: String(filters.page), per_page: String(filters.perPage) };
+      if (statusValue) dParams.status = statusValue;
+      if (searchValue) dParams.search = searchValue;
       const cParams: Record<string, string> = { per_page: '200' };
       const [d, c] = await Promise.allSettled([deployments.list(dParams), clusters.list(cParams)]);
       if (d.status === 'fulfilled') {
@@ -305,22 +307,7 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
     setLoading(false);
   };
 
-  useEffect(() => { refresh(); }, [page, perPage, statusFilter, search]);
-
-  // Debounced search: only update the query 300ms after typing stops
-  const handleSearchChange = (value: string) => {
-    setSearchInput(value);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => {
-      setSearch(value);
-      setPage(1);
-    }, 300);
-  };
-
-  const handleStatusChange = (value: string) => {
-    setStatusFilter(value);
-    setPage(1);
-  };
+  useEffect(() => { refresh(); }, [filters.page, filters.perPage, statusValue, searchValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Check deployment windows on load
   useEffect(() => {
@@ -668,53 +655,66 @@ const filtered = deployList;
       )}
 
       {viewMode === 'list' && (<>
-      <div className="flex flex-wrap items-center gap-3 page-animate-up page-delay-2">
-        <div className="relative flex-1 min-w-[180px] max-w-[320px] overflow-hidden">
-          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={searchInput}
-            onChange={e => handleSearchChange(e.target.value)}
+      <FilterBar
+        loading={loading}
+        search={
+          <SearchInput
+            value={searchValue}
+            onCommit={value => filters.set('search', value)}
             placeholder="Search deployments..."
-            className="input !pl-9"
+            label="Search deployments"
           />
-        </div>
-        <select
-          value={statusFilter}
-          onChange={e => handleStatusChange(e.target.value)}
-          className="input w-48"
-        >
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="syncing">Syncing</option>
-          <option value="deployed">Deployed</option>
-          <option value="promoted">Promoted</option>
-          <option value="rolled_back">Rolled Back</option>
-          <option value="failed">Failed</option>
-        </select>
-        {/* Deployment Window Status */}
-        {windowCheck && (
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border ${
-            windowCheck.allowed
-              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
-              : 'bg-red-500/10 border-red-500/20 text-red-500'
-          }`}>
-            <span>{windowCheck.allowed ? '\u2713' : '\u2717'}</span>
-            <span>Deploy {windowCheck.allowed ? 'allowed' : 'blocked'}: {windowCheck.reason}</span>
-            <select
-              value={windowCheckEnv}
-              onChange={e => setWindowCheckEnv(e.target.value)}
-              className="bg-transparent border-none text-xs p-0 ml-1 cursor-pointer"
-            >
-              <option value="production">production</option>
-              <option value="staging">staging</option>
-              <option value="development">development</option>
-            </select>
-          </div>
-        )}
-      </div>
+        }
+        quick={
+          <QuickFilter
+            field="status"
+            label="Status"
+            options={[
+              { value: 'pending', label: 'Pending' },
+              { value: 'syncing', label: 'Syncing' },
+              { value: 'deployed', label: 'Deployed' },
+              { value: 'promoted', label: 'Promoted' },
+              { value: 'rolled_back', label: 'Rolled Back' },
+              { value: 'failed', label: 'Failed' },
+            ]}
+            value={statusValue}
+            onChange={value => filters.set('status', value)}
+          />
+        }
+        actions={
+          windowCheck ? (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border ${
+              windowCheck.allowed
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
+                : 'bg-red-500/10 border-red-500/20 text-red-500'
+            }`}>
+              <span>{windowCheck.allowed ? '\u2713' : '\u2717'}</span>
+              <span>Deploy {windowCheck.allowed ? 'allowed' : 'blocked'}: {windowCheck.reason}</span>
+              <select
+                value={windowCheckEnv}
+                onChange={e => setWindowCheckEnv(e.target.value)}
+                className="bg-transparent border-none text-xs p-0 ml-1 cursor-pointer"
+              >
+                <option value="production">production</option>
+                <option value="staging">staging</option>
+                <option value="development">development</option>
+              </select>
+            </div>
+          ) : undefined
+        }
+        chips={
+          <FilterChips
+            chips={(() => {
+              const c: ActiveChip[] = [];
+              if (searchValue) c.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+              if (statusValue) c.push({ id: 'status', field: fieldLabel('status'), label: valueLabel(statusValue), onRemove: () => filters.set('status', '') });
+              return c;
+            })()}
+            onClearAll={() => filters.clear()}
+            summary={`${total} deployment${total !== 1 ? 's' : ''}`}
+          />
+        }
+      />
 
       {/* Table */}
       {loading ? (
@@ -879,11 +879,11 @@ const filtered = deployList;
       )}
       {viewMode === 'list' && !loading && totalPages > 1 && (
         <Pagination
-          page={page}
-          perPage={perPage}
+          page={filters.page}
+          perPage={filters.perPage}
           total={total}
-          onPageChange={setPage}
-          onPerPageChange={(pp) => { setPerPage(pp); setPage(1); }}
+          onPageChange={filters.setPage}
+          onPerPageChange={(pp) => filters.setPerPage(pp)}
         />
       )}
       </>)}

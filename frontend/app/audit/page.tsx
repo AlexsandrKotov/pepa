@@ -7,6 +7,14 @@ import { usePermission } from '@/hooks/usePermission';
 import { ForbiddenPage } from '@/components/PermissionGuard';
 import Tabs from '@/components/Tabs';
 import { SkeletonTable } from '@/components/Skeleton';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import FilterMenu from '@/components/filters/FilterMenu';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel, valueLabel } from '@/lib/filter-labels';
+import type { FilterGroup } from '@/components/filters/types';
 
 type Tab = 'audit' | 'plugin-actions' | 'ssh-commands';
 
@@ -207,14 +215,24 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [actionFilter, setActionFilter] = useState('');
-  const [resourceFilter, setResourceFilter] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [stats, setStats] = useState<{ by_action: Record<string, number>; by_resource: Record<string, number> }>({ by_action: {}, by_resource: {} });
   const [error, setError] = useState<string | null>(null);
   const [userMap, setUserMap] = useState<Map<string, string>>(new Map());
+
+  // Audit filters (URL-driven)
+  const filters = useUrlFilters({
+    single: ['action', 'resource'],
+  });
+  const actionValue = filters.get('action');
+  const resourceValue = filters.get('resource');
+
+  // Filter menu groups for audit tab
+  const auditMenuGroups: FilterGroup[] = [
+    { key: 'action', label: 'Action', options: ALL_ACTIONS.map(a => ({ value: a, label: a })) },
+    { key: 'resource', label: 'Resource', options: ALL_RESOURCES.map(r => ({ value: r, label: r })) },
+  ];
 
   // ── Plugin Actions state ──
   const [pluginActionsList, setPluginActionsList] = useState<PluginActionEntry[]>([]);
@@ -249,9 +267,9 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
     setLoading(true);
     setError(null);
     try {
-      const params: Record<string, string> = { per_page: '50', page: String(page) };
-      if (actionFilter) params.action = actionFilter;
-      if (resourceFilter) params.entity_type = resourceFilter;
+      const params: Record<string, string> = { per_page: '50', page: String(filters.page) };
+      if (actionValue) params.action = actionValue;
+      if (resourceValue) params.entity_type = resourceValue;
       const [data, st] = await Promise.all([
         audit.list(params),
         audit.stats().catch(() => ({ by_action: {}, by_resource: {} })),
@@ -264,7 +282,7 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
     }
     setLoading(false);
-  }, [page, actionFilter, resourceFilter]);
+  }, [filters.page, actionValue, resourceValue]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
@@ -370,8 +388,8 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
               {topActions.map(([action, count]) => {
                 const style = getActionStyle(action);
                 return (
-                  <button key={action} onClick={() => { setActionFilter(action === actionFilter ? '' : action); setPage(1); setExpandedIds([]); }}
-                    className={`modern-stat-card text-left transition-all ${actionFilter === action ? 'ring-2 ring-[var(--accent)]' : 'hover:border-[var(--border)]'}`}>
+                  <button key={action} onClick={() => { filters.set('action', action === actionValue ? '' : action); setExpandedIds([]); }}
+                    className={`modern-stat-card text-left transition-all ${actionValue === action ? 'ring-2 ring-[var(--accent)]' : 'hover:border-[var(--border)]'}`}>
                     <div className="flex items-center gap-2 mb-1">
                       <span className={`inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-mono font-bold ${style.bg} ${style.text}`}>{style.icon}</span>
                       <p className="text-[11px] text-[var(--text-tertiary)] capitalize truncate">{action}</p>
@@ -390,32 +408,46 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
             </div>
 
             {/* Filters */}
-            <div className="page-animate-up page-delay-1 flex flex-wrap items-center gap-3">
-              <select value={actionFilter} onChange={e => { setActionFilter(e.target.value); setPage(1); setExpandedIds([]); }}
-                className="text-[12px] border border-[var(--border)] rounded-lg px-3 py-1.5 bg-[var(--surface)] text-[var(--text-primary)]">
-                <option value="">All actions</option>
-                {ALL_ACTIONS.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-              <select value={resourceFilter} onChange={e => { setResourceFilter(e.target.value); setPage(1); setExpandedIds([]); }}
-                className="text-[12px] border border-[var(--border)] rounded-lg px-3 py-1.5 bg-[var(--surface)] text-[var(--text-primary)]">
-                <option value="">All resources</option>
-                {ALL_RESOURCES.map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-              {(actionFilter || resourceFilter) && (
-                <button onClick={() => { setActionFilter(''); setResourceFilter(''); setPage(1); setExpandedIds([]); }}
-                  className="text-[12px] text-[var(--accent)] hover:underline">Clear filters</button>
-              )}
-              {topResources.length > 0 && (
-                <div className="flex items-center gap-1 ml-auto">
-                  {topResources.map(([res, count]) => (
-                    <button key={res} onClick={() => { setResourceFilter(res === resourceFilter ? '' : res); setPage(1); setExpandedIds([]); }}
-                      className={`text-[11px] px-2 py-1 rounded-md transition-colors ${resourceFilter === res ? 'bg-[var(--accent)] text-white' : 'bg-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--border)]'}`}>
-                      {res} <span className="opacity-60">{count}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <FilterBar
+              loading={loading}
+              menu={
+                <FilterMenu
+                  groups={auditMenuGroups}
+                  values={{
+                    action: actionValue ? [actionValue] : [],
+                    resource: resourceValue ? [resourceValue] : [],
+                  }}
+                  onToggle={(key, value) => { filters.set(key, filters.get(key) === value ? '' : value); setExpandedIds([]); }}
+                  onClearGroup={key => { filters.set(key, ''); setExpandedIds([]); }}
+                  triggerLabel="Filters"
+                  activeCount={[actionValue, resourceValue].filter(Boolean).length}
+                />
+              }
+              actions={
+                topResources.length > 0 ? (
+                  <div className="flex items-center gap-1">
+                    {topResources.map(([res, count]) => (
+                      <button key={res} onClick={() => { filters.set('resource', res === resourceValue ? '' : res); setExpandedIds([]); }}
+                        className={`text-[11px] px-2 py-1 rounded-md transition-colors ${resourceValue === res ? 'bg-[var(--accent)] text-white' : 'bg-[var(--border-light)] text-[var(--text-secondary)] hover:bg-[var(--border)]'}`}>
+                        {res} <span className="opacity-60">{count}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : undefined
+              }
+              chips={
+                <FilterChips
+                  chips={(() => {
+                    const c: ActiveChip[] = [];
+                    if (actionValue) c.push({ id: 'action', field: fieldLabel('action'), label: valueLabel(actionValue), onRemove: () => { filters.set('action', ''); setExpandedIds([]); } });
+                    if (resourceValue) c.push({ id: 'resource', field: fieldLabel('resource'), label: valueLabel(resourceValue), onRemove: () => { filters.set('resource', ''); setExpandedIds([]); } });
+                    return c;
+                  })()}
+                  onClearAll={() => { filters.clear(); setExpandedIds([]); }}
+                  summary={`${total.toLocaleString()} entit${total !== 1 ? 'ies' : 'y'}`}
+                />
+              }
+            />
 
             {error && <div className="px-4 py-2.5 rounded-xl text-[13px] bg-red-500/10 text-red-500 border border-red-500/20">{error}</div>}
 
@@ -566,12 +598,12 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
 
             {total > 0 && (
               <div className="flex items-center justify-between text-[12px] text-[var(--text-tertiary)]">
-                <span>Showing {(page - 1) * 50 + 1}–{Math.min(page * 50, total)} of {total.toLocaleString()}</span>
+                <span>Showing {(filters.page - 1) * 50 + 1}–{Math.min(filters.page * 50, total)} of {total.toLocaleString()}</span>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setPage(p => Math.max(1, p - 1)); setExpandedIds([]); }} disabled={page <= 1}
+                  <button onClick={() => { filters.setPage(Math.max(1, filters.page - 1)); setExpandedIds([]); }} disabled={filters.page <= 1}
                     className="px-3 py-1 rounded-md border border-[var(--border)] disabled:opacity-30 hover:bg-[var(--border-light)]">Prev</button>
-                  <span>Page {page} / {totalPages}</span>
-                  <button onClick={() => { setPage(p => Math.min(totalPages, p + 1)); setExpandedIds([]); }} disabled={page >= totalPages}
+                  <span>Page {filters.page} / {totalPages}</span>
+                  <button onClick={() => { filters.setPage(Math.min(totalPages, filters.page + 1)); setExpandedIds([]); }} disabled={filters.page >= totalPages}
                     className="px-3 py-1 rounded-md border border-[var(--border)] disabled:opacity-30 hover:bg-[var(--border-light)]">Next</button>
                 </div>
               </div>
@@ -582,19 +614,29 @@ function AuditPageContent({ hasPluginActivityPerm }: { hasPluginActivityPerm: bo
         {/* ═══════════ PLUGIN ACTIONS TAB ═══════════ */}
         {tab === 'plugin-actions' && (
           <>
-            <div className="flex items-center gap-3">
-              <select value={pluginFilter} onChange={e => { setPluginFilter(e.target.value); setPluginActionsPage(1); }}
-                className="text-[12px] border border-[var(--border)] rounded-lg px-3 py-1.5 bg-[var(--surface)] text-[var(--text-primary)]">
-                <option value="">All plugins</option>
-                <option value="proxmox">Proxmox</option>
-                <option value="vmware">VMware</option>
-                <option value="s3">S3</option>
-              </select>
-              {pluginFilter && (
-                <button onClick={() => { setPluginFilter(''); setPluginActionsPage(1); }}
-                  className="text-[12px] text-[var(--accent)] hover:underline">Clear filter</button>
-              )}
-            </div>
+            <FilterBar
+              loading={pluginActionsLoading}
+              quick={
+                <QuickFilter
+                  field="plugin"
+                  label="Plugin"
+                  options={[
+                    { value: 'proxmox', label: 'Proxmox' },
+                    { value: 'vmware', label: 'VMware' },
+                    { value: 's3', label: 'S3' },
+                  ]}
+                  value={pluginFilter}
+                  onChange={value => { setPluginFilter(value); setPluginActionsPage(1); }}
+                />
+              }
+              chips={
+                <FilterChips
+                  chips={pluginFilter ? [{ id: 'plugin', field: fieldLabel('plugin'), label: valueLabel(pluginFilter), onRemove: () => { setPluginFilter(''); setPluginActionsPage(1); } }] : []}
+                  onClearAll={() => { setPluginFilter(''); setPluginActionsPage(1); }}
+                  summary={`${pluginActionsTotal} action${pluginActionsTotal !== 1 ? 's' : ''}`}
+                />
+              }
+            />
 
             <div className="page-animate-up page-delay-2">
               <div className="table-container" style={{ borderRadius: '12px' }}>

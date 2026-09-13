@@ -2,13 +2,20 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { discovery, type DiscoveredService } from '@/lib/api';
-import { useDebounce } from '@/hooks/useDebounce';
 import ConceptHelp from '@/components/ConceptHelp';
 import ResizableTable, { type ColumnDef } from '@/components/ResizableTable';
 import ServiceManagementPanel from '@/components/ServiceManagementPanel';
 import BrandIcon from '@/components/BrandIcon';
 import GearIcon from '@/components/GearIcon';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import FilterMenu from '@/components/filters/FilterMenu';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel, valueLabel } from '@/lib/filter-labels';
+import type { FilterGroup } from '@/components/filters/types';
 
 export default function DiscoveryPage() {
   const [services, setServices] = useState<DiscoveredService[]>([]);
@@ -22,15 +29,16 @@ export default function DiscoveryPage() {
   const [totalUnfiltered, setTotalUnfiltered] = useState(0);
 
   // Filters
-  const [searchFilter, setSearchFilter] = useState('');
-  const debouncedSearch = useDebounce(searchFilter, 300);
-  const [sourceFilter, setSourceFilter] = useState('');
-  const [clusterFilter, setClusterFilter] = useState('');
-  const [namespaceFilter, setNamespaceFilter] = useState('');
-  const [healthFilter, setHealthFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const filters = useUrlFilters({
+    single: ['search', 'source', 'cluster', 'namespace', 'health', 'status'],
+  });
+  const searchValue = filters.get('search');
+  const sourceValue = filters.get('source');
+  const clusterValue = filters.get('cluster');
+  const namespaceValue = filters.get('namespace');
+  const healthValue = filters.get('health');
+  const statusValue = filters.get('status');
   const [viewMode, setViewMode] = useState<'cluster' | 'source' | 'flat'>('cluster');
-  const [showFilters, setShowFilters] = useState(false);
 
   // FluxCD action state
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -44,12 +52,12 @@ export default function DiscoveryPage() {
   const loadServices = useCallback(async () => {
     try {
       const params: Record<string, string> = {};
-      if (debouncedSearch) params.search = debouncedSearch;
-      if (sourceFilter) params.source = sourceFilter;
-      if (clusterFilter) params.cluster = clusterFilter;
-      if (namespaceFilter) params.namespace = namespaceFilter;
-      if (healthFilter) params.health = healthFilter;
-      if (statusFilter) params.status = statusFilter;
+      if (searchValue) params.search = searchValue;
+      if (sourceValue) params.source = sourceValue;
+      if (clusterValue) params.cluster = clusterValue;
+      if (namespaceValue) params.namespace = namespaceValue;
+      if (healthValue) params.health = healthValue;
+      if (statusValue) params.status = statusValue;
 
       const data = await discovery.services(params);
       setServices(data.services || []);
@@ -64,7 +72,7 @@ export default function DiscoveryPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, sourceFilter, clusterFilter, namespaceFilter, healthFilter, statusFilter]);
+  }, [searchValue, sourceValue, clusterValue, namespaceValue, healthValue, statusValue]);
 
   useEffect(() => {
     loadServices();
@@ -82,24 +90,33 @@ export default function DiscoveryPage() {
     }
   };
 
-  const clearFilters = () => {
-    setSearchFilter('');
-    setSourceFilter('');
-    setClusterFilter('');
-    setNamespaceFilter('');
-    setHealthFilter('');
-    setStatusFilter('');
-  };
+  const hasActiveFilters = searchValue || sourceValue || clusterValue || namespaceValue || healthValue || statusValue;
 
-  const hasActiveFilters = debouncedSearch || sourceFilter || clusterFilter || namespaceFilter || healthFilter || statusFilter;
-
-  // Active filter chips for display
-  const activeFilterChips: { label: string; onClear: () => void }[] = [];
-  if (sourceFilter) activeFilterChips.push({ label: `Source: ${sourceFilter}`, onClear: () => setSourceFilter('') });
-  if (clusterFilter) activeFilterChips.push({ label: `Cluster: ${clusterFilter}`, onClear: () => setClusterFilter('') });
-  if (namespaceFilter) activeFilterChips.push({ label: `NS: ${namespaceFilter}`, onClear: () => setNamespaceFilter('') });
-  if (healthFilter) activeFilterChips.push({ label: `Health: ${healthFilter}`, onClear: () => setHealthFilter('') });
-  if (statusFilter) activeFilterChips.push({ label: `Status: ${statusFilter}`, onClear: () => setStatusFilter('') });
+  // Filter menu groups (dynamic options from API response)
+  const menuGroups: FilterGroup[] = [
+    {
+      key: 'source',
+      label: 'Source',
+      options: [
+        { value: 'pepa', label: 'PEPA' },
+        { value: 'argocd', label: 'ArgoCD' },
+        { value: 'fluxcd', label: 'FluxCD' },
+        { value: 'docker', label: 'Docker' },
+        { value: 'docker-container', label: 'Docker Containers' },
+        { value: 'manual', label: 'Manual' },
+      ],
+    },
+    {
+      key: 'cluster',
+      label: 'Cluster',
+      options: Object.keys(clusters).map(name => ({ value: name, label: `${name} (${clusters[name]})` })),
+    },
+    {
+      key: 'namespace',
+      label: 'Namespace',
+      options: namespaces.sort().map(ns => ({ value: ns, label: ns })),
+    },
+  ];
 
   // FluxCD actions
   const handleFluxcdAction = async (action: 'suspend' | 'resume' | 'reconcile' | 'delete', svc: DiscoveredService) => {
@@ -190,8 +207,7 @@ export default function DiscoveryPage() {
     unknown: 'text-[var(--text-tertiary)]',
   };
 
-  const clusterNames = Object.keys(clusters);
-  const activeFilterCount = [debouncedSearch, sourceFilter, clusterFilter, namespaceFilter, healthFilter, statusFilter].filter(Boolean).length;
+  const menuActiveCount = [sourceValue, clusterValue, namespaceValue].filter(Boolean).length;
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -278,202 +294,88 @@ export default function DiscoveryPage() {
       </div>
 
       {/* Filters */}
-      <div className="card card-body page-animate-up page-delay-2" style={{ borderRadius: '12px' }}>
-        <div className="space-y-3">
-          {/* View mode + search */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* View Mode */}
-            <div className="flex gap-1 bg-[var(--border-light)] rounded-lg p-0.5">
+      <FilterBar
+        loading={loading}
+        search={
+          <SearchInput
+            value={searchValue}
+            onCommit={value => filters.set('search', value)}
+            placeholder="Search by name or namespace..."
+            label="Search services"
+          />
+        }
+        quick={
+          <>
+            <QuickFilter
+              field="health"
+              label="Health"
+              options={[
+                { value: 'healthy', label: 'Healthy' },
+                { value: 'degraded', label: 'Degraded' },
+                { value: 'progressing', label: 'Progressing' },
+                { value: 'unknown', label: 'Unknown' },
+              ]}
+              value={healthValue}
+              onChange={value => filters.set('health', value)}
+            />
+            <QuickFilter
+              field="status"
+              label="Status"
+              options={[
+                { value: 'running', label: 'Running' },
+                { value: 'deploying', label: 'Deploying' },
+                { value: 'failed', label: 'Failed' },
+                { value: 'unknown', label: 'Unknown' },
+              ]}
+              value={statusValue}
+              onChange={value => filters.set('status', value)}
+            />
+          </>
+        }
+        menu={
+          <FilterMenu
+            groups={menuGroups}
+            values={{
+              source: sourceValue ? [sourceValue] : [],
+              cluster: clusterValue ? [clusterValue] : [],
+              namespace: namespaceValue ? [namespaceValue] : [],
+            }}
+            onToggle={(key, value) => filters.set(key, filters.get(key) === value ? '' : value)}
+            onClearGroup={key => filters.set(key, '')}
+            triggerLabel="Filters"
+            activeCount={menuActiveCount}
+          />
+        }
+        actions={
+          <div className="flex gap-1 bg-[var(--border-light)] rounded-lg p-0.5">
+            {([['cluster', 'By Cluster'], ['source', 'By Source'], ['flat', 'Flat List']] as const).map(([mode, label]) => (
               <button
-                onClick={() => setViewMode('cluster')}
-                className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${viewMode === 'cluster' ? 'bg-[var(--surface)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${viewMode === mode ? 'bg-[var(--surface)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
               >
-                By Cluster
+                {label}
               </button>
-              <button
-                onClick={() => setViewMode('source')}
-                className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${viewMode === 'source' ? 'bg-[var(--surface)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
-              >
-                By Source
-              </button>
-              <button
-                onClick={() => setViewMode('flat')}
-                className={`px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors ${viewMode === 'flat' ? 'bg-[var(--surface)] text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'}`}
-              >
-                Flat List
-              </button>
-            </div>
-
-            <div className="h-5 w-px bg-[var(--border)]" />
-
-            {/* Search */}
-            <div className="relative flex-1 min-w-[200px] overflow-hidden">
-              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Search by name or namespace..."
-                value={searchFilter}
-                onChange={e => setSearchFilter(e.target.value)}
-                className="input !py-1.5 !text-[12px] w-full !pl-8"
-              />
-              {searchFilter && (
-                <button
-                  onClick={() => setSearchFilter('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
-
-            {/* Filter toggle */}
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
-                showFilters || hasActiveFilters
-                  ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent-subtle)]'
-                  : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--border-light)]'
-              }`}
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              Filters
-              {activeFilterCount > 0 && (
-                <span className="w-4 h-4 rounded-full bg-[var(--accent)] text-white text-[9px] flex items-center justify-center font-bold">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="text-[11px] text-[var(--accent)] hover:underline flex items-center gap-1"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                Clear all
-              </button>
-            )}
+            ))}
           </div>
-
-          {/* Active filter chips */}
-          {activeFilterChips.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {activeFilterChips.map((chip, i) => (
-                <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent)]/20">
-                  {chip.label}
-                  <button onClick={chip.onClear} className="hover:text-[var(--text-primary)]">
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Collapsible Filter dropdowns */}
-          {showFilters && (
-            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--border-light)]">
-              {/* Source Filter */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Source</label>
-                <select
-                  value={sourceFilter}
-                  onChange={e => setSourceFilter(e.target.value)}
-                  className="select !py-1.5 !text-[12px] w-36"
-                >
-                  <option value="">All Sources</option>
-                  <option value="pepa">🚀 PEPA</option>
-                  <option value="argocd">⛵ ArgoCD</option>
-                  <option value="fluxcd">🔷 FluxCD</option>
-                  <option value="docker">🐳 Docker</option>
-                  <option value="docker-container">📦 Docker Containers</option>
-                  <option value="manual">📦 Manual</option>
-                </select>
-              </div>
-
-              {/* Cluster Filter */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Cluster</label>
-                <select
-                  value={clusterFilter}
-                  onChange={e => setClusterFilter(e.target.value)}
-                  className="select !py-1.5 !text-[12px] w-40"
-                >
-                  <option value="">All Clusters</option>
-                  {clusterNames.map(name => (
-                    <option key={name} value={name}>{name} ({clusters[name]})</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Namespace Filter */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Namespace</label>
-                <select
-                  value={namespaceFilter}
-                  onChange={e => setNamespaceFilter(e.target.value)}
-                  className="select !py-1.5 !text-[12px] w-44"
-                >
-                  <option value="">All Namespaces</option>
-                  {namespaces.sort().map(ns => (
-                    <option key={ns} value={ns}>{ns}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Health Filter */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Health</label>
-                <select
-                  value={healthFilter}
-                  onChange={e => setHealthFilter(e.target.value)}
-                  className="select !py-1.5 !text-[12px] w-36"
-                >
-                  <option value="">All Health</option>
-                  <option value="healthy">🟢 Healthy</option>
-                  <option value="degraded">🟡 Degraded</option>
-                  <option value="progressing">🔵 Progressing</option>
-                  <option value="unknown">⚪ Unknown</option>
-                </select>
-              </div>
-
-              {/* Status Filter */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wider">Status</label>
-                <select
-                  value={statusFilter}
-                  onChange={e => setStatusFilter(e.target.value)}
-                  className="select !py-1.5 !text-[12px] w-36"
-                >
-                  <option value="">All Status</option>
-                  <option value="running">Running</option>
-                  <option value="deploying">Deploying</option>
-                  <option value="failed">Failed</option>
-                  <option value="unknown">Unknown</option>
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Results count */}
-          <div className="flex items-center justify-between text-[12px] text-[var(--text-tertiary)]">
-            <span>
-              {services.length} service{services.length !== 1 ? 's' : ''}
-              {hasActiveFilters && <span className="ml-1">(filtered from {totalUnfiltered})</span>}
-            </span>
-            {loading && <span className="animate-pulse">Loading...</span>}
-          </div>
-        </div>
-      </div>
+        }
+        chips={
+          <FilterChips
+            chips={(() => {
+              const c: ActiveChip[] = [];
+              if (searchValue) c.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+              if (healthValue) c.push({ id: 'health', field: fieldLabel('health'), label: valueLabel(healthValue), onRemove: () => filters.set('health', '') });
+              if (sourceValue) c.push({ id: 'source', field: fieldLabel('source'), label: valueLabel(sourceValue), onRemove: () => filters.set('source', '') });
+              if (clusterValue) c.push({ id: 'cluster', field: fieldLabel('cluster'), label: clusterValue, onRemove: () => filters.set('cluster', '') });
+              if (namespaceValue) c.push({ id: 'namespace', field: fieldLabel('namespace'), label: namespaceValue, onRemove: () => filters.set('namespace', '') });
+              if (statusValue) c.push({ id: 'status', field: fieldLabel('status'), label: valueLabel(statusValue), onRemove: () => filters.set('status', '') });
+              return c;
+            })()}
+            onClearAll={() => filters.clear()}
+            summary={<>{services.length} service{services.length !== 1 ? 's' : ''}{hasActiveFilters && <> (filtered from {totalUnfiltered})</>}</>}
+          />
+        }
+      />
 
       {/* Content */}
       {loading ? (

@@ -37,6 +37,3 @@ ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS outbox_events_tenant_isolation ON outbox_events;
 CREATE POLICY outbox_events_tenant_isolation ON outbox_events
     USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
-
--- Grant permissions
-GRANT SELECT, INSERT, UPDATE ON outbox_events TO pepa_role;

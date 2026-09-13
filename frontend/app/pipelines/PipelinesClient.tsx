@@ -17,6 +17,13 @@ import ToastContainer from '@/components/ToastContainer';
 import { useToast } from '@/hooks/useToast';
 import ConfirmModal from '@/components/ConfirmModal';
 import Tabs from '@/components/Tabs';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import FilterMenu from '@/components/filters/FilterMenu';
+import QuickFilter from '@/components/filters/QuickFilter';
+import { fieldLabel, valueLabel } from '@/lib/filter-labels';
+import type { FilterGroup } from '@/components/filters/types';
 
 // ── Constants ──────────────────────────────────────────────
 
@@ -161,8 +168,22 @@ function PipelinesClientContent({
   const [triggerParams, setTriggerParams] = useState<Record<string, string>>({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createModalInitialType, setCreateModalInitialType] = useState<string>('gitlab_ci');
-  const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters] = useState({ source: '', status: '', type: '' });
+
+  const urlFilters = useUrlFilters({
+    single: ['source', 'status', 'type'],
+  });
+  const filterSource = urlFilters.get('source');
+  const filterStatus = urlFilters.get('status');
+  const filterType = urlFilters.get('type');
+
+  // Filter menu groups for engine sources
+  const engineMenuGroups: FilterGroup[] = [
+    {
+      key: 'source',
+      label: 'Engine',
+      options: sources.map(s => ({ value: s.id, label: s.name })),
+    },
+  ];
   const [testing, setTesting] = useState<string | null>(null);
   const { toasts, addToast, removeToast } = useToast();
   const [engineStats, setEngineStats] = useState<Record<string, EngineStats>>({});
@@ -759,9 +780,9 @@ function PipelinesClientContent({
   };
 
   const filteredSources = sources.filter(s => {
-    if (filters.source && s.id !== filters.source) return false;
-    if (filters.status && s.status !== filters.status) return false;
-    if (filters.type && s.source_type !== filters.type) return false;
+    if (filterSource && s.id !== filterSource) return false;
+    if (filterStatus && s.status !== filterStatus) return false;
+    if (filterType && s.source_type !== filterType) return false;
     return true;
   });
 
@@ -819,54 +840,61 @@ function PipelinesClientContent({
         {activeTab === 'engines' && (
           <>
             {/* Filters */}
-            <div className="flex items-center gap-2 mb-4">
-              <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${showFilters ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--accent)]' : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg)]'}`}
-              >
-                <span className="flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
-                  Filters
-                  {(filters.source || filters.status || filters.type) && <span className="w-2 h-2 bg-blue-600 rounded-full" />}
-                </span>
-              </button>
-            </div>
-
-            {showFilters && (
-              <div className="bg-[var(--surface)] rounded-lg shadow-sm border p-4 mb-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Engine</label>
-                    <select value={filters.source} onChange={e => setFilters(f => ({ ...f, source: e.target.value }))} className="w-full px-3 py-2 border border-[var(--border)] rounded-md text-sm">
-                      <option value="">All Engines</option>
-                      {sources.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Status</label>
-                    <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))} className="w-full px-3 py-2 border border-[var(--border)] rounded-md text-sm">
-                      <option value="">All Statuses</option>
-                      <option value="active">Active</option>
-                      <option value="disabled">Disabled</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">Engine Type</label>
-                    <select value={filters.type} onChange={e => setFilters(f => ({ ...f, type: e.target.value }))} className="w-full px-3 py-2 border border-[var(--border)] rounded-md text-sm">
-                      <option value="">All Types</option>
-                      <option value="gitlab_ci">GitLab CI</option>
-                      <option value="github_actions">GitHub Actions</option>
-                      <option value="ansible">Ansible</option>
-                      <option value="terraform">Terraform</option>
-                      <option value="trivy">Trivy Scanner</option>
-                    </select>
-                  </div>
-                  <div className="flex items-end">
-                    <button onClick={() => setFilters({ source: '', status: '', type: '' })} className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--border-light)] rounded-md w-full">Clear All</button>
-                  </div>
-                </div>
-              </div>
-            )}
+            <FilterBar
+              quick={
+                <>
+                  <QuickFilter
+                    field="status"
+                    label="Status"
+                    options={[
+                      { value: 'active', label: 'Active' },
+                      { value: 'disabled', label: 'Disabled' },
+                    ]}
+                    value={filterStatus}
+                    onChange={value => urlFilters.set('status', value)}
+                  />
+                  <QuickFilter
+                    field="type"
+                    label="Engine Type"
+                    options={[
+                      { value: 'gitlab_ci', label: 'GitLab CI' },
+                      { value: 'github_actions', label: 'GitHub Actions' },
+                      { value: 'ansible', label: 'Ansible' },
+                      { value: 'terraform', label: 'Terraform' },
+                      { value: 'trivy', label: 'Trivy Scanner' },
+                    ]}
+                    value={filterType}
+                    onChange={value => urlFilters.set('type', value)}
+                  />
+                </>
+              }
+              menu={
+                <FilterMenu
+                  groups={engineMenuGroups}
+                  values={{ source: filterSource ? [filterSource] : [] }}
+                  onToggle={(_key, value) => urlFilters.set('source', urlFilters.get('source') === value ? '' : value)}
+                  onClearGroup={key => urlFilters.set(key, '')}
+                  triggerLabel="Engine"
+                  activeCount={filterSource ? 1 : 0}
+                />
+              }
+              chips={
+                <FilterChips
+                  chips={(() => {
+                    const c: ActiveChip[] = [];
+                    if (filterSource) {
+                      const src = sources.find(s => s.id === filterSource);
+                      c.push({ id: 'source', field: 'Engine', label: src?.name || filterSource, onRemove: () => urlFilters.set('source', '') });
+                    }
+                    if (filterStatus) c.push({ id: 'status', field: fieldLabel('status'), label: valueLabel(filterStatus), onRemove: () => urlFilters.set('status', '') });
+                    if (filterType) c.push({ id: 'type', field: 'Engine type', label: valueLabel(filterType), onRemove: () => urlFilters.set('type', '') });
+                    return c;
+                  })()}
+                  onClearAll={() => urlFilters.clear()}
+                  summary={`${filteredSources.length} engine${filteredSources.length !== 1 ? 's' : ''}`}
+                />
+              }
+            />
             
             {/* Empty state: three engine type cards */}
             {sources.length === 0 && (

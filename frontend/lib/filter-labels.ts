@@ -25,6 +25,11 @@ export const FIELD_LABELS: Record<string, string> = {
   provider: 'Provider',
   result: 'Result',
   sort: 'Sort',
+  action: 'Action',
+  resource: 'Resource',
+  plugin: 'Plugin',
+  host_type: 'Host type',
+  type_key: 'Type',
 };
 
 export const VALUE_LABELS: Record<string, string> = {
@@ -69,6 +74,21 @@ export const VALUE_LABELS: Record<string, string> = {
   high: 'High',
   medium: 'Medium',
   low: 'Low',
+  // Deployment statuses
+  pr_created: 'PR Created',
+  merged: 'Merged',
+  promoted: 'Promoted',
+  rolled_back: 'Rolled Back',
+  cancelled: 'Cancelled',
+  // Source types
+  pepa: 'PEPA',
+  docker: 'Docker',
+  'docker-container': 'Docker Containers',
+  manual: 'Manual',
+  // Plugin names
+  proxmox: 'Proxmox',
+  vmware: 'VMware',
+  s3: 'S3',
 };
 
 const TONE_BY_VALUE: Record<string, Tone> = {

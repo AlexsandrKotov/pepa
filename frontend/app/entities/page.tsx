@@ -5,11 +5,16 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { entities, discovery, scorecards, type Entity, type DiscoveredService, type ScorecardResult } from '@/lib/api';
 import { Toast } from '@/components/Interactive';
-import { useDebounce } from '@/hooks/useDebounce';
 import Pagination from '@/components/Pagination';
 import ConceptHelp from '@/components/ConceptHelp';
 import EntityDetailClient from './EntityDetailClient';
 import { SkeletonTable } from '@/components/Skeleton';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import QuickFilter from '@/components/filters/QuickFilter';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel, valueLabel } from '@/lib/filter-labels';
 
 function EntitiesPageContent() {
   const searchParams = useSearchParams();
@@ -33,31 +38,28 @@ export default function EntitiesPage() {
 function EntitiesList() {
   const [items, setItems] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [perPage] = useState(20);
   const [total, setTotal] = useState(0);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [showImport, setShowImport] = useState(false);
-  const debouncedSearch = useDebounce(search, 300);
+
+  const filters = useUrlFilters({
+    single: ['search', 'type_key'],
+  });
+  const searchValue = filters.get('search');
+  const typeValue = filters.get('type_key');
 
   // Sync status
   const [syncStatus, setSyncStatus] = useState<{ last_synced_at: string | null; status: string } | null>(null);
   // Scorecard levels per entity (level + percentage)
   const [entityScores, setEntityScores] = useState<Record<string, { level: string; pct: number }>>({});
 
-  useEffect(() => {
-    setPage(1);
-  }, [debouncedSearch, typeFilter]);
-
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = { page: String(page), per_page: String(perPage) };
-      if (debouncedSearch) params.search = debouncedSearch;
-      if (typeFilter) params.type_key = typeFilter;
+      const params: Record<string, string> = { page: String(filters.page), per_page: String(filters.perPage) };
+      if (searchValue) params.search = searchValue;
+      if (typeValue) params.type_key = typeValue;
       const data = await entities.list(params).catch(() => ({ items: [], total: 0, page: 1, per_page: 20, total_pages: 0 }));
       setItems(data.items || []);
       setTotal(data.total || 0);
@@ -66,7 +68,7 @@ function EntitiesList() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, typeFilter, page, perPage]);
+  }, [searchValue, typeValue, filters.page, filters.perPage]);
 
   useEffect(() => {
     loadData();
@@ -186,27 +188,44 @@ function EntitiesList() {
         </div>
 
         {/* Filters */}
-        <div className="flex gap-3 page-animate-up page-delay-1">
-          <input
-            type="text"
-            placeholder="Search entities..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="input flex-[3]"
-          />
-          <select
-            value={typeFilter}
-            onChange={e => setTypeFilter(e.target.value)}
-            className="input flex-1 min-w-[140px]"
-          >
-            <option value="">All types</option>
-            <option value="service">Service</option>
-            <option value="resource">Resource</option>
-            <option value="team">Team</option>
-            <option value="environment">Environment</option>
-            <option value="api_endpoint">API Endpoint</option>
-          </select>
-        </div>
+        <FilterBar
+          search={
+            <SearchInput
+              value={searchValue}
+              onCommit={value => filters.set('search', value)}
+              placeholder="Search entities..."
+              label="Search entities"
+              loading={loading}
+            />
+          }
+          quick={
+            <QuickFilter
+              field="type_key"
+              label="Type"
+              options={[
+                { value: 'service', label: 'Service' },
+                { value: 'resource', label: 'Resource' },
+                { value: 'team', label: 'Team' },
+                { value: 'environment', label: 'Environment' },
+                { value: 'api_endpoint', label: 'API Endpoint' },
+              ]}
+              value={typeValue}
+              onChange={value => filters.set('type_key', value)}
+            />
+          }
+          chips={
+            <FilterChips
+              chips={(() => {
+                const c: ActiveChip[] = [];
+                if (searchValue) c.push({ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') });
+                if (typeValue) c.push({ id: 'type_key', field: 'Type', label: valueLabel(typeValue), onRemove: () => filters.set('type_key', '') });
+                return c;
+              })()}
+              onClearAll={() => filters.clear()}
+              summary={`${total} entit${total !== 1 ? 'ies' : 'y'}`}
+            />
+          }
+        />
 
         {/* List */}
         {loading ? (
@@ -289,7 +308,7 @@ function EntitiesList() {
                 </tbody>
               </table>
             </div>
-            <Pagination page={page} perPage={perPage} total={total} onPageChange={setPage} />
+            <Pagination page={filters.page} perPage={filters.perPage} total={total} onPageChange={filters.setPage} onPerPageChange={filters.setPerPage} />
           </div>
         )}
       </div>

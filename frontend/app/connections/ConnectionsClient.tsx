@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { connections as connectionsAPI, plugins as pluginsAPI, ai as aiAPI, type Connection, type ConnectionType, type PluginInfo, type ConnectionCredentialStatus } from '@/lib/api';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
@@ -10,6 +10,11 @@ import BrandIcon from '@/components/BrandIcon';
 import ConfirmModal from '@/components/ConfirmModal';
 import { usePermission } from '@/hooks/usePermission';
 import { SkeletonTable } from '@/components/Skeleton';
+import { useUrlFilters } from '@/hooks/useUrlFilters';
+import FilterBar from '@/components/filters/FilterBar';
+import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
+import SearchInput from '@/components/filters/SearchInput';
+import { fieldLabel } from '@/lib/filter-labels';
 
 const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; color: string; description: string; requiredPlugins?: string[] }[] = [
   { type: 'git', label: 'Git', icon: 'git', color: '#F05032', description: 'GitHub, GitLab, Gitea, Bitbucket, local' },
@@ -89,14 +94,10 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   const [defaultAIProvider, setDefaultAIProvider] = useState('');
   const [settingDefault, setSettingDefault] = useState<string | null>(null);
   const [credStatuses, setCredStatuses] = useState<Record<string, ConnectionCredentialStatus>>({});
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear the debounce timer on unmount to avoid setState after unmount
-  useEffect(() => () => {
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-  }, []);
+  const filters = useUrlFilters({ single: ['search'] });
+  const searchValue = filters.get('search');
+
   const { vaultRefs, setVaultRefs, onOpenVaultPicker, VaultPicker, removeVaultRef } = useVaultPicker();
   const { isAdmin, hasPermission } = usePermission();
   const canCreate = isAdmin || hasPermission('connections', 'create');
@@ -106,19 +107,12 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
   useEffect(() => {
     if (initialConnections) return; // already provided
     const params: Record<string, string> = { per_page: '200' };
-    if (search) params.search = search;
+    if (searchValue) params.search = searchValue;
     connectionsAPI.list(params)
       .then(data => setConnections(data.connections || []))
       .catch(() => setConnections([]))
       .finally(() => setLoading(false));
-  }, [initialConnections, search]);
-
-  // Debounced search: only update the query 300ms after typing stops
-  const handleSearchChange = (value: string) => {
-    setSearchInput(value);
-    if (searchTimer.current) clearTimeout(searchTimer.current);
-    searchTimer.current = setTimeout(() => setSearch(value), 300);
-  };
+  }, [initialConnections, searchValue]);
 
   // Fetch installed plugins to determine which connection types are available
   useEffect(() => {
@@ -269,18 +263,24 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
 
       {/* Search */}
       <div className="page-animate-up">
-        <div className="relative max-w-[320px] overflow-hidden">
-          <svg className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search connections..."
-            className="input !pl-9"
-          />
-        </div>
+        <FilterBar
+          search={
+            <SearchInput
+              value={searchValue}
+              onCommit={value => filters.set('search', value)}
+              placeholder="Search connections..."
+              label="Search connections"
+              loading={loading}
+            />
+          }
+          chips={
+            <FilterChips
+              chips={searchValue ? [{ id: 'search', field: fieldLabel('search'), label: `"${searchValue}"`, onRemove: () => filters.set('search', '') }] : []}
+              onClearAll={() => filters.clear()}
+              summary={`${connections.length} connection${connections.length !== 1 ? 's' : ''}`}
+            />
+          }
+        />
       </div>
 
       {/* Inline feedback for test / create results */}
