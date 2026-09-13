@@ -16,9 +16,9 @@ import (
 
 // IngestionEngine handles document ingestion into the RAG knowledge base.
 type IngestionEngine struct {
-	pool    *pgxpool.Pool
-	ragRepo *repository.RAGRepository
-	chunker Chunker
+	pool     *pgxpool.Pool
+	ragRepo  *repository.RAGRepository
+	chunker  Chunker
 	provider LLMProvider
 
 	// Per-source-type locks to avoid serializing unrelated ingestions.
@@ -215,9 +215,9 @@ func (l *EntityDocumentLoader) Load(ctx context.Context) ([]*Document, error) {
 		content := fmt.Sprintf("Entity: %s\nType: %s\nDescription: %s\nMetadata: %s\nLabels: %s",
 			name, typeKey, description, metadata, labels)
 		docs = append(docs, &Document{
-			ID:     id,
-			Source: "entity",
-			Type:   typeKey,
+			ID:      id,
+			Source:  "entity",
+			Type:    typeKey,
 			Content: content,
 			Metadata: map[string]string{
 				"name":     name,

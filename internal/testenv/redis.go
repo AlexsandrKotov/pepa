@@ -41,7 +41,7 @@ func StartRedis(ctx context.Context, t *testing.T) (*RedisContainer, error) {
 
 	addr, err := redisContainer.ConnectionString(ctx)
 	if err != nil {
-		redisContainer.Terminate(ctx)
+		_ = redisContainer.Terminate(ctx)
 		return nil, fmt.Errorf("get connection string: %w", err)
 	}
 
@@ -49,7 +49,7 @@ func StartRedis(ctx context.Context, t *testing.T) (*RedisContainer, error) {
 	// testcontainers returns "redis://host:port" format.
 	opts, err := goredis.ParseURL(addr)
 	if err != nil {
-		redisContainer.Terminate(ctx)
+		_ = redisContainer.Terminate(ctx)
 		return nil, fmt.Errorf("parse redis URL: %w", err)
 	}
 
@@ -57,8 +57,8 @@ func StartRedis(ctx context.Context, t *testing.T) (*RedisContainer, error) {
 
 	// Verify connection.
 	if err := client.Ping(ctx).Err(); err != nil {
-		client.Close()
-		redisContainer.Terminate(ctx)
+		_ = client.Close()
+		_ = redisContainer.Terminate(ctx)
 		return nil, fmt.Errorf("ping redis: %w", err)
 	}
 
@@ -84,7 +84,7 @@ func (r *RedisContainer) Addr() string {
 // Terminate stops and removes the Redis container.
 func (r *RedisContainer) Terminate(ctx context.Context) error {
 	if r.client != nil {
-		r.client.Close()
+		_ = r.client.Close()
 	}
 	if r.container != nil {
 		return r.container.Terminate(ctx)

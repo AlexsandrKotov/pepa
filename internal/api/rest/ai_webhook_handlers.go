@@ -28,7 +28,7 @@ func (h *AIWebhookHandlers) Suggest(c *gin.Context) {
 		FilePath    string `json:"file_path"`
 		Language    string `json:"language"`
 		Code        string `json:"code"`
-		Context     string `json:"context"`     // surrounding code or project info
+		Context     string `json:"context"`      // surrounding code or project info
 		ProjectType string `json:"project_type"` // e.g., "kubernetes", "go", "python"
 		Action      string `json:"action"`       // suggest, explain, fix, review
 	}

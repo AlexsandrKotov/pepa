@@ -749,7 +749,7 @@ type wsMessage struct {
 
 // sessionTracker tracks active SSH sessions per user.
 var (
-	activeSessions   = make(map[uuid.UUID]int)      // userID -> session count
+	activeSessions   = make(map[uuid.UUID]int)       // userID -> session count
 	activeSessionAge = make(map[uuid.UUID]time.Time) // userID -> last activity
 	activeSessionsMu sync.Mutex
 )

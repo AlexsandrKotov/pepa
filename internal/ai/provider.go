@@ -156,8 +156,8 @@ type Citation struct {
 
 // RAGQuery
 type RAGQuery struct {
-	Text             string            `json:"text"`
-	TenantID         string            `json:"tenant_id"`
+	Text     string `json:"text"`
+	TenantID string `json:"tenant_id"`
 	// TenantIDs is the effective read scope: the caller's workspace plus any
 	// shared platform corpus. It is resolved from the verified token by the
 	// handler, never from the request body. When empty the pipeline falls back

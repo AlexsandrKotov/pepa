@@ -20,11 +20,11 @@ import (
 
 // RAGHandlers handles RAG knowledge base endpoints.
 type RAGHandlers struct {
-	ragRepo    *repository.RAGRepository
-	aiManager  *ai.Manager
-	ingestion  *ai.IngestionEngine
-	pipeline   *ai.RAGPipeline
-	deps       Dependencies
+	ragRepo   *repository.RAGRepository
+	aiManager *ai.Manager
+	ingestion *ai.IngestionEngine
+	pipeline  *ai.RAGPipeline
+	deps      Dependencies
 	// platformTenant owns the seeded, read-only corpus (PEPA docs, runbooks).
 	// It is a read scope for every workspace, never a write target for a
 	// caller whose token carries a different tenant.

@@ -39,29 +39,29 @@ type TriggerResult struct {
 
 // RunStatus is a snapshot of a pipeline run's current state.
 type RunStatus struct {
-	ExternalRunID string      `json:"external_run_id"`
-	Status        string      `json:"status"` // pending, running, success, failed, cancelled
-	ExternalURL   string      `json:"external_url,omitempty"`
-	DurationMs    *int        `json:"duration_ms,omitempty"`
-	Logs          string      `json:"logs,omitempty"`
-	LogsURL       string      `json:"logs_url,omitempty"`
-	Jobs          []JobInfo   `json:"jobs,omitempty"`
-	HeadBranch    string      `json:"head_branch,omitempty"`
-	Event         string      `json:"event,omitempty"`
-	CreatedAt     string      `json:"created_at,omitempty"`
+	ExternalRunID string    `json:"external_run_id"`
+	Status        string    `json:"status"` // pending, running, success, failed, cancelled
+	ExternalURL   string    `json:"external_url,omitempty"`
+	DurationMs    *int      `json:"duration_ms,omitempty"`
+	Logs          string    `json:"logs,omitempty"`
+	LogsURL       string    `json:"logs_url,omitempty"`
+	Jobs          []JobInfo `json:"jobs,omitempty"`
+	HeadBranch    string    `json:"head_branch,omitempty"`
+	Event         string    `json:"event,omitempty"`
+	CreatedAt     string    `json:"created_at,omitempty"`
 }
 
 // JobInfo describes a single job/step within a pipeline run.
 type JobInfo struct {
-	ExternalJobID string      `json:"external_job_id"`
-	Name          string      `json:"name"`
-	Stage         string      `json:"stage,omitempty"`
-	Status        string      `json:"status"`
-	LogText       string      `json:"log_text,omitempty"`
-	LogURL        string      `json:"log_url,omitempty"`
-	RunnerName    string      `json:"runner_name,omitempty"`
-	AllowFailure  bool        `json:"allow_failure"`
-	Steps         []StepInfo  `json:"steps,omitempty"`
+	ExternalJobID string     `json:"external_job_id"`
+	Name          string     `json:"name"`
+	Stage         string     `json:"stage,omitempty"`
+	Status        string     `json:"status"`
+	LogText       string     `json:"log_text,omitempty"`
+	LogURL        string     `json:"log_url,omitempty"`
+	RunnerName    string     `json:"runner_name,omitempty"`
+	AllowFailure  bool       `json:"allow_failure"`
+	Steps         []StepInfo `json:"steps,omitempty"`
 }
 
 // StepInfo describes a single step within a job (GitHub Actions).
@@ -225,7 +225,7 @@ type AnsibleRole struct {
 
 // TerraformInspection contains parsed module and resource structure.
 type TerraformInspection struct {
-	Modules     []TerraformModule     `json:"modules"`
+	Modules     []TerraformModule      `json:"modules"`
 	Resources   []TerraformResourceDef `json:"resources"`
 	DataSources []TerraformResourceDef `json:"data_sources"`
 	Outputs     []TerraformOutputDef   `json:"outputs"`
@@ -235,8 +235,8 @@ type TerraformInspection struct {
 
 // TerraformModule describes a module block.
 type TerraformModule struct {
-	Name   string `json:"name"`
-	Source string `json:"source"`
+	Name    string `json:"name"`
+	Source  string `json:"source"`
 	Version string `json:"version,omitempty"`
 }
 

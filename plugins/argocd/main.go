@@ -70,10 +70,12 @@ func NewArgoCDPlugin(config map[string]string) (*ArgoCDPlugin, error) {
 	}, nil
 }
 
-func (p *ArgoCDPlugin) Name() string        { return "argocd" }
-func (p *ArgoCDPlugin) Version() string     { return "2.0.0" }
-func (p *ArgoCDPlugin) Description() string { return "ArgoCD integration — REST API or Kubernetes CRD mode with full read parity" }
-func (p *ArgoCDPlugin) PluginType() string  { return "cd_engine" }
+func (p *ArgoCDPlugin) Name() string    { return "argocd" }
+func (p *ArgoCDPlugin) Version() string { return "2.0.0" }
+func (p *ArgoCDPlugin) Description() string {
+	return "ArgoCD integration — REST API or Kubernetes CRD mode with full read parity"
+}
+func (p *ArgoCDPlugin) PluginType() string { return "cd_engine" }
 
 func (p *ArgoCDPlugin) Actions() []string {
 	return []string{
@@ -336,9 +338,9 @@ func crdSync(ctx context.Context, dc *crdClient, params []byte) ([]byte, error) 
 	}
 
 	return sdk.ActionOutput(map[string]string{
-		"status":    "success",
-		"message":   fmt.Sprintf("sync triggered for %s/%s", input.Namespace, appName),
-		"mode":      "crd",
+		"status":      "success",
+		"message":     fmt.Sprintf("sync triggered for %s/%s", input.Namespace, appName),
+		"mode":        "crd",
 		"application": appName,
 	})
 }
@@ -390,11 +392,11 @@ func crdRollback(ctx context.Context, dc *crdClient, params []byte) ([]byte, err
 	}
 
 	return sdk.ActionOutput(map[string]string{
-		"status":    "success",
-		"message":   fmt.Sprintf("rollback %s/%s to revision %s", input.Namespace, appName, input.Revision),
-		"mode":      "crd",
+		"status":      "success",
+		"message":     fmt.Sprintf("rollback %s/%s to revision %s", input.Namespace, appName, input.Revision),
+		"mode":        "crd",
 		"application": appName,
-		"revision":  input.Revision,
+		"revision":    input.Revision,
 	})
 }
 
@@ -738,13 +740,13 @@ func (p *ArgoCDPlugin) getEvents(ctx context.Context, params []byte) ([]byte, er
 
 func (p *ArgoCDPlugin) getLogs(ctx context.Context, params []byte) ([]byte, error) {
 	var input struct {
-		Name       string `json:"name"`
-		Namespace  string `json:"namespace,omitempty"`
-		Group      string `json:"group,omitempty"`
-		Kind       string `json:"kind,omitempty"`
-		Resource   string `json:"resourceName,omitempty"`
-		Container  string `json:"containerName,omitempty"`
-		TailLines  int64  `json:"tailLines,omitempty"`
+		Name      string `json:"name"`
+		Namespace string `json:"namespace,omitempty"`
+		Group     string `json:"group,omitempty"`
+		Kind      string `json:"kind,omitempty"`
+		Resource  string `json:"resourceName,omitempty"`
+		Container string `json:"containerName,omitempty"`
+		TailLines int64  `json:"tailLines,omitempty"`
 	}
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, err

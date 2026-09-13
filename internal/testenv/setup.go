@@ -35,7 +35,7 @@ func NewTestEnv(t *testing.T) *TestEnv {
 
 	rd, err := StartRedis(ctx, t)
 	if err != nil {
-		pg.Terminate(ctx)
+		_ = pg.Terminate(ctx)
 		t.Fatalf("start redis: %v", err)
 	}
 

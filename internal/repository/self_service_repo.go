@@ -13,27 +13,27 @@ import (
 
 // SelfServiceDeployment represents a developer self-service deployment request.
 type SelfServiceDeployment struct {
-	ID            uuid.UUID  `json:"id"`
-	TenantID      uuid.UUID  `json:"tenant_id"`
-	UserID        uuid.UUID  `json:"user_id"`
-	GitRepoURL    string     `json:"git_repo_url"`
-	GitBranch     string     `json:"git_branch"`
-	GitCommitSHA  *string    `json:"git_commit_sha"`
-	EnvironmentID *uuid.UUID `json:"environment_id"`
-	ServiceID     *uuid.UUID `json:"service_id"`
-	BlueprintType string     `json:"blueprint_type"`
+	ID              uuid.UUID              `json:"id"`
+	TenantID        uuid.UUID              `json:"tenant_id"`
+	UserID          uuid.UUID              `json:"user_id"`
+	GitRepoURL      string                 `json:"git_repo_url"`
+	GitBranch       string                 `json:"git_branch"`
+	GitCommitSHA    *string                `json:"git_commit_sha"`
+	EnvironmentID   *uuid.UUID             `json:"environment_id"`
+	ServiceID       *uuid.UUID             `json:"service_id"`
+	BlueprintType   string                 `json:"blueprint_type"`
 	BlueprintConfig map[string]interface{} `json:"blueprint_config"`
-	DeploymentID  *uuid.UUID `json:"deployment_id"`
-	Status        string     `json:"status"`
-	Progress      int        `json:"progress"`
-	Logs          string     `json:"logs"`
-	ErrorMessage  *string    `json:"error_message"`
-	IsPreview     bool       `json:"is_preview"`
-	PRNumber      *int       `json:"pr_number"`
-	PreviewURL    *string    `json:"preview_url"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-	DeployedAt    *time.Time `json:"deployed_at"`
+	DeploymentID    *uuid.UUID             `json:"deployment_id"`
+	Status          string                 `json:"status"`
+	Progress        int                    `json:"progress"`
+	Logs            string                 `json:"logs"`
+	ErrorMessage    *string                `json:"error_message"`
+	IsPreview       bool                   `json:"is_preview"`
+	PRNumber        *int                   `json:"pr_number"`
+	PreviewURL      *string                `json:"preview_url"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
+	DeployedAt      *time.Time             `json:"deployed_at"`
 }
 
 // SelfServiceDeploymentRepository handles self-service deployment persistence.

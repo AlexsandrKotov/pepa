@@ -16,10 +16,10 @@ import (
 // NotificationDispatcher listens for platform events on the event bus and
 // dispatches notifications to the appropriate connections based on routing rules.
 type NotificationDispatcher struct {
-	ruleRepo    *repository.NotificationRuleRepository
-	logRepo     *repository.NotificationLogRepository
-	connRepo    *repository.ConnectionRepository
-	pluginMgr   *engine.Manager
+	ruleRepo  *repository.NotificationRuleRepository
+	logRepo   *repository.NotificationLogRepository
+	connRepo  *repository.ConnectionRepository
+	pluginMgr *engine.Manager
 }
 
 // NewNotificationDispatcher creates a new notification dispatcher.
@@ -254,24 +254,24 @@ func (d *NotificationDispatcher) SendTest(ctx context.Context, rule *repository.
 // PreviewTemplate renders a template with sample data and returns the result.
 func PreviewTemplate(bodyTemplate string, eventType string) string {
 	samplePayload := map[string]interface{}{
-		"event_type":     eventType,
-		"timestamp":      time.Now().UTC().Format(time.RFC3339),
-		"service_name":   "my-service",
-		"environment":    "production",
-		"stage":          "prod",
-		"status":         "success",
-		"user":           "admin",
-		"duration":       "2m30s",
-		"image_tag":      "v1.2.3",
-		"pipeline_name":  "Build & Deploy",
-		"source_name":    "github/my-repo",
-		"branch":         "main",
-		"commit_sha":     "abc123def",
-		"workflow_name":  "Deploy Pipeline",
+		"event_type":      eventType,
+		"timestamp":       time.Now().UTC().Format(time.RFC3339),
+		"service_name":    "my-service",
+		"environment":     "production",
+		"stage":           "prod",
+		"status":          "success",
+		"user":            "admin",
+		"duration":        "2m30s",
+		"image_tag":       "v1.2.3",
+		"pipeline_name":   "Build & Deploy",
+		"source_name":     "github/my-repo",
+		"branch":          "main",
+		"commit_sha":      "abc123def",
+		"workflow_name":   "Deploy Pipeline",
 		"steps_completed": 4,
-		"steps_total":    4,
-		"error":          "",
-		"url":            "/deployments/example-uuid",
+		"steps_total":     4,
+		"error":           "",
+		"url":             "/deployments/example-uuid",
 	}
 	return RenderTemplate(bodyTemplate, BuildTemplateVars(eventType, samplePayload))
 }

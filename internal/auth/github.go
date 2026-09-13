@@ -15,10 +15,10 @@ import (
 
 // GitHub OAuth2 endpoints (not OIDC — GitHub does not support OIDC discovery).
 const (
-	githubAuthURL     = "https://github.com/login/oauth/authorize"
-	githubTokenURL    = "https://github.com/login/oauth/access_token" //nolint:gosec // #nosec // G101: this is a URL, not a credential
-	githubUserAPI     = "https://api.github.com/user"
-	githubEmailsAPI   = "https://api.github.com/user/emails"
+	githubAuthURL   = "https://github.com/login/oauth/authorize"
+	githubTokenURL  = "https://github.com/login/oauth/access_token" //nolint:gosec // #nosec // G101: this is a URL, not a credential
+	githubUserAPI   = "https://api.github.com/user"
+	githubEmailsAPI = "https://api.github.com/user/emails"
 )
 
 // GitHubUserInfo represents user information from GitHub.

@@ -17,7 +17,7 @@ func fakeSonar(t *testing.T, handler http.HandlerFunc) *SonarQubePlugin {
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	plugin, err := NewSonarQubePlugin(map[string]string{"url": srv.URL, "token": "sqp-test-token"})
+	plugin, err := NewSonarQubePlugin(map[string]string{"url": srv.URL, "token": "sqp-test-token"}) // #nosec G101 //nolint:gosec // test credential, not real
 	if err != nil {
 		t.Fatalf("NewSonarQubePlugin: %v", err)
 	}

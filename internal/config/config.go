@@ -41,6 +41,12 @@ type DatabaseConfig struct {
 	User     string `mapstructure:"user"`
 	Password string `mapstructure:"password"`
 	SSLMode  string `mapstructure:"sslmode"`
+	// AppUser is the non-superuser role used for runtime queries.
+	// When set, the application connects as this role so that
+	// row-level-security policies actually apply. Migrations still
+	// run as User (the table owner / superuser).
+	AppUser     string `mapstructure:"app_user"`
+	AppPassword string `mapstructure:"app_password"`
 }
 
 func (d DatabaseConfig) ConnectionString() string {
@@ -48,6 +54,28 @@ func (d DatabaseConfig) ConnectionString() string {
 		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
 		d.User, d.Password, d.Host, d.Port, d.DBName, d.SSLMode,
 	)
+}
+
+// RuntimeConnectionString returns the connection string for the application
+// role (AppUser). Falls back to the owner connection when AppUser is empty
+// or matches User.
+func (d DatabaseConfig) RuntimeConnectionString() string {
+	if d.AppUser == "" || d.AppUser == d.User {
+		return d.ConnectionString()
+	}
+	pw := d.AppPassword
+	if pw == "" {
+		pw = d.Password
+	}
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		d.AppUser, pw, d.Host, d.Port, d.DBName, d.SSLMode,
+	)
+}
+
+// HasAppRole reports whether a separate application role is configured.
+func (d DatabaseConfig) HasAppRole() bool {
+	return d.AppUser != "" && d.AppUser != d.User
 }
 
 type RedisConfig struct {
@@ -160,20 +188,20 @@ type WorkerConfig struct {
 // ObservabilityConfig holds OpenTelemetry and observability settings.
 // Controls distributed tracing, metrics export, and log forwarding.
 type ObservabilityConfig struct {
-	Enabled      bool    `mapstructure:"enabled"`
-	OTLPEndpoint string  `mapstructure:"otlp_endpoint"`
-	ServiceName  string  `mapstructure:"service_name"`
-	SamplingRate float64 `mapstructure:"sampling_rate"`
-	Insecure     bool    `mapstructure:"insecure"`
+	Enabled      bool         `mapstructure:"enabled"`
+	OTLPEndpoint string       `mapstructure:"otlp_endpoint"`
+	ServiceName  string       `mapstructure:"service_name"`
+	SamplingRate float64      `mapstructure:"sampling_rate"`
+	Insecure     bool         `mapstructure:"insecure"`
 	Syslog       SyslogConfig `mapstructure:"syslog"`
 }
 
 // SyslogConfig holds syslog forwarding settings.
 type SyslogConfig struct {
 	Enabled  bool   `mapstructure:"enabled"`
-	Network  string `mapstructure:"network"` // "udp", "tcp"
-	Address  string `mapstructure:"address"` // "syslog-server:514"
-	Tag      string `mapstructure:"tag"`     // "pepa"
+	Network  string `mapstructure:"network"`  // "udp", "tcp"
+	Address  string `mapstructure:"address"`  // "syslog-server:514"
+	Tag      string `mapstructure:"tag"`      // "pepa"
 	Facility string `mapstructure:"facility"` // "local0"-"local7"
 }
 
@@ -213,9 +241,9 @@ func DefaultConfig() *Config {
 		},
 		Auth: AuthConfig{ //nolint:gosec // #nosec // G101: struct contains dev default JWT secret; Validate() warns if not overridden
 			JWTSecret:       "dev-jwt-secret-change-in-production", //nolint:gosec // #nosec // G101: dev default; Validate() warns if not overridden
-			SessionDuration: 24 * time.Hour,     // 24 hours
-			TokenExpiry:     24 * time.Hour,     // 24 hours
-			RefreshExpiry:   7 * 24 * time.Hour, // 7 days
+			SessionDuration: 24 * time.Hour,                        // 24 hours
+			TokenExpiry:     24 * time.Hour,                        // 24 hours
+			RefreshExpiry:   7 * 24 * time.Hour,                    // 7 days
 			BCryptCost:      10,
 			OIDC: OIDCConfig{
 				Enabled: false,
@@ -225,8 +253,8 @@ func DefaultConfig() *Config {
 		Plugin: PluginConfig{
 			Dir:              "./plugins",
 			LogLevel:         "info",
-			SignatureVerify:  true,  // verify plugin signatures on load
-			SignatureEnforce: true,  // reject unsigned plugins (set false for dev)
+			SignatureVerify:  true, // verify plugin signatures on load
+			SignatureEnforce: true, // reject unsigned plugins (set false for dev)
 		},
 		AI: AIConfig{
 			Enabled:         false,
@@ -296,6 +324,13 @@ func (c *Config) LoadFromEnv() {
 	}
 	if v := getenv("POSTGRES_SSLMODE"); v != "" {
 		c.Database.SSLMode = v
+	}
+	// Application role (non-superuser for active RLS enforcement).
+	if v := getenv("APP_POSTGRES_USER"); v != "" {
+		c.Database.AppUser = v
+	}
+	if v := getenv("APP_POSTGRES_PASSWORD"); v != "" {
+		c.Database.AppPassword = v
 	}
 
 	// Redis

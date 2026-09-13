@@ -204,8 +204,8 @@ func (s *EntitySyncService) GetSyncStatus(ctx context.Context, tenantID uuid.UUI
 	_ = syncFilter
 
 	return map[string]interface{}{
-		"total_entities":  listResult.Total,
-		"last_synced_at":  time.Now().UTC(), // Will be updated by actual sync operations
-		"status":          "ok",
+		"total_entities": listResult.Total,
+		"last_synced_at": time.Now().UTC(), // Will be updated by actual sync operations
+		"status":         "ok",
 	}, nil
 }

@@ -491,13 +491,13 @@ func registerEnvironmentRoutes(r *gin.RouterGroup, deps Dependencies) {
 			combinedDeployments := make([]interface{}, 0, len(serviceDeployments)+len(gitopsDeployments))
 			for _, sd := range serviceDeployments {
 				combinedDeployments = append(combinedDeployments, gin.H{
-					"id":           sd.ID,
-					"service_id":   sd.ServiceID,
-					"image_tag":    sd.ImageTag,
-					"status":       sd.Status,
-					"environment":  sd.Environment,
-					"created_at":   sd.DeployedAt,
-					"type":         "docker",
+					"id":          sd.ID,
+					"service_id":  sd.ServiceID,
+					"image_tag":   sd.ImageTag,
+					"status":      sd.Status,
+					"environment": sd.Environment,
+					"created_at":  sd.DeployedAt,
+					"type":        "docker",
 				})
 			}
 			for _, gd := range gitopsDeployments {
@@ -523,16 +523,16 @@ func registerEnvironmentRoutes(r *gin.RouterGroup, deps Dependencies) {
 			}
 
 			c.JSON(http.StatusOK, gin.H{
-				"environment": env,
-				"clusters":    envClusters,
-				"deployments": combinedDeployments,
+				"environment":     env,
+				"clusters":        envClusters,
+				"deployments":     combinedDeployments,
 				"gitops_bindings": gitopsBindings,
 				"variables_count": varCount,
 				"summary": gin.H{
-					"cluster_count":   len(envClusters),
+					"cluster_count":    len(envClusters),
 					"deployment_count": len(combinedDeployments),
-					"binding_count":   len(gitopsBindings),
-					"variable_count":  varCount,
+					"binding_count":    len(gitopsBindings),
+					"variable_count":   varCount,
 				},
 			})
 		})

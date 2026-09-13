@@ -621,9 +621,9 @@ type historyActionParams struct {
 
 // HistoryEntry represents a reconciliation history entry.
 type HistoryEntry struct {
-	Revision    string    `json:"revision"`
-	Status      string    `json:"status"`
-	Message     string    `json:"message"`
+	Revision       string    `json:"revision"`
+	Status         string    `json:"status"`
+	Message        string    `json:"message"`
 	LastTransition time.Time `json:"last_transition_time"`
 }
 
@@ -850,12 +850,12 @@ func (p *FluxCDPlugin) events(ctx context.Context, c *FluxController, params []b
 
 // logsActionParams is the input for the logs action.
 type logsActionParams struct {
-	Name       string `json:"name"`
-	Namespace  string `json:"namespace"`
-	Kind       string `json:"kind"`
-	Container  string `json:"container,omitempty"`
-	TailLines  int64  `json:"tail_lines,omitempty"`
-	Follow     bool   `json:"follow,omitempty"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Kind      string `json:"kind"`
+	Container string `json:"container,omitempty"`
+	TailLines int64  `json:"tail_lines,omitempty"`
+	Follow    bool   `json:"follow,omitempty"`
 }
 
 // LogEntry represents a log line.
@@ -939,16 +939,16 @@ func (p *FluxCDPlugin) logs(ctx context.Context, c *FluxController, params []byt
 
 // PluginCapabilities describes what the FluxCD plugin supports.
 type PluginCapabilities struct {
-	EngineType    string   `json:"engine_type"`
+	EngineType     string   `json:"engine_type"`
 	SupportedKinds []string `json:"supported_kinds"`
-	Diff          bool     `json:"diff"`
-	History       bool     `json:"history"`
-	ResourceTree  bool     `json:"resource_tree"`
-	Events        bool     `json:"events"`
-	Logs          bool     `json:"logs"`
-	Refresh       bool     `json:"refresh"`
-	AutoSync      bool     `json:"auto_sync"`
-	Projects      bool     `json:"projects"`
+	Diff           bool     `json:"diff"`
+	History        bool     `json:"history"`
+	ResourceTree   bool     `json:"resource_tree"`
+	Events         bool     `json:"events"`
+	Logs           bool     `json:"logs"`
+	Refresh        bool     `json:"refresh"`
+	AutoSync       bool     `json:"auto_sync"`
+	Projects       bool     `json:"projects"`
 }
 
 func (p *FluxCDPlugin) capabilities(ctx context.Context, c *FluxController, params []byte) ([]byte, error) {
@@ -961,7 +961,7 @@ func (p *FluxCDPlugin) capabilities(ctx context.Context, c *FluxController, para
 		Events:         true,
 		Logs:           true,
 		Refresh:        true,
-		AutoSync:       true, // via suspend/resume
+		AutoSync:       true,  // via suspend/resume
 		Projects:       false, // FluxCD doesn't have AppProjects
 	}
 	return actionOutput(caps)

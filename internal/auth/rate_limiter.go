@@ -18,8 +18,8 @@ type LoginRateLimiter struct {
 }
 
 type loginAttempt struct {
-	count     int
-	lastFail  time.Time
+	count       int
+	lastFail    time.Time
 	lockedUntil time.Time
 }
 

@@ -188,9 +188,9 @@ func runAIStream(query string) error {
 // runAIWithRAG sends a query through the RAG pipeline.
 func runAIWithRAG(query string, stream bool) error {
 	body := map[string]interface{}{
-		"message":       query,
-		"top_k":         10,
-		"enable_tools":  true,
+		"message":      query,
+		"top_k":        10,
+		"enable_tools": true,
 	}
 
 	endpoint := "/api/v1/rag/chat"

@@ -13,12 +13,12 @@ import (
 
 // CostRecommendation represents a cost optimization suggestion.
 type CostRecommendation struct {
-	Service     string  `json:"service"`
-	Category    string  `json:"category"` // compute, storage, network, idle
-	Title       string  `json:"title"`
-	Description string  `json:"description"`
-	Savings     string  `json:"estimated_savings"` // e.g. "~$200/month"
-	Priority    string  `json:"priority"`          // high, medium, low
+	Service     string `json:"service"`
+	Category    string `json:"category"` // compute, storage, network, idle
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Savings     string `json:"estimated_savings"` // e.g. "~$200/month"
+	Priority    string `json:"priority"`          // high, medium, low
 }
 
 // CostAdvisor analyzes resource utilization and suggests optimizations.

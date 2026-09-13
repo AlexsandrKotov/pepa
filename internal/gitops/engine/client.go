@@ -22,8 +22,8 @@ import (
 
 // Client provides a unified interface for GitOps engine operations.
 type Client struct {
-	registry       *provider.Registry
-	credResolver   *gitops.CredentialResolver
+	registry     *provider.Registry
+	credResolver *gitops.CredentialResolver
 }
 
 // NewClient creates a new engine client.
@@ -65,20 +65,20 @@ type AppSummary struct {
 type AppDetail struct {
 	AppSummary
 	// ArgoCD-specific fields
-	OperationState  *ArgoOperationState  `json:"operation_state,omitempty"`
-	SyncPolicy      *ArgoSyncPolicy      `json:"sync_policy,omitempty"`
-	Source          *ArgoSource          `json:"source,omitempty"`
-	Destination     *ArgoDestination     `json:"destination,omitempty"`
+	OperationState *ArgoOperationState `json:"operation_state,omitempty"`
+	SyncPolicy     *ArgoSyncPolicy     `json:"sync_policy,omitempty"`
+	Source         *ArgoSource         `json:"source,omitempty"`
+	Destination    *ArgoDestination    `json:"destination,omitempty"`
 	// FluxCD-specific fields
-	Interval        string               `json:"interval,omitempty"`
-	Suspend         bool                 `json:"suspend,omitempty"`
-	Prune           bool                 `json:"prune,omitempty"`
-	SourceRef       *FluxSourceRef       `json:"source_ref,omitempty"`
-	Values          map[string]interface{} `json:"values,omitempty"`
+	Interval  string                 `json:"interval,omitempty"`
+	Suspend   bool                   `json:"suspend,omitempty"`
+	Prune     bool                   `json:"prune,omitempty"`
+	SourceRef *FluxSourceRef         `json:"source_ref,omitempty"`
+	Values    map[string]interface{} `json:"values,omitempty"`
 	// Common fields
-	Conditions      []Condition          `json:"conditions,omitempty"`
-	Images          []string             `json:"images,omitempty"`
-	Capabilities    Capabilities         `json:"capabilities"`
+	Conditions   []Condition  `json:"conditions,omitempty"`
+	Images       []string     `json:"images,omitempty"`
+	Capabilities Capabilities `json:"capabilities"`
 }
 
 // Capabilities describes what operations are supported for an application.
@@ -124,16 +124,16 @@ type ResourceNode struct {
 
 // ArgoOperationState represents ArgoCD operation state.
 type ArgoOperationState struct {
-	Phase     string `json:"phase"` // Running, Failed, Error, Terminating
-	Message   string `json:"message,omitempty"`
-	StartedAt string `json:"started_at,omitempty"`
+	Phase      string `json:"phase"` // Running, Failed, Error, Terminating
+	Message    string `json:"message,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
 	FinishedAt string `json:"finished_at,omitempty"`
 }
 
 // ArgoSyncPolicy represents ArgoCD sync policy.
 type ArgoSyncPolicy struct {
-	Automated *ArgoSyncAutomated `json:"automated,omitempty"`
-	SyncOptions []string         `json:"sync_options,omitempty"`
+	Automated   *ArgoSyncAutomated `json:"automated,omitempty"`
+	SyncOptions []string           `json:"sync_options,omitempty"`
 }
 
 // ArgoSyncAutomated represents ArgoCD automated sync settings.
@@ -166,15 +166,15 @@ type FluxSourceRef struct {
 
 // ListOptions specifies options for listing applications.
 type ListOptions struct {
-	TenantID     uuid.UUID
-	ClusterID    *uuid.UUID
-	Environment  string
-	Project      string
-	Health       string
-	SyncStatus   string
-	EngineType   string // "argocd", "fluxcd", or "" for all
-	Limit        int
-	Offset       int
+	TenantID    uuid.UUID
+	ClusterID   *uuid.UUID
+	Environment string
+	Project     string
+	Health      string
+	SyncStatus  string
+	EngineType  string // "argocd", "fluxcd", or "" for all
+	Limit       int
+	Offset      int
 }
 
 // List returns a list of application summaries.

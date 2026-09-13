@@ -12,6 +12,7 @@ import (
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/pkg/models"
 )
+
 // auditLogCh is a bounded channel for async audit log writes.
 // It prevents unbounded goroutine creation when the DB is overloaded.
 // Capacity increased to 1024 since we now log ALL requests (including GET).
@@ -37,13 +38,18 @@ func init() {
 }
 
 // auditRepo is set during init to allow the worker goroutines to write audit logs.
-var auditRepo interface{ Create(context.Context, *models.AuditLog) error }
+var auditRepo interface {
+	Create(context.Context, *models.AuditLog) error
+}
 
 // initAuditWorkers sets the audit repository for the background worker pool.
 // Called once during router setup.
-func initAuditWorkers(repo interface{ Create(context.Context, *models.AuditLog) error }) {
+func initAuditWorkers(repo interface {
+	Create(context.Context, *models.AuditLog) error
+}) {
 	auditRepo = repo
 }
+
 // registerAuditRoutes registers audit log API endpoints.
 //
 // Only /audit is exposed: an /audit-logs alias used to exist here for "frontend
@@ -338,45 +344,45 @@ func pathToEntityType(path string) string {
 func pathSegmentToType(segment string) string {
 	// Map common API path segments to entity types
 	mapping := map[string]string{
-		"entities":          "entity",
-		"workflows":         "workflow",
-		"plugins":           "plugin",
-		"scorecards":        "scorecard",
-		"clusters":          "cluster",
-		"deployments":       "deployment",
-		"jira":              "jira",
-		"connections":       "connection",
-		"services":          "service",
-		"catalog":           "catalog",
-		"gitops":            "gitops",
-		"settings":          "setting",
-		"environments":      "environment",
-		"marketplace":       "marketplace",
-		"discovery":         "discovery",
-		"docker-hosts":      "docker_host",
-		"docker-services":   "docker_service",
-		"helm-repositories": "helm_repository",
+		"entities":              "entity",
+		"workflows":             "workflow",
+		"plugins":               "plugin",
+		"scorecards":            "scorecard",
+		"clusters":              "cluster",
+		"deployments":           "deployment",
+		"jira":                  "jira",
+		"connections":           "connection",
+		"services":              "service",
+		"catalog":               "catalog",
+		"gitops":                "gitops",
+		"settings":              "setting",
+		"environments":          "environment",
+		"marketplace":           "marketplace",
+		"discovery":             "discovery",
+		"docker-hosts":          "docker_host",
+		"docker-services":       "docker_service",
+		"helm-repositories":     "helm_repository",
 		"registry-repositories": "registry_repository",
-		"pipeline-sources":  "pipeline_source",
-		"pipeline-runs":     "pipeline_run",
-		"vault":             "vault",
-		"teams":             "team",
-		"roles":             "role",
-		"users":             "user",
-		"credentials":       "credential",
-		"audit":             "audit",
-		"audit-logs":        "audit",
-		"storage":           "storage",
-		"ai":                "ai",
-		"observability":     "observability",
-		"organization":      "organization",
-		"workspaces":        "workspace",
-		"blueprints":        "blueprint",
-		"blueprint-groups":  "blueprint_group",
-		"s3-browser":        "s3",
-		"virtualization":    "virtualization",
-		"rbac":              "rbac",
-		"auth":              "auth",
+		"pipeline-sources":      "pipeline_source",
+		"pipeline-runs":         "pipeline_run",
+		"vault":                 "vault",
+		"teams":                 "team",
+		"roles":                 "role",
+		"users":                 "user",
+		"credentials":           "credential",
+		"audit":                 "audit",
+		"audit-logs":            "audit",
+		"storage":               "storage",
+		"ai":                    "ai",
+		"observability":         "observability",
+		"organization":          "organization",
+		"workspaces":            "workspace",
+		"blueprints":            "blueprint",
+		"blueprint-groups":      "blueprint_group",
+		"s3-browser":            "s3",
+		"virtualization":        "virtualization",
+		"rbac":                  "rbac",
+		"auth":                  "auth",
 	}
 	if t, ok := mapping[segment]; ok {
 		return t

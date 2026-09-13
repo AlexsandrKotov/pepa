@@ -12,11 +12,11 @@ import (
 
 // RiskAssessment represents the result of a deployment risk analysis.
 type RiskAssessment struct {
-	Score       int      `json:"score"` // 1-10
-	Level       string   `json:"level"` // low, medium, high, critical
-	Reasons     []string `json:"reasons"`
-	Recommendations []string `json:"recommendations"`
-	AnalyzedAt  time.Time `json:"analyzed_at"`
+	Score           int       `json:"score"` // 1-10
+	Level           string    `json:"level"` // low, medium, high, critical
+	Reasons         []string  `json:"reasons"`
+	Recommendations []string  `json:"recommendations"`
+	AnalyzedAt      time.Time `json:"analyzed_at"`
 }
 
 // RiskScorer analyzes deployment risk using AI.

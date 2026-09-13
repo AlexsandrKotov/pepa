@@ -233,23 +233,23 @@ type VMwareVM struct {
 
 // VMwareVMDetail is the detailed VM response from GET /api/vcenter/vm/{id}.
 type VMwareVMDetail struct {
-	Name      string `json:"name"`
-	Power     string `json:"power_state"`
-	CPU       struct {
-		Count   int   `json:"count"`
-		CoresPer int  `json:"cores_per_socket"`
+	Name  string `json:"name"`
+	Power string `json:"power_state"`
+	CPU   struct {
+		Count    int `json:"count"`
+		CoresPer int `json:"cores_per_socket"`
 	} `json:"cpu"`
-	Memory    struct {
+	Memory struct {
 		SizeMiB int64 `json:"size_MiB"`
 	} `json:"memory"`
-	Guest     struct {
-		OS         string `json:"os"`
-		Name       string `json:"name"`
-		IPAddress  string `json:"ip_address"`
-		HostName   string `json:"host_name"`
+	Guest struct {
+		OS        string `json:"os"`
+		Name      string `json:"name"`
+		IPAddress string `json:"ip_address"`
+		HostName  string `json:"host_name"`
 	} `json:"guest"`
-	Host      string `json:"host"`
-	Cluster   string `json:"cluster"`
+	Host    string `json:"host"`
+	Cluster string `json:"cluster"`
 }
 
 // VMwareHost represents an ESXi host.
@@ -258,10 +258,10 @@ type VMwareHost struct {
 	Name       string `json:"name"`
 	Connection string `json:"connection_state"`
 	Hardware   struct {
-		CPUCores   int   `json:"cpu_cores"`
-		MemoryMiB  int64 `json:"memory_size_mib"`
+		CPUCores  int   `json:"cpu_cores"`
+		MemoryMiB int64 `json:"memory_size_mib"`
 	} `json:"hardware,omitempty"`
-	MemoryUsageMiB  int64 `json:"memory_usage_mib,omitempty"`
+	MemoryUsageMiB    int64   `json:"memory_usage_mib,omitempty"`
 	MemoryUtilization float64 `json:"memory_utilization,omitempty"`
 }
 
@@ -279,11 +279,11 @@ type VMwareCluster struct {
 
 // VMwareDatastore represents a datastore.
 type VMwareDatastore struct {
-	Datastore  string  `json:"datastore"`
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	FreeSpace  int64   `json:"free_space"`
-	Capacity   int64   `json:"capacity"`
+	Datastore string `json:"datastore"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	FreeSpace int64  `json:"free_space"`
+	Capacity  int64  `json:"capacity"`
 }
 
 // VMwareNetwork represents a network.
@@ -310,9 +310,9 @@ type VMwareSnapshot struct {
 
 // VMwareVersion represents the vCenter version info.
 type VMwareVersion struct {
-	Version    string `json:"version"`
-	Build      string `json:"build"`
-	Product    string `json:"product"`
+	Version      string `json:"version"`
+	Build        string `json:"build"`
+	Product      string `json:"product"`
 	InstanceUUID string `json:"instance_uuid"`
 }
 
@@ -405,7 +405,6 @@ func (c *Client) ListHosts() ([]VMwareHost, error) {
 	}
 	return hosts, nil
 }
-
 
 // ListVMs returns all virtual machines, enriched with host mapping and guest identity.
 func (c *Client) ListVMs() ([]VMwareVM, error) {
@@ -981,8 +980,9 @@ func (c *Client) CloneVM(sourceVMID string, spec map[string]interface{}) (string
 
 // ReconfigureVM updates VM configuration (CPU, memory).
 // The vSphere REST API requires separate PATCH calls to hardware sub-endpoints:
-//   PATCH /api/vcenter/vm/{vm}/hardware/cpu   {"count":N,"cores_per_socket":N}
-//   PATCH /api/vcenter/vm/{vm}/hardware/memory {"size_MiB":N}
+//
+//	PATCH /api/vcenter/vm/{vm}/hardware/cpu   {"count":N,"cores_per_socket":N}
+//	PATCH /api/vcenter/vm/{vm}/hardware/memory {"size_MiB":N}
 func (c *Client) ReconfigureVM(vmID string, spec map[string]interface{}) error {
 	if cpu, ok := spec["cpu"]; ok {
 		if _, err := c.patch(fmt.Sprintf("/api/vcenter/vm/%s/hardware/cpu", vmID), cpu); err != nil {

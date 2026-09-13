@@ -29,12 +29,12 @@ type DriftDetectionOutcome struct {
 
 // DriftScheduler manages cron-based drift detection execution.
 type DriftScheduler struct {
-	repo      *DriftScheduleRepository
-	detect    DriftDetectionFunc
-	alertFn   DriftAlertFunc
-	stopCh    chan struct{}
-	reloadCh  chan struct{}
-	stopOnce  sync.Once
+	repo     *DriftScheduleRepository
+	detect   DriftDetectionFunc
+	alertFn  DriftAlertFunc
+	stopCh   chan struct{}
+	reloadCh chan struct{}
+	stopOnce sync.Once
 }
 
 // NewDriftScheduler creates a new DriftScheduler.

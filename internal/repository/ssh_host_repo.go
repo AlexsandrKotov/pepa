@@ -11,20 +11,20 @@ import (
 
 // SSHHost represents an SSH host configuration.
 type SSHHost struct {
-	ID          uuid.UUID `json:"id" db:"id"`
-	TenantID    uuid.UUID `json:"tenant_id" db:"tenant_id"`
-	Name        string    `json:"name" db:"name"`
-	Hostname    string    `json:"hostname" db:"hostname"`
-	Port        int       `json:"port" db:"port"`
-	Username    string    `json:"username" db:"username"`
-	AuthMethod  string    `json:"auth_method" db:"auth_method"`
-	SSHEncryptedKey   string `json:"-" db:"ssh_key_enc"`
-	PasswordEnc string    `json:"-" db:"password_enc"`
-	Tags        []string  `json:"tags" db:"tags"`
-	Description string    `json:"description" db:"description"`
-	CreatedBy   *uuid.UUID `json:"created_by,omitempty" db:"created_by"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	ID              uuid.UUID  `json:"id" db:"id"`
+	TenantID        uuid.UUID  `json:"tenant_id" db:"tenant_id"`
+	Name            string     `json:"name" db:"name"`
+	Hostname        string     `json:"hostname" db:"hostname"`
+	Port            int        `json:"port" db:"port"`
+	Username        string     `json:"username" db:"username"`
+	AuthMethod      string     `json:"auth_method" db:"auth_method"`
+	SSHEncryptedKey string     `json:"-" db:"ssh_key_enc"`
+	PasswordEnc     string     `json:"-" db:"password_enc"`
+	Tags            []string   `json:"tags" db:"tags"`
+	Description     string     `json:"description" db:"description"`
+	CreatedBy       *uuid.UUID `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt       time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // SSHHostRepository handles SSH host persistence.

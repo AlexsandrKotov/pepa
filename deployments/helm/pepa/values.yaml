@@ -29,6 +29,12 @@ apiServer:
     DEV_MODE: "false"
     LOG_LEVEL: "info"
     TRIVY_CACHE_DIR: /tmp/trivy-cache
+    # Application role for active RLS enforcement.
+    APP_POSTGRES_USER: "pepa_app"
+    # SonarQube: PEPA only collects reports from an external SonarQube, whose
+    # URL and token live in a Connection. These two bound that collection.
+    SONAR_SCAN_TIMEOUT: "2m"
+    SONAR_DEFAULT_STALE_HOURS: "24"
   # -- Horizontal Pod Autoscaler
   autoscaling:
     enabled: false
@@ -57,6 +63,8 @@ worker:
       memory: 512Mi
   env:
     LOG_LEVEL: "info"
+    # Application role for active RLS enforcement.
+    APP_POSTGRES_USER: "pepa_app"
   autoscaling:
     enabled: false
     minReplicas: 2
@@ -161,7 +169,13 @@ secrets:
   redisUrl: ""
   jwtSecret: ""
   postgresPassword: ""
+  # -- Password for the non-superuser application role (pepa_app).
+  # Enables active RLS enforcement. Generate: openssl rand -hex 16
+  appPostgresPassword: ""
   redisPassword: ""
+  # -- Shared secret for the SonarQube Compute Operator webhook
+  # (POST /api/v1/security/sonar/webhook). Empty keeps the endpoint disabled.
+  sonarWebhookToken: ""
 
 # -- Service account
 serviceAccount:

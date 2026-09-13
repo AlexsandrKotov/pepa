@@ -17,18 +17,18 @@ import (
 
 // BotConfig holds configuration for the AI bot.
 type BotConfig struct {
-	Platform   string `json:"platform"`    // slack, telegram
-	Token      string `json:"token"`       // Bot token
-	APIURL     string `json:"api_url"`     // PEPA API URL
-	PEPAToken  string `json:"pepa_token"`  // PEPA auth token
-	ChannelID  string `json:"channel_id"`  // Default channel (optional)
+	Platform  string `json:"platform"`   // slack, telegram
+	Token     string `json:"token"`      // Bot token
+	APIURL    string `json:"api_url"`    // PEPA API URL
+	PEPAToken string `json:"pepa_token"` // PEPA auth token
+	ChannelID string `json:"channel_id"` // Default channel (optional)
 }
 
 // Bot handles chat messages from Slack/Telegram and routes them to PEPA AI.
 type Bot struct {
-	config  BotConfig
-	client  *http.Client
-	stopCh  chan struct{}
+	config BotConfig
+	client *http.Client
+	stopCh chan struct{}
 }
 
 // NewBot creates a new AI bot.
@@ -276,7 +276,7 @@ func (b *Bot) handleIncident(text string) string {
 // ── Telegram API helpers ──────────────────────────────────────────
 
 type telegramUpdate struct {
-	UpdateID int64          `json:"update_id"`
+	UpdateID int64           `json:"update_id"`
 	Message  telegramMessage `json:"message"`
 }
 

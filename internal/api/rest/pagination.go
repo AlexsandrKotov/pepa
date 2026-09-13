@@ -39,16 +39,16 @@ func DecodeCursor(cursor string) (string, error) {
 	if cursor == "" {
 		return "", nil
 	}
-	
+
 	data, err := base64.URLEncoding.DecodeString(cursor)
 	if err != nil {
 		return "", err
 	}
-	
+
 	var c Cursor
 	if err := json.Unmarshal(data, &c); err != nil {
 		return "", err
 	}
-	
+
 	return c.ID, nil
 }

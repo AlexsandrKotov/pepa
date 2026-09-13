@@ -12,24 +12,24 @@ import (
 
 // DriftSchedule represents a cron-based drift detection configuration.
 type DriftSchedule struct {
-	ID                   uuid.UUID  `json:"id"`
-	TenantID             uuid.UUID  `json:"tenant_id"`
-	RepoID               uuid.UUID  `json:"repo_id"`
-	ClusterID            uuid.UUID  `json:"cluster_id"`
-	ScopePath            *string    `json:"scope_path,omitempty"`
-	Name                 string     `json:"name"`
-	Description          *string    `json:"description,omitempty"`
-	CronExpression       string     `json:"cron_expression"`
-	Enabled              bool       `json:"enabled"`
-	AlertOnDrift         bool       `json:"alert_on_drift"`
-	AlertSeverityThreshold string   `json:"alert_severity_threshold"`
-	LastRunAt            *time.Time `json:"last_run_at,omitempty"`
-	LastRunStatus        *string    `json:"last_run_status,omitempty"`
-	LastDriftCount       int        `json:"last_drift_count"`
-	NextRunAt            *time.Time `json:"next_run_at,omitempty"`
-	CreatedBy            *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
+	ID                     uuid.UUID  `json:"id"`
+	TenantID               uuid.UUID  `json:"tenant_id"`
+	RepoID                 uuid.UUID  `json:"repo_id"`
+	ClusterID              uuid.UUID  `json:"cluster_id"`
+	ScopePath              *string    `json:"scope_path,omitempty"`
+	Name                   string     `json:"name"`
+	Description            *string    `json:"description,omitempty"`
+	CronExpression         string     `json:"cron_expression"`
+	Enabled                bool       `json:"enabled"`
+	AlertOnDrift           bool       `json:"alert_on_drift"`
+	AlertSeverityThreshold string     `json:"alert_severity_threshold"`
+	LastRunAt              *time.Time `json:"last_run_at,omitempty"`
+	LastRunStatus          *string    `json:"last_run_status,omitempty"`
+	LastDriftCount         int        `json:"last_drift_count"`
+	NextRunAt              *time.Time `json:"next_run_at,omitempty"`
+	CreatedBy              *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 	// Joined fields
 	RepoName    string `json:"repo_name,omitempty"`
 	ClusterName string `json:"cluster_name,omitempty"`
@@ -152,18 +152,18 @@ func (r *DriftScheduleRepository) Create(ctx context.Context, s *DriftSchedule) 
 		) RETURNING id, created_at, updated_at
 	`
 	return r.db.Pool.QueryRow(ctx, query, pgx.NamedArgs{
-		"tenant_id":              s.TenantID,
-		"repo_id":                s.RepoID,
-		"cluster_id":             s.ClusterID,
-		"scope_path":             s.ScopePath,
-		"name":                   s.Name,
-		"description":            s.Description,
-		"cron_expression":        s.CronExpression,
-		"enabled":                s.Enabled,
-		"alert_on_drift":         s.AlertOnDrift,
+		"tenant_id":                s.TenantID,
+		"repo_id":                  s.RepoID,
+		"cluster_id":               s.ClusterID,
+		"scope_path":               s.ScopePath,
+		"name":                     s.Name,
+		"description":              s.Description,
+		"cron_expression":          s.CronExpression,
+		"enabled":                  s.Enabled,
+		"alert_on_drift":           s.AlertOnDrift,
 		"alert_severity_threshold": s.AlertSeverityThreshold,
-		"next_run_at":            s.NextRunAt,
-		"created_by":             s.CreatedBy,
+		"next_run_at":              s.NextRunAt,
+		"created_by":               s.CreatedBy,
 	}).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 }
 
@@ -183,21 +183,21 @@ func (r *DriftScheduleRepository) Update(ctx context.Context, s *DriftSchedule) 
 		RETURNING updated_at
 	`
 	return r.db.Pool.QueryRow(ctx, query, pgx.NamedArgs{
-		"id":                     s.ID,
-		"tenant_id":              s.TenantID,
-		"repo_id":                s.RepoID,
-		"cluster_id":             s.ClusterID,
-		"scope_path":             s.ScopePath,
-		"name":                   s.Name,
-		"description":            s.Description,
-		"cron_expression":        s.CronExpression,
-		"enabled":                s.Enabled,
-		"alert_on_drift":         s.AlertOnDrift,
+		"id":                       s.ID,
+		"tenant_id":                s.TenantID,
+		"repo_id":                  s.RepoID,
+		"cluster_id":               s.ClusterID,
+		"scope_path":               s.ScopePath,
+		"name":                     s.Name,
+		"description":              s.Description,
+		"cron_expression":          s.CronExpression,
+		"enabled":                  s.Enabled,
+		"alert_on_drift":           s.AlertOnDrift,
 		"alert_severity_threshold": s.AlertSeverityThreshold,
-		"last_run_at":            s.LastRunAt,
-		"last_run_status":        s.LastRunStatus,
-		"last_drift_count":       s.LastDriftCount,
-		"next_run_at":            s.NextRunAt,
+		"last_run_at":              s.LastRunAt,
+		"last_run_status":          s.LastRunStatus,
+		"last_drift_count":         s.LastDriftCount,
+		"next_run_at":              s.NextRunAt,
 	}).Scan(&s.UpdatedAt)
 }
 

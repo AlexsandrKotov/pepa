@@ -351,7 +351,11 @@ func listHelmCharts(deps Dependencies) gin.HandlerFunc {
 
 		index, err := fetchHelmIndex(repo)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to fetch helm index: %v", err)})
+			// Upstream repositories (e.g., Bitnami) may return 403 or be temporarily
+			// unreachable. Return an empty chart list with a warning instead of 500.
+			slog.Warn("failed to fetch helm index, returning empty chart list",
+				"repo", repo.Name, "url", repo.URL, "error", err)
+			c.JSON(http.StatusOK, gin.H{"charts": []interface{}{}, "total": 0, "warning": "Could not fetch chart index from upstream repository"})
 			return
 		}
 
@@ -629,12 +633,12 @@ func downloadHelmChart(deps Dependencies) gin.HandlerFunc {
 
 // helmChartMetadata represents parsed common fields from a Helm chart's values.yaml.
 type helmChartMetadata struct {
-	Replicas    *int               `json:"replicas,omitempty"`
-	Image       *helmImageMeta     `json:"image,omitempty"`
-	Service     *helmServiceMeta   `json:"service,omitempty"`
-	Ingress     *helmIngressMeta   `json:"ingress,omitempty"`
-	Resources   *helmResourcesMeta `json:"resources,omitempty"`
-	Ports       []helmPortMeta     `json:"ports,omitempty"`
+	Replicas    *int                 `json:"replicas,omitempty"`
+	Image       *helmImageMeta       `json:"image,omitempty"`
+	Service     *helmServiceMeta     `json:"service,omitempty"`
+	Ingress     *helmIngressMeta     `json:"ingress,omitempty"`
+	Resources   *helmResourcesMeta   `json:"resources,omitempty"`
+	Ports       []helmPortMeta       `json:"ports,omitempty"`
 	Autoscaling *helmAutoscalingMeta `json:"autoscaling,omitempty"`
 }
 
@@ -662,16 +666,16 @@ type helmResourcesMeta struct {
 }
 
 type helmPortMeta struct {
-	Name         string `json:"name"`
-	ContainerPort int   `json:"container_port"`
-	Protocol     string `json:"protocol"`
+	Name          string `json:"name"`
+	ContainerPort int    `json:"container_port"`
+	Protocol      string `json:"protocol"`
 }
 
 type helmAutoscalingMeta struct {
-	Enabled      bool `json:"enabled"`
-	MinReplicas  int  `json:"min_replicas"`
-	MaxReplicas  int  `json:"max_replicas"`
-	TargetCPU    int  `json:"target_cpu_utilization"`
+	Enabled     bool `json:"enabled"`
+	MinReplicas int  `json:"min_replicas"`
+	MaxReplicas int  `json:"max_replicas"`
+	TargetCPU   int  `json:"target_cpu_utilization"`
 }
 
 // extractChartMetadata parses common fields from a Helm chart's values.yaml.

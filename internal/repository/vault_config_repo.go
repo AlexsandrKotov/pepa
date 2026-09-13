@@ -10,14 +10,14 @@ import (
 
 // VaultACL represents a vault access control entry.
 type VaultACL struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
+	ID         uuid.UUID
+	TenantID   uuid.UUID
 	PathPrefix string
-	UserID    *uuid.UUID
-	TeamID    *uuid.UUID
-	CanRead   bool
-	CanCreate bool
-	CanDelete bool
+	UserID     *uuid.UUID
+	TeamID     *uuid.UUID
+	CanRead    bool
+	CanCreate  bool
+	CanDelete  bool
 }
 
 // VaultConfigRepository handles database operations for vault configuration and ACL.

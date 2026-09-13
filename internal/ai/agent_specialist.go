@@ -10,12 +10,12 @@ import (
 type SpecialistType string
 
 const (
-	SpecialistSRE     SpecialistType = "sre"
-	SpecialistDevOps  SpecialistType = "devops"
+	SpecialistSRE      SpecialistType = "sre"
+	SpecialistDevOps   SpecialistType = "devops"
 	SpecialistSecurity SpecialistType = "security"
-	SpecialistDoc     SpecialistType = "doc"
-	SpecialistCost    SpecialistType = "cost"
-	SpecialistGeneral SpecialistType = "general"
+	SpecialistDoc      SpecialistType = "doc"
+	SpecialistCost     SpecialistType = "cost"
+	SpecialistGeneral  SpecialistType = "general"
 )
 
 // SpecialistAgent is an agent specialized in a specific domain.
@@ -140,12 +140,12 @@ func filterToolsForSpecialist(base *ToolRegistry, specialist SpecialistType) *To
 
 	// Define which tool categories each specialist gets
 	allowedPrefixes := map[SpecialistType][]string{
-		SpecialistSRE:     {"get_services", "get_deployments", "get_pipeline", "get_entities", "get_docker"},
-		SpecialistDevOps:  {"get_services", "get_deployments", "get_pipeline", "get_clusters", "get_environments", "get_helm", "get_docker", "get_gitops", "list_gitops_bindings", "get_gitops_suggestions"},
+		SpecialistSRE:      {"get_services", "get_deployments", "get_pipeline", "get_entities", "get_docker"},
+		SpecialistDevOps:   {"get_services", "get_deployments", "get_pipeline", "get_clusters", "get_environments", "get_helm", "get_docker", "get_gitops", "list_gitops_bindings", "get_gitops_suggestions"},
 		SpecialistSecurity: {"get_services", "get_entities", "get_vault", "get_audit", "get_roles"},
-		SpecialistDoc:     {"get_services", "get_entities", "get_pipeline", "search_knowledge"},
-		SpecialistCost:    {"get_services", "get_clusters", "get_docker", "get_environments"},
-		SpecialistGeneral: {}, // empty = all tools
+		SpecialistDoc:      {"get_services", "get_entities", "get_pipeline", "search_knowledge"},
+		SpecialistCost:     {"get_services", "get_clusters", "get_docker", "get_environments"},
+		SpecialistGeneral:  {}, // empty = all tools
 	}
 
 	allowed, isFiltered := allowedPrefixes[specialist]

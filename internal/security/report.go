@@ -27,12 +27,12 @@ func GenerateJSONReport(target *repository.ScanTarget, run *repository.ScanRun) 
 			"version":   "1.0",
 		},
 		"target": map[string]any{
-			"id":            target.ID,
-			"name":          target.Name,
-			"scanner_type":  target.ScannerType,
-			"target_type":   target.TargetType,
-			"target_ref":    target.TargetRef,
-			"scan_config":   target.ScanConfig,
+			"id":           target.ID,
+			"name":         target.Name,
+			"scanner_type": target.ScannerType,
+			"target_type":  target.TargetType,
+			"target_ref":   target.TargetRef,
+			"scan_config":  target.ScanConfig,
 		},
 		"scan": map[string]any{
 			"id":           run.ID,

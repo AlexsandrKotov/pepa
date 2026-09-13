@@ -154,7 +154,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Info("PostgreSQL connected", "host", cfg.Database.Host, "port", cfg.Database.Port, "db", cfg.Database.DBName)
+	slog.Info("PostgreSQL connected", "host", cfg.Database.Host, "port", cfg.Database.Port, "db", cfg.Database.DBName, "user", cfg.Database.User)
 
 	// Run database migrations
 	if err := db.RunMigrations(context.Background()); err != nil {
@@ -162,6 +162,22 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 	slog.Info("database migrations up to date")
+
+	// Switch to the application role for runtime queries.
+	// Migrations run as the table owner (superuser) which bypasses RLS.
+	// The app role (pepa_app) is a non-superuser subject to RLS policies,
+	// providing defence-in-depth tenant isolation.
+	if cfg.Database.HasAppRole() {
+		ownerPool := db.Pool
+		appDB, err := database.New(cfg.Database.RuntimeConnectionString())
+		if err != nil {
+			ownerPool.Close()
+			return nil, fmt.Errorf("connect as app role %q: %w", cfg.Database.AppUser, err)
+		}
+		db.Pool = appDB.Pool
+		ownerPool.Close()
+		slog.Info("switched to application role for runtime queries", "app_user", cfg.Database.AppUser)
+	}
 
 	// Load persisted observability settings from database BEFORE initializing OTel.
 	// This ensures the user-configured endpoint/service/sampling are applied at startup.

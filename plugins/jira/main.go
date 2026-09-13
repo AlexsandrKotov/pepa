@@ -396,7 +396,7 @@ func (p *JiraPlugin) updateIssue(ctx context.Context, params []byte) ([]byte, er
 	}
 
 	issue := &jira.Issue{
-		Key: input.IssueKey,
+		Key:    input.IssueKey,
 		Fields: &jira.IssueFields{},
 	}
 
@@ -426,8 +426,8 @@ func (p *JiraPlugin) updateIssue(ctx context.Context, params []byte) ([]byte, er
 
 func (p *JiraPlugin) deleteIssue(ctx context.Context, params []byte) ([]byte, error) {
 	var input struct {
-		IssueKey         string `json:"issue_key"`
-		DeleteSubtasks   bool   `json:"delete_subtasks"`
+		IssueKey       string `json:"issue_key"`
+		DeleteSubtasks bool   `json:"delete_subtasks"`
 	}
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, err
@@ -861,11 +861,11 @@ func (p *JiraPlugin) listBoardSprints(ctx context.Context, boardID int, state st
 
 func (p *JiraPlugin) addWorklog(ctx context.Context, params []byte) ([]byte, error) {
 	var input struct {
-		IssueKey       string `json:"issue_key"`
-		TimeSpent      string `json:"time_spent"`       // e.g. "2h 30m"
-		TimeSpentSecs  int    `json:"time_spent_secs"`  // alternative: seconds
-		Comment        string `json:"comment"`
-		Started        string `json:"started"` // ISO date
+		IssueKey      string `json:"issue_key"`
+		TimeSpent     string `json:"time_spent"`      // e.g. "2h 30m"
+		TimeSpentSecs int    `json:"time_spent_secs"` // alternative: seconds
+		Comment       string `json:"comment"`
+		Started       string `json:"started"` // ISO date
 	}
 	if err := json.Unmarshal(params, &input); err != nil {
 		return nil, err
@@ -892,9 +892,9 @@ func (p *JiraPlugin) addWorklog(ctx context.Context, params []byte) ([]byte, err
 	}
 
 	return sdk.ActionOutput(map[string]interface{}{
-		"status":   "worklog_added",
-		"id":       record.ID,
-		"time":     record.TimeSpent,
+		"status": "worklog_added",
+		"id":     record.ID,
+		"time":   record.TimeSpent,
 	})
 }
 
@@ -917,12 +917,12 @@ func (p *JiraPlugin) listWorklogs(ctx context.Context, params []byte) ([]byte, e
 	}
 	var data struct {
 		Worklogs []struct {
-			ID               string          `json:"id"`
-			TimeSpent        string          `json:"timeSpent"`
-			TimeSpentSeconds int             `json:"timeSpentSeconds"`
-			Comment          string          `json:"comment"`
-			Author           *jira.User      `json:"author"`
-			Started          string          `json:"started"`
+			ID               string     `json:"id"`
+			TimeSpent        string     `json:"timeSpent"`
+			TimeSpentSeconds int        `json:"timeSpentSeconds"`
+			Comment          string     `json:"comment"`
+			Author           *jira.User `json:"author"`
+			Started          string     `json:"started"`
 		} `json:"worklogs"`
 	}
 	_, err = p.client.Do(req, &data)
@@ -933,11 +933,11 @@ func (p *JiraPlugin) listWorklogs(ctx context.Context, params []byte) ([]byte, e
 	result := make([]map[string]interface{}, 0, len(data.Worklogs))
 	for _, w := range data.Worklogs {
 		entry := map[string]interface{}{
-			"id":               w.ID,
-			"time_spent":       w.TimeSpent,
-			"time_spent_secs":  w.TimeSpentSeconds,
-			"comment":          w.Comment,
-			"started":          w.Started,
+			"id":              w.ID,
+			"time_spent":      w.TimeSpent,
+			"time_spent_secs": w.TimeSpentSeconds,
+			"comment":         w.Comment,
+			"started":         w.Started,
 		}
 		if w.Author != nil {
 			entry["author"] = w.Author.DisplayName
@@ -949,9 +949,9 @@ func (p *JiraPlugin) listWorklogs(ctx context.Context, params []byte) ([]byte, e
 
 func (p *JiraPlugin) linkIssues(ctx context.Context, params []byte) ([]byte, error) {
 	var input struct {
-		InwardKey  string `json:"inward_key"`   // the issue that has the link
-		OutwardKey string `json:"outward_key"`  // the linked issue
-		LinkType   string `json:"link_type"`    // "Blocks", "Clones", "Duplicate", "Relates"
+		InwardKey  string `json:"inward_key"`  // the issue that has the link
+		OutwardKey string `json:"outward_key"` // the linked issue
+		LinkType   string `json:"link_type"`   // "Blocks", "Clones", "Duplicate", "Relates"
 		Comment    string `json:"comment"`
 	}
 	if err := json.Unmarshal(params, &input); err != nil {

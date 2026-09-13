@@ -1416,7 +1416,7 @@ func (s *Scanner) runSonarQubeScan(ctx context.Context, target *repository.ScanT
 		hours = s.sonarDefaultStaleHours
 	}
 	summary["stale_after_hours"] = hours
-	if ciURL := sonarConfigString(target.ScanConfig, "source_ci_url"); ciURL != "" {
+	if ciURL := sanitizeHTTPURL(sonarConfigString(target.ScanConfig, "source_ci_url")); ciURL != "" {
 		summary["source_ci_url"] = ciURL
 	}
 	// Issue transitions are addressed by connection, and the report viewer only
@@ -1491,6 +1491,26 @@ func sonarDashboardURL(baseURL, projectKey string) string {
 func sonarIssueURL(baseURL, projectKey, issueKey string) string {
 	return fmt.Sprintf("%s/project/issues?id=%s&open=%s",
 		strings.TrimRight(baseURL, "/"), url.QueryEscape(projectKey), url.QueryEscape(issueKey))
+}
+
+// sanitizeHTTPURL returns raw unchanged when it is a safe http or https URL,
+// or empty string otherwise. User-supplied URLs stored in scan_config (such as
+// source_ci_url) are passed through this helper before being surfaced to the
+// frontend, so a javascript: or data: value cannot become a stored-XSS vector
+// via an <a href> rendered in the report viewer.
+func sanitizeHTTPURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	return raw
 }
 
 // sonarSeverityToTrivy maps a SonarQube severity onto the Trivy severity scale.

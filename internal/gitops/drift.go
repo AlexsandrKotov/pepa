@@ -10,12 +10,12 @@ import (
 type DriftType string
 
 const (
-	DriftSuspended   DriftType = "suspended"    // suspended in cluster but not in Git
-	DriftResumed     DriftType = "resumed"      // active in cluster but suspended in Git
-	DriftVersion     DriftType = "version"      // chart version differs
-	DriftMissing     DriftType = "missing"      // exists in Git but not in cluster
-	DriftOrphaned    DriftType = "orphaned"     // exists in cluster but not in Git
-	DriftValues      DriftType = "values"       // values differ
+	DriftSuspended DriftType = "suspended" // suspended in cluster but not in Git
+	DriftResumed   DriftType = "resumed"   // active in cluster but suspended in Git
+	DriftVersion   DriftType = "version"   // chart version differs
+	DriftMissing   DriftType = "missing"   // exists in Git but not in cluster
+	DriftOrphaned  DriftType = "orphaned"  // exists in cluster but not in Git
+	DriftValues    DriftType = "values"    // values differ
 )
 
 // DriftEntry represents a single drift between Git desired state and live cluster state.
@@ -46,13 +46,13 @@ type DriftEntry struct {
 
 // DriftResult holds the full drift analysis for a GitOps repository vs a cluster.
 type DriftResult struct {
-	RepoID      string         `json:"repo_id"`
-	RepoName    string         `json:"repo_name"`
-	ClusterID   string         `json:"cluster_id,omitempty"`
-	ClusterName string         `json:"cluster_name,omitempty"`
-	Entries     []DriftEntry   `json:"entries"`
-	Summary     DriftSummary   `json:"summary"`
-	ScannedAt   time.Time      `json:"scanned_at"`
+	RepoID      string       `json:"repo_id"`
+	RepoName    string       `json:"repo_name"`
+	ClusterID   string       `json:"cluster_id,omitempty"`
+	ClusterName string       `json:"cluster_name,omitempty"`
+	Entries     []DriftEntry `json:"entries"`
+	Summary     DriftSummary `json:"summary"`
+	ScannedAt   time.Time    `json:"scanned_at"`
 }
 
 // DriftSummary provides aggregate counts.
@@ -121,17 +121,17 @@ func DetectDrift(repo *Repo, gitResources []Resource, liveResources []LiveResour
 		if !exists {
 			// Resource defined in Git but not found in cluster
 			result.Entries = append(result.Entries, DriftEntry{
-				Kind:        gr.Kind,
-				Name:        gr.Name,
-				Namespace:   gr.Namespace,
-				Cluster:     gr.Cluster,
-				DriftType:   DriftMissing,
-				Severity:    "info",
-				Description: fmt.Sprintf("%s %s/%s exists in Git but is not deployed in the cluster", gr.Kind, gr.Namespace, gr.Name),
-				GitValue:    "defined",
+				Kind:         gr.Kind,
+				Name:         gr.Name,
+				Namespace:    gr.Namespace,
+				Cluster:      gr.Cluster,
+				DriftType:    DriftMissing,
+				Severity:     "info",
+				Description:  fmt.Sprintf("%s %s/%s exists in Git but is not deployed in the cluster", gr.Kind, gr.Namespace, gr.Name),
+				GitValue:     "defined",
 				ClusterValue: "not found",
-				FilePath:    gr.FilePath,
-				DetectedAt:  time.Now(),
+				FilePath:     gr.FilePath,
+				DetectedAt:   time.Now(),
 			})
 			compared++
 			continue
@@ -142,51 +142,51 @@ func DetectDrift(repo *Repo, gitResources []Resource, liveResources []LiveResour
 		// Check suspend drift: Git says active, cluster says suspended
 		if !gr.Suspended && lr.Suspended {
 			result.Entries = append(result.Entries, DriftEntry{
-				Kind:        gr.Kind,
-				Name:        gr.Name,
-				Namespace:   gr.Namespace,
-				Cluster:     gr.Cluster,
-				DriftType:   DriftSuspended,
-				Severity:    "critical",
-				Description: fmt.Sprintf("%s %s/%s is suspended in the cluster but active in Git (someone ran suspend via CLI)", gr.Kind, gr.Namespace, gr.Name),
-				GitValue:    "active",
+				Kind:         gr.Kind,
+				Name:         gr.Name,
+				Namespace:    gr.Namespace,
+				Cluster:      gr.Cluster,
+				DriftType:    DriftSuspended,
+				Severity:     "critical",
+				Description:  fmt.Sprintf("%s %s/%s is suspended in the cluster but active in Git (someone ran suspend via CLI)", gr.Kind, gr.Namespace, gr.Name),
+				GitValue:     "active",
 				ClusterValue: "suspended",
-				FilePath:    gr.FilePath,
-				DetectedAt:  time.Now(),
+				FilePath:     gr.FilePath,
+				DetectedAt:   time.Now(),
 			})
 		}
 
 		// Check resume drift: Git says suspended, cluster says active
 		if gr.Suspended && !lr.Suspended {
 			result.Entries = append(result.Entries, DriftEntry{
-				Kind:        gr.Kind,
-				Name:        gr.Name,
-				Namespace:   gr.Namespace,
-				Cluster:     gr.Cluster,
-				DriftType:   DriftResumed,
-				Severity:    "warning",
-				Description: fmt.Sprintf("%s %s/%s is active in the cluster but suspended in Git", gr.Kind, gr.Namespace, gr.Name),
-				GitValue:    "suspended",
+				Kind:         gr.Kind,
+				Name:         gr.Name,
+				Namespace:    gr.Namespace,
+				Cluster:      gr.Cluster,
+				DriftType:    DriftResumed,
+				Severity:     "warning",
+				Description:  fmt.Sprintf("%s %s/%s is active in the cluster but suspended in Git", gr.Kind, gr.Namespace, gr.Name),
+				GitValue:     "suspended",
 				ClusterValue: "active",
-				FilePath:    gr.FilePath,
-				DetectedAt:  time.Now(),
+				FilePath:     gr.FilePath,
+				DetectedAt:   time.Now(),
 			})
 		}
 
 		// Check chart version drift
 		if gr.Version != "" && lr.Version != "" && gr.Version != lr.Version {
 			result.Entries = append(result.Entries, DriftEntry{
-				Kind:        gr.Kind,
-				Name:        gr.Name,
-				Namespace:   gr.Namespace,
-				Cluster:     gr.Cluster,
-				DriftType:   DriftVersion,
-				Severity:    "warning",
-				Description: fmt.Sprintf("%s %s/%s chart version differs: Git=%s, Cluster=%s", gr.Kind, gr.Namespace, gr.Name, gr.Version, lr.Version),
-				GitValue:    gr.Version,
+				Kind:         gr.Kind,
+				Name:         gr.Name,
+				Namespace:    gr.Namespace,
+				Cluster:      gr.Cluster,
+				DriftType:    DriftVersion,
+				Severity:     "warning",
+				Description:  fmt.Sprintf("%s %s/%s chart version differs: Git=%s, Cluster=%s", gr.Kind, gr.Namespace, gr.Name, gr.Version, lr.Version),
+				GitValue:     gr.Version,
 				ClusterValue: lr.Version,
-				FilePath:    gr.FilePath,
-				DetectedAt:  time.Now(),
+				FilePath:     gr.FilePath,
+				DetectedAt:   time.Now(),
 			})
 		}
 	}
@@ -195,15 +195,15 @@ func DetectDrift(repo *Repo, gitResources []Resource, liveResources []LiveResour
 	for key, lr := range liveMap {
 		if _, exists := gitMap[key]; !exists {
 			result.Entries = append(result.Entries, DriftEntry{
-				Kind:        lr.Kind,
-				Name:        lr.Name,
-				Namespace:   lr.Namespace,
-				DriftType:   DriftOrphaned,
-				Severity:    "info",
-				Description: fmt.Sprintf("%s %s/%s exists in the cluster but is not defined in Git", lr.Kind, lr.Namespace, lr.Name),
-				GitValue:    "not defined",
+				Kind:         lr.Kind,
+				Name:         lr.Name,
+				Namespace:    lr.Namespace,
+				DriftType:    DriftOrphaned,
+				Severity:     "info",
+				Description:  fmt.Sprintf("%s %s/%s exists in the cluster but is not defined in Git", lr.Kind, lr.Namespace, lr.Name),
+				GitValue:     "not defined",
 				ClusterValue: fmt.Sprintf("deployed (health: %s)", lr.Health),
-				DetectedAt:  time.Now(),
+				DetectedAt:   time.Now(),
 			})
 		}
 	}

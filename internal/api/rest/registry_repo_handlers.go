@@ -525,7 +525,7 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 			return nil, fmt.Errorf("parse projects: %w", err)
 		}
 		_ = resp.Body.Close()
-		
+
 		if len(projects) == 0 {
 			break
 		}
@@ -558,7 +558,7 @@ func listGitLabContainerRepos(realm string, repo *repository.RegistryRepo) ([]st
 			}
 			_ = resp.Body.Close()
 		}
-		
+
 		if len(projects) < 100 {
 			break
 		}
@@ -776,4 +776,3 @@ func listRegistryImageTags(deps Dependencies) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"name": tagData.Name, "tags": tagData.Tags, "total": len(tagData.Tags)})
 	}
 }
-

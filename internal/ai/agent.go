@@ -417,7 +417,7 @@ var categoryKeywords = map[string][]string{
 	"environment": {"infra"}, "env": {"infra"}, "connection": {"infra"},
 	"entity": {"entity"},
 	"plugin": {"plugin"},
-	"jira": {"jira"}, "issue": {"jira"},
+	"jira":   {"jira"}, "issue": {"jira"},
 	"blueprint": {"blueprint"}, "blueprints": {"blueprint"},
 	// Russian
 	"сервис": {"service"}, "сервисы": {"service"}, "каталог": {"service"},
@@ -428,8 +428,8 @@ var categoryKeywords = map[string][]string{
 	"воркфлоу": {"workflow"}, "автоматизац": {"workflow"},
 	"окружен": {"infra"}, "подключен": {"infra"},
 	"сущност": {"entity"},
-	"плагин": {"plugin"},
-	"джира": {"jira"}, "задач": {"jira"},
+	"плагин":  {"plugin"},
+	"джира":   {"jira"}, "задач": {"jira"},
 	"блюпринт": {"blueprint"}, "шаблон": {"blueprint"},
 }
 

@@ -30,7 +30,7 @@ func registerAuthRoutes(r *gin.Engine, deps Dependencies) {
 		public.POST("/logout", logoutHandler(deps))
 		public.GET("/bootstrap/status", bootstrapStatusHandler(deps))
 		public.POST("/bootstrap/activate", bootstrapActivateHandler(deps))
-		
+
 		// OIDC routes (public, no JWT required)
 		public.GET("/oidc/config", oidcConfigHandler(deps))
 		public.GET("/oidc/login", oidcLoginHandler(deps))
@@ -1114,9 +1114,9 @@ func HashBootstrapToken(token string) string {
 var (
 	bootstrapStatusMu    sync.Mutex
 	bootstrapStatusCache *struct {
-		needed      bool
-		inProgress  bool
-		expiresAt   time.Time
+		needed     bool
+		inProgress bool
+		expiresAt  time.Time
 	}
 )
 
@@ -1200,9 +1200,9 @@ func bootstrapStatusHandler(deps Dependencies) gin.HandlerFunc {
 		// Update cache
 		bootstrapStatusMu.Lock()
 		bootstrapStatusCache = &struct {
-			needed      bool
-			inProgress  bool
-			expiresAt   time.Time
+			needed     bool
+			inProgress bool
+			expiresAt  time.Time
 		}{needed: needed, inProgress: inProgress, expiresAt: time.Now().Add(30 * time.Second)}
 		bootstrapStatusMu.Unlock()
 	}

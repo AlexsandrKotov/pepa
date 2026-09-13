@@ -218,7 +218,7 @@ function NewServiceForm() {
       }));
       setHelmCharts(allCharts);
       setHelmRepoErrors(errors);
-    } catch {}
+    } catch (e) { console.error('Failed to load Helm charts:', e); }
     setLoadingHelmCharts(false);
   };
 
@@ -227,7 +227,7 @@ function NewServiceForm() {
       const data = await integrations.list({ type: 'gitlab' }).catch(() => ({ integrations: [], total: 0 }));
       const glList = (data.integrations || []).map(i => ({ id: i.id, name: i.name, url: i.url }));
       setGitlabIntegrations(glList);
-    } catch {}
+    } catch (e) { console.error('Failed to load GitLab integrations:', e); }
   };
 
   const loadDockerHosts = async () => {
@@ -237,7 +237,7 @@ function NewServiceForm() {
       if ((data.docker_hosts || []).length > 0 && !composeHostId) {
         setComposeHostId(data.docker_hosts[0].id);
       }
-    } catch {}
+    } catch (e) { console.error('Failed to load Docker hosts:', e); }
   };
 
   const isComposeImport = selectedTemplate?.slug === 'docker-compose-import';

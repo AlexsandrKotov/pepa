@@ -146,11 +146,11 @@ func discoverGitOpsApplications(deps Dependencies) gin.HandlerFunc {
 }
 
 type discoveredApp struct {
-	ConnectionID   uuid.UUID        `json:"connection_id"`
-	ConnectionName string           `json:"connection_name"`
+	ConnectionID   uuid.UUID         `json:"connection_id"`
+	ConnectionName string            `json:"connection_name"`
 	App            engine.AppSummary `json:"app"`
-	Bound          bool             `json:"bound"`
-	BindingID      *uuid.UUID       `json:"binding_id,omitempty"`
+	Bound          bool              `json:"bound"`
+	BindingID      *uuid.UUID        `json:"binding_id,omitempty"`
 }
 
 // listGitOpsBindings returns all bindings for the tenant with joined environment info.
@@ -299,23 +299,23 @@ func updateGitOpsBinding(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name              string     `json:"name"`
-			ServiceID         *uuid.UUID `json:"service_id"`
-			EntityID          *uuid.UUID `json:"entity_id"`
-			RepoID            *uuid.UUID `json:"repo_id"`
-			ClusterID         *uuid.UUID `json:"cluster_id"`
-			ArgoConnectionID  *uuid.UUID `json:"argo_connection_id"`
-			EngineType        string     `json:"engine_type"`
-			AppName           string     `json:"app_name"`
-			AppNamespace      string     `json:"app_namespace"`
-			AppProject        *string    `json:"app_project"`
-			Environment       *string    `json:"environment"`
-			EnvironmentID     *uuid.UUID `json:"environment_id"`
-			ClearEnvironment  bool       `json:"clear_environment"`
-			ManifestPath      *string    `json:"manifest_path"`
-			UpdateStrategy    string     `json:"update_strategy"`
-			UpdatePath        *string    `json:"update_path"`
-			VerifyURL         *string    `json:"verify_url"`
+			Name             string     `json:"name"`
+			ServiceID        *uuid.UUID `json:"service_id"`
+			EntityID         *uuid.UUID `json:"entity_id"`
+			RepoID           *uuid.UUID `json:"repo_id"`
+			ClusterID        *uuid.UUID `json:"cluster_id"`
+			ArgoConnectionID *uuid.UUID `json:"argo_connection_id"`
+			EngineType       string     `json:"engine_type"`
+			AppName          string     `json:"app_name"`
+			AppNamespace     string     `json:"app_namespace"`
+			AppProject       *string    `json:"app_project"`
+			Environment      *string    `json:"environment"`
+			EnvironmentID    *uuid.UUID `json:"environment_id"`
+			ClearEnvironment bool       `json:"clear_environment"`
+			ManifestPath     *string    `json:"manifest_path"`
+			UpdateStrategy   string     `json:"update_strategy"`
+			UpdatePath       *string    `json:"update_path"`
+			VerifyURL        *string    `json:"verify_url"`
 		}
 
 		if err := c.ShouldBindJSON(&req); err != nil {

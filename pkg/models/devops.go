@@ -12,24 +12,24 @@ import (
 // ============================================================
 
 type DeploymentWindow struct {
-	ID            uuid.UUID   `json:"id" db:"id"`
-	TenantID      uuid.UUID   `json:"tenant_id" db:"tenant_id"`
-	Name          string      `json:"name" db:"name"`
-	Description   string      `json:"description,omitempty" db:"description"`
-	WindowType    string      `json:"window_type" db:"window_type"` // 'allowed' | 'blocked' | 'freeze'
-	CronExpression string     `json:"cron_expression,omitempty" db:"cron_expression"`
-	StartAt       *time.Time  `json:"start_at,omitempty" db:"start_at"`
-	EndAt         *time.Time  `json:"end_at,omitempty" db:"end_at"`
-	Timezone      string      `json:"timezone" db:"timezone"`
-	Environments  []string    `json:"environments" db:"environments"`
-	ServiceIDs    []uuid.UUID `json:"service_ids" db:"service_ids"`
-	Enabled       bool        `json:"enabled" db:"enabled"`
-	Priority      int         `json:"priority" db:"priority"`
-	Reason        string      `json:"reason,omitempty" db:"reason"`
-	OverrideRoles []string    `json:"override_roles" db:"override_roles"`
-	CreatedBy     *uuid.UUID  `json:"created_by,omitempty" db:"created_by"`
-	CreatedAt     time.Time   `json:"created_at" db:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at" db:"updated_at"`
+	ID             uuid.UUID   `json:"id" db:"id"`
+	TenantID       uuid.UUID   `json:"tenant_id" db:"tenant_id"`
+	Name           string      `json:"name" db:"name"`
+	Description    string      `json:"description,omitempty" db:"description"`
+	WindowType     string      `json:"window_type" db:"window_type"` // 'allowed' | 'blocked' | 'freeze'
+	CronExpression string      `json:"cron_expression,omitempty" db:"cron_expression"`
+	StartAt        *time.Time  `json:"start_at,omitempty" db:"start_at"`
+	EndAt          *time.Time  `json:"end_at,omitempty" db:"end_at"`
+	Timezone       string      `json:"timezone" db:"timezone"`
+	Environments   []string    `json:"environments" db:"environments"`
+	ServiceIDs     []uuid.UUID `json:"service_ids" db:"service_ids"`
+	Enabled        bool        `json:"enabled" db:"enabled"`
+	Priority       int         `json:"priority" db:"priority"`
+	Reason         string      `json:"reason,omitempty" db:"reason"`
+	OverrideRoles  []string    `json:"override_roles" db:"override_roles"`
+	CreatedBy      *uuid.UUID  `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt      time.Time   `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at" db:"updated_at"`
 }
 
 type CreateDeploymentWindowRequest struct {
@@ -66,9 +66,9 @@ type UpdateDeploymentWindowRequest struct {
 
 // WindowCheckResult represents the result of checking if deployment is allowed
 type WindowCheckResult struct {
-	Allowed       bool              `json:"allowed"`
-	Reason        string            `json:"reason,omitempty"`
-	BlockingWindow *DeploymentWindow `json:"blocking_window,omitempty"`
+	Allowed        bool               `json:"allowed"`
+	Reason         string             `json:"reason,omitempty"`
+	BlockingWindow *DeploymentWindow  `json:"blocking_window,omitempty"`
 	ActiveWindows  []DeploymentWindow `json:"active_windows,omitempty"`
 }
 
@@ -110,12 +110,12 @@ type CreateBatchOperationRequest struct {
 }
 
 type BatchOperationResult struct {
-	ServiceID     uuid.UUID `json:"service_id"`
-	ServiceName   string    `json:"service_name"`
-	Status        string    `json:"status"` // 'success' | 'failed' | 'skipped'
-	DeploymentID  *uuid.UUID `json:"deployment_id,omitempty"`
-	ErrorMessage  string    `json:"error_message,omitempty"`
-	DurationMs    int       `json:"duration_ms,omitempty"`
+	ServiceID    uuid.UUID  `json:"service_id"`
+	ServiceName  string     `json:"service_name"`
+	Status       string     `json:"status"` // 'success' | 'failed' | 'skipped'
+	DeploymentID *uuid.UUID `json:"deployment_id,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
+	DurationMs   int        `json:"duration_ms,omitempty"`
 }
 
 // ============================================================
@@ -181,19 +181,19 @@ type ComplianceEvaluation struct {
 }
 
 type ComplianceViolation struct {
-	Field       string `json:"field"`
-	Message     string `json:"message"`
-	Expected    string `json:"expected,omitempty"`
-	Actual      string `json:"actual,omitempty"`
-	Severity    string `json:"severity"`
+	Field    string `json:"field"`
+	Message  string `json:"message"`
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+	Severity string `json:"severity"`
 }
 
 // ComplianceCheckResult is the result of checking all policies for a deployment
 type ComplianceCheckResult struct {
-	Passed       bool                  `json:"passed"`
-	Blocked      bool                  `json:"blocked"`
-	Evaluations  []ComplianceEvaluation `json:"evaluations"`
-	Violations   []ComplianceViolation  `json:"violations,omitempty"`
+	Passed      bool                   `json:"passed"`
+	Blocked     bool                   `json:"blocked"`
+	Evaluations []ComplianceEvaluation `json:"evaluations"`
+	Violations  []ComplianceViolation  `json:"violations,omitempty"`
 }
 
 // ============================================================
@@ -244,22 +244,22 @@ type UpdateSecurityFindingRequest struct {
 }
 
 type SecurityFindingFilter struct {
-	Severity     string `form:"severity"`
-	Status       string `form:"status"`
-	FindingType  string `form:"finding_type"`
-	ServiceID    string `form:"service_id"`
-	Search       string `form:"search"`
-	Page         int    `form:"page,default=1"`
-	PerPage      int    `form:"per_page,default=50"`
+	Severity    string `form:"severity"`
+	Status      string `form:"status"`
+	FindingType string `form:"finding_type"`
+	ServiceID   string `form:"service_id"`
+	Search      string `form:"search"`
+	Page        int    `form:"page,default=1"`
+	PerPage     int    `form:"per_page,default=50"`
 }
 
 type SecurityFindingSummary struct {
-	Total       int            `json:"total"`
-	BySeverity  map[string]int `json:"by_severity"`
-	ByStatus    map[string]int `json:"by_status"`
-	ByType      map[string]int `json:"by_type"`
-	OpenCount   int            `json:"open_count"`
-	CriticalCount int          `json:"critical_count"`
+	Total         int            `json:"total"`
+	BySeverity    map[string]int `json:"by_severity"`
+	ByStatus      map[string]int `json:"by_status"`
+	ByType        map[string]int `json:"by_type"`
+	OpenCount     int            `json:"open_count"`
+	CriticalCount int            `json:"critical_count"`
 }
 
 // ============================================================
@@ -267,27 +267,27 @@ type SecurityFindingSummary struct {
 // ============================================================
 
 type SecretRotation struct {
-	ID                 uuid.UUID   `json:"id" db:"id"`
-	TenantID           uuid.UUID   `json:"tenant_id" db:"tenant_id"`
-	Name               string      `json:"name" db:"name"`
-	Description        string      `json:"description,omitempty" db:"description"`
-	SecretPath         string      `json:"secret_path" db:"secret_path"`
-	RotationType       string      `json:"rotation_type" db:"rotation_type"` // 'scheduled' | 'on_demand' | 'on_expiry'
-	CronExpression     string      `json:"cron_expression,omitempty" db:"cron_expression"`
-	RotationIntervalDays int       `json:"rotation_interval_days,omitempty" db:"rotation_interval_days"`
-	LastRotatedAt      *time.Time  `json:"last_rotated_at,omitempty" db:"last_rotated_at"`
-	LastRotatedBy      *uuid.UUID  `json:"last_rotated_by,omitempty" db:"last_rotated_by"`
-	NextRotationAt     *time.Time  `json:"next_rotation_at,omitempty" db:"next_rotation_at"`
-	ExpiresAt          *time.Time  `json:"expires_at,omitempty" db:"expires_at"`
-	Status             string      `json:"status" db:"status"` // 'active' | 'paused' | 'expired' | 'failed'
-	RotationCount      int         `json:"rotation_count" db:"rotation_count"`
-	ServiceIDs         []uuid.UUID `json:"service_ids" db:"service_ids"`
-	Enabled            bool        `json:"enabled" db:"enabled"`
-	LastError          string      `json:"last_error,omitempty" db:"last_error"`
-	LastErrorAt        *time.Time  `json:"last_error_at,omitempty" db:"last_error_at"`
-	CreatedBy          *uuid.UUID  `json:"created_by,omitempty" db:"created_by"`
-	CreatedAt          time.Time   `json:"created_at" db:"created_at"`
-	UpdatedAt          time.Time   `json:"updated_at" db:"updated_at"`
+	ID                   uuid.UUID   `json:"id" db:"id"`
+	TenantID             uuid.UUID   `json:"tenant_id" db:"tenant_id"`
+	Name                 string      `json:"name" db:"name"`
+	Description          string      `json:"description,omitempty" db:"description"`
+	SecretPath           string      `json:"secret_path" db:"secret_path"`
+	RotationType         string      `json:"rotation_type" db:"rotation_type"` // 'scheduled' | 'on_demand' | 'on_expiry'
+	CronExpression       string      `json:"cron_expression,omitempty" db:"cron_expression"`
+	RotationIntervalDays int         `json:"rotation_interval_days,omitempty" db:"rotation_interval_days"`
+	LastRotatedAt        *time.Time  `json:"last_rotated_at,omitempty" db:"last_rotated_at"`
+	LastRotatedBy        *uuid.UUID  `json:"last_rotated_by,omitempty" db:"last_rotated_by"`
+	NextRotationAt       *time.Time  `json:"next_rotation_at,omitempty" db:"next_rotation_at"`
+	ExpiresAt            *time.Time  `json:"expires_at,omitempty" db:"expires_at"`
+	Status               string      `json:"status" db:"status"` // 'active' | 'paused' | 'expired' | 'failed'
+	RotationCount        int         `json:"rotation_count" db:"rotation_count"`
+	ServiceIDs           []uuid.UUID `json:"service_ids" db:"service_ids"`
+	Enabled              bool        `json:"enabled" db:"enabled"`
+	LastError            string      `json:"last_error,omitempty" db:"last_error"`
+	LastErrorAt          *time.Time  `json:"last_error_at,omitempty" db:"last_error_at"`
+	CreatedBy            *uuid.UUID  `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt            time.Time   `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time   `json:"updated_at" db:"updated_at"`
 }
 
 type CreateSecretRotationRequest struct {
@@ -336,7 +336,7 @@ type DeploymentAuditLog struct {
 	TenantID            uuid.UUID       `json:"tenant_id" db:"tenant_id"`
 	DeploymentID        *uuid.UUID      `json:"deployment_id,omitempty" db:"deployment_id"`
 	ServiceID           *uuid.UUID      `json:"service_id,omitempty" db:"service_id"`
-	Action              string          `json:"action" db:"action"` // 'deploy' | 'rollback' | 'promote' | 'scale' | 'restart' | 'cancel' | 'verify'
+	Action              string          `json:"action" db:"action"`         // 'deploy' | 'rollback' | 'promote' | 'scale' | 'restart' | 'cancel' | 'verify'
 	ActorType           string          `json:"actor_type" db:"actor_type"` // 'user' | 'system' | 'workflow' | 'api_key'
 	ActorID             *uuid.UUID      `json:"actor_id,omitempty" db:"actor_id"`
 	ActorName           string          `json:"actor_name,omitempty" db:"actor_name"`
@@ -394,18 +394,18 @@ type PreDeployGateRequest struct {
 }
 
 type PreDeployGateResult struct {
-	Allowed          bool                   `json:"allowed"`
-	WindowCheck      *WindowCheckResult     `json:"window_check,omitempty"`
-	ComplianceCheck  *ComplianceCheckResult `json:"compliance_check,omitempty"`
-	SecurityCheck    *SecurityCheckResult   `json:"security_check,omitempty"`
-	BlockedReasons   []string               `json:"blocked_reasons,omitempty"`
-	Warnings         []string               `json:"warnings,omitempty"`
+	Allowed         bool                   `json:"allowed"`
+	WindowCheck     *WindowCheckResult     `json:"window_check,omitempty"`
+	ComplianceCheck *ComplianceCheckResult `json:"compliance_check,omitempty"`
+	SecurityCheck   *SecurityCheckResult   `json:"security_check,omitempty"`
+	BlockedReasons  []string               `json:"blocked_reasons,omitempty"`
+	Warnings        []string               `json:"warnings,omitempty"`
 }
 
 type SecurityCheckResult struct {
-	Passed          bool              `json:"passed"`
-	OpenFindings    int               `json:"open_findings"`
-	CriticalCount   int               `json:"critical_count"`
-	HighCount       int               `json:"high_count"`
-	BlockingIssues  []string          `json:"blocking_issues,omitempty"`
+	Passed         bool     `json:"passed"`
+	OpenFindings   int      `json:"open_findings"`
+	CriticalCount  int      `json:"critical_count"`
+	HighCount      int      `json:"high_count"`
+	BlockingIssues []string `json:"blocking_issues,omitempty"`
 }

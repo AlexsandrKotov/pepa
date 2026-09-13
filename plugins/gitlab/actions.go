@@ -787,17 +787,17 @@ func (p *GitLabPlugin) getPipelineJobs(ctx context.Context, baseURL, token strin
 	}
 
 	type jobInfo struct {
-		ID           int    `json:"id"`
-		Name         string `json:"name"`
-		Stage        string `json:"stage"`
-		Status       string `json:"status"`
-		Ref          string `json:"ref"`
-		AllowFailure bool   `json:"allow_failure"`
+		ID           int     `json:"id"`
+		Name         string  `json:"name"`
+		Stage        string  `json:"stage"`
+		Status       string  `json:"status"`
+		Ref          string  `json:"ref"`
+		AllowFailure bool    `json:"allow_failure"`
 		Duration     float64 `json:"duration"`
-		Runner       string `json:"runner"`
-		WebURL       string `json:"web_url"`
-		StartedAt    string `json:"started_at,omitempty"`
-		FinishedAt   string `json:"finished_at,omitempty"`
+		Runner       string  `json:"runner"`
+		WebURL       string  `json:"web_url"`
+		StartedAt    string  `json:"started_at,omitempty"`
+		FinishedAt   string  `json:"finished_at,omitempty"`
 	}
 
 	result := make([]jobInfo, 0, len(jobs))

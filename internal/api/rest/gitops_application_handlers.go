@@ -65,12 +65,12 @@ func listGitOpsApplications(deps Dependencies) gin.HandlerFunc {
 		tenantID := getTenantID(c)
 
 		opts := engine.ListOptions{
-			TenantID:   tenantID,
-			EngineType: c.Query("engine"),
-			Health:     c.Query("health"),
-			SyncStatus: c.Query("sync_status"),
+			TenantID:    tenantID,
+			EngineType:  c.Query("engine"),
+			Health:      c.Query("health"),
+			SyncStatus:  c.Query("sync_status"),
 			Environment: c.Query("environment"),
-			Project:    c.Query("project"),
+			Project:     c.Query("project"),
 		}
 
 		apps, err := client.List(c.Request.Context(), opts)

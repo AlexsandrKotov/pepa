@@ -30,7 +30,7 @@ type watchEntry struct {
 
 // DeployEvent represents a deployment status change.
 type DeployEvent struct {
-	Phase          string    `json:"phase"`            // pending, ci_running, syncing, healthy, degraded, failed
+	Phase          string    `json:"phase"` // pending, ci_running, syncing, healthy, degraded, failed
 	Message        string    `json:"message"`
 	Timestamp      time.Time `json:"timestamp"`
 	FluxCondition  string    `json:"flux_condition,omitempty"`

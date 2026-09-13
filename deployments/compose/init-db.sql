@@ -1546,3 +1546,28 @@ INSERT INTO schema_migrations (version, description) VALUES
     (28, 'Proxmox virtualization'),
     (29, 'Vault ACL and credential sharing')
 ON CONFLICT DO NOTHING;
+
+-- ============================================================
+-- APPLICATION ROLE (for active RLS enforcement)
+-- ============================================================
+-- The application connects as pepa_app at runtime so that
+-- row-level-security policies actually apply. The pepa role
+-- (table owner) bypasses RLS; pepa_app does not.
+-- The Docker entrypoint rotates the password before the app starts.
+-- ============================================================
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pepa_app') THEN
+        CREATE ROLE pepa_app LOGIN PASSWORD 'placeholder_init';
+    END IF;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pepa_app;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO pepa_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pepa_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE ON SEQUENCES TO pepa_app;
+REVOKE CREATE ON SCHEMA public FROM pepa_app;
+ALTER ROLE pepa_app SET search_path = public;
+ALTER ROLE pepa_app NOBYPASSRLS;

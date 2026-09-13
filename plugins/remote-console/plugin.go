@@ -19,10 +19,12 @@ type RemoteConsolePlugin struct{}
 
 var _ provider.Provider = (*RemoteConsolePlugin)(nil)
 
-func (p *RemoteConsolePlugin) Name() string        { return "remote-console" }
-func (p *RemoteConsolePlugin) Version() string     { return "1.0.0" }
-func (p *RemoteConsolePlugin) Description() string { return "SSH remote console — test connectivity to hosts via SSH" }
-func (p *RemoteConsolePlugin) PluginType() string  { return "infrastructure" }
+func (p *RemoteConsolePlugin) Name() string    { return "remote-console" }
+func (p *RemoteConsolePlugin) Version() string { return "1.0.0" }
+func (p *RemoteConsolePlugin) Description() string {
+	return "SSH remote console — test connectivity to hosts via SSH"
+}
+func (p *RemoteConsolePlugin) PluginType() string { return "infrastructure" }
 
 func (p *RemoteConsolePlugin) Actions() []string {
 	return []string{"test_connection"}

@@ -57,20 +57,20 @@ func StartPostgres(ctx context.Context, t *testing.T) (*PostgresContainer, error
 
 	connStr, err := pgContainer.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		pgContainer.Terminate(ctx)
+		_ = pgContainer.Terminate(ctx)
 		return nil, fmt.Errorf("get connection string: %w", err)
 	}
 
 	// Apply migrations using the embedded migrations package.
 	db, err := database.New(connStr)
 	if err != nil {
-		pgContainer.Terminate(ctx)
+		_ = pgContainer.Terminate(ctx)
 		return nil, fmt.Errorf("connect to postgres: %w", err)
 	}
 
 	if err := db.RunMigrations(ctx); err != nil {
 		db.Close()
-		pgContainer.Terminate(ctx)
+		_ = pgContainer.Terminate(ctx)
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
@@ -81,7 +81,7 @@ func StartPostgres(ctx context.Context, t *testing.T) (*PostgresContainer, error
 	).Scan(&extVersion)
 	if err != nil {
 		db.Close()
-		pgContainer.Terminate(ctx)
+		_ = pgContainer.Terminate(ctx)
 		return nil, fmt.Errorf("pgvector extension not available: %w", err)
 	}
 

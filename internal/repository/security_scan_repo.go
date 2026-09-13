@@ -12,21 +12,21 @@ import (
 
 // ScanTarget represents a target configured for security scanning.
 type ScanTarget struct {
-	ID              uuid.UUID        `json:"id"`
-	TenantID        uuid.UUID        `json:"tenant_id"`
-	Name            string           `json:"name"`
-	ScannerType     string           `json:"scanner_type"`    // trivy|sonarqube|both
-	TargetType      string           `json:"target_type"`     // image|git_repo|filesystem|container|service|sonarqube_project
-	TargetRef       string           `json:"target_ref"`      // image name, repo URL, service ID, project key
-	ConnectionID    *uuid.UUID       `json:"connection_id,omitempty"`
-	ScanConfig      map[string]any   `json:"scan_config"`
-	Enabled         bool             `json:"enabled"`
-	LastScanAt      *time.Time       `json:"last_scan_at,omitempty"`
-	LastScanStatus  *string          `json:"last_scan_status,omitempty"`
-	LastScanSummary map[string]any   `json:"last_scan_summary,omitempty"`
-	CreatedBy       *uuid.UUID       `json:"created_by,omitempty"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
+	ID              uuid.UUID      `json:"id"`
+	TenantID        uuid.UUID      `json:"tenant_id"`
+	Name            string         `json:"name"`
+	ScannerType     string         `json:"scanner_type"` // trivy|sonarqube|both
+	TargetType      string         `json:"target_type"`  // image|git_repo|filesystem|container|service|sonarqube_project
+	TargetRef       string         `json:"target_ref"`   // image name, repo URL, service ID, project key
+	ConnectionID    *uuid.UUID     `json:"connection_id,omitempty"`
+	ScanConfig      map[string]any `json:"scan_config"`
+	Enabled         bool           `json:"enabled"`
+	LastScanAt      *time.Time     `json:"last_scan_at,omitempty"`
+	LastScanStatus  *string        `json:"last_scan_status,omitempty"`
+	LastScanSummary map[string]any `json:"last_scan_summary,omitempty"`
+	CreatedBy       *uuid.UUID     `json:"created_by,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // ScanRun represents a single scan execution.
@@ -35,8 +35,8 @@ type ScanRun struct {
 	TenantID      uuid.UUID      `json:"tenant_id"`
 	TargetID      uuid.UUID      `json:"target_id"`
 	ScannerType   string         `json:"scanner_type"`
-	Status        string         `json:"status"`        // pending|running|completed|failed|cancelled
-	TriggerType   string         `json:"trigger_type"`  // manual|schedule|pipeline|webhook
+	Status        string         `json:"status"`       // pending|running|completed|failed|cancelled
+	TriggerType   string         `json:"trigger_type"` // manual|schedule|pipeline|webhook
 	StartedAt     *time.Time     `json:"started_at,omitempty"`
 	CompletedAt   *time.Time     `json:"completed_at,omitempty"`
 	DurationMs    *int           `json:"duration_ms,omitempty"`
@@ -312,16 +312,16 @@ func (r *SecurityScanRepository) UpdateScanRun(ctx context.Context, s *ScanRun) 
 		WHERE id = @id AND tenant_id = @tenant_id
 	`
 	_, err := r.db.Pool.Exec(ctx, query, pgx.NamedArgs{
-		"id":            s.ID,
-		"tenant_id":     s.TenantID,
-		"status":        s.Status,
-		"started_at":    s.StartedAt,
-		"completed_at":  s.CompletedAt,
-		"duration_ms":   s.DurationMs,
+		"id":             s.ID,
+		"tenant_id":      s.TenantID,
+		"status":         s.Status,
+		"started_at":     s.StartedAt,
+		"completed_at":   s.CompletedAt,
+		"duration_ms":    s.DurationMs,
 		"result_summary": s.ResultSummary,
-		"result_full":   s.ResultFull,
-		"error_message": s.ErrorMessage,
-		"report_url":    s.ReportURL,
+		"result_full":    s.ResultFull,
+		"error_message":  s.ErrorMessage,
+		"report_url":     s.ReportURL,
 	})
 	return err
 }

@@ -18,10 +18,12 @@ import (
 // TeamsPlugin implements notifications via Microsoft Teams incoming webhooks.
 type TeamsPlugin struct{}
 
-func (p *TeamsPlugin) Name() string        { return "teams" }
-func (p *TeamsPlugin) Version() string     { return "0.1.0" }
-func (p *TeamsPlugin) Description() string { return "Microsoft Teams notification integration via webhooks" }
-func (p *TeamsPlugin) PluginType() string  { return "notification" }
+func (p *TeamsPlugin) Name() string    { return "teams" }
+func (p *TeamsPlugin) Version() string { return "0.1.0" }
+func (p *TeamsPlugin) Description() string {
+	return "Microsoft Teams notification integration via webhooks"
+}
+func (p *TeamsPlugin) PluginType() string { return "notification" }
 
 func (p *TeamsPlugin) Actions() []string {
 	return []string{"send_message", "send_card"}

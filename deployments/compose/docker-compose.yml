@@ -47,6 +47,10 @@ x-common-env: &common-env
   POSTGRES_USER: ${POSTGRES_USER:-pepa}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
   POSTGRES_SSLMODE: disable
+  # Application role — non-superuser subject to RLS policies.
+  # Migrations still run as POSTGRES_USER (owner); runtime queries use this role.
+  APP_POSTGRES_USER: ${APP_POSTGRES_USER:-pepa_app}
+  APP_POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD}
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -159,6 +163,13 @@ services:
       TRIVY_VEX_DIR: /etc/trivy/vex
       # VEX repository URI (auto-fetched VEX documents)
       TRIVY_VEX_REPOSITORY_URI: ${TRIVY_VEX_REPOSITORY_URI:-}
+      # SonarQube — PEPA only collects reports from an external SonarQube over
+      # REST; its URL and token live in a Connection, not in the environment.
+      SONAR_SCAN_TIMEOUT: ${SONAR_SCAN_TIMEOUT:-2m}
+      SONAR_DEFAULT_STALE_HOURS: ${SONAR_DEFAULT_STALE_HOURS:-24}
+      # Shared secret for POST /api/v1/security/sonar/webhook. Unset keeps the
+      # endpoint disabled (503) and report collection runs on schedules only.
+      SONAR_WEBHOOK_TOKEN: ${SONAR_WEBHOOK_TOKEN:-}
       # GOMEMLIMIT soft-cap keeps the Go runtime from consuming memory needed
       # by the Trivy DB download subprocess (~600 MB during Java DB fetch).
       GOMEMLIMIT: "768MiB"

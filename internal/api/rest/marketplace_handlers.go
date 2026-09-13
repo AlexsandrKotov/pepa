@@ -402,7 +402,7 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 
 		// Parse optional request body for custom DB repository configuration
 		var installReq struct {
-			DBRepository    string `json:"db_repository,omitempty"`
+			DBRepository     string `json:"db_repository,omitempty"`
 			JavaDBRepository string `json:"java_db_repository,omitempty"`
 		}
 		_ = c.ShouldBindJSON(&installReq) // ignore error — body is optional
@@ -536,10 +536,10 @@ func installMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 		// If binary failed to load, return error so admin knows immediately
 		if loadErr != nil {
 			c.JSON(http.StatusPartialContent, gin.H{
-				"message":          "plugin registered but binary failed to load",
-				"error":            loadErr.Error(),
-				"plugin":           plugin,
-				"hint":             "try enabling the plugin again or check container logs",
+				"message": "plugin registered but binary failed to load",
+				"error":   loadErr.Error(),
+				"plugin":  plugin,
+				"hint":    "try enabling the plugin again or check container logs",
 			})
 			return
 		}
@@ -600,10 +600,10 @@ func uninstallMarketplacePlugin(deps Dependencies) gin.HandlerFunc {
 
 		if len(dependentConns) > 0 && !force {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":                "plugin has dependent connections",
-				"dependent_count":      len(dependentConns),
+				"error":                 "plugin has dependent connections",
+				"dependent_count":       len(dependentConns),
 				"dependent_connections": dependentConns,
-				"message":              "This plugin is used by connections. Use ?force=true to uninstall anyway.",
+				"message":               "This plugin is used by connections. Use ?force=true to uninstall anyway.",
 			})
 			return
 		}

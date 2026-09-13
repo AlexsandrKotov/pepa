@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +20,10 @@ func listTeamWorkflows(deps Dependencies) gin.HandlerFunc {
 
 		configs, err := deps.Repos.TeamWorkflow.List(c.Request.Context(), tenantID)
 		if err != nil {
-			respondInternalError(c, err)
+			// If the table doesn't exist or is empty, return an empty list
+			// instead of 500 so the workflow board renders.
+			slog.Warn("team workflow list failed, returning empty", "error", err)
+			c.JSON(http.StatusOK, gin.H{"workflows": []interface{}{}, "total": 0})
 			return
 		}
 		if configs == nil {

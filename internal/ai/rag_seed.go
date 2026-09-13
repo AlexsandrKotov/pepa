@@ -187,9 +187,9 @@ func SeedDocumentList() []map[string]string {
 // This is a convenience wrapper around IngestionEngine.IngestDocument.
 func IngestCustomDocument(ctx context.Context, engine *IngestionEngine, tenantID uuid.UUID, title, sourceType, content string) error {
 	doc := &Document{
-		ID:     "custom-" + sanitizeID(title),
-		Source: "custom",
-		Type:   sourceType,
+		ID:      "custom-" + sanitizeID(title),
+		Source:  "custom",
+		Type:    sourceType,
 		Content: content,
 		Metadata: map[string]string{
 			"title": title,

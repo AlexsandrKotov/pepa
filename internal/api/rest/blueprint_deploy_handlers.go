@@ -485,11 +485,11 @@ func deployBlueprintGroupToKubernetes(deps Dependencies) gin.HandlerFunc {
 			spec := map[string]interface{}{
 				"values_yaml": bp.ValuesYAML,
 				"chart": map[string]interface{}{
-					"source_type":  bp.SourceType,
-					"chart_url":    bp.ChartURL,
-					"chart_name":   bp.ChartName,
+					"source_type":   bp.SourceType,
+					"chart_url":     bp.ChartURL,
+					"chart_name":    bp.ChartName,
 					"chart_version": bp.ChartVersion,
-					"chart_path":   bp.ChartPath,
+					"chart_path":    bp.ChartPath,
 				},
 				"service": map[string]interface{}{
 					"port": func() int {
@@ -509,17 +509,17 @@ func deployBlueprintGroupToKubernetes(deps Dependencies) gin.HandlerFunc {
 			specJSON, _ := json.Marshal(spec)
 
 			d := &repository.Deployment{
-				TenantID:        auth.GetTenantID(c),
+				TenantID:          auth.GetTenantID(c),
 				GitlabProjectName: bp.Name,
-				TargetClusterID: func() *uuid.UUID { id, _ := uuid.Parse(req.ClusterID); return &id }(),
-				TargetNamespace: req.Namespace,
-				ImageRepository: bp.Image,
-				DeployType:      deployType,
-				Replicas:        bp.Replicas,
-				Strategy:        "rolling",
-				Spec:            specJSON,
-				Status:          "pending",
-				TimeoutSeconds:  300,
+				TargetClusterID:   func() *uuid.UUID { id, _ := uuid.Parse(req.ClusterID); return &id }(),
+				TargetNamespace:   req.Namespace,
+				ImageRepository:   bp.Image,
+				DeployType:        deployType,
+				Replicas:          bp.Replicas,
+				Strategy:          "rolling",
+				Spec:              specJSON,
+				Status:            "pending",
+				TimeoutSeconds:    300,
 			}
 
 			if deps.Repos.Deployment == nil {

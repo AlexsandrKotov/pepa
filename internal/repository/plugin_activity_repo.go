@@ -20,8 +20,8 @@ type SSHCommandLog struct {
 	HostName  string     `json:"host_name" db:"host_name"`
 	Username  string     `json:"username" db:"username"`
 	Command   string     `json:"command" db:"command"`
-	ExitCode  *int      `json:"exit_code,omitempty" db:"exit_code"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	ExitCode  *int       `json:"exit_code,omitempty" db:"exit_code"`
+	CreatedAt time.Time  `json:"created_at" db:"created_at"`
 }
 
 // PluginActionLog represents a plugin action (VM start/stop/create/delete etc.).

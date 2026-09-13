@@ -263,9 +263,9 @@ func (p *SyslogPlugin) testConnection(ctx context.Context, config map[string]str
 	}
 
 	return json.Marshal(map[string]string{
-		"status":  "ok",
-		"message": "Syslog connection test successful",
-		"server":  server,
+		"status":   "ok",
+		"message":  "Syslog connection test successful",
+		"server":   server,
 		"protocol": protocol,
 	})
 }

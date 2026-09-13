@@ -28,9 +28,9 @@ type StageInfo struct {
 type JobNode struct {
 	Name   string   `json:"name"`
 	Stage  string   `json:"stage"`
-	Needs  []string `json:"needs"`              // job names this depends on
-	RunsOn string   `json:"runs_on,omitempty"`  // e.g. "ubuntu-latest"
-	If     string   `json:"if,omitempty"`       // conditional expression
+	Needs  []string `json:"needs"`             // job names this depends on
+	RunsOn string   `json:"runs_on,omitempty"` // e.g. "ubuntu-latest"
+	If     string   `json:"if,omitempty"`      // conditional expression
 }
 
 // ── GitHub Actions parser ──────────────────────────────────────

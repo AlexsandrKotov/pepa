@@ -670,17 +670,17 @@ func validateVaultData(data map[string]string) error {
 
 // VaultACLEntry represents a path-based access control entry.
 type VaultACLEntry struct {
-	ID         string     `json:"id"`
-	PathPrefix string     `json:"path_prefix"`
-	UserID     *string    `json:"user_id,omitempty"`
-	TeamID     *string    `json:"team_id,omitempty"`
-	UserName   string     `json:"user_name,omitempty"`
-	TeamName   string     `json:"team_name,omitempty"`
-	CanRead    bool       `json:"can_read"`
-	CanCreate  bool       `json:"can_create"`
-	CanDelete  bool       `json:"can_delete"`
-	CreatedBy  *string    `json:"created_by,omitempty"`
-	CreatedAt  string     `json:"created_at"`
+	ID         string  `json:"id"`
+	PathPrefix string  `json:"path_prefix"`
+	UserID     *string `json:"user_id,omitempty"`
+	TeamID     *string `json:"team_id,omitempty"`
+	UserName   string  `json:"user_name,omitempty"`
+	TeamName   string  `json:"team_name,omitempty"`
+	CanRead    bool    `json:"can_read"`
+	CanCreate  bool    `json:"can_create"`
+	CanDelete  bool    `json:"can_delete"`
+	CreatedBy  *string `json:"created_by,omitempty"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 // checkVaultPathAccess returns true if the user may access the given path.

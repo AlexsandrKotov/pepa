@@ -20,10 +20,12 @@ type S3Plugin struct{}
 
 var _ provider.Provider = (*S3Plugin)(nil)
 
-func (p *S3Plugin) Name() string        { return "s3" }
-func (p *S3Plugin) Version() string     { return "0.1.0" }
-func (p *S3Plugin) Description() string { return "S3-compatible object storage — browse buckets, upload and manage files" }
-func (p *S3Plugin) PluginType() string  { return "storage" }
+func (p *S3Plugin) Name() string    { return "s3" }
+func (p *S3Plugin) Version() string { return "0.1.0" }
+func (p *S3Plugin) Description() string {
+	return "S3-compatible object storage — browse buckets, upload and manage files"
+}
+func (p *S3Plugin) PluginType() string { return "storage" }
 
 func (p *S3Plugin) Actions() []string {
 	return []string{
@@ -274,11 +276,11 @@ func (p *S3Plugin) uploadObject(ctx context.Context, client *minio.Client, param
 	}
 
 	return sdk.JSONMarshal(map[string]interface{}{
-		"status":  "ok",
-		"bucket":  req.Bucket,
-		"key":     req.Key,
-		"size":    info.Size,
-		"etag":    info.ETag,
+		"status": "ok",
+		"bucket": req.Bucket,
+		"key":    req.Key,
+		"size":   info.Size,
+		"etag":   info.ETag,
 	})
 }
 

@@ -12,28 +12,28 @@ import (
 
 // GitOpsBinding represents a mapping between a service/entity and a GitOps application.
 type GitOpsBinding struct {
-	ID              uuid.UUID  `json:"id"`
-	TenantID        uuid.UUID  `json:"tenant_id"`
-	ServiceID       *uuid.UUID `json:"service_id,omitempty"`
-	EntityID        *uuid.UUID `json:"entity_id,omitempty"`
-	Name            string     `json:"name"`
-	RepoID          *uuid.UUID `json:"repo_id,omitempty"`
-	ClusterID       *uuid.UUID `json:"cluster_id,omitempty"`
+	ID               uuid.UUID  `json:"id"`
+	TenantID         uuid.UUID  `json:"tenant_id"`
+	ServiceID        *uuid.UUID `json:"service_id,omitempty"`
+	EntityID         *uuid.UUID `json:"entity_id,omitempty"`
+	Name             string     `json:"name"`
+	RepoID           *uuid.UUID `json:"repo_id,omitempty"`
+	ClusterID        *uuid.UUID `json:"cluster_id,omitempty"`
 	ArgoConnectionID *uuid.UUID `json:"argo_connection_id,omitempty"`
-	EngineType      string     `json:"engine_type"` // 'argocd' or 'fluxcd'
-	AppName         string     `json:"app_name"`
-	AppNamespace    string     `json:"app_namespace"`
-	AppProject      *string    `json:"app_project,omitempty"`
-	Environment     *string    `json:"environment,omitempty"` // deprecated: use EnvironmentID
-	EnvironmentID   *uuid.UUID `json:"environment_id,omitempty"`
-	ManifestPath    *string    `json:"manifest_path,omitempty"`
-	UpdateStrategy  string     `json:"update_strategy"` // 'kustomize_image', 'helm_values', 'appset_param', 'raw_yaml'
-	UpdatePath      *string    `json:"update_path,omitempty"`
-	VerifyURL       *string    `json:"verify_url,omitempty"`
-	AutoBound       bool       `json:"auto_bound"`
-	CreatedBy       *uuid.UUID `json:"created_by,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	EngineType       string     `json:"engine_type"` // 'argocd' or 'fluxcd'
+	AppName          string     `json:"app_name"`
+	AppNamespace     string     `json:"app_namespace"`
+	AppProject       *string    `json:"app_project,omitempty"`
+	Environment      *string    `json:"environment,omitempty"` // deprecated: use EnvironmentID
+	EnvironmentID    *uuid.UUID `json:"environment_id,omitempty"`
+	ManifestPath     *string    `json:"manifest_path,omitempty"`
+	UpdateStrategy   string     `json:"update_strategy"` // 'kustomize_image', 'helm_values', 'appset_param', 'raw_yaml'
+	UpdatePath       *string    `json:"update_path,omitempty"`
+	VerifyURL        *string    `json:"verify_url,omitempty"`
+	AutoBound        bool       `json:"auto_bound"`
+	CreatedBy        *uuid.UUID `json:"created_by,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 
 	// Joined environment info (populated by ListWithEnvironment)
 	EnvName  *string `json:"env_name,omitempty"`

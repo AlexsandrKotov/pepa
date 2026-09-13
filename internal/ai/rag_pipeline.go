@@ -272,7 +272,7 @@ func (p *RAGPipeline) hybridSearch(ctx context.Context, query string, tenantIDs 
 func reciprocalRankFusion(vectorResults, keywordResults []repository.RAGSearchResult, topK int) []repository.RAGSearchResult {
 	const k = 60.0 // RRF constant
 
-	scores := make(map[string]float64)  // chunk_id -> RRF score
+	scores := make(map[string]float64) // chunk_id -> RRF score
 	resultMap := make(map[string]repository.RAGSearchResult)
 
 	// Score vector results

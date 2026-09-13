@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" // #nosec G108 //nolint:gosec // pprof is intentionally enabled for diagnostics
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -297,8 +297,9 @@ func main() {
 				http.DefaultServeMux.ServeHTTP(w, r)
 			}))
 			pprofServer := &http.Server{
-				Addr:    pprofAddr,
-				Handler: pprofMux,
+				Addr:              pprofAddr,
+				Handler:           pprofMux,
+				ReadHeaderTimeout: 10 * time.Second,
 			}
 			if err := pprofServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				slog.Error("pprof server failed", "error", err)
@@ -412,5 +413,5 @@ func reportRLSCoverage(comp *bootstrap.Components) {
 			append(attrs, "bypasses_rls", true)...)
 		return
 	}
-	slog.Info("row-level security self-check", append(attrs, "bypasses_rls", false)...)
+	slog.Info("row-level security is ACTIVE — the application role is subject to RLS policies", append(attrs, "bypasses_rls", false)...)
 }

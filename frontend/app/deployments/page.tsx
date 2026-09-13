@@ -184,10 +184,10 @@ export function DeploymentsList({ autoCreate }: { autoCreate?: boolean }) {
           const chartsData = await helmRepositories.listCharts(repo.id);
           const charts = (chartsData.charts || []).map(c => ({ ...c, repoId: repo.id, repoName: repo.name }));
           allCharts.push(...charts);
-        } catch { /* ignore */ }
+        } catch { /* ignore individual repo errors */ }
       }));
       setHelmCharts(allCharts);
-    } catch {}
+    } catch (e) { console.error('Failed to load Helm charts:', e); }
     setLoadingHelmCharts(false);
   };
 

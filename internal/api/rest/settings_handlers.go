@@ -62,6 +62,19 @@ func getSetting(deps Dependencies) gin.HandlerFunc {
 		key := c.Param("key")
 		value, err := deps.Repos.Settings.Get(c.Request.Context(), key)
 		if err != nil {
+			// Return sensible defaults for well-known settings that may not exist yet,
+			// instead of 404 spam that pollutes audit logs and breaks frontend polling.
+			switch key {
+			case "get_started":
+				c.JSON(http.StatusOK, gin.H{"key": key, "value": json.RawMessage(`{"completed":false}`)})
+				return
+			case "general":
+				c.JSON(http.StatusOK, gin.H{"key": key, "value": json.RawMessage(`{}`)})
+				return
+			case "ai":
+				c.JSON(http.StatusOK, gin.H{"key": key, "value": json.RawMessage(`{"enabled":false,"providers":{}}`)})
+				return
+			}
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
@@ -388,12 +401,12 @@ func applyAISettings(deps Dependencies, ctx context.Context, value json.RawMessa
 // applyOIDCSettings reads the OIDC settings JSON and updates the runtime config.
 func applyOIDCSettings(deps Dependencies, value json.RawMessage) {
 	var oidcSettings struct {
-		Enabled       bool     `json:"enabled"`
-		Issuer        string   `json:"issuer"`
-		ClientID      string   `json:"client_id"`
-		ClientSecret  string   `json:"client_secret"`
-		RedirectURL   string   `json:"redirect_url"`
-		Scopes        []string `json:"scopes"`
+		Enabled      bool     `json:"enabled"`
+		Issuer       string   `json:"issuer"`
+		ClientID     string   `json:"client_id"`
+		ClientSecret string   `json:"client_secret"`
+		RedirectURL  string   `json:"redirect_url"`
+		Scopes       []string `json:"scopes"`
 	}
 	if err := json.Unmarshal(value, &oidcSettings); err != nil {
 		slog.Error("failed to unmarshal OIDC settings", "error", err)
@@ -762,19 +775,19 @@ func getLDAPAdminConfig(deps Dependencies) gin.HandlerFunc {
 			maskedCACert = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" //nolint:gosec // #nosec // G101: mask string, not a credential
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"enabled":             ldap.Enabled,
-			"url":                 ldap.URL,
-			"bind_dn":             ldap.BindDN,
-			"bind_password":       maskedPassword,
-			"base_dn":             ldap.BaseDN,
-			"user_filter":         ldap.UserFilter,
-			"group_filter":        ldap.GroupFilter,
-			"email_attr":          ldap.EmailAttr,
-			"name_attr":           ldap.NameAttr,
-			"start_tls":           ldap.StartTLS,
+			"enabled":              ldap.Enabled,
+			"url":                  ldap.URL,
+			"bind_dn":              ldap.BindDN,
+			"bind_password":        maskedPassword,
+			"base_dn":              ldap.BaseDN,
+			"user_filter":          ldap.UserFilter,
+			"group_filter":         ldap.GroupFilter,
+			"email_attr":           ldap.EmailAttr,
+			"name_attr":            ldap.NameAttr,
+			"start_tls":            ldap.StartTLS,
 			"insecure_skip_verify": ldap.InsecureSkipVerify,
-			"ca_certificate":      maskedCACert,
-			"group_mapping":       ldap.GroupMapping,
+			"ca_certificate":       maskedCACert,
+			"group_mapping":        ldap.GroupMapping,
 		})
 	}
 }

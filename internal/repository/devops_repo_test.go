@@ -20,7 +20,7 @@ func TestCronMatches(t *testing.T) {
 		{"exact mismatch 9:01", "0 9 * * *", time.Date(2026, 9, 2, 9, 1, 0, 0, time.UTC), false},
 
 		// Range: weekdays (Mon=1 through Fri=5)
-		{"weekday match Wednesday", "0 9 * * 1-5", time.Date(2026, 9, 2, 9, 0, 0, 0, time.UTC), true},  // Wed
+		{"weekday match Wednesday", "0 9 * * 1-5", time.Date(2026, 9, 2, 9, 0, 0, 0, time.UTC), true},   // Wed
 		{"weekday nomatch Saturday", "0 9 * * 1-5", time.Date(2026, 9, 5, 9, 0, 0, 0, time.UTC), false}, // Sat
 
 		// List: specific hours
@@ -33,7 +33,7 @@ func TestCronMatches(t *testing.T) {
 		{"step nomatch :07", "*/15 * * * *", time.Date(2026, 9, 2, 14, 7, 0, 0, time.UTC), false},
 
 		// Combined: weekdays 9-17, on the hour
-		{"business hours match", "0 9-17 * * 1-5", time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), true},  // Wed 14:00
+		{"business hours match", "0 9-17 * * 1-5", time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), true},            // Wed 14:00
 		{"business hours nomatch evening", "0 9-17 * * 1-5", time.Date(2026, 9, 2, 20, 0, 0, 0, time.UTC), false}, // Wed 20:00
 
 		// Sunday = 0

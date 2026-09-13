@@ -355,8 +355,8 @@ func addBackendSchemaProps(workDir string, props map[string]PropertyDef) {
 			if len(attrMatch) < 3 {
 				continue
 			}
-			attrName := attrMatch[1]  // e.g. "address"
-			varName := attrMatch[2]   // e.g. "gitlab_remote_state_address"
+			attrName := attrMatch[1]         // e.g. "address"
+			varName := attrMatch[2]          // e.g. "gitlab_remote_state_address"
 			propKey := "backend_" + attrName // e.g. "backend_address"
 			if _, exists := props[propKey]; !exists {
 				props[propKey] = PropertyDef{
@@ -711,9 +711,9 @@ func (a *TerraformAdapter) State(ctx context.Context, raw json.RawMessage, param
 		Values struct {
 			RootModule struct {
 				Resources []struct {
-					Type    string `json:"type"`
-					Name    string `json:"name"`
-					Value   map[string]interface{} `json:"values"`
+					Type  string                 `json:"type"`
+					Name  string                 `json:"name"`
+					Value map[string]interface{} `json:"values"`
 				} `json:"resources"`
 			} `json:"root_module"`
 		} `json:"values"`

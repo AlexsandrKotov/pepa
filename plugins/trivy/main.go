@@ -87,10 +87,12 @@ func NewTrivyPlugin(config map[string]string) (*TrivyPlugin, error) {
 	}, nil
 }
 
-func (p *TrivyPlugin) Name() string        { return "trivy" }
-func (p *TrivyPlugin) Version() string     { return "0.1.0" }
-func (p *TrivyPlugin) Description() string { return "Trivy security scanner — vulnerability detection for images, filesystem, repos, and IaC" }
-func (p *TrivyPlugin) PluginType() string  { return "security_scanner" }
+func (p *TrivyPlugin) Name() string    { return "trivy" }
+func (p *TrivyPlugin) Version() string { return "0.1.0" }
+func (p *TrivyPlugin) Description() string {
+	return "Trivy security scanner — vulnerability detection for images, filesystem, repos, and IaC"
+}
+func (p *TrivyPlugin) PluginType() string { return "security_scanner" }
 
 func (p *TrivyPlugin) Actions() []string {
 	return []string{

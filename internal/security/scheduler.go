@@ -13,9 +13,9 @@ import (
 
 // Scheduler manages recurring security scans based on cron schedules.
 type Scheduler struct {
-	repo    *repository.SecurityScanRepository
-	scanner *Scanner
-	stopCh  chan struct{}
+	repo     *repository.SecurityScanRepository
+	scanner  *Scanner
+	stopCh   chan struct{}
 	reloadCh chan struct{} // signals the scheduler to recalculate sleep
 }
 

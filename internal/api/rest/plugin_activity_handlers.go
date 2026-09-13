@@ -14,17 +14,17 @@ import (
 
 // stateChangingProxmoxActions lists Proxmox actions that modify infrastructure state.
 var stateChangingProxmoxActions = map[string]string{
-	"create_vm":         "vm",
-	"delete_vm":         "vm",
-	"start_vm":          "vm",
-	"stop_vm":           "vm",
-	"shutdown_vm":       "vm",
-	"reboot_vm":         "vm",
-	"create_container":  "container",
-	"delete_container":  "container",
-	"start_container":   "container",
-	"stop_container":    "container",
-	"deploy_docker":     "container",
+	"create_vm":        "vm",
+	"delete_vm":        "vm",
+	"start_vm":         "vm",
+	"stop_vm":          "vm",
+	"shutdown_vm":      "vm",
+	"reboot_vm":        "vm",
+	"create_container": "container",
+	"delete_container": "container",
+	"start_container":  "container",
+	"stop_container":   "container",
+	"deploy_docker":    "container",
 }
 
 // stateChangingVMwareActions lists VMware actions that modify infrastructure state.

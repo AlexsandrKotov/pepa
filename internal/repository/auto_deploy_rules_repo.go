@@ -21,7 +21,7 @@ type AutoDeployRule struct {
 	ProjectPath          *string    `json:"project_path,omitempty"`
 	BranchPattern        string     `json:"branch_pattern"`
 	EnvironmentID        uuid.UUID  `json:"environment_id"`
-	ImageTagSource       string     `json:"image_tag_source"`        // branch_name, ci_variable, regex
+	ImageTagSource       string     `json:"image_tag_source"` // branch_name, ci_variable, regex
 	ImageTagRegex        *string    `json:"image_tag_regex,omitempty"`
 	ImageName            *string    `json:"image_name,omitempty"`
 	Enabled              bool       `json:"enabled"`
@@ -32,9 +32,9 @@ type AutoDeployRule struct {
 	UpdatedAt            time.Time  `json:"updated_at"`
 
 	// Joined fields (populated by ListWithDetails)
-	EnvName *string `json:"env_name,omitempty"`
-	EnvSlug *string `json:"env_slug,omitempty"`
-	EnvColor *string `json:"env_color,omitempty"`
+	EnvName    *string `json:"env_name,omitempty"`
+	EnvSlug    *string `json:"env_slug,omitempty"`
+	EnvColor   *string `json:"env_color,omitempty"`
 	SourceName *string `json:"source_name,omitempty"`
 }
 

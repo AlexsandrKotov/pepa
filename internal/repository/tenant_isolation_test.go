@@ -151,12 +151,12 @@ func TestTenantIsolation_Deployments(t *testing.T) {
 
 	// Create deployment for tenant A.
 	deployA := &Deployment{
-		ID:            uuid.New(),
-		TenantID:      tenantA,
-		ImageTag:      "v1.0.0",
+		ID:              uuid.New(),
+		TenantID:        tenantA,
+		ImageTag:        "v1.0.0",
 		ImageRepository: "registry/service-a",
-		DeployType:    "helm",
-		Status:        "deployed",
+		DeployType:      "helm",
+		Status:          "deployed",
 	}
 	err := deployRepo.Create(ctx, deployA)
 	if err != nil {
@@ -165,12 +165,12 @@ func TestTenantIsolation_Deployments(t *testing.T) {
 
 	// Create deployment for tenant B.
 	deployB := &Deployment{
-		ID:            uuid.New(),
-		TenantID:      tenantB,
-		ImageTag:      "v1.0.0",
+		ID:              uuid.New(),
+		TenantID:        tenantB,
+		ImageTag:        "v1.0.0",
 		ImageRepository: "registry/service-b",
-		DeployType:    "helm",
-		Status:        "deployed",
+		DeployType:      "helm",
+		Status:          "deployed",
 	}
 	err = deployRepo.Create(ctx, deployB)
 	if err != nil {

@@ -278,15 +278,15 @@ func (p *VMwarePlugin) vmAction(client *Client, params []byte, action string) ([
 
 func (p *VMwarePlugin) createVM(client *Client, params []byte) ([]byte, error) {
 	var req struct {
-		Name       string `json:"name"`
-		Host       string `json:"host,omitempty"`
-		Cluster    string `json:"cluster,omitempty"`
-		Datastore  string `json:"datastore,omitempty"`
+		Name         string `json:"name"`
+		Host         string `json:"host,omitempty"`
+		Cluster      string `json:"cluster,omitempty"`
+		Datastore    string `json:"datastore,omitempty"`
 		ResourcePool string `json:"resource_pool,omitempty"`
-		Cores      int    `json:"cores,omitempty"`
-		MemoryMiB  int64  `json:"memory_mib,omitempty"`
-		GuestOS    string `json:"guest_os,omitempty"`
-		Network    string `json:"network,omitempty"`
+		Cores        int    `json:"cores,omitempty"`
+		MemoryMiB    int64  `json:"memory_mib,omitempty"`
+		GuestOS      string `json:"guest_os,omitempty"`
+		Network      string `json:"network,omitempty"`
 	}
 	if err := actionInput(params, &req); err != nil {
 		return nil, fmt.Errorf("create_vm: parse params: %w", err)

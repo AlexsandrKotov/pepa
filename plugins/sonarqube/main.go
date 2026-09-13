@@ -554,11 +554,6 @@ func (p *SonarQubePlugin) buildIssueSearchParams(params map[string]interface{}) 
 
 // fetchIssuePages walks /api/issues/search page by page up to issuesMaxFetch.
 func (p *SonarQubePlugin) fetchIssuePages(ctx context.Context, qp map[string]string) ([]Issue, int, []issueFacet, error) {
-	pageSize, _ := strconv.Atoi(qp["ps"])
-	if pageSize <= 0 {
-		pageSize = issuesPageSize
-	}
-
 	var (
 		issues []Issue
 		total  int

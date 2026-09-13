@@ -27,13 +27,13 @@ type WorkflowDefinition struct {
 
 // WorkflowStep represents a single step in a workflow.
 type WorkflowStep struct {
-	ID       string                 `json:"id"`
-	Name     string                 `json:"name"`
-	Plugin   string                 `json:"plugin"`
-	Action   string                 `json:"action"`
-	Inputs   map[string]interface{} `json:"inputs,omitempty"`
-	Condition string                `json:"condition,omitempty"`
-	OnError  string                 `json:"on_error,omitempty"`
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Plugin    string                 `json:"plugin"`
+	Action    string                 `json:"action"`
+	Inputs    map[string]interface{} `json:"inputs,omitempty"`
+	Condition string                 `json:"condition,omitempty"`
+	OnError   string                 `json:"on_error,omitempty"`
 }
 
 // WorkflowBuilder generates workflow definitions from natural language.

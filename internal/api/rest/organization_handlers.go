@@ -293,9 +293,9 @@ func getWorkspace(deps Dependencies) gin.HandlerFunc {
 				CreatedAt: ws.CreatedAt.Format(time.RFC3339),
 			},
 			"counts": gin.H{
-				"services":     stats.Services,
-				"connections":  stats.Connections,
-				"teams":        stats.Teams,
+				"services":    stats.Services,
+				"connections": stats.Connections,
+				"teams":       stats.Teams,
 			},
 		})
 	}

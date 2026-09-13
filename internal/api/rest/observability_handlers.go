@@ -880,10 +880,10 @@ func observabilitySendTestTelemetry(deps Dependencies) gin.HandlerFunc {
 		)
 
 		c.JSON(http.StatusOK, gin.H{
-			"status":  "ok",
-			"message": fmt.Sprintf("Test telemetry sent to %s. Check SigNoz in 5-10 seconds.", deps.Config.Observability.OTLPEndpoint),
+			"status":   "ok",
+			"message":  fmt.Sprintf("Test telemetry sent to %s. Check SigNoz in 5-10 seconds.", deps.Config.Observability.OTLPEndpoint),
 			"trace_id": traceID,
-			"results": results,
+			"results":  results,
 		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/repository"
@@ -324,5 +325,73 @@ func TestSonarReportIsJSONSafe(t *testing.T) {
 	}
 	if _, err := json.Marshal(full); err != nil {
 		t.Fatalf("full report must be serialisable: %v", err)
+	}
+}
+
+func TestSonarIssueIgnored(t *testing.T) {
+	ignores := map[string]bool{"AKK1": true, "rule:java:S1135": true}
+	issue := sonarIssue{Key: "AKK1", Rule: "java:S1135"}
+	if !sonarIssueIgnored(ignores, issue) {
+		t.Error("an ignored issue key must be suppressed")
+	}
+	if !sonarIssueIgnored(ignores, sonarIssue{Key: "AKK9", Rule: "java:S1135"}) {
+		t.Error("a rule ignore must suppress every finding of that rule")
+	}
+	if sonarIssueIgnored(ignores, sonarIssue{Key: "AKK9", Rule: "java:S2259"}) {
+		t.Error("unrelated findings must stay visible")
+	}
+	if sonarIssueIgnored(nil, issue) {
+		t.Error("no ignores means nothing is suppressed")
+	}
+}
+
+// A collection is a handful of REST calls, not an analysis: it needs its own
+// short budget, and a typo in the environment must not disable it.
+func TestSonarScanEnvironmentConfiguration(t *testing.T) {
+	t.Setenv("SONAR_SCAN_TIMEOUT", "")
+	t.Setenv("SONAR_DEFAULT_STALE_HOURS", "")
+	s := NewScanner(nil, nil, nil, nil, nil)
+	if s.sonarTimeout != 2*time.Minute {
+		t.Errorf("default sonar timeout = %v, want 2m", s.sonarTimeout)
+	}
+	if s.sonarDefaultStaleHours != 24 {
+		t.Errorf("default staleness budget = %d, want 24", s.sonarDefaultStaleHours)
+	}
+
+	t.Setenv("SONAR_SCAN_TIMEOUT", "45s")
+	t.Setenv("SONAR_DEFAULT_STALE_HOURS", "6")
+	s = NewScanner(nil, nil, nil, nil, nil)
+	if s.sonarTimeout != 45*time.Second || s.sonarDefaultStaleHours != 6 {
+		t.Errorf("environment values must be honoured: %v / %d", s.sonarTimeout, s.sonarDefaultStaleHours)
+	}
+
+	t.Setenv("SONAR_SCAN_TIMEOUT", "nonsense")
+	t.Setenv("SONAR_DEFAULT_STALE_HOURS", "-1")
+	s = NewScanner(nil, nil, nil, nil, nil)
+	if s.sonarTimeout != 2*time.Minute || s.sonarDefaultStaleHours != 24 {
+		t.Errorf("invalid values must fall back to the defaults, got %v / %d", s.sonarTimeout, s.sonarDefaultStaleHours)
+	}
+}
+
+func TestSanitizeHTTPURL(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in, want string
+	}{
+		{"https://gitlab.example.com/org/repo/-/pipelines/1234", "https://gitlab.example.com/org/repo/-/pipelines/1234"},
+		{"http://ci.internal/job/42", "http://ci.internal/job/42"},
+		{"javascript:alert(1)", ""},
+		{"data:text/html,<script>alert(1)</script>", ""},
+		{"ftp://example.com/file", ""},
+		{"", ""},
+		{"   ", ""},
+		{"not-a-url", ""},
+		{"https://", ""},
+	}
+	for _, tc := range cases {
+		got := sanitizeHTTPURL(tc.in)
+		if got != tc.want {
+			t.Errorf("sanitizeHTTPURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

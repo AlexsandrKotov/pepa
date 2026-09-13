@@ -14,9 +14,9 @@ import (
 // When PEPA deploys a new image, the writer updates the corresponding manifest
 // in Git so that FluxCD/ArgoCD picks up the change natively.
 type ManifestWriter struct {
-	gitopsRepo   *gitops.Repository
-	bindingRepo  *repository.GitOpsBindingRepository
-	cacheDir     string
+	gitopsRepo  *gitops.Repository
+	bindingRepo *repository.GitOpsBindingRepository
+	cacheDir    string
 }
 
 // NewManifestWriter creates a new ManifestWriter.
@@ -172,9 +172,9 @@ func (w *ManifestWriter) WriteBackByService(ctx context.Context, tenantID uuid.U
 
 // WriteBackResults combines binding metadata with the write-back result.
 type WriteBackResults struct {
-	BindingID   uuid.UUID      `json:"binding_id"`
-	BindingName string         `json:"binding_name"`
-	Environment *string        `json:"environment,omitempty"`
+	BindingID   uuid.UUID        `json:"binding_id"`
+	BindingName string           `json:"binding_name"`
+	Environment *string          `json:"environment,omitempty"`
 	Result      *WriteBackResult `json:"result"`
 }
 

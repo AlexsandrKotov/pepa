@@ -11,11 +11,11 @@ import (
 
 // CoordinatorResult holds the aggregated result from multiple specialist agents.
 type CoordinatorResult struct {
-	Query       string                    `json:"query"`
-	Primary     string                    `json:"primary_specialist"`
-	Responses   []SpecialistResponse      `json:"responses"`
-	Synthesized string                    `json:"synthesized_answer"`
-	Duration    time.Duration             `json:"duration_ms"`
+	Query       string               `json:"query"`
+	Primary     string               `json:"primary_specialist"`
+	Responses   []SpecialistResponse `json:"responses"`
+	Synthesized string               `json:"synthesized_answer"`
+	Duration    time.Duration        `json:"duration_ms"`
 }
 
 // SpecialistResponse holds a single specialist's response.

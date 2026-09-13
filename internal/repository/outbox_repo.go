@@ -138,7 +138,7 @@ func (r *OutboxRepository) InsertWithTx(ctx context.Context, tx pgx.Tx, aggregat
 		if err != nil {
 			return fmt.Errorf("begin tx: %w", err)
 		}
-		defer tx.Rollback(ctx)
+		defer func() { _ = tx.Rollback(ctx) }()
 
 		if err := r.Insert(ctx, tx, aggregateType, aggregateID, eventType, payload, tenantID); err != nil {
 			return err
@@ -163,7 +163,7 @@ func (r *OutboxRepository) BatchMarkPublished(ctx context.Context, eventIDs []uu
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	for _, id := range eventIDs {
 		if _, err := tx.Exec(ctx, `

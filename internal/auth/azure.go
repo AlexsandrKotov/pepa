@@ -48,7 +48,7 @@ type AzureUserInfo struct {
 	OID               string `json:"oid"` // Azure object ID (stable unique identifier)
 	Email             string `json:"email"`
 	UPN               string `json:"upn"` // User principal name (e.g. user@domain.com)
-	PreferredUsername  string `json:"preferred_username"`
+	PreferredUsername string `json:"preferred_username"`
 	Name              string `json:"name"`
 	GivenName         string `json:"given_name"`
 	FamilyName        string `json:"family_name"`

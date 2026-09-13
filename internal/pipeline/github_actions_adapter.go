@@ -234,11 +234,11 @@ func (a *GitHubActionsAdapter) Status(ctx context.Context, raw json.RawMessage, 
 	}
 
 	var run struct {
-		ID              int    `json:"id"`
-		HTMLURL         string `json:"html_url"`
-		Status          string `json:"status"`
-		Conclusion      string `json:"conclusion"`
-		RunStartedAt    string `json:"run_started_at"`
+		ID           int    `json:"id"`
+		HTMLURL      string `json:"html_url"`
+		Status       string `json:"status"`
+		Conclusion   string `json:"conclusion"`
+		RunStartedAt string `json:"run_started_at"`
 	}
 	if err := json.Unmarshal(body, &run); err != nil {
 		return nil, fmt.Errorf("parse run response: %w", err)
@@ -281,12 +281,12 @@ func (a *GitHubActionsAdapter) Jobs(ctx context.Context, raw json.RawMessage, ex
 
 	var jobsResp struct {
 		Jobs []struct {
-			ID          int    `json:"id"`
-			Name        string `json:"name"`
-			Status      string `json:"status"`
-			Conclusion  string `json:"conclusion"`
-			HTMLURL     string `json:"html_url"`
-			RunnerName  string `json:"runner_name"`
+			ID         int    `json:"id"`
+			Name       string `json:"name"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+			HTMLURL    string `json:"html_url"`
+			RunnerName string `json:"runner_name"`
 		} `json:"jobs"`
 	}
 	if err := json.Unmarshal(body, &jobsResp); err != nil {
@@ -429,15 +429,15 @@ func (a *GitHubActionsAdapter) ListRemoteRuns(ctx context.Context, raw json.RawM
 
 	var resp struct {
 		WorkflowRuns []struct {
-			ID         int    `json:"id"`
-			HTMLURL    string `json:"html_url"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			HeadBranch string `json:"head_branch"`
-			Event      string `json:"event"`
-			CreatedAt  string `json:"created_at"`
+			ID           int    `json:"id"`
+			HTMLURL      string `json:"html_url"`
+			Status       string `json:"status"`
+			Conclusion   string `json:"conclusion"`
+			HeadBranch   string `json:"head_branch"`
+			Event        string `json:"event"`
+			CreatedAt    string `json:"created_at"`
 			RunStartedAt string `json:"run_started_at"`
-			UpdatedAt  string `json:"updated_at"`
+			UpdatedAt    string `json:"updated_at"`
 		} `json:"workflow_runs"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -502,15 +502,15 @@ func (a *GitHubActionsAdapter) jobsForRun(ctx context.Context, cfg *GitHubAction
 
 	var jobsResp struct {
 		Jobs []struct {
-			ID         int    `json:"id"`
-			Name       string `json:"name"`
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			HTMLURL    string `json:"html_url"`
-			RunnerName string `json:"runner_name"`
-			StartedAt  string `json:"started_at"`
+			ID          int    `json:"id"`
+			Name        string `json:"name"`
+			Status      string `json:"status"`
+			Conclusion  string `json:"conclusion"`
+			HTMLURL     string `json:"html_url"`
+			RunnerName  string `json:"runner_name"`
+			StartedAt   string `json:"started_at"`
 			CompletedAt string `json:"completed_at"`
-			Steps []struct {
+			Steps       []struct {
 				Name        string `json:"name"`
 				Status      string `json:"status"`
 				Conclusion  string `json:"conclusion"`

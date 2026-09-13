@@ -209,6 +209,7 @@ GET /roles/:id/permissions
 GET /rules
 GET /scans
 GET /scans/:id
+GET /scans/:id/report
 GET /schedules
 GET /schedules/:id
 GET /secrets/*path
@@ -218,6 +219,7 @@ GET /services
 GET /settings
 GET /shared
 GET /sources
+GET /sonar/projects
 GET /sprints
 GET /ssh-commands
 GET /ssh-terminal/:host_id
@@ -306,6 +308,7 @@ POST /ai/workflow/build
 POST /ai/workflow/preview
 POST /alerts/:id/resolve
 POST /api/v1/webhooks/gitlab
+POST /api/v1/security/sonar/webhook
 POST /automation/rules
 POST /blueprint-groups/:id/deploy-docker
 POST /blueprint-groups/:id/deploy-kubernetes
@@ -378,6 +381,7 @@ POST /rules
 POST /rules/:id/test
 POST /scan-all
 POST /scans/:id/cancel
+POST /sonar/issues/transition
 POST /schedules
 POST /secrets/*path
 POST /settings/test-otlp

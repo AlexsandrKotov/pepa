@@ -27,42 +27,42 @@ func registerServiceBlueprintRoutes(r *gin.RouterGroup, deps Dependencies) {
 }
 
 type serviceBlueprintRow struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description"`
-	SourceType       string            `json:"source_type"`
-	HelmRepoID       *string           `json:"helm_repo_id"`
-	Image            string            `json:"image"`
-	ChartURL         string            `json:"chart_url"`
-	ChartName        string            `json:"chart_name"`
-	ChartVersion     string            `json:"chart_version"`
-	ChartPath        string            `json:"chart_path"`
-	Namespace        string            `json:"namespace"`
-	ValuesYAML       string            `json:"values_yaml"`
-	CPU              string            `json:"cpu"`
-	Memory           string            `json:"memory"`
-	Replicas         int               `json:"replicas"`
-	Ports            []int             `json:"ports"`
-	Category         string            `json:"category"`
-	GroupIDs         []string          `json:"group_ids"`
-	ComposeYAML      string            `json:"compose_yaml"`
-	ComposeFolderPath string           `json:"compose_folder_path"`
-	ComposeGitURL    string            `json:"compose_git_url"`
-	CreatedAt        time.Time         `json:"created_at"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	SourceType        string    `json:"source_type"`
+	HelmRepoID        *string   `json:"helm_repo_id"`
+	Image             string    `json:"image"`
+	ChartURL          string    `json:"chart_url"`
+	ChartName         string    `json:"chart_name"`
+	ChartVersion      string    `json:"chart_version"`
+	ChartPath         string    `json:"chart_path"`
+	Namespace         string    `json:"namespace"`
+	ValuesYAML        string    `json:"values_yaml"`
+	CPU               string    `json:"cpu"`
+	Memory            string    `json:"memory"`
+	Replicas          int       `json:"replicas"`
+	Ports             []int     `json:"ports"`
+	Category          string    `json:"category"`
+	GroupIDs          []string  `json:"group_ids"`
+	ComposeYAML       string    `json:"compose_yaml"`
+	ComposeFolderPath string    `json:"compose_folder_path"`
+	ComposeGitURL     string    `json:"compose_git_url"`
+	CreatedAt         time.Time `json:"created_at"`
 	// Template metadata (system blueprints)
-	Slug             string            `json:"slug,omitempty"`
-	TenantID         string            `json:"tenant_id,omitempty"`
-	Icon             string            `json:"icon,omitempty"`
-	Language         string            `json:"language,omitempty"`
-	Framework        string            `json:"framework,omitempty"`
-	Tags             []string          `json:"tags"`
-	IsEnabled        bool              `json:"is_enabled"`
-	IsSystem         bool              `json:"is_system"`
-	DockerfileTmpl   string            `json:"dockerfile_tmpl,omitempty"`
-	HelmChart        json.RawMessage   `json:"helm_chart,omitempty"`
-	CICDTmpl         string            `json:"cicd_tmpl,omitempty"`
-	DefaultValues    json.RawMessage   `json:"default_values,omitempty"`
-	ResourceDefaults json.RawMessage   `json:"resource_defaults,omitempty"`
+	Slug             string          `json:"slug,omitempty"`
+	TenantID         string          `json:"tenant_id,omitempty"`
+	Icon             string          `json:"icon,omitempty"`
+	Language         string          `json:"language,omitempty"`
+	Framework        string          `json:"framework,omitempty"`
+	Tags             []string        `json:"tags"`
+	IsEnabled        bool            `json:"is_enabled"`
+	IsSystem         bool            `json:"is_system"`
+	DockerfileTmpl   string          `json:"dockerfile_tmpl,omitempty"`
+	HelmChart        json.RawMessage `json:"helm_chart,omitempty"`
+	CICDTmpl         string          `json:"cicd_tmpl,omitempty"`
+	DefaultValues    json.RawMessage `json:"default_values,omitempty"`
+	ResourceDefaults json.RawMessage `json:"resource_defaults,omitempty"`
 }
 
 // selectBlueprintCols returns the SQL column list for selecting a blueprint.
@@ -129,7 +129,7 @@ func listServiceBlueprints(deps Dependencies) gin.HandlerFunc {
 		ctx := c.Request.Context()
 
 		// Build dynamic query with filters
-		typeFilter := c.Query("type")   // "system" or "user"
+		typeFilter := c.Query("type") // "system" or "user"
 		catFilter := c.Query("category")
 		searchFilter := c.Query("search")
 
@@ -204,26 +204,26 @@ func createServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 		userID := auth.GetUserID(c)
 
 		var req struct {
-			Name          string   `json:"name" binding:"required"`
-			Description   string   `json:"description"`
-			SourceType    string   `json:"source_type" binding:"required"`
-			HelmRepoID    *string  `json:"helm_repo_id"`
-			Image         string   `json:"image"`
-			ChartURL      string   `json:"chart_url"`
-			ChartName     string   `json:"chart_name"`
-			ChartVersion  string   `json:"chart_version"`
-			ChartPath     string   `json:"chart_path"`
-			Namespace     string   `json:"namespace"`
-			ValuesYAML    string   `json:"values_yaml"`
-			CPU           string   `json:"cpu"`
-			Memory        string   `json:"memory"`
-			Replicas      int      `json:"replicas"`
-			Ports         []int    `json:"ports"`
-			Category      string   `json:"category"`
-			GroupIDs      []string `json:"group_ids"`
-			ComposeYAML      string   `json:"compose_yaml"`
-			ComposeFolderPath string  `json:"compose_folder_path"`
-			ComposeGitURL    string   `json:"compose_git_url"`
+			Name              string   `json:"name" binding:"required"`
+			Description       string   `json:"description"`
+			SourceType        string   `json:"source_type" binding:"required"`
+			HelmRepoID        *string  `json:"helm_repo_id"`
+			Image             string   `json:"image"`
+			ChartURL          string   `json:"chart_url"`
+			ChartName         string   `json:"chart_name"`
+			ChartVersion      string   `json:"chart_version"`
+			ChartPath         string   `json:"chart_path"`
+			Namespace         string   `json:"namespace"`
+			ValuesYAML        string   `json:"values_yaml"`
+			CPU               string   `json:"cpu"`
+			Memory            string   `json:"memory"`
+			Replicas          int      `json:"replicas"`
+			Ports             []int    `json:"ports"`
+			Category          string   `json:"category"`
+			GroupIDs          []string `json:"group_ids"`
+			ComposeYAML       string   `json:"compose_yaml"`
+			ComposeFolderPath string   `json:"compose_folder_path"`
+			ComposeGitURL     string   `json:"compose_git_url"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -338,26 +338,26 @@ func updateServiceBlueprint(deps Dependencies) gin.HandlerFunc {
 		}
 
 		var req struct {
-			Name          string   `json:"name" binding:"required"`
-			Description   string   `json:"description"`
-			SourceType    string   `json:"source_type" binding:"required"`
-			HelmRepoID    *string  `json:"helm_repo_id"`
-			Image         string   `json:"image"`
-			ChartURL      string   `json:"chart_url"`
-			ChartName     string   `json:"chart_name"`
-			ChartVersion  string   `json:"chart_version"`
-			ChartPath     string   `json:"chart_path"`
-			Namespace     string   `json:"namespace"`
-			ValuesYAML    string   `json:"values_yaml"`
-			CPU           string   `json:"cpu"`
-			Memory        string   `json:"memory"`
-			Replicas      int      `json:"replicas"`
-			Ports         []int    `json:"ports"`
-			Category      string   `json:"category"`
-			GroupIDs      []string `json:"group_ids"`
-			ComposeYAML      string   `json:"compose_yaml"`
-			ComposeFolderPath string  `json:"compose_folder_path"`
-			ComposeGitURL    string   `json:"compose_git_url"`
+			Name              string   `json:"name" binding:"required"`
+			Description       string   `json:"description"`
+			SourceType        string   `json:"source_type" binding:"required"`
+			HelmRepoID        *string  `json:"helm_repo_id"`
+			Image             string   `json:"image"`
+			ChartURL          string   `json:"chart_url"`
+			ChartName         string   `json:"chart_name"`
+			ChartVersion      string   `json:"chart_version"`
+			ChartPath         string   `json:"chart_path"`
+			Namespace         string   `json:"namespace"`
+			ValuesYAML        string   `json:"values_yaml"`
+			CPU               string   `json:"cpu"`
+			Memory            string   `json:"memory"`
+			Replicas          int      `json:"replicas"`
+			Ports             []int    `json:"ports"`
+			Category          string   `json:"category"`
+			GroupIDs          []string `json:"group_ids"`
+			ComposeYAML       string   `json:"compose_yaml"`
+			ComposeFolderPath string   `json:"compose_folder_path"`
+			ComposeGitURL     string   `json:"compose_git_url"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

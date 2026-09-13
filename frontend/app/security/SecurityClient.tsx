@@ -1336,6 +1336,7 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
   const sonarBranch = typeof sonarSummary.branch === 'string' ? sonarSummary.branch : '';
   const sonarDebt = typeof sonarSummary.technical_debt === 'string' ? sonarSummary.technical_debt : '';
   const sonarCiUrl = typeof sonarSummary.source_ci_url === 'string' ? sonarSummary.source_ci_url : '';
+  const sonarCiUrlSafe = sonarCiUrl.startsWith('http://') || sonarCiUrl.startsWith('https://') ? sonarCiUrl : '';
   const sonarConnectionId = typeof sonarSummary.connection_id === 'string' ? sonarSummary.connection_id : '';
   const sonarTruncated = sonarSummary.truncated === true;
   const sonarIssueTotal = configNumber(sonarSummary.issue_total);
@@ -1527,8 +1528,8 @@ function ScanDetailPanel({ scan, onClose }: { scan: ScanRun; onClose: () => void
                     Issue list truncated{sonarIssueTotal !== null ? ` (${sonarIssueTotal} total)` : ''}
                   </span>
                 )}
-                {sonarCiUrl && (
-                  <a href={sonarCiUrl} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent)] hover:underline">CI pipeline</a>
+                {sonarCiUrlSafe && (
+                  <a href={sonarCiUrlSafe} target="_blank" rel="noreferrer" className="text-xs text-[var(--accent)] hover:underline">CI pipeline</a>
                 )}
                 {active.report_url && (
                   <a href={active.report_url} target="_blank" rel="noreferrer" className="ml-auto text-xs text-[var(--accent)] hover:underline shrink-0">Open in SonarQube</a>
