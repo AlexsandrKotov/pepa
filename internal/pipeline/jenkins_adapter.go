@@ -87,7 +87,7 @@ func jenkinsGetJSON(ctx context.Context, client *http.Client, reqURL, username, 
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("jenkins API returned %d: %s", resp.StatusCode, string(b))
@@ -163,7 +163,7 @@ func (a *JenkinsAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 
 	for _, prop := range jobInfo.Property {
 		for _, pd := range prop.ParameterDefinitions {
-			schemaType := "string"
+			var schemaType string
 			var enumVals []string
 
 			switch pd.Type {
@@ -241,7 +241,7 @@ func (a *JenkinsAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 	if err != nil {
 		return nil, fmt.Errorf("trigger jenkins build: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)
@@ -385,7 +385,7 @@ func (a *JenkinsAdapter) Logs(ctx context.Context, raw json.RawMessage, external
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
@@ -413,7 +413,7 @@ func (a *JenkinsAdapter) Cancel(ctx context.Context, raw json.RawMessage, extern
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(resp.Body)

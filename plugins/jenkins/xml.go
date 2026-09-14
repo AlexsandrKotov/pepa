@@ -109,26 +109,6 @@ func escapeXML(s string) string {
 	return s
 }
 
-// mapJenkinsParamType maps a Jenkins parameter _class to a JSON Schema type.
-func mapJenkinsParamType(jenkinsType string) string {
-	switch jenkinsType {
-	case "BooleanParameterDefinition":
-		return "boolean"
-	case "ChoiceParameterDefinition":
-		return "enum"
-	case "TextParameterDefinition":
-		return "text"
-	case "PasswordParameterDefinition":
-		return "password"
-	case "FileParameterDefinition":
-		return "file"
-	case "RunParameterDefinition":
-		return "run"
-	default:
-		return "string"
-	}
-}
-
 // mapJenkinsStatus maps a Jenkins build result to a PEPA status string.
 func mapJenkinsStatus(result *string, building bool) string {
 	if building {

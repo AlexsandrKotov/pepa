@@ -97,7 +97,7 @@ func (c *JenkinsClient) crumb(ctx context.Context) (field, value string, err err
 	if err != nil {
 		return "", "", fmt.Errorf("fetch crumb: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		// CSRF protection is disabled on this Jenkins instance
@@ -151,7 +151,7 @@ func (c *JenkinsClient) getJSON(ctx context.Context, path string, result interfa
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -167,7 +167,7 @@ func (c *JenkinsClient) getText(ctx context.Context, path string) (string, error
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -194,7 +194,7 @@ func (c *JenkinsClient) getTextProgressive(ctx context.Context, path string) (st
 	if err != nil {
 		return "", false, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -224,7 +224,7 @@ func (c *JenkinsClient) postForm(ctx context.Context, path string, data url.Valu
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
@@ -239,7 +239,7 @@ func (c *JenkinsClient) postXML(ctx context.Context, path string, xmlBody string
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
@@ -254,7 +254,7 @@ func (c *JenkinsClient) postRaw(ctx context.Context, path string, contentType st
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -550,7 +550,7 @@ func (c *JenkinsClient) GetSystemInfo(ctx context.Context) (*JenkinsSystemInfo, 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
