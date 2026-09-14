@@ -611,7 +611,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	}
 	args = append(args, imageRef)
 
-	cmd := exec.CommandContext(singleCtx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	cmd := exec.CommandContext(singleCtx, "trivy", args...) //nolint:gosec // #nosec G204 G702: trivy is an admin-configured binary; args are built from controlled image refs
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
