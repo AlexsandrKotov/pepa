@@ -21,6 +21,13 @@ type Config struct {
 	CORS          CORSConfig          `mapstructure:"cors"`
 	Worker        WorkerConfig        `mapstructure:"worker"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
+	// HostDataDir is the root directory on the host containing all
+	// scannable/deployable projects. When PEPA runs inside Docker this
+	// directory is bind-mounted into the container at the same path so that
+	// Trivy scans, Terraform local_path, Docker Compose folder_path, and
+	// blueprint deployments can access host files. Empty means native mode
+	// (no path translation).
+	HostDataDir string `mapstructure:"host_data_dir"`
 }
 
 type ServerConfig struct {
@@ -565,6 +572,15 @@ func (c *Config) LoadFromEnv() {
 	}
 	if v := getenv("SYSLOG_FACILITY"); v != "" {
 		c.Observability.Syslog.Facility = v
+	}
+
+	// Host data directory — root for all host filesystem access (scans, deploys).
+	// HOST_DATA_DIR takes precedence; falls back to HOST_HOME_DIR for backward
+	// compatibility with older deployments.
+	if v := getenv("HOST_DATA_DIR"); v != "" {
+		c.HostDataDir = v
+	} else if v := getenv("HOST_HOME_DIR"); v != "" {
+		c.HostDataDir = v
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/hostpath"
 	"github.com/pepa/pepa/internal/plugin/engine"
 	"github.com/pepa/pepa/internal/repository"
 )
@@ -384,6 +385,29 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	// prepend the registry hostname to the image reference if missing.
 	// Trivy uses environment variables (not CLI flags) for registry auth.
 	imageRef := target.TargetRef
+
+	// For filesystem targets, resolve the path through hostpath to handle
+	// Docker container path translation and validate it's within HOST_DATA_DIR.
+	if target.TargetType == "filesystem" {
+		hostDataDir := os.Getenv("HOST_DATA_DIR")
+		resolved, resolveErr := hostpath.Resolve(imageRef, hostDataDir)
+		if resolveErr != nil {
+			return nil, nil, fmt.Errorf("filesystem target path resolution failed: %w", resolveErr)
+		}
+		// Verify the resolved path actually exists inside the container.
+		if info, statErr := os.Stat(resolved); statErr != nil || !info.IsDir() {
+			slog.Error("filesystem scan target not accessible inside container",
+				"target_ref", imageRef,
+				"resolved_path", resolved,
+				"host_data_dir", hostDataDir,
+				"error", statErr,
+			)
+			return nil, nil, fmt.Errorf("scan target path does not exist inside the container: %s (resolved to %s). Ensure HOST_DATA_DIR is mounted correctly", imageRef, resolved)
+		}
+		imageRef = resolved
+		slog.Info("filesystem target path resolved", "original", target.TargetRef, "resolved", resolved)
+	}
+
 	var regUsername, regPassword, regToken string
 	var regHost string
 	var regRepoData *repository.RegistryRepo

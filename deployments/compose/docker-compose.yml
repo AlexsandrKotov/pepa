@@ -186,6 +186,8 @@ services:
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-pepa}
       OTEL_SAMPLING_RATE: ${OTEL_SAMPLING_RATE:-1.0}
       OTEL_INSECURE: ${OTEL_INSECURE:-true}
+      # Host data directory — root for all host filesystem access (scans, deploys).
+      HOST_DATA_DIR: ${HOST_DATA_DIR:-}
     ports:
       - "${API_PORT:-8088}:8080"
     healthcheck:
@@ -202,6 +204,7 @@ services:
       - ${MOUNT_DOCK_SOCKET:-/dev/null}:/var/run/docker.sock:ro
       - pepa-token-tmpfs:/var/run/pepa
       - trivy-cache:/tmp/trivy-cache
+      - ${HOST_DATA_DIR:-/dev/null}:${HOST_DATA_DIR:-/dev/null}:ro
     depends_on:
       postgres:
         condition: service_healthy

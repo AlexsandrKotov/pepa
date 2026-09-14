@@ -879,11 +879,10 @@ function CreateTargetModal({ onClose, onCreated, editTarget }: { onClose: () => 
               </div>
 
               {codeSource === 'local' && (
-                <div>
-                  <label className="label">Local Path *</label>
-                  <input type="text" value={localPath} onChange={e => setLocalPath(e.target.value)} className="input font-mono text-[12px]" placeholder="/path/to/project" />
-                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Absolute path on the server filesystem</p>
-                </div>
+                <DirectoryBrowser
+                  value={localPath}
+                  onChange={setLocalPath}
+                />
               )}
 
               {codeSource === 'git_url' && (
@@ -2788,6 +2787,158 @@ function FindingsTab({ findings, summary }: { findings: SecurityFinding[]; summa
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Directory Browser Component ─────────────────────────────────
+
+interface DirEntry {
+  name: string;
+  path: string;
+}
+
+function DirectoryBrowser({ value, onChange }: { value: string; onChange: (path: string) => void }) {
+  const [baseDir, setBaseDir] = useState('');
+  const [currentPath, setCurrentPath] = useState('');
+  const [directories, setDirectories] = useState<DirEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [configured, setConfigured] = useState(true);
+  const [error, setError] = useState('');
+
+  // Fetch HOST_DATA_DIR config on mount
+  useEffect(() => {
+    fetch('/api/v1/host/config')
+      .then(r => r.json())
+      .then(data => {
+        setConfigured(data.configured);
+        if (data.configured) {
+          setBaseDir(data.host_data_dir);
+          setCurrentPath(data.host_data_dir);
+        }
+      })
+      .catch(() => setConfigured(false));
+  }, []);
+
+  // Fetch directory listing when currentPath changes
+  const fetchDirectories = useCallback(async (path?: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const params = path ? `?path=${encodeURIComponent(path)}` : '';
+      const res = await fetch(`/api/v1/host/directories${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to list directories');
+        return;
+      }
+      setCurrentPath(data.current_path);
+      setDirectories(data.directories || []);
+    } catch {
+      setError('Failed to connect to server');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Load directories when currentPath changes
+  useEffect(() => {
+    if (currentPath) {
+      fetchDirectories(currentPath);
+    }
+  }, [currentPath, fetchDirectories]);
+
+  // Build breadcrumb segments from current path
+  const breadcrumbs = useMemo(() => {
+    if (!currentPath || !baseDir) return [];
+    const relative = currentPath.startsWith(baseDir) ? currentPath.slice(baseDir.length) : '';
+    const parts = relative.split('/').filter(Boolean);
+    const crumbs = [{ name: baseDir.split('/').pop() || baseDir, path: baseDir }];
+    let accumulated = baseDir;
+    for (const part of parts) {
+      accumulated = accumulated + '/' + part;
+      crumbs.push({ name: part, path: accumulated });
+    }
+    return crumbs;
+  }, [currentPath, baseDir]);
+
+  if (!configured) {
+    return (
+      <div>
+        <label className="label">Local Path *</label>
+        <input type="text" value={value} onChange={e => onChange(e.target.value)} className="input font-mono text-[12px]" placeholder="/path/to/project" />
+        <p className="text-[10px] text-[var(--text-tertiary)] mt-1">Absolute path on the server filesystem</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="label">Local Path *</label>
+
+      {/* Breadcrumb navigation */}
+      <div className="flex items-center gap-1 flex-wrap mb-2 px-2 py-1.5 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px]">
+        {breadcrumbs.map((crumb, i) => (
+          <span key={crumb.path} className="flex items-center gap-1">
+            {i > 0 && <span className="text-[var(--text-tertiary)]">/</span>}
+            <button
+              type="button"
+              onClick={() => fetchDirectories(crumb.path)}
+              className={`hover:text-[var(--accent)] transition-colors ${i === breadcrumbs.length - 1 ? 'font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}
+            >
+              {crumb.name}
+            </button>
+          </span>
+        ))}
+      </div>
+
+      {/* Directory listing */}
+      <div className="border border-[var(--border)] rounded-lg max-h-[180px] overflow-y-auto bg-[var(--bg-primary)]">
+        {loading && (
+          <div className="p-3 text-center text-[11px] text-[var(--text-tertiary)]">Loading...</div>
+        )}
+        {error && (
+          <div className="p-3 text-center text-[11px] text-red-500">{error}</div>
+        )}
+        {!loading && !error && directories.length === 0 && (
+          <div className="p-3 text-center text-[11px] text-[var(--text-tertiary)]">No subdirectories found</div>
+        )}
+        {directories.map(dir => (
+          <button
+            key={dir.path}
+            type="button"
+            onClick={() => fetchDirectories(dir.path)}
+            onDoubleClick={() => onChange(dir.path)}
+            className="w-full text-left px-3 py-1.5 text-[11px] hover:bg-[var(--bg-secondary)] border-b border-[var(--border)] last:border-b-0 flex items-center gap-2 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5 text-[var(--text-tertiary)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+            <span className="truncate">{dir.name}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Selected path display and confirm button */}
+      <div className="flex items-center gap-2 mt-2">
+        <input
+          type="text"
+          value={value || currentPath}
+          onChange={e => onChange(e.target.value)}
+          className="input font-mono text-[11px] flex-1"
+          placeholder="Selected directory path"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(currentPath)}
+          className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[11px] font-medium hover:opacity-90 transition-opacity flex-shrink-0"
+        >
+          Select
+        </button>
+      </div>
+      <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+        Browse or type a path. All paths must be within the configured host data directory.
+      </p>
     </div>
   );
 }

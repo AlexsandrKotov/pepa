@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/pepa/pepa/internal/hostpath"
 )
 
 // HostConfig holds the connection details for a Docker host.
@@ -335,22 +337,14 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 	return nil
 }
 
-// translateToHostHome translates a host path like /Users/alice/project to /host-home/project.
-// Returns empty string if the path doesn't match known host home prefixes.
+// translateToHostHome translates a host path to a container-accessible path
+// using the unified hostpath package. Returns empty string if translation fails.
 func translateToHostHome(p string) string {
-	prefixes := []string{"/Users/", "/home/"}
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(p, prefix) {
-			rest := strings.TrimPrefix(p, prefix)
-			if idx := strings.Index(rest, "/"); idx >= 0 {
-				rest = rest[idx+1:]
-			} else {
-				continue
-			}
-			return filepath.Join("/host-home", rest)
-		}
+	resolved, err := hostpath.Resolve(p, os.Getenv("HOST_DATA_DIR"))
+	if err != nil {
+		return ""
 	}
-	return ""
+	return resolved
 }
 
 // ComposeDown removes a compose stack.

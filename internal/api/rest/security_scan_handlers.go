@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
+	"github.com/pepa/pepa/internal/hostpath"
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/internal/security"
 )
@@ -127,6 +129,19 @@ func createScanTarget(deps Dependencies) gin.HandlerFunc {
 		}
 		if input.ScanConfig == nil {
 			input.ScanConfig = map[string]any{}
+		}
+
+		// Validate filesystem target paths are within HOST_DATA_DIR.
+		if input.TargetType == "filesystem" {
+			hostDataDir := os.Getenv("HOST_DATA_DIR")
+			if hostDataDir == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "HOST_DATA_DIR is not configured — filesystem scan targets require the admin to set HOST_DATA_DIR"})
+				return
+			}
+			if err := hostpath.Validate(input.TargetRef, hostDataDir); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		tenantID := auth.GetTenantID(c)
@@ -324,6 +339,20 @@ func updateScanTarget(deps Dependencies) gin.HandlerFunc {
 		if input.TargetRef != "" {
 			existing.TargetRef = input.TargetRef
 		}
+
+		// Validate filesystem target paths are within HOST_DATA_DIR.
+		if existing.TargetType == "filesystem" {
+			hostDataDir := os.Getenv("HOST_DATA_DIR")
+			if hostDataDir == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "HOST_DATA_DIR is not configured — filesystem scan targets require the admin to set HOST_DATA_DIR"})
+				return
+			}
+			if err := hostpath.Validate(existing.TargetRef, hostDataDir); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
 		if input.ConnectionID != nil {
 			existing.ConnectionID = input.ConnectionID
 		}
@@ -961,5 +990,63 @@ func deleteScanIgnore(deps Dependencies) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "ignore deleted"})
+	}
+}
+
+// ── Host Data Directory Browser ────────────────────────────────
+
+// registerHostDataRoutes registers the directory listing endpoint used by the
+// frontend directory browser. The endpoint lists subdirectories within
+// HOST_DATA_DIR so users can pick scan targets, Terraform stacks, etc.
+func registerHostDataRoutes(v1 *gin.RouterGroup, deps Dependencies) {
+	host := v1.Group("/host")
+	host.GET("/directories", listHostDirectories(deps))
+	host.GET("/config", getHostDataConfig(deps))
+}
+
+// getHostDataConfig returns the HOST_DATA_DIR setting so the frontend knows
+// the root directory for the directory browser.
+func getHostDataConfig(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		hostDataDir := os.Getenv("HOST_DATA_DIR")
+		c.JSON(http.StatusOK, gin.H{
+			"host_data_dir":    hostDataDir,
+			"configured":       hostDataDir != "",
+		})
+	}
+}
+
+// listHostDirectories lists subdirectories within HOST_DATA_DIR.
+// Query parameter "path" optionally specifies a subdirectory to list.
+func listHostDirectories(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		hostDataDir := os.Getenv("HOST_DATA_DIR")
+		if hostDataDir == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "HOST_DATA_DIR is not configured — ask your admin to set it in .env",
+			})
+			return
+		}
+
+		subPath := c.Query("path")
+		dirs, err := hostpath.ListDirectories(subPath, hostDataDir)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		currentPath := hostDataDir
+		if subPath != "" {
+			resolved, resolveErr := hostpath.Resolve(subPath, hostDataDir)
+			if resolveErr == nil {
+				currentPath = resolved
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"base_dir":     hostDataDir,
+			"current_path": currentPath,
+			"directories":  dirs,
+		})
 	}
 }

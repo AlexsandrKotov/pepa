@@ -305,6 +305,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 		registerRemoteConsoleRoutes(v1, deps)
 		// Plugin activity endpoints moved under /audit (plugin-actions, ssh-commands)
 		registerSecurityScanRoutes(v1, deps)
+		registerHostDataRoutes(v1, deps)
 		registerDevOpsRoutes(v1, deps)
 		registerNotificationRoutes(v1, deps)
 		registerAutoDeployRoutes(v1, deps)

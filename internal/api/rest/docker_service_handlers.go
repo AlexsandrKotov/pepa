@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,49 +16,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
 	dockerpkg "github.com/pepa/pepa/internal/docker"
+	"github.com/pepa/pepa/internal/hostpath"
 	"github.com/pepa/pepa/internal/repository"
 )
 
-// hostHomePrefixes are common absolute-path prefixes on host machines.
-// When PEPA runs inside Docker the host home directory is bind-mounted at
-// /host-home so these paths become accessible after translation.
-var hostHomePrefixes = []string{"/Users/", "/home/"}
-
-// resolveHostPath translates a host absolute path (e.g. /Users/alice/project)
-// to a path accessible inside the current container. When PEPA runs natively
-// the path is returned as-is. When running inside Docker the host home
-// directory is mounted read-only at /host-home, so a host path like
-// /Users/alice/project is translated to /host-home/project.
+// resolveHostPath translates a host absolute path to a path accessible inside
+// the current container. Delegates to hostpath.Resolve using HOST_DATA_DIR.
 func resolveHostPath(p string) (string, error) {
-	absPath, err := filepath.Abs(p)
-	if err != nil {
-		return "", fmt.Errorf("invalid path: %w", err)
-	}
-
-	// 1. Direct access (native mode or path already inside container).
-	if info, statErr := os.Stat(absPath); statErr == nil && info.IsDir() {
-		return absPath, nil
-	}
-
-	// 2. Docker mode — translate host home path → /host-home/...
-	if filepath.IsAbs(p) {
-		for _, prefix := range hostHomePrefixes {
-			if strings.HasPrefix(p, prefix) {
-				rest := strings.TrimPrefix(p, prefix)
-				if idx := strings.Index(rest, "/"); idx >= 0 {
-					rest = rest[idx+1:]
-				} else {
-					continue
-				}
-				containerPath := filepath.Join("/host-home", rest)
-				if info, statErr := os.Stat(containerPath); statErr == nil && info.IsDir() {
-					return containerPath, nil
-				}
-			}
-		}
-	}
-
-	return "", fmt.Errorf("folder not accessible: %s", p)
+	return hostpath.Resolve(p, os.Getenv("HOST_DATA_DIR"))
 }
 
 func registerDockerServiceRoutes(r *gin.RouterGroup, deps Dependencies) {
