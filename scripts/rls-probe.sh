@@ -120,15 +120,15 @@ log "Probing plugins (global table)..."
 plugins_owner=$(psql_owner "SELECT count(*) FROM plugins" 2>/dev/null) || plugins_owner="ERR"
 plugins_app=$(psql_app "SELECT count(*) FROM plugins" 2>/dev/null) || plugins_app="ERR"
 
-if [ "$plugins_app" = "ERR" ]; then
-  fail "plugins: app role cannot read (RLS policy missing?)"
+if [ "$plugins_app" = "ERR" ] || [ "$plugins_owner" = "ERR" ]; then
+  fail "plugins: owner=$plugins_owner app=$plugins_app (query error or app role cannot read)"
   failed=$((failed + 1))
 elif [ "$plugins_app" = "$plugins_owner" ]; then
   ok "plugins: $plugins_app rows (global read works)"
   passed=$((passed + 1))
 else
-  warn "plugins: owner=$plugins_owner app=$plugins_app (unexpected — plugins should be globally readable)"
-  skipped=$((skipped + 1))
+  fail "plugins: owner=$plugins_owner app=$plugins_app (plugins should be globally readable by contract)"
+  failed=$((failed + 1))
 fi
 
 # ── Summary ──────────────────────────────────────────────────

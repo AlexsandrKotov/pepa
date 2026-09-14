@@ -1,0 +1,8 @@
+extends:
+  - spectral:oas
+
+rules:
+  info-contact: off
+  info-description: off
+  oas3-api-server: off
+  no-$ref-siblings: off

@@ -84,7 +84,11 @@ for plugin_dir in "$BUILTIN_DIR"/*/; do
 
   log "Installing $name (version ${version:-unknown})..."
 
-  http_code=$(curl -sf -o /tmp/pepa-install-resp.json -w '%{http_code}' \
+  # Do NOT use -f: we need the actual HTTP code to distinguish
+  # "already installed" (400) and "binary not available" (409) from
+  # real failures. -f would map all 4xx/5xx to a non-zero exit, and
+  # the || fallback would overwrite the code to "000".
+  http_code=$(curl -sS -o /tmp/pepa-install-resp.json -w '%{http_code}' \
     -X POST "$PEPA_URL/api/v1/marketplace/$name/install" \
     -H "Authorization: Bearer $PEPA_TOKEN" \
     -H "Content-Type: application/json" \
