@@ -332,9 +332,6 @@ export default function PipelineBuilderPage() {
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
-      <div className="mx-[-24px] mt-[-24px] mb-6 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-center text-[12px] font-semibold text-amber-600">
-        ⚠ DEMO ENVIRONMENT — Pipeline builds are simulated and do not create real infrastructure.
-      </div>
       <div className="px-6 py-6 space-y-6">
       {/* Header */}
       <div className="page-animate flex items-center justify-between">

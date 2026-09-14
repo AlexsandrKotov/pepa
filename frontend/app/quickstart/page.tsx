@@ -10,11 +10,6 @@ export default function QuickstartPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
 
-  const demoBanner = (
-    <div className="mx-[-24px] mt-[-24px] mb-6 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-center text-[12px] font-semibold text-amber-600">
-      ⚠ DEMO ENVIRONMENT — Actions may write to real database. Do not use production credentials.
-    </div>
-  );
   
   // Section 1: Register service
   const [serviceName, setServiceName] = useState('');
@@ -193,7 +188,6 @@ export default function QuickstartPage() {
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
-      {demoBanner}
       <div className="px-6 py-6 space-y-6 max-w-4xl">
       <div className="page-animate mb-8">
         <h1 className="page-title-modern">Quickstart Guide</h1>

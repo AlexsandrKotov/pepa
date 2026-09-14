@@ -356,6 +356,23 @@ CREATE INDEX IF NOT EXISTS idx_exec_workflow ON workflow_executions(workflow_id,
 CREATE INDEX IF NOT EXISTS idx_exec_status ON workflow_executions(tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_step_exec ON step_executions(execution_id, step_name);
 
+-- Team workflow configs (stages, gitops target, CI, verification)
+CREATE TABLE IF NOT EXISTS team_workflow_configs (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL,
+    team_name       VARCHAR(128) NOT NULL,
+    stages          JSONB NOT NULL DEFAULT '[]',
+    gitops          JSONB NOT NULL DEFAULT '{}',
+    ci              JSONB NOT NULL DEFAULT '{}',
+    verification    JSONB NOT NULL DEFAULT '{}',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT team_workflow_configs_tenant_team_unique UNIQUE (tenant_id, team_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_workflow_configs_tenant
+    ON team_workflow_configs (tenant_id);
+
 -- ============================================================
 -- DASHBOARDS
 -- ============================================================
@@ -1359,6 +1376,11 @@ CREATE POLICY tenant_isolation_clusters ON clusters
 ALTER TABLE workflows ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_workflows ON workflows;
 CREATE POLICY tenant_isolation_workflows ON workflows
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
+
+ALTER TABLE team_workflow_configs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation_team_workflow_configs ON team_workflow_configs;
+CREATE POLICY tenant_isolation_team_workflow_configs ON team_workflow_configs
     USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE scorecards ENABLE ROW LEVEL SECURITY;

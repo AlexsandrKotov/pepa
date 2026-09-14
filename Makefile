@@ -235,10 +235,15 @@ build-plugin-example:
 
 # ── Plugins ──────────────────────────────────────────────────
 
-# All plugin source directories (plugins/<name>/ with Go files)
+# All plugin source directories (plugins/<name>/ with Go files).
+# ai_bot is excluded on purpose: it is a standalone bot process that calls the
+# PEPA API over HTTP, not a go-plugin. Building it into plugins/bin/ makes the
+# plugin manager spawn it, fail the gRPC handshake and log a warning on every
+# start of api-server and worker.
 PLUGIN_DIRS := $(shell find plugins -mindepth 1 -maxdepth 1 -type d \
 	! -name bin ! -name examples ! -name sdk-go ! -name builtin \
-	! -name community ! -name premium ! -name premium-bin ! -name README.md 2>/dev/null)
+	! -name community ! -name premium ! -name premium-bin ! -name ai_bot \
+	! -name README.md 2>/dev/null)
 
 # Plugins default to Linux/amd64 for Docker containers.
 # Override: make plugins GOOS= GOARCH=
