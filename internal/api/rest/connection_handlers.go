@@ -665,6 +665,8 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 		switch conn.Type {
 		case "gitlab":
 			pluginName = "gitlab"
+		case "jenkins":
+			pluginName = "jenkins"
 		case "git":
 			// Route to the appropriate plugin based on the git provider
 			switch provider, _ := conn.Config["provider"].(string); provider {
@@ -807,6 +809,8 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 		switch conn.Type {
 		case "gitlab":
 			pluginName = "gitlab"
+		case "jenkins":
+			pluginName = "jenkins"
 		case "git":
 			switch provider, _ := conn.Config["provider"].(string); provider {
 			case "gitlab":
@@ -914,6 +918,8 @@ func testProviderInfo(connType repository.ConnectionType, config map[string]any)
 		return "kubernetes", ""
 	case repository.ConnectionArgoCD:
 		return "argocd", "server_url"
+	case repository.ConnectionJenkins:
+		return "jenkins", "url"
 	default:
 		return "", ""
 	}

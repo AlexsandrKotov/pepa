@@ -317,6 +317,19 @@ const BRAND_ICONS: Record<string, React.ReactNode> = {
     <path d="M10 2a8 8 0 105.293 14.707l3 3a1 1 0 001.414-1.414l-3-3A8 8 0 0010 2zm-6 8a6 6 0 1112 0 6 6 0 01-12 0z" fill="#4E9BCD" />
   ),
 
+  // Jenkins — butler/ladybug in brand red
+  jenkins: (
+    <>
+      <circle cx="12" cy="12" r="10" fill="#D33833" />
+      <circle cx="12" cy="10" r="5" fill="#F5D0C5" />
+      <circle cx="10" cy="9" r="1" fill="#333" />
+      <circle cx="14" cy="9" r="1" fill="#333" />
+      <path d="M10 12c0 1.1.9 2 2 2s2-.9 2-2" fill="none" stroke="#333" strokeWidth="0.8" strokeLinecap="round" />
+      <ellipse cx="8" cy="7" rx="2.5" ry="3" fill="#D33833" />
+      <ellipse cx="16" cy="7" rx="2.5" ry="3" fill="#D33833" />
+    </>
+  ),
+
   // Services — layered boxes in cyan
   services: (
     <path d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" fill="none" stroke="#06B6D4" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />

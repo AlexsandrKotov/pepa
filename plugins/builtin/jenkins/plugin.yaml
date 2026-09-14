@@ -1,0 +1,142 @@
+name: jenkins
+version: "1.0.0"
+display_name: "Jenkins CI/CD"
+description: "Jenkins CI/CD integration — manage jobs, trigger builds with parameters, view/edit Groovy pipelines, monitor agents, and track pipeline stages."
+category: ci_provider
+type: builtin
+author: PEPA Team
+license: Apache-2.0
+icon: jenkins
+
+config_schema:
+  type: object
+  properties:
+    url:
+      type: string
+      description: "Jenkins server URL (e.g., https://jenkins.example.com)"
+    username:
+      type: string
+      description: "Jenkins username"
+    api_token:
+      type: string
+      description: "Jenkins API token (create under People → user → Configure → Add new Token)"
+    insecure:
+      type: boolean
+      description: "Allow self-signed TLS certificates (dev only)"
+      default: false
+  required:
+    - url
+    - username
+    - api_token
+
+actions:
+  # Jobs & Folders
+  - name: list_jobs
+    description: "List Jenkins jobs/pipelines (folder-aware)"
+  - name: list_folders
+    description: "Browse Jenkins folder hierarchy"
+  - name: get_job
+    description: "Get job details (config, last build, health, parameters)"
+  - name: create_job
+    description: "Create a new Pipeline job with Groovy script"
+    parameters:
+      type: object
+      properties:
+        job_name:
+          type: string
+          description: "Job name (use / for folder paths)"
+        script:
+          type: string
+          description: "Groovy pipeline script (Declarative or Scripted)"
+        sandbox:
+          type: boolean
+          description: "Enable Groovy sandbox"
+          default: true
+  - name: update_job
+    description: "Update job configuration (script, parameters)"
+  - name: delete_job
+    description: "Delete a Jenkins job"
+  - name: enable_job
+    description: "Enable a disabled job"
+  - name: disable_job
+    description: "Disable a job"
+
+  # Builds & Parameters
+  - name: list_builds
+    description: "List builds for a job"
+  - name: get_build
+    description: "Get build details (status, duration, params, causes)"
+  - name: trigger_build
+    description: "Trigger a build with optional parameters"
+    parameters:
+      type: object
+      properties:
+        job_name:
+          type: string
+          description: "Job name"
+        params:
+          type: object
+          description: "Build parameters (key-value pairs)"
+  - name: rebuild
+    description: "Re-run a build with the same parameters"
+  - name: stop_build
+    description: "Abort a running build"
+  - name: get_build_parameters
+    description: "Get parameter values used in a specific build"
+
+  # Groovy Pipeline Script
+  - name: get_pipeline_script
+    description: "Fetch the Jenkinsfile/Groovy script from job config"
+  - name: update_pipeline_script
+    description: "Update the Groovy pipeline script"
+    parameters:
+      type: object
+      properties:
+        job_name:
+          type: string
+          description: "Job name"
+        script:
+          type: string
+          description: "New Groovy pipeline script"
+  - name: get_job_config_xml
+    description: "Get raw config.xml for advanced editing"
+  - name: update_job_config_xml
+    description: "Write raw config.xml (power-user mode)"
+
+  # Logs & Artifacts
+  - name: get_build_log
+    description: "Get full console output"
+  - name: get_build_log_progressive
+    description: "Get progressive console output (for streaming live builds)"
+  - name: get_build_artifacts
+    description: "List build artifacts"
+  - name: get_build_changes
+    description: "Get SCM changes (commits) in a build"
+  - name: get_build_test_results
+    description: "Get test results from a build"
+
+  # Pipeline Stages
+  - name: get_pipeline_stages
+    description: "Get Pipeline stage view (requires Pipeline Stage View plugin)"
+
+  # Infrastructure
+  - name: list_views
+    description: "List Jenkins views"
+  - name: list_nodes
+    description: "List agent nodes (health, executors)"
+  - name: get_node
+    description: "Get agent node details"
+  - name: get_queue
+    description: "List queued builds"
+  - name: list_credentials
+    description: "List Jenkins credential IDs"
+
+  # System
+  - name: test_connection
+    description: "Verify URL and credentials"
+  - name: get_system_info
+    description: "Get Jenkins version and system info"
+
+health_check:
+  endpoint: /health
+  interval: 30s

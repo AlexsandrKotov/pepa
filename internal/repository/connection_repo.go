@@ -31,6 +31,7 @@ const (
 	ConnectionSecret       ConnectionType = "secret"
 	ConnectionNotification ConnectionType = "notification"
 	ConnectionSonarQube    ConnectionType = "sonarqube"
+	ConnectionJenkins      ConnectionType = "jenkins"
 	ConnectionKubernetes   ConnectionType = "kubernetes"
 	ConnectionArgoCD       ConnectionType = "argocd" // legacy — use ConnectionKubernetes for new connections
 	ConnectionFluxCD       ConnectionType = "fluxcd" // legacy — use ConnectionKubernetes for new connections

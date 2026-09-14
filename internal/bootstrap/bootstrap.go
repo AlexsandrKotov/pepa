@@ -407,6 +407,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	pipelineRegistry.Register("terraform", pipeline.NewTerraformAdapter())
 	pipelineRegistry.Register("github_actions", pipeline.NewGitHubActionsAdapter())
 	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
+	pipelineRegistry.Register("jenkins", pipeline.NewJenkinsAdapter())
 	// Register security scan adapter for pipeline integration
 	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo, c.RegistryRepo, c.ScanIgnoreRepo)
 	pipelineRegistry.Register("security_scan", pipeline.NewSecurityScanAdapter(secScanner, c.SecurityScanRepo))

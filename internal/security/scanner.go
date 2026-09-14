@@ -611,7 +611,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	}
 	args = append(args, imageRef)
 
-	cmd := exec.CommandContext(singleCtx, "trivy", args...) //nolint:gosec // #nosec G204 G702: trivy is an admin-configured binary; args are built from controlled image refs
+	cmd := exec.CommandContext(singleCtx, "trivy", args...) // #nosec G204,G702 //nolint:gosec // trivy is an admin-configured binary; args are built from controlled image refs
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
@@ -700,7 +700,7 @@ func (s *Scanner) scanSingleImage(ctx context.Context, imageRef, scanType, sever
 	}
 	args = append(args, imageRef)
 
-	cmd := exec.CommandContext(ctx, "trivy", args...) //nolint:gosec // #nosec // G204: trivy is an admin-configured binary
+	cmd := exec.CommandContext(ctx, "trivy", args...) // #nosec G204,G702 //nolint:gosec // trivy is an admin-configured binary
 	// Kill the entire process group on cancellation to prevent child processes
 	// from keeping pipes open and blocking cmd.Run() forever.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

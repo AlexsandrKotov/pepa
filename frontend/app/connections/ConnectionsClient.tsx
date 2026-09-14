@@ -31,6 +31,7 @@ const CONNECTION_TYPES: { type: ConnectionType; label: string; icon: string; col
   { type: 'vmware', label: 'VMware vCenter', icon: 'vmware', color: '#607D8B', description: 'ESXi virtual machines via vCenter', requiredPlugins: ['vmware'] },
   { type: 'notification', label: 'Notifications', icon: 'slack', color: '#E01E5A', description: 'Email, Webhook, Slack, Telegram, Microsoft Teams' },
   { type: 'sonarqube', label: 'SonarQube', icon: 'sonarqube', color: '#4E9BCD', description: 'Code quality and security analysis', requiredPlugins: ['sonarqube'] },
+  { type: 'jenkins', label: 'Jenkins', icon: 'jenkins', color: '#D33833', description: 'CI/CD pipelines — jobs, builds, agents, Groovy pipelines', requiredPlugins: ['jenkins'] },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -56,6 +57,7 @@ const TYPE_REQUIREMENTS: Record<ConnectionType, string> = {
   docker: 'Provide the Docker host address. For local Docker, no configuration is needed. For remote Docker, provide the TCP host address.',
   secret: 'Configure a Vault server for secret management. Provide the Vault server address and an authentication token.',
   sonarqube: 'You need your SonarQube server URL and a user token. Create a token in SonarQube under My Account → Security → Generate Token.',
+  jenkins: 'You need your Jenkins URL and an API token (or username + API token). Create a token in Jenkins under People → (user) → Configure → Add new Token.',
 };
 
 // Default Base URL / Model per AI provider
@@ -82,6 +84,7 @@ const VAULT_FIELDS: Record<string, string[]> = {
   argocd: ['auth_token'],
   fluxcd: ['kubeconfig'],
   notification: ['bot_token', 'webhook_url'],
+  jenkins: ['api_token', 'password'],
 };
 
 export default function ConnectionsClient({ initialConnections, initialType }: { initialConnections?: Connection[]; initialType?: string }) {
@@ -541,6 +544,10 @@ function AddConnectionModal({
     }
     if (selectedType === 'storage') {
       const ps = gitPluginStatus.s3;
+      return !ps || !ps.installed || !ps.enabled;
+    }
+    if (selectedType === 'jenkins') {
+      const ps = gitPluginStatus.jenkins;
       return !ps || !ps.installed || !ps.enabled;
     }
     return false;
@@ -1063,6 +1070,62 @@ function AddConnectionModal({
               <p className="text-xs text-[var(--text-tertiary)] -mt-2">
                 Scan targets pick up this connection under Security → Code Quality; tokens are never stored in the target configuration.
               </p>
+            </>
+          )}
+
+          {selectedType === 'jenkins' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Jenkins URL *</label>
+                <input
+                  type="url"
+                  value={config.url || ''}
+                  onChange={e => setConfig({ ...config, url: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                  placeholder="https://jenkins.example.com"
+                />
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  Base URL of your Jenkins instance. PEPA connects via the Jenkins REST API to manage jobs, trigger builds, and view Groovy pipelines.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Username *</label>
+                <input
+                  type="text"
+                  value={config.username || ''}
+                  onChange={e => setConfig({ ...config, username: e.target.value })}
+                  required
+                  className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                  placeholder="admin"
+                />
+              </div>
+              <VaultInput
+                label="API Token *"
+                field="api_token"
+                value={config.api_token || ''}
+                onChange={v => setConfig({ ...config, api_token: v })}
+                vaultRef={vaultRefs.api_token}
+                onOpenVault={onOpenVaultPicker}
+                onRemoveVault={onRemoveVault}
+                placeholder="11xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                required
+              />
+              <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+                Create an API token in Jenkins under People → (your user) → Configure → Add new Token. The token needs <code className="bg-[var(--border-light)] px-1 rounded">Job Read</code>, <code className="bg-[var(--border-light)] px-1 rounded">Job Build</code>, and <code className="bg-[var(--border-light)] px-1 rounded">Job Create</code> permissions.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="jenkins_insecure"
+                  checked={config.insecure === 'true'}
+                  onChange={e => setConfig({ ...config, insecure: e.target.checked ? 'true' : 'false' })}
+                  className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                />
+                <label htmlFor="jenkins_insecure" className="text-sm text-[var(--text-secondary)]">
+                  Skip TLS verification (for self-signed certificates)
+                </label>
+              </div>
             </>
           )}
 
