@@ -91,7 +91,15 @@ test-coverage: test
 
 test-integration:
 	@echo "→ Running integration tests (requires Docker)..."
-	@go test -tags=integration -race -timeout=5m ./internal/testenv/...
+	@go test -tags=integration -race -count=1 -timeout=5m ./...
+
+rls-probe:
+	@echo "→ Probing RLS enforcement on the live database..."
+	@bash scripts/rls-probe.sh
+
+install-plugins:
+	@echo "→ Installing all built-in plugins via the Marketplace API..."
+	@bash scripts/install-plugins.sh
 
 lint:
 	@echo "→ Running linter..."

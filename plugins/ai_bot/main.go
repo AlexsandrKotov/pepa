@@ -18,8 +18,13 @@ func main() {
 	}
 
 	if cfg.Token == "" {
-		slog.Error("BOT_TOKEN is required")
-		os.Exit(1)
+		// Degrade gracefully: the bot is an optional notification channel, not a
+		// core platform component.  Exiting with code 0 keeps container orchestrators
+		// from restart-loops when the bot is deployed without credentials (e.g. a
+		// dev stack that does not need Telegram notifications).
+		slog.Warn("BOT_TOKEN is not set — ai_bot will exit without starting. " +
+			"Set BOT_TOKEN to enable the notification bot.")
+		os.Exit(0)
 	}
 
 	bot := NewBot(cfg)
