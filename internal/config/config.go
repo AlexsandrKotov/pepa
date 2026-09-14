@@ -47,7 +47,26 @@ type DatabaseConfig struct {
 	// run as User (the table owner / superuser).
 	AppUser     string `mapstructure:"app_user"`
 	AppPassword string `mapstructure:"app_password"`
+	// RLSTenantMode decides how the app.tenant_id GUC that every RLS policy
+	// reads is populated. "off" leaves it unset, which makes the policies
+	// unable to match any row — only valid when the runtime role bypasses RLS.
+	// "pinned" sets the GUC once per pooled connection to SingleTenantID, so a
+	// single-tenant deployment gets working row-level security without
+	// request-scoped connection pinning. "per_request" is reserved for
+	// request-scoped pinning and is rejected until that exists.
+	// Empty means: "pinned" when an app role is configured, otherwise "off".
+	RLSTenantMode string `mapstructure:"rls_tenant_mode"`
+	// SingleTenantID is the tenant pinned onto every runtime connection in
+	// "pinned" mode. Empty resolves to database.DefaultTenantID.
+	SingleTenantID string `mapstructure:"single_tenant_id"`
 }
+
+// RLS tenant-pinning modes. See DatabaseConfig.RLSTenantMode.
+const (
+	RLSTenantModeOff        = "off"
+	RLSTenantModePinned     = "pinned"
+	RLSTenantModePerRequest = "per_request"
+)
 
 func (d DatabaseConfig) ConnectionString() string {
 	return fmt.Sprintf(
@@ -76,6 +95,60 @@ func (d DatabaseConfig) RuntimeConnectionString() string {
 // HasAppRole reports whether a separate application role is configured.
 func (d DatabaseConfig) HasAppRole() bool {
 	return d.AppUser != "" && d.AppUser != d.User
+}
+
+// EffectiveRLSTenantMode returns the RLS tenant-pinning mode, defaulting to
+// "pinned" whenever runtime queries run under the app role (otherwise those
+// queries would be subject to policies that can never match) and "off"
+// otherwise.
+func (d DatabaseConfig) EffectiveRLSTenantMode() string {
+	mode := strings.ToLower(strings.TrimSpace(d.RLSTenantMode))
+	if mode != "" {
+		return mode
+	}
+	if d.HasAppRole() {
+		return RLSTenantModePinned
+	}
+	return RLSTenantModeOff
+}
+
+// ValidateRLS rejects configurations where row-level security is nominally on
+// but the tenant GUC cannot work: "per_request" is not implemented, and
+// "pinned" without an app role pins nothing useful.
+//
+// "off" under an app role is deliberately not an error here — it is the documented
+// emergency rollback (RLS goes back to being inert). The startup self-check in
+// cmd/api-server logs that state loudly instead.
+func (d DatabaseConfig) ValidateRLS() error {
+	switch d.EffectiveRLSTenantMode() {
+	case RLSTenantModeOff:
+		return nil
+	case RLSTenantModePinned:
+		if !d.HasAppRole() {
+			return fmt.Errorf(
+				"DB_RLS_TENANT_MODE=%s only makes sense with a non-owner runtime role; set APP_POSTGRES_USER or use %s",
+				RLSTenantModePinned, RLSTenantModeOff)
+		}
+		// An empty SingleTenantID resolves to database.DefaultTenantID, which is
+		// exactly what a pinned single-tenant deployment means.
+		return nil
+	case RLSTenantModePerRequest:
+		return fmt.Errorf(
+			"DB_RLS_TENANT_MODE=%s is not implemented: repositories take connections straight from the pool, so a "+
+				"request-scoped GUC cannot be pinned yet. Use %s for single-tenant deployments.",
+			RLSTenantModePerRequest, RLSTenantModePinned)
+	default:
+		return fmt.Errorf("unknown DB_RLS_TENANT_MODE %q (want %s, %s or %s)", d.RLSTenantMode,
+			RLSTenantModeOff, RLSTenantModePinned, RLSTenantModePerRequest)
+	}
+}
+
+// RLSTenantPin is the resolved tenant-pinning configuration for the runtime
+// connection pool: the effective mode plus the tenant to pin. An empty tenantID
+// means "not configured" and is up to the caller to default to the platform's
+// built-in tenant, so this package stays free of database imports.
+func (d DatabaseConfig) RLSTenantPin() (mode string, tenantID string) {
+	return d.EffectiveRLSTenantMode(), strings.TrimSpace(d.SingleTenantID)
 }
 
 type RedisConfig struct {
@@ -331,6 +404,13 @@ func (c *Config) LoadFromEnv() {
 	}
 	if v := getenv("APP_POSTGRES_PASSWORD"); v != "" {
 		c.Database.AppPassword = v
+	}
+	// How the app.tenant_id GUC behind every RLS policy gets populated.
+	if v := getenv("DB_RLS_TENANT_MODE"); v != "" {
+		c.Database.RLSTenantMode = strings.ToLower(strings.TrimSpace(v))
+	}
+	if v := getenv("DB_SINGLE_TENANT_ID"); v != "" {
+		c.Database.SingleTenantID = strings.TrimSpace(v)
 	}
 
 	// Redis

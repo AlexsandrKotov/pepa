@@ -24,6 +24,9 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Check RLS tenant GUC in init-db.sql
+        run: make verify-rls-guc
+
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 

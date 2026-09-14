@@ -18,6 +18,15 @@ import (
 var pluginSensitiveKeys = []string{"token", "password", "api_key", "api_token", "secret", "access_token", "private_token"}
 
 // PluginRepository handles plugin persistence.
+//
+// plugins is a GLOBAL table by contract: name carries a table-level UNIQUE
+// constraint, so one row describes one provider binary for the whole platform,
+// and registering one writes tenant_id = NULL. That is why the queries here have
+// no "WHERE tenant_id = ..." filter, and why migrations/080_plugins_global_rls.sql
+// replaces 078's blanket tenant-isolation policy with a global read policy plus a
+// write policy that accepts NULL. Adding tenant filtering to this repository, or
+// a tenant-matching policy to the table, makes the Marketplace empty for
+// everybody — NULL never equals a tenant.
 type PluginRepository struct {
 	pool *pgxpool.Pool
 }
@@ -36,12 +45,12 @@ type Plugin struct {
 	Status      string          `json:"status"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Enabled     bool            `json:"enabled"`
-	TenantID    *uuid.UUID      `json:"tenant_id,omitempty"`
+	TenantID    *uuid.UUID      `json:"tenant_id,omitempty"` // nil = shared global registry entry
 	InstalledAt time.Time       `json:"installed_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
-// List returns all registered plugins.
+// List returns every registered plugin. No tenant filter: see PluginRepository.
 func (r *PluginRepository) List(ctx context.Context) ([]Plugin, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, version, type, status, config, enabled, tenant_id, installed_at, updated_at
@@ -162,6 +171,8 @@ func (r *PluginRepository) Register(ctx context.Context, p *Plugin) error {
 		p.Type = "builtin"
 	}
 
+	// tenant_id stays NULL for the shared registry rows; plugins_write in
+	// migrations/080 exists precisely to allow that under RLS.
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO plugins (id, name, version, type, status, config, enabled, tenant_id, installed_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)

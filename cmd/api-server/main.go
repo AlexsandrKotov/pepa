@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,12 +55,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Run database migrations
-	if err := comp.DB.RunMigrations(context.Background()); err != nil {
-		slog.Error("database migrations failed", "error", err)
-		os.Exit(1)
-	}
-	slog.Info("database migrations completed")
+	// Migrations were already applied inside bootstrap, on the table-owner
+	// connection. Re-running them here would use the runtime pool instead, whose
+	// app role is not allowed to create objects in the schema.
 
 	// If -migrate-only, exit successfully after migrations.
 	if migrateOnly {
@@ -414,4 +412,72 @@ func reportRLSCoverage(comp *bootstrap.Components) {
 		return
 	}
 	slog.Info("row-level security is ACTIVE — the application role is subject to RLS policies", append(attrs, "bypasses_rls", false)...)
+
+	verifyTenantPin(comp, ctx)
+}
+
+// verifyTenantPin checks that the tenant pinned onto the runtime pool actually
+// makes rows visible, and refuses to keep serving a platform that reads itself
+// as empty.
+//
+// This is the gate that the 078/079 combination was missing: RLS was enabled and
+// the runtime moved to a non-owner role, but nothing set app.tenant_id, so every
+// tenant-scoped table returned zero rows and every write failed with SQLSTATE
+// 42501 — while the process started "successfully" and the UI rendered an empty
+// installation. Only "pinned" mode is checked: "off" is the documented rollback
+// where inert RLS is the operator's explicit choice.
+func verifyTenantPin(comp *bootstrap.Components, ctx context.Context) {
+	pin := comp.DB.Pin()
+	if pin.Mode != database.PinModePinned {
+		return
+	}
+
+	attrs := []any{"tenant_id", pin.TenantID, "rls_tenant_mode", pin.Mode}
+
+	pinnedGUC, err := comp.DB.CurrentTenantPin(ctx)
+	if err != nil {
+		failTenantPin(comp, attrs, "could not read the tenant GUC from a runtime connection", err)
+		return
+	}
+	if pinnedGUC != pin.TenantID {
+		failTenantPin(comp, attrs, fmt.Sprintf("runtime connections carry %q, not the pinned tenant", pinnedGUC), nil)
+		return
+	}
+
+	// Roles are seeded unconditionally before this check, so an app role that sees
+	// none of them is filtered out by RLS rather than facing an empty database.
+	var visible int
+	if err := comp.DB.QueryRow(ctx,
+		`SELECT count(*) FROM roles WHERE tenant_id::text = $1`, pin.TenantID).Scan(&visible); err != nil {
+		failTenantPin(comp, attrs, "cannot read the roles table through the runtime pool", err)
+		return
+	}
+	if visible > 0 {
+		slog.Info("RLS tenant pin verified", append(attrs, "visible_roles", visible)...)
+		return
+	}
+	failTenantPin(comp, attrs, "the pinned tenant can see no roles although they were just seeded", nil)
+}
+
+// failTenantPin logs the diagnosis and exits, unless the operator declared the
+// inert configuration acceptable via DB_RLS_ALLOW_INERT.
+func failTenantPin(comp *bootstrap.Components, attrs []any, reason string, err error) {
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
+	slog.Error("row-level security is active but the tenant pin does not make any row visible: "+reason,
+		append(attrs,
+			"role", comp.Config.Database.AppUser,
+			"hint", "check DB_RLS_TENANT_MODE / DB_SINGLE_TENANT_ID; to run with inert RLS set DB_RLS_TENANT_MODE=off",
+		)...)
+	if allowInertEnv() {
+		slog.Warn("continuing anyway because DB_RLS_ALLOW_INERT=true; the platform will read itself as empty")
+		return
+	}
+	os.Exit(1)
+}
+
+func allowInertEnv() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("DB_RLS_ALLOW_INERT")))
+	return v == "1" || v == "true" || v == "yes"
 }

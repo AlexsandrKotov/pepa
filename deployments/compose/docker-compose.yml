@@ -51,6 +51,13 @@ x-common-env: &common-env
   # Migrations still run as POSTGRES_USER (owner); runtime queries use this role.
   APP_POSTGRES_USER: ${APP_POSTGRES_USER:-pepa_app}
   APP_POSTGRES_PASSWORD: ${APP_POSTGRES_PASSWORD}
+  # RLS tenant pinning. Every policy compares tenant_id against the
+  # app.tenant_id GUC; this is what sets it on runtime connections.
+  #   pinned      — one-tenant deployment (default when APP_POSTGRES_USER is set)
+  #   off         — inert RLS, rollback path (needs a role that bypasses it)
+  #   per_request — not implemented yet; refuses to start
+  DB_RLS_TENANT_MODE: ${DB_RLS_TENANT_MODE:-}
+  DB_SINGLE_TENANT_ID: ${DB_SINGLE_TENANT_ID:-}
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_PASSWORD: ${REDIS_PASSWORD}

@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,10 +18,36 @@ const DefaultQueryTimeout = 30 * time.Second
 // DB wraps a pgx connection pool with helper methods.
 type DB struct {
 	Pool *pgxpool.Pool
+
+	// pin records how TenantGUC is populated for connections from this pool.
+	pin TenantPin
 }
 
-// New creates a new database connection pool.
+// TenantPin selects how the app.tenant_id GUC — the single knob every RLS
+// policy in the schema reads — is populated for a connection pool.
+//
+// The GUC cannot be set per call on a pooled connection: set_config(..., true)
+// is transaction-local, so outside an explicit transaction it is discarded
+// immediately, and the next caller draws a different connection. Pinning at
+// connection setup is therefore the only mechanism that works with the current
+// "repositories hold a *pgxpool.Pool" design.
+type TenantPin struct {
+	// Mode is "off", "pinned" or "per_request" (see config.RLSTenantMode*).
+	Mode string
+	// TenantID is the tenant pinned onto every connection when Mode is "pinned".
+	TenantID string
+}
+
+// New creates a new database connection pool with RLS tenant pinning disabled.
 func New(connString string) (*DB, error) {
+	return NewWithPin(connString, TenantPin{Mode: "off"})
+}
+
+// NewWithPin creates a database connection pool whose connections carry the
+// given RLS tenant pin. In "pinned" mode every connection is established with
+// app.tenant_id already set to pin.TenantID, so row-level security applies to
+// the non-owner runtime role instead of silently filtering everything out.
+func NewWithPin(connString string, pin TenantPin) (*DB, error) {
 	config, err := pgxpool.ParseConfig(connString)
 	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -32,6 +59,30 @@ func New(connString string) (*DB, error) {
 	config.MaxConnIdleTime = 5 * time.Minute
 	config.HealthCheckPeriod = 10 * time.Second
 
+	switch pin.Mode {
+	case PinModePinned:
+		tenantID := strings.TrimSpace(pin.TenantID)
+		if tenantID == "" {
+			return nil, fmt.Errorf("tenant pin: %s mode requires a tenant id", PinModePinned)
+		}
+		// Session-scoped (is_local = false): the value must survive the implicit
+		// transaction that set_config runs in, because it has to be in effect for
+		// every later query that reuses this pooled connection.
+		config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			if _, err := conn.Exec(ctx, "SELECT set_config($1, $2, false)", TenantGUC, tenantID); err != nil {
+				return fmt.Errorf("set %s on new connection: %w", TenantGUC, err)
+			}
+			return nil
+		}
+	case PinModeOff, "":
+		// No GUC: policies that read it can never match, which is only correct
+		// when the connecting role owns the tables or has BYPASSRLS.
+	case PinModePerRequest:
+		return nil, fmt.Errorf("tenant pin: %s mode needs request-scoped connection pinning, which the repositories do not support yet", PinModePerRequest)
+	default:
+		return nil, fmt.Errorf("tenant pin: unknown mode %q", pin.Mode)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -40,14 +91,26 @@ func New(connString string) (*DB, error) {
 		return nil, fmt.Errorf("create pool: %w", err)
 	}
 
-	// Verify connection
+	// Verify connection. This also exercises AfterConnect, because the pool
+	// pre-spawns MinConns connections during Ping.
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 
-	return &DB{Pool: pool}, nil
+	return &DB{Pool: pool, pin: pin}, nil
 }
+
+// TenantPin modes, mirroring config.RLSTenantMode*. Kept as literals in this
+// package so internal/database does not depend on internal/config.
+const (
+	PinModeOff        = "off"
+	PinModePinned     = "pinned"
+	PinModePerRequest = "per_request"
+)
+
+// Pin returns the tenant-pinning configuration this pool was created with.
+func (d *DB) Pin() TenantPin { return d.pin }
 
 // Close closes the connection pool.
 func (d *DB) Close() {
@@ -85,19 +148,6 @@ func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFun
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, DefaultQueryTimeout)
-}
-
-// SetTenant sets the RLS tenant GUC on one pooled connection.
-//
-// Deprecated: this cannot work as intended. The setting is transaction-local, so
-// outside an explicit transaction it is discarded immediately, and a pooled pool
-// hands the next caller a different connection anyway. Use SetTenantInTx with a
-// transaction that runs the whole request, or keep relying on the explicit
-// tenant_id filters in the repositories (which is what actually isolates
-// tenants today). Kept so existing call sites fail loudly rather than silently.
-func (d *DB) SetTenant(ctx context.Context, tenantID string) error {
-	_, err := d.Pool.Exec(ctx, "SELECT set_config($1, $2, true)", TenantGUC, tenantID)
-	return err
 }
 
 // BeginTx starts a new database transaction. The caller is responsible for

@@ -119,6 +119,25 @@ migrate-init:
 	@echo "→ Initializing database from compose schema..."
 	@psql "$(DATABASE_URL)" -f deployments/compose/init-db.sql
 
+# The fresh-install schema in init-db.sql must read the same tenant GUC the
+# runtime pins, otherwise every policy matches nothing and the app sees an empty
+# platform. init-db.sql is hand-maintained, so this is checked, not assumed.
+verify-rls-guc:
+	@echo "→ Checking the RLS tenant GUC in init-db.sql..."
+	@legacy=$$(grep -c 'app\.current_tenant' deployments/compose/init-db.sql || true); \
+	if [ "$$legacy" != "0" ]; then \
+		echo "✗ init-db.sql has $$legacy policies reading the retired app.current_tenant GUC;"; \
+		echo "  the application sets app.tenant_id (internal/database.TenantGUC). Use 'make rls-guc-fix'."; \
+		exit 1; \
+	fi
+	@echo "✓ init-db.sql policies read app.tenant_id"
+
+rls-guc-fix:
+	@echo "→ Rewriting the retired tenant GUC in init-db.sql..."
+	@sed -i.bak 's/app\.current_tenant/app.tenant_id/g' deployments/compose/init-db.sql
+	@rm -f deployments/compose/init-db.sql.bak
+	@echo "✓ Rewritten — review the diff"
+
 # ── Docker ───────────────────────────────────────────────────
 
 COMPOSE_DIR  := deployments/compose

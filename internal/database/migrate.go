@@ -12,10 +12,37 @@ import (
 	"github.com/pepa/pepa/migrations"
 )
 
+// migrationAdvisoryLockKey is the pg_advisory_lock namespace for schema
+// migrations. "PEPA" in ASCII, so it is recognisable in pg_locks.
+const migrationAdvisoryLockKey int64 = 0x50455041
+
 // RunMigrations applies all pending SQL migrations in version order.
 // It creates the schema_migrations table if it does not exist, then
 // applies each migration file that has not yet been recorded.
+//
+// api-server and worker start in parallel and both migrate, so the whole run is
+// serialised by a session-level advisory lock: two sessions applying the same
+// migration collide inside PostgreSQL (e.g. "duplicate key value violates unique
+// constraint pg_type_typname_nsp_index" while both create the same type). The
+// loser waits, then finds every version already recorded.
 func (d *DB) RunMigrations(ctx context.Context) error {
+	// The lock lives on one dedicated connection for the entire run; the
+	// migrations themselves execute on transaction connections from the pool.
+	conn, err := d.Pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationAdvisoryLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		// Best effort: releasing the connection would drop the lock anyway, and a
+		// failed unlock must not mask the migration result.
+		_, _ = conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock($1)", migrationAdvisoryLockKey)
+	}()
+
 	// Ensure schema_migrations table exists
 	if err := d.ensureMigrationsTable(ctx); err != nil {
 		return fmt.Errorf("ensure migrations table: %w", err)

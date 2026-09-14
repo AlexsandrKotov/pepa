@@ -31,6 +31,27 @@ func SetTenantInTx(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	return nil
 }
 
+// CurrentTenantPin reports the app.tenant_id visible on a connection drawn from
+// this pool, or an empty string when nothing is set. The startup self-check uses
+// it to fail loudly instead of running blind against every tenant-scoped table.
+//
+// The value is read on a single pooled connection, so it only reflects what that
+// connection carries — which is exactly what "pinned" mode guarantees for all of
+// them, since the GUC is set in pgxpool's AfterConnect hook.
+func (d *DB) CurrentTenantPin(ctx context.Context) (string, error) {
+	if d == nil || d.Pool == nil {
+		return "", fmt.Errorf("current tenant pin: database not initialised")
+	}
+	var val *string
+	if err := d.Pool.QueryRow(ctx, "SELECT current_setting($1, true)", TenantGUC).Scan(&val); err != nil {
+		return "", fmt.Errorf("current tenant pin: %w", err)
+	}
+	if val == nil {
+		return "", nil
+	}
+	return *val, nil
+}
+
 // RLSReport describes how much of the schema row-level security actually covers
 // and whether the connected database role is even subject to it.
 type RLSReport struct {

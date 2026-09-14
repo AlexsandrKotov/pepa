@@ -149,6 +149,13 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		slog.Debug("encryption key validation passed")
 	}
 
+	// Validate the RLS tenant-pinning configuration before any connection is
+	// opened: a mode that cannot populate the app.tenant_id GUC makes every
+	// tenant-scoped table look empty, which must never happen silently.
+	if err := cfg.Database.ValidateRLS(); err != nil {
+		return nil, fmt.Errorf("invalid database RLS configuration: %w", err)
+	}
+
 	// Initialize PostgreSQL (needed before loading observability settings from DB)
 	db, err := database.New(cfg.Database.ConnectionString())
 	if err != nil {
@@ -167,16 +174,35 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	// Migrations run as the table owner (superuser) which bypasses RLS.
 	// The app role (pepa_app) is a non-superuser subject to RLS policies,
 	// providing defence-in-depth tenant isolation.
+	//
+	// Those policies all compare tenant_id against the app.tenant_id GUC, so the
+	// runtime pool has to carry that GUC — hence the pin. "pinned" is the default
+	// whenever an app role is configured; see config.DatabaseConfig.RLSTenantMode.
 	if cfg.Database.HasAppRole() {
 		ownerPool := db.Pool
-		appDB, err := database.New(cfg.Database.RuntimeConnectionString())
+		pinMode, pinTenant := cfg.Database.RLSTenantPin()
+		if pinMode == config.RLSTenantModeOff {
+			slog.Warn("RLS tenant GUC is not being pinned: the app role sees zero rows in every "+
+				"tenant-scoped table and all writes fail with SQLSTATE 42501",
+				"app_user", cfg.Database.AppUser, "rls_tenant_mode", pinMode)
+		}
+		if pinTenant == "" && pinMode != config.RLSTenantModeOff {
+			pinTenant = database.DefaultTenantID
+		}
+		appDB, err := database.NewWithPin(cfg.Database.RuntimeConnectionString(), database.TenantPin{
+			Mode:     pinMode,
+			TenantID: pinTenant,
+		})
 		if err != nil {
 			ownerPool.Close()
 			return nil, fmt.Errorf("connect as app role %q: %w", cfg.Database.AppUser, err)
 		}
-		db.Pool = appDB.Pool
+		db = appDB
 		ownerPool.Close()
-		slog.Info("switched to application role for runtime queries", "app_user", cfg.Database.AppUser)
+		slog.Info("switched to application role for runtime queries",
+			"app_user", cfg.Database.AppUser,
+			"rls_tenant_mode", pinMode,
+			"tenant_id", pinTenant)
 	}
 
 	// Load persisted observability settings from database BEFORE initializing OTel.

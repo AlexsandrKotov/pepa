@@ -11,6 +11,9 @@ set -euo pipefail
 # Usage:
 #   ./deploy.sh           # Load embedded images (archive) or pull
 #   ./deploy.sh --fresh   # Clean start (removes all data volumes)
+#   ./deploy.sh --fresh --keep-trivy-cache
+#                         # Clean start but keep the Trivy vulnerability DB
+#                         # (saves re-downloading ~2-3 GB)
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,8 +74,23 @@ if ls images/*.tar.gz 1>/dev/null 2>&1; then
   ok "All images loaded from archive"
 else
   log "Pulling Docker images from registry..."
-  $COMPOSE_CMD pull
+  # --ignore-buildable: services that are built from this source tree (the dev
+  # override adds db-cache, and CI never publishes it) must not abort the pull.
+  # A partial pull is not fatal — the build step below produces those images.
+  $COMPOSE_CMD pull --ignore-buildable \
+    || warn "Registry pull incomplete (some images are not published); continuing"
   ok "Images pulled"
+fi
+
+# ── Build local images when the compose files declare build contexts ──
+# Pulling first retags :latest to whatever CI published, which would silently
+# deploy a different revision than this working tree. Anything buildable is
+# rebuilt so the containers match the source that is checked out.
+BUILDABLE="$($COMPOSE_CMD config --services --buildable 2>/dev/null || true)"
+if [ -n "$BUILDABLE" ]; then
+  log "Building local images for: $(echo "$BUILDABLE" | tr '\n' ' ')"
+  $COMPOSE_CMD build $BUILDABLE
+  ok "Local images built"
 fi
 
 # ── Setup .env ────────────────────────────────────────────────
@@ -106,15 +124,29 @@ $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
 
 # ── Handle --fresh flag (clean volumes) ───────────────────────
 FRESH=false
+KEEP_TRIVY_CACHE=false
 for arg in "$@"; do
   case $arg in
     --fresh) FRESH=true ;;
+    --keep-trivy-cache) KEEP_TRIVY_CACHE=true ;;
   esac
 done
 
 if $FRESH; then
-  warn "--fresh flag set: removing all data volumes!"
-  $COMPOSE_CMD down -v --remove-orphans 2>/dev/null || true
+  if $KEEP_TRIVY_CACHE; then
+    warn "--fresh with --keep-trivy-cache: removing data volumes, keeping the Trivy DB"
+    # down -v would take trivy-cache too, so stop the stack and delete only the
+    # volumes that actually hold install state.
+    $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+    for vol in postgres-data redis-data custom-plugins nginx-logs pepa-token-tmpfs; do
+      docker volume rm "pepa_${vol}" >/dev/null 2>&1 || true
+    done
+  else
+    warn "--fresh flag set: removing all data volumes!"
+    warn "This includes trivy-cache — the ~2-3 GB vulnerability DB is re-downloaded on boot."
+    warn "Use --keep-trivy-cache to preserve it."
+    $COMPOSE_CMD down -v --remove-orphans 2>/dev/null || true
+  fi
   ok "Volumes removed"
 fi
 

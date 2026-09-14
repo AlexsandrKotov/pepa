@@ -47,26 +47,6 @@ if [ -n "$APP_POSTGRES_PASSWORD" ] && [ -n "$APP_POSTGRES_USER" ]; then
     else
         echo "entrypoint: WARNING — could not rotate password for role ${APP_POSTGRES_USER} (role may not exist yet)"
     fi
-
-    # WORKAROUND (temporary, tracked): cmd/api-server/main.go calls
-    # DB.RunMigrations() a SECOND time, after bootstrap.Bootstrap() has already
-    # applied all migrations as the owner role and swapped db.Pool for the
-    # app-role pool. That second call executes
-    # "CREATE TABLE IF NOT EXISTS schema_migrations", which PostgreSQL rejects
-    # with "permission denied for schema public" because migration 079 does
-    # "REVOKE CREATE ON SCHEMA public FROM pepa_app". The API then exit(1)s and
-    # crash-loops. The proper fix is to drop the redundant RunMigrations call in
-    # cmd/api-server/main.go; until then we re-grant CREATE here so the
-    # idempotent no-op DDL succeeds.
-    # Security impact: pepa_app can create objects in schema public. It remains
-    # a NON-superuser with NOBYPASSRLS and is not a table owner, so row-level
-    # security is still fully enforced — the primary control is unaffected.
-    if PGPASSWORD="$_pw" psql -h "$_pg_host" -p "$_pg_port" -U "$_pg_user" -d "$_pg_db" -c \
-        "GRANT USAGE, CREATE ON SCHEMA public TO \"${APP_POSTGRES_USER}\"" >/dev/null 2>&1; then
-        echo "entrypoint: granted USAGE, CREATE on schema public to ${APP_POSTGRES_USER} (workaround for duplicate RunMigrations in main.go)"
-    else
-        echo "entrypoint: WARNING — could not grant schema privileges to ${APP_POSTGRES_USER}"
-    fi
 fi
 
 # Drop root privileges and exec the main process as pepa.

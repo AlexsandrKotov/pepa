@@ -212,7 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_entities_search ON entities USING GIN(to_tsvector
 ALTER TABLE entities ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON entities;
 CREATE POLICY tenant_isolation ON entities
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 -- ============================================================
 -- RELATIONSHIP TYPES & ENTITY RELATIONSHIPS
@@ -264,7 +264,7 @@ CREATE INDEX IF NOT EXISTS idx_rel_type ON entity_relationships(type_key, tenant
 ALTER TABLE entity_relationships ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_rel ON entity_relationships;
 CREATE POLICY tenant_isolation_rel ON entity_relationships
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 -- ============================================================
 -- PLUGINS
@@ -435,11 +435,11 @@ ALTER TABLE rag_chunks ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS tenant_rag_docs ON rag_documents;
 CREATE POLICY tenant_rag_docs ON rag_documents
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 DROP POLICY IF EXISTS tenant_rag_chunks ON rag_chunks;
 CREATE POLICY tenant_rag_chunks ON rag_chunks
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 CREATE TABLE IF NOT EXISTS ai_conversations (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1313,91 +1313,128 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_runs_tenant_created ON pipeline_runs(ten
 -- ============================================================
 -- ROW-LEVEL SECURITY (RLS) for tenant-scoped tables
 -- ============================================================
+-- 'app.tenant_id' is the only tenant GUC the platform reads (migration 073
+-- retired the older two-name spelling); internal/database.TenantGUC is the Go
+-- side of that contract and the runtime pool pins it per connection
+-- (DB_RLS_TENANT_MODE=pinned). Keep this spelling exactly in sync with
+-- migrations/*.sql — a policy watching a different variable silently matches
+-- nothing, and 'missing_ok = true' means it fails as an empty result, not as an
+-- error. `make verify-rls-guc` guards it.
 
 ALTER TABLE services ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_services ON services;
 CREATE POLICY tenant_isolation_services ON services
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE connections ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_connections ON connections;
 CREATE POLICY tenant_isolation_connections ON connections
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE deployments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_deployments ON deployments;
 CREATE POLICY tenant_isolation_deployments ON deployments
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_audit_log ON audit_log;
 CREATE POLICY tenant_isolation_audit_log ON audit_log
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE pipeline_sources ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_pipeline_sources ON pipeline_sources;
 CREATE POLICY tenant_isolation_pipeline_sources ON pipeline_sources
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE pipeline_runs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_pipeline_runs ON pipeline_runs;
 CREATE POLICY tenant_isolation_pipeline_runs ON pipeline_runs
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE clusters ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_clusters ON clusters;
 CREATE POLICY tenant_isolation_clusters ON clusters
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE workflows ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_workflows ON workflows;
 CREATE POLICY tenant_isolation_workflows ON workflows
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE scorecards ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_scorecards ON scorecards;
 CREATE POLICY tenant_isolation_scorecards ON scorecards
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE docker_hosts ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_docker_hosts ON docker_hosts;
 CREATE POLICY tenant_isolation_docker_hosts ON docker_hosts
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE docker_services ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_docker_services ON docker_services;
 CREATE POLICY tenant_isolation_docker_services ON docker_services
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE helm_repositories ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_helm_repositories ON helm_repositories;
 CREATE POLICY tenant_isolation_helm_repositories ON helm_repositories
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE gitops_repositories ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_gitops_repositories ON gitops_repositories;
 CREATE POLICY tenant_isolation_gitops_repositories ON gitops_repositories
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE jira_automation_rules ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_jira_automation_rules ON jira_automation_rules;
 CREATE POLICY tenant_isolation_jira_automation_rules ON jira_automation_rules
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE jira_comments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_jira_comments ON jira_comments;
 CREATE POLICY tenant_isolation_jira_comments ON jira_comments
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE user_credentials ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_user_credentials ON user_credentials;
 CREATE POLICY tenant_isolation_user_credentials ON user_credentials
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 ALTER TABLE environment_variables ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation_environment_variables ON environment_variables;
 CREATE POLICY tenant_isolation_environment_variables ON environment_variables
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
+
+-- plugins is a GLOBAL registry: UNIQUE(name) across tenants, read without a
+-- tenant filter, and registered with tenant_id = NULL. A blanket
+-- tenant-isolation policy here is unsatisfiable (NULL = '<uuid>' is NULL), so
+-- the Marketplace would read empty and every install would fail with SQLSTATE
+-- 42501. These are the same policies migrations/080_plugins_global_rls.sql
+-- installs on an existing database; declaring them here also stops 078 from
+-- adding its blanket policy to this table on a fresh install. CREATE POLICY
+-- takes exactly one command, hence four policies.
+ALTER TABLE plugins ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS plugins_tenant_isolation ON plugins;
+DROP POLICY IF EXISTS plugins_read ON plugins;
+CREATE POLICY plugins_read ON plugins FOR SELECT
+    USING (true);
+DROP POLICY IF EXISTS plugins_insert ON plugins;
+CREATE POLICY plugins_insert ON plugins FOR INSERT
+    WITH CHECK (
+        tenant_id IS NULL
+        OR tenant_id::text = current_setting('app.tenant_id', true)
+    );
+DROP POLICY IF EXISTS plugins_update ON plugins;
+CREATE POLICY plugins_update ON plugins FOR UPDATE
+    USING (true)
+    WITH CHECK (
+        tenant_id IS NULL
+        OR tenant_id::text = current_setting('app.tenant_id', true)
+    );
+DROP POLICY IF EXISTS plugins_delete ON plugins;
+CREATE POLICY plugins_delete ON plugins FOR DELETE
+    USING (true);
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_migrations (

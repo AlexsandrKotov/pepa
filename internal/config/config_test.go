@@ -300,3 +300,121 @@ func containsStr(s, sub string) bool {
 	}
 	return false
 }
+
+func TestDatabaseConfig_EffectiveRLSTenantMode(t *testing.T) {
+	tests := []struct {
+		name string
+		db   DatabaseConfig
+		want string
+	}{
+		{
+			name: "owner only defaults to off",
+			db:   DatabaseConfig{User: "pepa"},
+			want: RLSTenantModeOff,
+		},
+		{
+			name: "app role defaults to pinned",
+			db:   DatabaseConfig{User: "pepa", AppUser: "pepa_app"},
+			want: RLSTenantModePinned,
+		},
+		{
+			name: "app user equal to owner is no app role",
+			db:   DatabaseConfig{User: "pepa", AppUser: "pepa"},
+			want: RLSTenantModeOff,
+		},
+		{
+			name: "explicit mode wins over the default",
+			db:   DatabaseConfig{User: "pepa", AppUser: "pepa_app", RLSTenantMode: RLSTenantModeOff},
+			want: RLSTenantModeOff,
+		},
+		{
+			name: "explicit mode is normalised",
+			db:   DatabaseConfig{User: "pepa", AppUser: "pepa_app", RLSTenantMode: "  PINNED "},
+			want: RLSTenantModePinned,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.db.EffectiveRLSTenantMode(); got != tt.want {
+				t.Errorf("EffectiveRLSTenantMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDatabaseConfig_ValidateRLS pins the rule that made the platform unusable
+// once: an app role with nothing populating app.tenant_id reads zero rows and
+// cannot write anything, and it did so silently.
+func TestDatabaseConfig_ValidateRLS(t *testing.T) {
+	tests := []struct {
+		name    string
+		db      DatabaseConfig
+		wantErr bool
+	}{
+		{
+			name: "owner without pinning is fine",
+			db:   DatabaseConfig{User: "pepa"},
+		},
+		{
+			name: "app role defaults to pinned",
+			db:   DatabaseConfig{User: "pepa", AppUser: "pepa_app"},
+		},
+		{
+			name: "explicit off under an app role stays allowed as rollback",
+			db:   DatabaseConfig{User: "pepa", AppUser: "pepa_app", RLSTenantMode: RLSTenantModeOff},
+		},
+		{
+			name:    "pinning without an app role is meaningless",
+			db:      DatabaseConfig{User: "pepa", RLSTenantMode: RLSTenantModePinned},
+			wantErr: true,
+		},
+		{
+			name:    "per request is not implemented",
+			db:      DatabaseConfig{User: "pepa", AppUser: "pepa_app", RLSTenantMode: RLSTenantModePerRequest},
+			wantErr: true,
+		},
+		{
+			name:    "unknown mode is rejected",
+			db:      DatabaseConfig{User: "pepa", AppUser: "pepa_app", RLSTenantMode: "perrequest"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.db.ValidateRLS()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateRLS() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDatabaseConfig_RLSTenantPin(t *testing.T) {
+	d := DatabaseConfig{User: "pepa", AppUser: "pepa_app", SingleTenantID: "  00000000-0000-0000-0000-000000000002  "}
+	mode, tenantID := d.RLSTenantPin()
+	if mode != RLSTenantModePinned {
+		t.Errorf("mode = %q, want %q", mode, RLSTenantModePinned)
+	}
+	if tenantID != "00000000-0000-0000-0000-000000000002" {
+		t.Errorf("tenantID = %q, want the trimmed configured tenant", tenantID)
+	}
+
+	// An unset tenant is left empty for the caller to default, so that this
+	// package does not have to import the database package.
+	if _, tenantID := (DatabaseConfig{User: "pepa", AppUser: "pepa_app"}).RLSTenantPin(); tenantID != "" {
+		t.Errorf("tenantID = %q, want empty when unconfigured", tenantID)
+	}
+}
+
+func TestLoadFromEnv_RLSTenantMode(t *testing.T) {
+	t.Setenv("DB_RLS_TENANT_MODE", " OFF ")
+	t.Setenv("DB_SINGLE_TENANT_ID", " 11111111-1111-1111-1111-111111111111 ")
+	cfg := DefaultConfig()
+	cfg.LoadFromEnv()
+	if cfg.Database.RLSTenantMode != RLSTenantModeOff {
+		t.Errorf("RLSTenantMode = %q, want %q", cfg.Database.RLSTenantMode, RLSTenantModeOff)
+	}
+	if cfg.Database.SingleTenantID != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("SingleTenantID = %q, want the trimmed value", cfg.Database.SingleTenantID)
+	}
+}

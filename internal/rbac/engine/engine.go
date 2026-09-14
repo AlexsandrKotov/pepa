@@ -603,6 +603,8 @@ func (e *Engine) SeedDefaultRoles(ctx context.Context, tenantID uuid.UUID) error
 // EnsureBasePermissions guarantees that the core system roles (admin, developer, viewer)
 // have the expected base permissions, regardless of whether they were created by
 // migrations or by SeedDefaultRoles. This is idempotent and safe to call on every startup.
+// It also ensures the default admin user has the admin role assigned, fixing the case
+// where init-db.sql created the user before roles existed.
 func (e *Engine) EnsureBasePermissions(ctx context.Context, tenantID uuid.UUID) error {
 	// All resources that the frontend and rbacResourceMap check permissions for
 	// (must be PLURAL). Single source of truth: AllRBACResources.
@@ -624,12 +626,38 @@ func (e *Engine) EnsureBasePermissions(ctx context.Context, tenantID uuid.UUID) 
 		Slug string
 	}
 	var roles []roleInfo
+	var adminRoleID uuid.UUID
 	for rows.Next() {
 		var r roleInfo
 		if err := rows.Scan(&r.ID, &r.Slug); err != nil {
 			return fmt.Errorf("scan role: %w", err)
 		}
 		roles = append(roles, r)
+		if r.Slug == "admin" {
+			adminRoleID = r.ID
+		}
+	}
+
+	// Ensure the default admin user has the admin role assigned.
+	// This fixes the case where init-db.sql created the admin user before
+	// the roles existed (SeedDefaultRoles runs after init-db.sql).
+	if adminRoleID != uuid.Nil {
+		adminUserID, parseErr := uuid.Parse("00000000-0000-0000-0000-000000000010")
+		if parseErr == nil {
+			var assignmentCount int
+			if countErr := e.db.QueryRow(ctx, `
+				SELECT COUNT(*) FROM role_assignments
+				WHERE tenant_id = $1 AND user_id = $2 AND role_id = $3
+			`, tenantID, adminUserID, adminRoleID).Scan(&assignmentCount); countErr == nil {
+				if assignmentCount == 0 {
+					_, _ = e.db.Exec(ctx, `
+						INSERT INTO role_assignments (id, tenant_id, user_id, role_id, is_active, granted_by)
+						VALUES ($1, $2, $3, $4, true, $5)
+						ON CONFLICT DO NOTHING
+					`, uuid.New(), tenantID, adminUserID, adminRoleID, adminUserID)
+				}
+			}
+		}
 	}
 
 	for _, r := range roles {
