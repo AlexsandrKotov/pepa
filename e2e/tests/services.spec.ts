@@ -6,8 +6,10 @@ test.describe('Services Golden Journey', () => {
   test.beforeEach(async ({ page }) => {
     // Login before each test
     await page.goto('/login');
-    await page.fill('input[name="username"], input[type="text"]', 'admin');
-    await page.fill('input[name="password"], input[type="password"]', 'admin');
+    const emailInput = page.locator('#email');
+    await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+    await emailInput.fill('admin');
+    await page.locator('#password').fill('admin');
     await page.click('button[type="submit"]');
     await expect(page).toHaveURL(/\/(dashboard|services)/);
   });

@@ -4,9 +4,13 @@ test.describe('Authentication Golden Journey', () => {
   test('login with default admin credentials', async ({ page }) => {
     await page.goto('/login');
 
+    // Wait for the login form to be visible (page may load bootstrap status first)
+    const emailInput = page.locator('#email');
+    await emailInput.waitFor({ state: 'visible', timeout: 15000 });
+
     // Fill login form
-    await page.fill('input[name="username"], input[type="text"]', 'admin');
-    await page.fill('input[name="password"], input[type="password"]', 'admin');
+    await emailInput.fill('admin');
+    await page.locator('#password').fill('admin');
     await page.click('button[type="submit"]');
 
     // Wait for redirect to dashboard
