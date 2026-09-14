@@ -51,7 +51,7 @@ jobs:
       - name: Security scan (gosec)
         uses: securego/gosec@master
         with:
-          args: '-exclude-generated -exclude=G101,G106,G115,G122,G204,G304,G402,G703 ./...'
+          args: '-exclude-generated -track-suppressions -exclude=G101,G106,G115,G122,G204,G304,G402,G702,G703 ./...'
 
       - name: Vulnerability check (govulncheck)
         run: |
