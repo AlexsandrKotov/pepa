@@ -81,6 +81,8 @@ var rbacResourceMap = map[string]string{
 	// RAG knowledge base lives next to the AI assistant; documents are
 	// tenant-scoped and writable, so they must not fall through unmapped.
 	"rag": "ai",
+	// Host directory browsing for volume-mount / data-path selection.
+	"host": "connections",
 }
 
 // rbacSkipPrefixes are paths that only require authentication, not a

@@ -395,7 +395,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 			return nil, nil, fmt.Errorf("filesystem target path resolution failed: %w", resolveErr)
 		}
 		// Verify the resolved path actually exists inside the container.
-		if info, statErr := os.Stat(resolved); statErr != nil || !info.IsDir() {
+		if info, statErr := os.Stat(resolved); statErr != nil || !info.IsDir() { // #nosec G703 //nolint:gosec // resolved path is validated within HOST_DATA_DIR by hostpath.Resolve
 			slog.Error("filesystem scan target not accessible inside container",
 				"target_ref", imageRef,
 				"resolved_path", resolved,

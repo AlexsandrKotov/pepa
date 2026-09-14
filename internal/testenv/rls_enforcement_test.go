@@ -4,6 +4,7 @@ package testenv
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -24,8 +25,9 @@ func setupAppRolePool(t *testing.T, ctx context.Context, env *TestEnv, tenantID 
 	t.Helper()
 
 	// Reset password to a known value — migration 079 uses a random placeholder.
+	// ALTER ROLE is DDL and does not support $1 parameters, so use fmt.Sprintf.
 	_, err := env.DB().Exec(ctx,
-		`ALTER ROLE pepa_app PASSWORD $1`, appRolePassword)
+		fmt.Sprintf(`ALTER ROLE pepa_app PASSWORD '%s'`, appRolePassword))
 	if err != nil {
 		t.Fatalf("set pepa_app password: %v", err)
 	}
@@ -67,10 +69,14 @@ func replaceRoleInConnStr(t *testing.T, connStr, user, password string) string {
 	if err != nil {
 		t.Fatalf("parse conn string: %v", err)
 	}
-	c.ConnConfig.User = user
-	c.ConnConfig.Password = password
-	// Reconstruct via pgx's ConnString which preserves all parameters.
-	return c.ConnString()
+	// Build a new connection string with the updated credentials.
+	// pgx's ConnString() doesn't always reflect ConnConfig mutations,
+	// so we reconstruct it manually to ensure the new user/password are used.
+	host := c.ConnConfig.Host
+	port := c.ConnConfig.Port
+	dbname := c.ConnConfig.Database
+	return fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=disable",
+		host, port, dbname, user, password)
 }
 
 // TestRLS_PinnedTenantSeesOwnData verifies that in pinned mode the app role
@@ -87,9 +93,9 @@ func TestRLS_PinnedTenantSeesOwnData(t *testing.T) {
 
 	// Seed data for both tenants as the owner (superuser, bypasses RLS).
 	_, err := env.DB().Exec(ctx,
-		`INSERT INTO roles (id, name, description, tenant_id) VALUES
-		 (gen_random_uuid(), 'test-admin-a', 'Tenant A admin', $1),
-		 (gen_random_uuid(), 'test-admin-b', 'Tenant B admin', $2)`,
+		`INSERT INTO roles (id, name, slug, description, tenant_id) VALUES
+		 (gen_random_uuid(), 'test-admin-a', 'test-admin-a', 'Tenant A admin', $1),
+		 (gen_random_uuid(), 'test-admin-b', 'test-admin-b', 'Tenant B admin', $2)`,
 		tenantA, tenantB)
 	if err != nil {
 		t.Fatalf("seed roles: %v", err)

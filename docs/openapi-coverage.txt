@@ -125,6 +125,7 @@ GET /debug-raw
 GET /deployment/:deploymentId
 GET /deployments
 GET /deployments/:id
+GET /directories
 GET /docker-container/:host/:name/logs
 GET /drift-logs
 GET /drift-schedules
