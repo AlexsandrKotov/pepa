@@ -147,7 +147,8 @@ jobs:
       - name: Compute image tag
         id: tag
         run: |
-          IMAGE_TAG="${RELEASE_TAG#v}"
+          IMAGE_TAG="${{ github.ref_name }}"
+          IMAGE_TAG="${IMAGE_TAG#v}"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Generate SBOM
