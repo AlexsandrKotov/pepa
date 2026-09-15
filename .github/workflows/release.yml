@@ -144,10 +144,16 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
 
+      - name: Compute image tag
+        id: tag
+        run: |
+          IMAGE_TAG="${RELEASE_TAG#v}"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ env.RELEASE_TAG#v }}
+          image: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ steps.tag.outputs.image_tag }}
           format: spdx-json
           output-file: sbom-${{ matrix.target }}.spdx.json
 
