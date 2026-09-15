@@ -150,11 +150,14 @@ jobs:
           IMAGE_TAG="${{ github.ref_name }}"
           IMAGE_TAG="${IMAGE_TAG#v}"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          # GHCR requires lowercase repository owner
+          IMAGE_REF="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ github.event.repository.name }}/pepa-${{ matrix.target }}:${IMAGE_TAG}"
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ env.IMAGE_NAME }}/pepa-${{ matrix.target }}:${{ steps.tag.outputs.image_tag }}
+          image: ${{ steps.tag.outputs.image_ref }}
           format: spdx-json
           output-file: sbom-${{ matrix.target }}.spdx.json
 
