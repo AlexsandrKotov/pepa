@@ -403,27 +403,61 @@ func (s *ConnectionService) TestCIConnection(ctx context.Context, url string, co
 }
 
 // TestDockerConnection tests a Docker connection.
-func (s *ConnectionService) TestDockerConnection(ctx context.Context, host string) TestResult {
-	if host == "" || host == "unix:///var/run/docker.sock" {
+func (s *ConnectionService) TestDockerConnection(ctx context.Context, config map[string]any) TestResult {
+	hostType, _ := config["host_type"].(string)
+	host, _ := config["host"].(string)
+
+	// Local socket connection
+	if hostType == "" || hostType == "local" || host == "" || host == "unix:///var/run/docker.sock" {
 		// Inside a container, we can't reach the host Docker socket directly.
 		// Just validate the configuration is present.
 		return TestResult{Status: "connected", Message: "Docker socket configured (local connection)"}
 	}
-	// TCP-based Docker host
-	req, _ := http.NewRequestWithContext(ctx, "GET", host+"/_ping", nil)
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Docker: %v", err)}
+
+	// TCP-based Docker host with optional TLS
+	if hostType == "tcp" {
+		if host == "" {
+			return TestResult{Status: "error", Message: "No Docker host address configured"}
+		}
+		// For now, just test basic connectivity via HTTP
+		// TLS certificates would be used for actual Docker client connections
+		req, _ := http.NewRequestWithContext(ctx, "GET", host+"/_ping", nil)
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Docker: %v", err)}
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode == 200 {
+			return TestResult{Status: "connected", Message: "Successfully connected to Docker daemon"}
+		}
+		return TestResult{Status: "error", Message: fmt.Sprintf("Docker returned status %d", resp.StatusCode)}
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == 200 {
-		return TestResult{Status: "connected", Message: "Successfully connected to Docker daemon"}
+
+	// SSH-based Docker host
+	if hostType == "ssh" {
+		if host == "" {
+			return TestResult{Status: "error", Message: "No SSH host configured"}
+		}
+		// SSH connections are validated by config presence; actual testing requires SSH client
+		return TestResult{Status: "connected", Message: fmt.Sprintf("SSH Docker host configured: %s", host)}
 	}
-	return TestResult{Status: "error", Message: fmt.Sprintf("Docker returned status %d", resp.StatusCode)}
+
+	return TestResult{Status: "error", Message: fmt.Sprintf("Unknown Docker host type: %s", hostType)}
 }
 
 // TestVaultConnection tests a Vault connection.
-func (s *ConnectionService) TestVaultConnection(ctx context.Context, address, token string) TestResult {
+func (s *ConnectionService) TestVaultConnection(ctx context.Context, config map[string]any) TestResult {
+	backendMode, _ := config["backend_mode"].(string)
+
+	// Built-in KV mode - no external Vault needed
+	if backendMode == "" || backendMode == "builtin" {
+		return TestResult{Status: "connected", Message: "Built-in KV store configured (AES-256-GCM encryption)"}
+	}
+
+	// HashiCorp Vault mode - test external connection
+	address, _ := config["address"].(string)
+	token, _ := config["token"].(string)
+
 	if address == "" {
 		return TestResult{Status: "error", Message: "No Vault address configured"}
 	}

@@ -489,13 +489,10 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		case repository.ConnectionVMware:
 			status, message = testVMwareConnection(deps, c, conn.Config)
 		case repository.ConnectionDocker:
-			host, _ := conn.Config["host"].(string)
-			result := deps.Services.Connection.TestDockerConnection(ctx, host)
+			result := deps.Services.Connection.TestDockerConnection(ctx, conn.Config)
 			status, message = result.Status, result.Message
 		case repository.ConnectionSecret:
-			address, _ := conn.Config["address"].(string)
-			token, _ := conn.Config["token"].(string)
-			result := deps.Services.Connection.TestVaultConnection(ctx, address, token)
+			result := deps.Services.Connection.TestVaultConnection(ctx, conn.Config)
 			status, message = result.Status, result.Message
 		case repository.ConnectionNotification:
 			result := deps.Services.Connection.TestNotificationConnection(ctx, conn.Config)

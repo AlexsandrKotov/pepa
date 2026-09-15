@@ -85,6 +85,8 @@ const VAULT_FIELDS: Record<string, string[]> = {
   fluxcd: ['kubeconfig'],
   notification: ['bot_token', 'webhook_url'],
   jenkins: ['api_token', 'password'],
+  docker: ['tls_ca_cert', 'tls_cert', 'tls_key', 'ssh_key'],
+  secret: ['token'],
 };
 
 export default function ConnectionsClient({ initialConnections, initialType }: { initialConnections?: Connection[]; initialType?: string }) {
@@ -971,6 +973,215 @@ function AddConnectionModal({
                   Skip TLS verification (for self-signed certificates)
                 </label>
               </div>
+            </>
+          )}
+
+          {selectedType === 'docker' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Connection Type</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['local', 'tcp', 'ssh'] as const).map(type => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setConfig({ ...config, host_type: type, host_address: type === 'local' ? 'unix:///var/run/docker.sock' : '' })}
+                      className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                        (config.host_type || 'local') === type
+                          ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+                          : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50'
+                      }`}
+                    >
+                      {type === 'local' ? '🖥 Local' : type === 'tcp' ? '🌐 TCP' : '🔒 SSH'}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  {(config.host_type || 'local') === 'local' && 'Uses the Unix socket. For local Docker, no additional configuration is needed.'}
+                  {config.host_type === 'tcp' && 'Connect to a remote Docker daemon via TCP with optional TLS.'}
+                  {config.host_type === 'ssh' && 'Connect to a remote Docker daemon via SSH tunnel.'}
+                </p>
+              </div>
+              {config.host_type !== 'local' && (
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Host Address *</label>
+                  <input
+                    type="text"
+                    value={config.host || ''}
+                    onChange={e => setConfig({ ...config, host: e.target.value })}
+                    required
+                    className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent font-mono text-sm"
+                    placeholder={config.host_type === 'tcp' ? 'tcp://docker.example.com:2376' : 'user@docker.example.com'}
+                  />
+                  <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                    {config.host_type === 'tcp' ? 'TCP address of the remote Docker daemon (e.g. tcp://192.168.1.100:2376).' : 'SSH connection string (e.g. user@192.168.1.100).'}
+                  </p>
+                </div>
+              )}
+              {config.host_type === 'tcp' && (
+                <>
+                  <VaultInput
+                    label="TLS CA Certificate"
+                    field="tls_ca_cert"
+                    value={config.tls_ca_cert || ''}
+                    onChange={v => setConfig({ ...config, tls_ca_cert: v })}
+                    vaultRef={vaultRefs.tls_ca_cert}
+                    onOpenVault={onOpenVaultPicker}
+                    onRemoveVault={onRemoveVault}
+                    placeholder="-----BEGIN CERTIFICATE-----"
+                    isTextarea
+                  />
+                  <VaultInput
+                    label="TLS Client Certificate"
+                    field="tls_cert"
+                    value={config.tls_cert || ''}
+                    onChange={v => setConfig({ ...config, tls_cert: v })}
+                    vaultRef={vaultRefs.tls_cert}
+                    onOpenVault={onOpenVaultPicker}
+                    onRemoveVault={onRemoveVault}
+                    placeholder="-----BEGIN CERTIFICATE-----"
+                    isTextarea
+                  />
+                  <VaultInput
+                    label="TLS Client Key"
+                    field="tls_key"
+                    value={config.tls_key || ''}
+                    onChange={v => setConfig({ ...config, tls_key: v })}
+                    vaultRef={vaultRefs.tls_key}
+                    onOpenVault={onOpenVaultPicker}
+                    onRemoveVault={onRemoveVault}
+                    placeholder="-----BEGIN RSA PRIVATE KEY-----"
+                    isTextarea
+                  />
+                  <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+                    Required for TLS-secured Docker daemons. Generate with <code className="font-mono">docker tls generate</code>.
+                  </p>
+                </>
+              )}
+              {config.host_type === 'ssh' && (
+                <VaultInput
+                  label="SSH Private Key"
+                  field="ssh_key"
+                  value={config.ssh_key || ''}
+                  onChange={v => setConfig({ ...config, ssh_key: v })}
+                  vaultRef={vaultRefs.ssh_key}
+                  onOpenVault={onOpenVaultPicker}
+                  onRemoveVault={onRemoveVault}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  isTextarea
+                />
+              )}
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="docker_admin_fallback"
+                  checked={config.admin_credential_fallback === 'true'}
+                  onChange={e => setConfig({ ...config, admin_credential_fallback: e.target.checked ? 'true' : 'false' })}
+                  className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                />
+                <label htmlFor="docker_admin_fallback" className="text-sm text-[var(--text-secondary)]">
+                  Allow admin credential fallback
+                </label>
+              </div>
+              <p className="text-xs text-[var(--text-tertiary)] -mt-2">
+                When enabled, users without personal credentials will use the admin connection credentials.
+              </p>
+            </>
+          )}
+
+          {selectedType === 'secret' && (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Backend Mode</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfig({ ...config, backend_mode: 'builtin' })}
+                    className={`px-3 py-3 rounded-lg border text-sm font-medium transition-colors text-left ${
+                      (config.backend_mode || 'builtin') === 'builtin'
+                        ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50'
+                    }`}
+                  >
+                    <div className="font-medium">🏠 Built-in KV</div>
+                    <div className="text-xs opacity-75 mt-1">Local encrypted store in PostgreSQL. AES-256-GCM.</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfig({ ...config, backend_mode: 'vault' })}
+                    className={`px-3 py-3 rounded-lg border text-sm font-medium transition-colors text-left ${
+                      config.backend_mode === 'vault'
+                        ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+                        : 'border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50'
+                    }`}
+                  >
+                    <div className="font-medium">🔗 HashiCorp Vault</div>
+                    <div className="text-xs opacity-75 mt-1">Connect to a remote Vault server via HTTP API.</div>
+                  </button>
+                </div>
+                <p className="text-xs text-[var(--text-tertiary)] mt-1">
+                  {config.backend_mode === 'vault'
+                    ? 'Connect to an external HashiCorp Vault server for secret management.'
+                    : 'Use the built-in encrypted KV store. No external dependencies required.'}
+                </p>
+              </div>
+              {config.backend_mode === 'vault' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Vault Address *</label>
+                    <input
+                      type="url"
+                      value={config.address || ''}
+                      onChange={e => setConfig({ ...config, address: e.target.value })}
+                      required
+                      className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                      placeholder="https://vault.example.com:8200"
+                    />
+                    <p className="text-xs text-[var(--text-tertiary)] mt-1">The URL of your HashiCorp Vault server (e.g. https://vault.example.com:8200).</p>
+                  </div>
+                  <VaultInput
+                    label="Token *"
+                    field="token"
+                    value={config.token || ''}
+                    onChange={v => setConfig({ ...config, token: v })}
+                    vaultRef={vaultRefs.token}
+                    onOpenVault={onOpenVaultPicker}
+                    onRemoveVault={onRemoveVault}
+                    placeholder="hvs_... (Vault authentication token)"
+                    required
+                  />
+                  <div>
+                    <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">KV Engine Mount Path</label>
+                    <input
+                      type="text"
+                      value={config.mount_path || ''}
+                      onChange={e => setConfig({ ...config, mount_path: e.target.value })}
+                      className="w-full px-3 py-2 border border-[var(--border)] rounded-lg focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent"
+                      placeholder="secret"
+                    />
+                    <p className="text-xs text-[var(--text-tertiary)] mt-1">The KV v2 engine mount path (default: <code className="font-mono">secret</code>).</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="vault_insecure_tls"
+                      checked={config.insecure_tls === 'true'}
+                      onChange={e => setConfig({ ...config, insecure_tls: e.target.checked ? 'true' : 'false' })}
+                      className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                    />
+                    <label htmlFor="vault_insecure_tls" className="text-sm text-[var(--text-secondary)]">
+                      Skip TLS verification (for self-signed certificates)
+                    </label>
+                  </div>
+                </>
+              )}
+              {config.backend_mode !== 'vault' && (
+                <div className="p-3 rounded-lg bg-[var(--accent)]/5 border border-[var(--accent)]/20">
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    <span className="font-medium text-[var(--accent)]">Built-in KV mode:</span> Secrets are encrypted with AES-256-GCM and stored directly in PostgreSQL. No external Vault server required. The encryption key is derived from your <code className="font-mono">VAULT_TOKEN</code> environment variable.
+                  </p>
+                </div>
+              )}
             </>
           )}
 
