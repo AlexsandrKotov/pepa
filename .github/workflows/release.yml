@@ -606,10 +606,12 @@ jobs:
           # Copy the canonical docker-compose.yml (single source of truth)
           cp deployments/compose/docker-compose.yml "${PKG}/docker-compose.yml"
 
-          # Pin PEPA image tags to this release version
-          sed -i "s|/pepa-api-server:latest|/pepa-api-server:${VERSION}|g" "${PKG}/docker-compose.yml"
-          sed -i "s|/pepa-worker:latest|/pepa-worker:${VERSION}|g" "${PKG}/docker-compose.yml"
-          sed -i "s|/pepa-frontend:latest|/pepa-frontend:${VERSION}|g" "${PKG}/docker-compose.yml"
+          # Pin PEPA image tags to this release version. The source compose
+          # file uses ${PEPA_IMAGE_TAG:-latest}; substitute the variable so
+          # the shipped compose file is self-contained and runs against the
+          # exact images built for this release without requiring users to
+          # set PEPA_IMAGE_TAG in their environment.
+          sed -i "s|\${PEPA_IMAGE_TAG:-latest}|${VERSION}|g" "${PKG}/docker-compose.yml"
 
           # Copy nginx config from the repo
           cp deployments/compose/nginx/nginx.conf "${PKG}/nginx/nginx.conf"
