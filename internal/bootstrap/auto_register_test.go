@@ -87,7 +87,7 @@ func TestAutoRegister_StatusFiltering(t *testing.T) {
 		}
 	}
 
-	insert("jenkins", "installed", true)     // admin installed, enabled
+	insert("jenkins", "installed", true)      // admin installed, enabled
 	insert("gitlab", "installed", false)      // admin installed, disabled
 	insert("sonarqube", "uninstalled", false) // admin uninstalled
 	// argocd — no row at all (never installed)

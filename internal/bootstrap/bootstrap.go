@@ -430,7 +430,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		// even for a brief window.  This closes the race where every
 		// discovered binary was registered as Enabled=true and only
 		// AutoRegisterPlugins() (later) corrected the state.
-		installedPlugins, dbErr := c.PluginRepo.List(context.Background())
+		installedPlugins, dbErr := c.PluginRepo.List(ctx)
 		installedMap := make(map[string]*repository.Plugin)
 		if dbErr != nil {
 			slog.Warn("could not list installed plugins from DB, deferring to AutoRegisterPlugins", "error", dbErr)
