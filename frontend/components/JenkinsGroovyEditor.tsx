@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import ConfirmModal from '@/components/ConfirmModal';
+import { connections } from '@/lib/api';
+import { friendlyError } from '@/lib/errors';
 
 interface JenkinsGroovyEditorProps {
   connectionId: string;
@@ -48,6 +50,7 @@ type Mode = 'view' | 'edit' | 'create';
 export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: JenkinsGroovyEditorProps) {
   const [mode, setMode] = useState<Mode>('view');
   const [script, setScript] = useState('');
+  const [savedScript, setSavedScript] = useState('');
   const [pipelineType, setPipelineType] = useState<'cps' | 'cps-scm' | ''>('');
   const [newJobName, setNewJobName] = useState('');
   const [newPipelineType, setNewPipelineType] = useState<'declarative' | 'scripted'>('declarative');
@@ -56,6 +59,7 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
   const [success, setSuccess] = useState('');
   const [showSaveConfirm, setShowSaveConfirm] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [justCreated, setJustCreated] = useState(false);
 
   // Fetch the pipeline script
   const fetchScript = useCallback(async () => {
@@ -63,29 +67,30 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
     setLoading(true);
     setError('');
     try {
-      const resp = await fetch(`/api/v1/connections/${connectionId}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resource: 'get_pipeline_script',
-          params: { job_name: jobName },
-        }),
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: 'Failed to fetch' }));
-        throw new Error(err.error || 'Failed to fetch pipeline script');
-      }
-      const data = await resp.json();
-      const scriptData = data.data || data;
+      const { data } = await connections.execute(connectionId, 'get_pipeline_script', { job_name: jobName });
+      const scriptData = data as { script?: string; type?: 'cps' | 'cps-scm' | '' };
       setScript(scriptData.script || '');
+      setSavedScript(scriptData.script || '');
       setPipelineType(scriptData.type || '');
       setDirty(false);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch pipeline script');
+    } catch (err) {
+      setError(friendlyError(err).message);
     } finally {
       setLoading(false);
     }
   }, [connectionId, jobName]);
+
+  useEffect(() => { void fetchScript(); }, [fetchScript]);
+
+  // Reset the post-create flag when the parent navigates to a different job.
+  useEffect(() => { setJustCreated(false); }, [jobName]);
+
+  const cancelEdit = () => {
+    setMode('view');
+    setScript(savedScript);
+    setDirty(false);
+    setError('');
+  };
 
   // Save the pipeline script
   const saveScript = async () => {
@@ -93,24 +98,14 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
     setError('');
     setSuccess('');
     try {
-      const resp = await fetch(`/api/v1/connections/${connectionId}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resource: 'update_pipeline_script',
-          params: { job_name: jobName, script },
-        }),
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: 'Failed to save' }));
-        throw new Error(err.error || 'Failed to save pipeline script');
-      }
+      await connections.execute(connectionId, 'update_pipeline_script', { job_name: jobName, script });
+      setSavedScript(script);
       setSuccess('Pipeline script saved successfully');
       setDirty(false);
       setMode('view');
       onSaved?.();
-    } catch (err: any) {
-      setError(err.message || 'Failed to save pipeline script');
+    } catch (err) {
+      setError(friendlyError(err).message);
     } finally {
       setLoading(false);
       setShowSaveConfirm(false);
@@ -127,28 +122,22 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
     setError('');
     setSuccess('');
     try {
-      const template = newPipelineType === 'declarative' ? DECLARATIVE_TEMPLATE : SCRIPTED_TEMPLATE;
-      const resp = await fetch(`/api/v1/connections/${connectionId}/execute`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          resource: 'create_job',
-          params: {
-            job_name: newJobName,
-            script,
-            sandbox: true,
-          },
-        }),
+      const parts = newJobName.trim().split('/');
+      const name = parts.pop();
+      await connections.execute(connectionId, 'create_job', {
+        job_name: name, folder: parts.join('/'), script, sandbox: true,
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({ error: 'Failed to create' }));
-        throw new Error(err.error || 'Failed to create job');
-      }
       setSuccess(`Pipeline job "${newJobName}" created successfully`);
+      // Keep the script the user authored in the editor so they can review or
+      // save it again. The job list above will refresh via onSaved and the
+      // user can navigate to the new job to load it from Jenkins.
+      setSavedScript(script);
+      setDirty(false);
       setMode('view');
+      setJustCreated(true);
       onSaved?.();
-    } catch (err: any) {
-      setError(err.message || 'Failed to create job');
+    } catch (err) {
+      setError(friendlyError(err).message);
     } finally {
       setLoading(false);
     }
@@ -187,12 +176,14 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
             <>
               <button
                 onClick={() => setMode('edit')}
-                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                disabled={loading || !jobName || pipelineType !== 'cps'}
+                className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
               >
                 Edit
               </button>
               <button
-                onClick={() => { setMode('create'); setScript(DECLARATIVE_TEMPLATE); }}
+                onClick={() => { setMode('create'); setNewPipelineType('declarative'); setScript(DECLARATIVE_TEMPLATE); setError(''); setSuccess(''); }}
+                disabled={loading}
                 className="px-3 py-1.5 text-sm bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"
               >
                 New Pipeline
@@ -202,7 +193,8 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
           {mode === 'edit' && (
             <>
               <button
-                onClick={() => { setMode('view'); setDirty(false); }}
+                onClick={cancelEdit}
+                disabled={loading}
                 className="px-3 py-1.5 text-sm text-[var(--text-secondary)] border border-[var(--border)] rounded-lg hover:bg-[var(--surface-hover)] transition-colors"
               >
                 Cancel
@@ -219,7 +211,8 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
           {mode === 'create' && (
             <>
               <button
-                onClick={() => setMode('view')}
+                onClick={cancelEdit}
+                disabled={loading}
                 className="px-3 py-1.5 text-sm text-[var(--text-secondary)] border border-[var(--border)] rounded-lg hover:bg-[var(--surface-hover)] transition-colors"
               >
                 Cancel
@@ -289,7 +282,10 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
 
       {/* Editor / Viewer */}
       <div className="relative">
-        {mode === 'view' && !script && !loading && (
+        {mode === 'view' && pipelineType === 'cps-scm' && (
+          <p className="p-3 text-sm text-[var(--text-secondary)]">This pipeline uses a Jenkinsfile from source control. Edit it in its Git repository.</p>
+        )}
+        {mode === 'view' && jobName && !script && !loading && pipelineType !== 'cps-scm' && (
           <button
             onClick={fetchScript}
             className="w-full py-8 text-sm text-[var(--text-tertiary)] border border-dashed border-[var(--border)] rounded-xl hover:border-blue-400 hover:text-blue-500 transition-colors"
@@ -297,7 +293,7 @@ export default function JenkinsGroovyEditor({ connectionId, jobName, onSaved }: 
             Click to load pipeline script
           </button>
         )}
-        {(mode !== 'view' || script || loading) && (
+        {(mode !== 'view' || script || loading || justCreated) && (
           <textarea
             value={script}
             onChange={e => { setScript(e.target.value); setDirty(true); }}

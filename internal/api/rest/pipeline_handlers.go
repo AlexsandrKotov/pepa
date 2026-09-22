@@ -251,7 +251,10 @@ func resolvePipelineSchema(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
 
 		schema, err := provider.ResolveSchema(c.Request.Context(), config)
 		if err != nil {
@@ -304,7 +307,10 @@ func syncPipelineRuns(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, tenantID)
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
 
 		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "30"))
 		if perPage > 100 {
@@ -495,6 +501,11 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
+
 		// Create the run record first
 		paramsJSON, _ := json.Marshal(req.Parameters)
 		run := &models.PipelineRun{
@@ -511,8 +522,6 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 			respondInternalError(c, err)
 			return
 		}
-
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
 
 		// For GitLab CI sources, separate spec.inputs (marked with is_input in the
 		// parameter schema) from regular CI variables. The inputs are embedded in
@@ -582,6 +591,11 @@ func triggerPipelineRun(deps Dependencies) gin.HandlerFunc {
 			} else {
 				currentRun.ExternalRunID = result.ExternalRunID
 				currentRun.ExternalURL = result.ExternalURL
+				if source.SourceType == "jenkins" && (result.Status == "pending" || result.Status == "running") {
+					currentRun.Status = models.PipelineRunStatus(result.Status)
+					_ = deps.Repos.PipelineRun.Update(bgCtx, currentRun.ID, currentRun)
+					return
+				}
 				switch result.Status {
 				case "success":
 					currentRun.Status = models.PipelineRunSuccess
@@ -698,13 +712,18 @@ func refreshPipelineRun(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		status, err := provider.Status(c.Request.Context(), resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c)), run.ExternalRunID)
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
+		status, err := provider.Status(c.Request.Context(), config, run.ExternalRunID)
 		if err != nil {
 			respondInternalError(c, err)
 			return
 		}
 
 		now := time.Now().UTC()
+		prevStatus := run.Status
 		run.Status = models.PipelineRunStatus(status.Status)
 		run.ExternalStatus = status.Status
 		if status.DurationMs != nil {
@@ -714,10 +733,22 @@ func refreshPipelineRun(deps Dependencies) gin.HandlerFunc {
 			run.LogsURL = status.LogsURL
 		}
 
+		// Persist the resolved build ID so subsequent logs/cancel/status calls
+		// no longer depend on a queue item that may expire.
+		if status.ExternalRunID != "" && status.ExternalRunID != run.ExternalRunID {
+			run.ExternalRunID = status.ExternalRunID
+		}
+
 		// Set started_at when the run begins executing
 		if run.Status == models.PipelineRunRunning && run.StartedAt == nil {
 			run.StartedAt = &now
 		}
+
+		// Determine whether the run just transitioned into a terminal state.
+		// This is used below to emit a completion event — important for providers
+		// like Jenkins where the trigger returns before the build finishes and
+		// the run reaches its final state via refresh.
+		var justCompleted bool
 		// Set completed_at when the run reaches a terminal state
 		switch run.Status {
 		case models.PipelineRunSuccess, models.PipelineRunFailed,
@@ -732,12 +763,32 @@ func refreshPipelineRun(deps Dependencies) gin.HandlerFunc {
 					run.DurationMs = &dur
 				}
 			}
+			justCompleted = prevStatus != run.Status
 		}
 
 		_ = deps.Repos.PipelineRun.Update(c.Request.Context(), run.ID, run)
 
+		// Publish pipeline_run.completed event on first transition to a terminal
+		// state. This covers async providers (e.g. Jenkins) whose trigger returns
+		// before the build finishes, as well as any provider whose runs are
+		// finalized through refresh rather than the trigger goroutine.
+		if justCompleted && deps.EventBus != nil {
+			_ = deps.EventBus.Publish(events.Event{
+				Type:     "pipeline_run.completed",
+				TenantID: run.TenantID.String(),
+				EntityID: run.ID.String(),
+				Payload: map[string]interface{}{
+					"pipeline_run_id": run.ID.String(),
+					"source_id":       run.SourceID.String(),
+					"status":          string(run.Status),
+					"trigger_type":    run.TriggerType,
+					"url":             "/pipelines/runs/" + run.ID.String(),
+				},
+			})
+		}
+
 		// Refresh jobs too (upsert to avoid duplicates on repeated refreshes)
-		jobs, err := provider.Jobs(c.Request.Context(), resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c)), run.ExternalRunID)
+		jobs, err := provider.Jobs(c.Request.Context(), config, run.ExternalRunID)
 		if err == nil {
 			for _, j := range jobs {
 				job := &models.PipelineRunJob{
@@ -805,7 +856,11 @@ func cancelPipelineRun(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := provider.Cancel(c.Request.Context(), resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c)), run.ExternalRunID); err != nil {
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
+		if err := provider.Cancel(c.Request.Context(), config, run.ExternalRunID); err != nil {
 			respondInternalError(c, err)
 			return
 		}
@@ -877,7 +932,11 @@ func getPipelineRunLogs(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		logs, err := provider.Logs(c.Request.Context(), resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c)), run.ExternalRunID, jobID)
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
+		logs, err := provider.Logs(c.Request.Context(), config, run.ExternalRunID, jobID)
 		if err != nil {
 			respondInternalError(c, err)
 			return
@@ -1100,7 +1159,10 @@ func getPipelineState(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
 		state, err := enhanced.State(c.Request.Context(), config, params)
 		if err != nil {
 			respondInternalError(c, err)
@@ -1153,7 +1215,10 @@ func getPipelinePlan(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
 		plan, err := enhanced.Plan(c.Request.Context(), config, params)
 		if err != nil {
 			respondInternalError(c, err)
@@ -1197,7 +1262,10 @@ func inspectPipelineSource(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
 		result, err := inspectable.Inspect(c.Request.Context(), config)
 		if err != nil {
 			respondInternalError(c, err)
@@ -1240,7 +1308,10 @@ func getWorkflowGraph(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		config := resolvePipelineConfig(c.Request.Context(), deps, source, auth.GetTenantID(c))
+		config, ready := resolvePipelineRequestConfig(c, deps, source)
+		if !ready {
+			return
+		}
 		graph, err := graphProvider.GetWorkflowGraph(c.Request.Context(), config)
 		if err != nil {
 			respondInternalError(c, err)

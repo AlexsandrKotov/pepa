@@ -33,6 +33,9 @@ func resolveConnectionTestConfig(deps Dependencies, c *gin.Context, ctx context.
 			continue
 		}
 		allowed := conn.Type == repository.ConnectionSecret && key == "token"
+		if conn.Type == repository.ConnectionJenkins && (key == "api_token" || key == "token" || key == "username") {
+			allowed = true
+		}
 		if conn.Type == repository.ConnectionDocker {
 			switch key {
 			case "tls_key", "tls_cert", "tls_ca_cert", "ssh_key", "ssh_host_key":
@@ -529,6 +532,13 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 				result := deps.Services.Connection.TestCIConnection(ctx, url, conn.Config)
 				status, message = result.Status, result.Message
 			}
+		case repository.ConnectionJenkins:
+			config, err := resolveConnectionTestConfig(deps, c, ctx, conn)
+			if err != nil {
+				status, message = "error", err.Error()
+				break
+			}
+			status, message = testJenkinsConnection(ctx, deps, config)
 		case repository.ConnectionProxmox:
 			status, message = testProxmoxConnection(deps, c, conn.Config)
 		case repository.ConnectionVMware:
@@ -592,6 +602,25 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			"credential_source": credSource,
 		})
 	}
+}
+
+func testJenkinsConnection(ctx context.Context, deps Dependencies, config map[string]any) (string, string) {
+	if deps.ProviderRegistry == nil {
+		return "error", "Jenkins plugin is unavailable. Install and enable it in Marketplace."
+	}
+	entry, ok := deps.ProviderRegistry.GetEnabled("jenkins")
+	if !ok || entry == nil || entry.Executor == nil {
+		return "error", "Jenkins plugin is unavailable. Install and enable it in Marketplace."
+	}
+	pluginConfig := make(map[string]string, len(config))
+	for k, v := range config {
+		pluginConfig[k] = fmt.Sprint(v)
+	}
+	resp, err := entry.Executor.Execute(ctx, "test_connection", json.RawMessage("{}"), "", pluginConfig)
+	if err != nil || resp == nil || !resp.GetSuccess() {
+		return "error", "Jenkins connection failed. Check the URL, username, API token, TLS settings, and plugin logs."
+	}
+	return "connected", "Successfully connected to Jenkins"
 }
 
 func connectionSummary(deps Dependencies) gin.HandlerFunc {
@@ -927,6 +956,25 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 
+		if conn.Type == repository.ConnectionJenkins {
+			resolvedConn := *conn
+			resolvedConn.Config = make(map[string]any, len(connConfig))
+			for key, value := range connConfig {
+				resolvedConn.Config[key] = value
+			}
+			config, err := resolveConnectionTestConfig(deps, c, c.Request.Context(), &resolvedConn)
+			if err != nil {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			for key, value := range config {
+				connConfig[key] = fmt.Sprint(value)
+			}
+			if insecure, ok := conn.Config["insecure"].(bool); ok {
+				connConfig["insecure"] = strconv.FormatBool(insecure)
+			}
+		}
+
 		// Marshal params to JSON for the plugin
 		paramsBytes, _ := json.Marshal(req.Params)
 		params := json.RawMessage(paramsBytes)
@@ -1026,6 +1074,8 @@ func requiredPluginForConnection(connType string, config map[string]any) string 
 		return "jira"
 	case "proxmox":
 		return "proxmox"
+	case "jenkins":
+		return "jenkins"
 	case "notification":
 		provider, _ := config["provider"].(string)
 		switch provider {
@@ -1060,6 +1110,7 @@ func connectionPluginStatus(deps Dependencies) gin.HandlerFunc {
 			// Other plugin-backed connection types
 			"jira":    "jira",
 			"proxmox": "proxmox",
+			"jenkins": "jenkins",
 			// GitOps engines
 			"argocd": "argocd",
 			"fluxcd": "fluxcd",

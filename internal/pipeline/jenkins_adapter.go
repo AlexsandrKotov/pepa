@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -156,9 +157,7 @@ func (a *JenkinsAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 	}
 
 	if err := jenkinsGetJSON(ctx, client, apiURL, cfg.Username, cfg.Token, &jobInfo); err != nil {
-		// If we can't fetch params, return a minimal schema
-		props["ref"] = PropertyDef{Type: "string", Description: "Git ref to build against"}
-		return &ParameterSchema{Type: "object", Properties: props}, nil
+		return nil, fmt.Errorf("fetch Jenkins job parameters: %w", err)
 	}
 
 	for _, prop := range jobInfo.Property {
@@ -194,11 +193,6 @@ func (a *JenkinsAdapter) ResolveSchema(ctx context.Context, raw json.RawMessage)
 		}
 	}
 
-	// If no parameters found, provide a minimal ref field
-	if len(props) == 0 {
-		props["ref"] = PropertyDef{Type: "string", Description: "Git ref to build against"}
-	}
-
 	return &ParameterSchema{
 		Type:       "object",
 		Properties: props,
@@ -218,7 +212,7 @@ func (a *JenkinsAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 	// Separate build params from meta params
 	buildParams := make(url.Values)
 	for k, v := range params {
-		if k == "ref" || k == "" {
+		if k == "" {
 			continue
 		}
 		buildParams.Set(k, fmt.Sprintf("%v", v))
@@ -248,37 +242,51 @@ func (a *JenkinsAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 		return nil, fmt.Errorf("trigger jenkins build (%d): %s", resp.StatusCode, string(b))
 	}
 
-	// Jenkins returns 201 with Location header pointing to the queue item
-	queueURL := resp.Header.Get("Location")
-	externalURL := fmt.Sprintf("%s/%s/", cfg.URL, jobPath)
-
-	// Try to resolve the queue item to get the build number
-	buildNumber := ""
-	if queueURL != "" {
-		// Poll the queue item to get the executable number
-		for i := 0; i < 10; i++ {
-			time.Sleep(500 * time.Millisecond)
-			var queueItem struct {
-				Executable struct {
-					Number int `json:"number"`
-				} `json:"executable"`
-			}
-			qURL := strings.TrimSuffix(queueURL, "/") + "/api/json"
-			if err := jenkinsGetJSON(ctx, client, qURL, cfg.Username, cfg.Token, &queueItem); err == nil {
-				if queueItem.Executable.Number > 0 {
-					buildNumber = fmt.Sprintf("%d", queueItem.Executable.Number)
-					externalURL = fmt.Sprintf("%s/%s/%d/", cfg.URL, jobPath, queueItem.Executable.Number)
-					break
-				}
-			}
-		}
+	queueURL, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil || queueURL.Path == "" {
+		return nil, fmt.Errorf("Jenkins accepted the build but did not return a queue location; check Jenkins before retrying")
 	}
-
+	parts := strings.Split(strings.Trim(queueURL.Path, "/"), "/")
+	if len(parts) < 3 || parts[len(parts)-3] != "queue" || parts[len(parts)-2] != "item" {
+		return nil, fmt.Errorf("Jenkins returned an invalid queue location")
+	}
+	queueID := parts[len(parts)-1]
+	if _, err := strconv.ParseUint(queueID, 10, 64); err != nil {
+		return nil, fmt.Errorf("Jenkins returned an invalid queue ID")
+	}
 	return &TriggerResult{
-		ExternalRunID: buildNumber,
-		ExternalURL:   externalURL,
+		ExternalRunID: "queue:" + queueID,
+		ExternalURL:   fmt.Sprintf("%s/%s/", cfg.URL, jobPath),
 		Status:        "pending",
 	}, nil
+}
+
+// resolveJenkinsBuild follows queued builds without sending credentials to the
+// server-provided Location URL. All requests stay on the configured Jenkins URL.
+func resolveJenkinsBuild(ctx context.Context, cfg *JenkinsPipelineConfig, externalID string) (string, bool, error) {
+	if !strings.HasPrefix(externalID, "queue:") {
+		n, err := strconv.ParseUint(externalID, 10, 64)
+		if err != nil || n == 0 {
+			return "", false, fmt.Errorf("invalid Jenkins build number")
+		}
+		return externalID, false, nil
+	}
+	queueID := strings.TrimPrefix(externalID, "queue:")
+	if _, err := strconv.ParseUint(queueID, 10, 64); err != nil {
+		return "", false, fmt.Errorf("invalid Jenkins queue ID")
+	}
+	var item struct {
+		Cancelled bool `json:"cancelled"`
+		Executable *struct { Number int `json:"number"` } `json:"executable"`
+	}
+	err := jenkinsGetJSON(ctx, jenkinsHTTPClient(cfg.Insecure), cfg.URL+"/queue/item/"+queueID+"/api/json", cfg.Username, cfg.Token, &item)
+	if err != nil {
+		return "", false, err
+	}
+	if item.Executable != nil && item.Executable.Number > 0 {
+		return strconv.Itoa(item.Executable.Number), false, nil
+	}
+	return "", item.Cancelled, nil
 }
 
 // Status returns the current status of a Jenkins build.
@@ -288,6 +296,16 @@ func (a *JenkinsAdapter) Status(ctx context.Context, raw json.RawMessage, extern
 		return nil, err
 	}
 
+	buildID, cancelled, err := resolveJenkinsBuild(ctx, cfg, externalRunID)
+	if err != nil {
+		return nil, err
+	}
+	if buildID == "" {
+		status := "pending"
+		if cancelled { status = "cancelled" }
+		return &RunStatus{ExternalRunID: externalRunID, Status: status}, nil
+	}
+	externalRunID = buildID
 	client := jenkinsHTTPClient(cfg.Insecure)
 	apiURL := fmt.Sprintf("%s/%s/%s/api/json", cfg.URL, jenkinsJobPath(cfg.JobName), externalRunID)
 
@@ -320,6 +338,10 @@ func (a *JenkinsAdapter) Jobs(ctx context.Context, raw json.RawMessage, external
 		return nil, err
 	}
 
+	buildID, _, err := resolveJenkinsBuild(ctx, cfg, externalRunID)
+	if err != nil { return nil, err }
+	if buildID == "" { return []JobInfo{}, nil }
+	externalRunID = buildID
 	client := jenkinsHTTPClient(cfg.Insecure)
 
 	// Try Pipeline Stage View API first
@@ -378,6 +400,10 @@ func (a *JenkinsAdapter) Logs(ctx context.Context, raw json.RawMessage, external
 		return "", err
 	}
 
+	buildID, _, err := resolveJenkinsBuild(ctx, cfg, externalRunID)
+	if err != nil { return "", err }
+	if buildID == "" { return "", nil }
+	externalRunID = buildID
 	client := jenkinsHTTPClient(cfg.Insecure)
 	logURL := fmt.Sprintf("%s/%s/%s/consoleText", cfg.URL, jenkinsJobPath(cfg.JobName), externalRunID)
 
@@ -399,7 +425,7 @@ func (a *JenkinsAdapter) Logs(ctx context.Context, raw json.RawMessage, external
 	return string(b), nil
 }
 
-// Cancel aborts a running Jenkins build.
+// Cancel aborts a running Jenkins build or removes a queued item.
 func (a *JenkinsAdapter) Cancel(ctx context.Context, raw json.RawMessage, externalRunID string) error {
 	cfg, err := parseJenkinsConfig(raw)
 	if err != nil {
@@ -407,7 +433,22 @@ func (a *JenkinsAdapter) Cancel(ctx context.Context, raw json.RawMessage, extern
 	}
 
 	client := jenkinsHTTPClient(cfg.Insecure)
-	stopURL := fmt.Sprintf("%s/%s/%s/stop", cfg.URL, jenkinsJobPath(cfg.JobName), externalRunID)
+	var stopURL string
+	if strings.HasPrefix(externalRunID, "queue:") {
+		queueID := strings.TrimPrefix(externalRunID, "queue:")
+		// If the queue item already has a build number, stop that build instead.
+		buildID, _, resolveErr := resolveJenkinsBuild(ctx, cfg, externalRunID)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if buildID != "" {
+			stopURL = fmt.Sprintf("%s/%s/%s/stop", cfg.URL, jenkinsJobPath(cfg.JobName), buildID)
+		} else {
+			stopURL = cfg.URL + "/queue/cancelItem?id=" + queueID
+		}
+	} else {
+		stopURL = fmt.Sprintf("%s/%s/%s/stop", cfg.URL, jenkinsJobPath(cfg.JobName), externalRunID)
+	}
 
 	resp, err := jenkinsDo(ctx, client, "POST", stopURL, cfg.Username, cfg.Token, nil, "")
 	if err != nil {

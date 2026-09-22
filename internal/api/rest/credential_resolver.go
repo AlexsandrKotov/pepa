@@ -150,6 +150,10 @@ func overrideConfigWithUserCred(adminConfig map[string]string, provider, token, 
 		if username != "" {
 			merged["username"] = username
 		}
+	case "jenkins":
+		merged["api_token"] = token
+		merged["token"] = token
+		merged["username"] = username
 	case "sonarqube":
 		merged["token"] = token
 	case "docker":

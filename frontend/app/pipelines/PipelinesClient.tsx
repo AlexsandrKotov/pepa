@@ -17,6 +17,8 @@ import ToastContainer from '@/components/ToastContainer';
 import { useToast } from '@/hooks/useToast';
 import ConfirmModal from '@/components/ConfirmModal';
 import Tabs from '@/components/Tabs';
+import JenkinsPanel from '@/components/JenkinsPanel';
+import { usePermission } from '@/hooks/usePermission';
 import { useUrlFilters } from '@/hooks/useUrlFilters';
 import FilterBar from '@/components/filters/FilterBar';
 import FilterChips, { type ActiveChip } from '@/components/filters/FilterChips';
@@ -55,6 +57,7 @@ const sourceTypeLabels: Record<string, string> = {
   terraform: 'Terraform',
   github_actions: 'GitHub Actions',
   trivy: 'Trivy Scanner',
+  jenkins: 'Jenkins',
 };
 
 const ENGINE_TYPE_INFO: Record<string, { icon: string; label: string; color: string; bgColor: string; borderColor: string; description: string }> = {
@@ -144,9 +147,10 @@ function PipelinesClientContent({
 }) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'engines' | 'providers'>(
-    searchParams.get('tab') === 'providers' ? 'providers' : 'engines'
-  );
+  const { enabledPlugins } = usePermission();
+  const jenkinsEnabled = enabledPlugins.includes('jenkins');
+  const tab = searchParams.get('tab');
+  const activeTab = tab === 'providers' || tab === 'jenkins' ? tab : 'engines';
   const [sources, setSources] = useState<PipelineSource[]>(initialSources ?? []);
   const [connections, setConnections] = useState(initialConnections ?? []);
   const [loading, setLoading] = useState(false);
@@ -366,7 +370,7 @@ function PipelinesClientContent({
     await loadPlan(source.id);
   }, [loadPlan]);
 
-  const selectSource = async (source: PipelineSource) => {
+  const selectSource = async (source: PipelineSource, tab?: string) => {
     setSelectedSource(source);
     setDetailTab('runs');
     setTfState(null);
@@ -377,6 +381,7 @@ function PipelinesClientContent({
     // Persist selected engine in URL so tab-switching preserves it
     const params = new URLSearchParams(window.location.search);
     params.set('engine', source.id);
+    if (tab) params.set('tab', tab);
     router.replace(`/pipelines?${params.toString()}`, { scroll: false });
     await loadRuns(source.id);
     await loadPresets(source.id);
@@ -452,7 +457,19 @@ function PipelinesClientContent({
 
   // Open trigger modal for Engines tab - dynamically load CI variables if connection available
   const openEngineTriggerModal = async (source: PipelineSource) => {
-    const schema = source.parameter_schema as Record<string, Record<string, unknown>> | undefined;
+    let schema = source.parameter_schema as Record<string, Record<string, unknown>> | undefined;
+    if (source.source_type === 'jenkins') {
+      try {
+        const resolved = await pipelineSources.resolveSchema(source.id);
+        const updated = { ...source, parameter_schema: resolved };
+        setSelectedSource(updated);
+        setSources(current => current.map(s => s.id === source.id ? updated : s));
+        schema = resolved as Record<string, Record<string, unknown>>;
+      } catch (err) {
+        addToast(friendlyError(err).message, 'error');
+        return;
+      }
+    }
     const defaults: Record<string, string> = {};
     if (schema?.properties) {
       for (const [k, v] of Object.entries(schema.properties)) {
@@ -824,7 +841,6 @@ function PipelinesClientContent({
           <Tabs
             activeKey={activeTab}
             onChange={(k) => {
-              setActiveTab(k as 'engines' | 'providers');
               const params = new URLSearchParams(searchParams.toString());
               params.set('tab', k);
               router.replace(`?${params.toString()}`, { scroll: false });
@@ -832,9 +848,17 @@ function PipelinesClientContent({
             tabs={[
               { key: 'engines', label: 'Engines', icon: 'cicd', badge: sources.length || undefined },
               { key: 'providers', label: 'Providers', icon: 'plugin', badge: connections.length || undefined },
+              ...(jenkinsEnabled || activeTab === 'jenkins' ? [{ key: 'jenkins', label: 'Jenkins', icon: 'jenkins' }] : []),
             ]}
           />
         </div>
+
+        {activeTab === 'jenkins' && (
+          <JenkinsPanel enabled={jenkinsEnabled} sources={sources} onOpenSource={source => {
+            setSources(current => current.some(s => s.id === source.id) ? current : [...current, source]);
+            void selectSource(source, 'engines');
+          }} />
+        )}
 
         {/* ── Engines Tab ──────────────────────────────────── */}
         {activeTab === 'engines' && (
@@ -859,6 +883,7 @@ function PipelinesClientContent({
                     options={[
                       { value: 'gitlab_ci', label: 'GitLab CI' },
                       { value: 'github_actions', label: 'GitHub Actions' },
+                      { value: 'jenkins', label: 'Jenkins' },
                       { value: 'ansible', label: 'Ansible' },
                       { value: 'terraform', label: 'Terraform' },
                       { value: 'trivy', label: 'Trivy Scanner' },
@@ -948,7 +973,7 @@ function PipelinesClientContent({
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
                             <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg text-sm ${ENGINE_TYPE_INFO[source.source_type]?.bgColor || 'bg-[var(--bg)]'}`}>
-                              <BrandIcon name={ENGINE_TYPE_INFO[source.source_type]?.icon || 'plugin'} size={16} />
+                              <BrandIcon name={ENGINE_TYPE_INFO[source.source_type]?.icon || (source.source_type === 'jenkins' ? 'jenkins' : 'plugin')} size={16} />
                             </span>
                             <div>
                               <div className="flex items-center gap-1.5">

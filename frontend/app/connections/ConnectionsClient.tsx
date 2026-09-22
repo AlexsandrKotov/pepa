@@ -524,7 +524,12 @@ function AddConnectionModal({
 
   // Check if the selected provider's plugin is missing or disabled
   const isPluginBlocked = (() => {
-    if (!selectedType || !config.provider) return false;
+    if (!selectedType) return false;
+    if (selectedType === 'jenkins') {
+      const ps = gitPluginStatus.jenkins;
+      return !ps || !ps.installed || !ps.enabled;
+    }
+    if (!config.provider) return false;
     // Git providers that need a plugin
     if (selectedType === 'git' && ['github', 'gitlab', 'gitea', 'bitbucket'].includes(config.provider)) {
       const ps = gitPluginStatus[config.provider];
@@ -550,10 +555,6 @@ function AddConnectionModal({
     }
     if (selectedType === 'storage') {
       const ps = gitPluginStatus.s3;
-      return !ps || !ps.installed || !ps.enabled;
-    }
-    if (selectedType === 'jenkins') {
-      const ps = gitPluginStatus.jenkins;
       return !ps || !ps.installed || !ps.enabled;
     }
     return false;

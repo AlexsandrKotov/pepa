@@ -23,6 +23,7 @@ out/
 /email
 /webhook
 /prometheus
+/jenkins
 /examples
 
 # Environment files (NEVER commit secrets)
