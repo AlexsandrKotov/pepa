@@ -160,6 +160,9 @@ jobs:
           image: ${{ steps.tag.outputs.image_ref }}
           format: spdx-json
           output-file: sbom-${{ matrix.target }}.spdx.json
+          # SBOM is still uploaded as a workflow artifact and attached to the
+          # image via cosign attest; keep it off the public Release page.
+          upload-release-assets: false
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v4
