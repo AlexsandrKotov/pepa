@@ -80,6 +80,19 @@ func TestDockerConnectionRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestConnectionModeErrorsDoNotEchoValues(t *testing.T) {
+	const secret = "resolved-value-must-not-be-echoed"
+	svc := NewConnectionService()
+	for _, result := range []TestResult{
+		svc.TestDockerConnection(t.Context(), map[string]any{"host_type": secret}),
+		svc.TestVaultConnection(t.Context(), map[string]any{"backend_mode": secret}),
+	} {
+		if result.Status != "error" || strings.Contains(result.Message, secret) {
+			t.Fatalf("invalid mode was accepted or disclosed: %+v", result)
+		}
+	}
+}
+
 func TestDockerConnectionLocalSocket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "d.sock")
 	listener, err := net.Listen("unix", path)

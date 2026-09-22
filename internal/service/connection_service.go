@@ -496,7 +496,7 @@ func (s *ConnectionService) TestDockerConnection(ctx context.Context, config map
 		u.Path = "/_ping"
 		endpoint = u.String()
 	default:
-		return TestResult{Status: "error", Message: fmt.Sprintf("Unknown Docker host type: %s", hostType)}
+		return TestResult{Status: "error", Message: "Unknown Docker host type"}
 	}
 
 	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: noConnectionRedirect}
@@ -626,7 +626,7 @@ func (s *ConnectionService) TestVaultConnection(ctx context.Context, config map[
 		return TestResult{Status: "connected", Message: "Built-in KV storage is reachable and encryption self-test passed"}
 	}
 	if backendMode != "vault" {
-		return TestResult{Status: "error", Message: fmt.Sprintf("Unknown secret backend mode: %s", backendMode)}
+		return TestResult{Status: "error", Message: "Unknown secret backend mode"}
 	}
 	u, err := url.Parse(strings.TrimSpace(address))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

@@ -20,6 +20,67 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
+// resolveConnectionTestConfig resolves only supported credential references after
+// enforcing the same RBAC and path ACL as a direct Vault read. Stored config is
+// never mutated, and errors must not contain secret values or backend responses.
+func resolveConnectionTestConfig(deps Dependencies, c *gin.Context, ctx context.Context, conn *repository.Connection) (map[string]any, error) {
+	config := make(map[string]any, len(conn.Config))
+	paths := make(map[string]string)
+	for key, value := range conn.Config {
+		config[key] = value
+		ref, ok := value.(string)
+		if !ok || !strings.HasPrefix(ref, "vault:") {
+			continue
+		}
+		allowed := conn.Type == repository.ConnectionSecret && key == "token"
+		if conn.Type == repository.ConnectionDocker {
+			switch key {
+			case "tls_key", "tls_cert", "tls_ca_cert", "ssh_key", "ssh_host_key":
+				allowed = true
+			}
+		}
+		if !allowed {
+			return nil, fmt.Errorf("Vault references are only supported in credential fields")
+		}
+		raw := strings.TrimPrefix(ref, "vault:")
+		idx := strings.LastIndex(raw, "/")
+		if idx <= 0 || idx == len(raw)-1 {
+			return nil, fmt.Errorf("Invalid Vault reference")
+		}
+		path := raw[:idx]
+		if validateVaultPath(path) != nil || strings.ContainsAny(path, "%?#\\") || strings.Contains(path, "//") {
+			return nil, fmt.Errorf("Invalid Vault reference")
+		}
+		paths[key] = path
+	}
+	if len(paths) == 0 {
+		return config, nil
+	}
+
+	userID := auth.GetUserID(c)
+	if userID == nil || conn.TenantID != auth.GetTenantID(c) || deps.RBAC == nil || deps.Repos == nil || deps.Repos.VaultConfig == nil {
+		return nil, fmt.Errorf("Vault reference access denied")
+	}
+	allowed, err := deps.RBAC.CheckPermission(ctx, conn.TenantID, *userID, "vault", "read")
+	if err != nil || !allowed {
+		return nil, fmt.Errorf("Vault reference access denied")
+	}
+	// Authorize every path before reading anything from either backend.
+	for _, path := range paths {
+		if !checkVaultPathAccess(deps, c, path, "read") {
+			return nil, fmt.Errorf("Vault reference access denied")
+		}
+	}
+	for key := range paths {
+		resolved, err := resolveVaultRef(deps, ctx, config[key].(string), conn.TenantID)
+		if err != nil {
+			return nil, fmt.Errorf("Cannot resolve Vault reference")
+		}
+		config[key] = resolved
+	}
+	return config, nil
+}
+
 func registerConnectionRoutes(r *gin.RouterGroup, deps Dependencies) {
 	conns := r.Group("/connections")
 	{
@@ -473,19 +534,9 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		case repository.ConnectionVMware:
 			status, message = testVMwareConnection(deps, c, conn.Config)
 		case repository.ConnectionDocker, repository.ConnectionSecret:
-			config := make(map[string]any, len(conn.Config))
-			for key, value := range conn.Config {
-				config[key] = value
-				if ref, ok := value.(string); ok && strings.HasPrefix(ref, "vault:") {
-					resolved, err := resolveVaultRef(deps, ctx, ref, conn.TenantID)
-					if err != nil {
-						status, message = "error", fmt.Sprintf("Cannot resolve Vault reference for %s", key)
-						break
-					}
-					config[key] = resolved
-				}
-			}
-			if status == "error" {
+			config, err := resolveConnectionTestConfig(deps, c, ctx, conn)
+			if err != nil {
+				status, message = "error", err.Error()
 				break
 			}
 			if conn.Type == repository.ConnectionDocker {

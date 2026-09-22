@@ -2,10 +2,14 @@ package rest
 
 import (
 	"encoding/json"
+	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/pkg/utils"
 )
@@ -44,6 +48,65 @@ func TestSanitizeConnectionConfig(t *testing.T) {
 		if isSensitiveConfigKey(key) != utils.IsSensitiveKey(key) {
 			t.Errorf("inconsistent secret policy for %s", key)
 		}
+	}
+}
+
+func TestConnectionTestConfigRejectsUnsafeVaultReferences(t *testing.T) {
+	for _, tc := range []struct {
+		kind           repository.ConnectionType
+		key, ref, want string
+	}{
+		{repository.ConnectionSecret, "backend_mode", "vault:checks/private/value", "credential fields"},
+		{repository.ConnectionSecret, "address", "vault:checks/private/value", "credential fields"},
+		{repository.ConnectionDocker, "host_type", "vault:checks/private/value", "credential fields"},
+		{repository.ConnectionDocker, "host", "vault:checks/private/value", "credential fields"},
+		{repository.ConnectionDocker, "unknown_token", "vault:checks/private/value", "credential fields"},
+		{repository.ConnectionSecret, "token", "vault:path", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:path/", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:/key", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed/../private/key", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed/%2e%2e/private/key", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed//private/key", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed?other/key", "Invalid Vault reference"},
+	} {
+		t.Run(string(tc.kind)+"/"+tc.key+"/"+tc.ref, func(t *testing.T) {
+			conn := &repository.Connection{Type: tc.kind, Config: map[string]any{tc.key: tc.ref}}
+			// No identity or repositories: validation must precede any secret read.
+			_, err := resolveConnectionTestConfig(Dependencies{}, nil, t.Context(), conn)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), tc.ref) {
+				t.Fatalf("unexpected validation result: %v", err)
+			}
+		})
+	}
+}
+
+func TestConnectionTestConfigFailsClosedWithoutAuthorization(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/", nil)
+	tenantID := uuid.New()
+	c.Set(auth.CtxTenantID, tenantID)
+	for _, key := range []string{"tls_key", "tls_cert", "tls_ca_cert", "ssh_key", "ssh_host_key"} {
+		conn := &repository.Connection{TenantID: tenantID, Type: repository.ConnectionDocker, Config: map[string]any{key: "vault:checks/private/value"}}
+		if _, err := resolveConnectionTestConfig(Dependencies{}, c, t.Context(), conn); err == nil {
+			t.Fatal("anonymous secret resolution was accepted")
+		}
+		c.Set(auth.CtxUserID, uuid.New())
+		if _, err := resolveConnectionTestConfig(Dependencies{}, c, t.Context(), conn); err == nil {
+			t.Fatal("secret resolution without authorization dependencies was accepted")
+		}
+		delete(c.Keys, auth.CtxUserID)
+	}
+}
+
+func TestConnectionTestConfigCopiesLiteralCredentials(t *testing.T) {
+	conn := &repository.Connection{Type: repository.ConnectionSecret, Config: map[string]any{"backend_mode": "vault", "token": "literal-test-value"}}
+	config, err := resolveConnectionTestConfig(Dependencies{}, nil, t.Context(), conn)
+	if err != nil || !reflect.DeepEqual(config, conn.Config) {
+		t.Fatalf("literal config changed: %v", err)
+	}
+	config["token"] = "changed"
+	if conn.Config["token"] != "literal-test-value" {
+		t.Fatal("test config aliases stored config")
 	}
 }
 

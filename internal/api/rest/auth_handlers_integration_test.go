@@ -22,7 +22,7 @@ import (
 	"github.com/pepa/pepa/internal/testenv"
 )
 
-const bootstrapTestPassword = "Bootstrap-Regression-1!"
+const bootstrapTestPassword = "Bootstrap-Regression-1!" //nolint:gosec // G101: Disposable credentials for an isolated test database.
 
 func bootstrapTestDeps(t *testing.T) (Dependencies, *testenv.PostgresContainer) {
 	t.Helper()
@@ -121,7 +121,7 @@ func TestBootstrapPasswordLifecycle(t *testing.T) {
 	if duplicate, err := SeedBootstrapToken(deps); err != nil || duplicate != "" {
 		t.Fatalf("unexpected duplicate token: %v", err)
 	}
-	router := authTestRouter(deps)
+	router := authTestRouter(t, deps)
 	// A short session lets the test observe genuine JWT expiry without changing
 	// the password or forging an expired cookie.
 	deps.Config.Auth.SessionDuration = 2 * time.Second
@@ -165,7 +165,7 @@ func TestBootstrapPasswordLifecycle(t *testing.T) {
 	if replacement, err := SeedBootstrapToken(deps); err != nil || replacement != "" {
 		t.Fatalf("completed setup must not generate a replacement token: %v", err)
 	}
-	router = authTestRouter(deps)
+	router = authTestRouter(t, deps)
 	oldSession := bootstrapTestLogin(t, router, bootstrapTestPassword, http.StatusOK)
 	status := authTestRequest(router, http.MethodGet, "/api/v1/auth/bootstrap/status", "", "")
 	var state struct {
@@ -176,7 +176,7 @@ func TestBootstrapPasswordLifecycle(t *testing.T) {
 		t.Fatal("completed bootstrap was lost after restart")
 	}
 
-	const replacementPassword = "Bootstrap-Replacement-2!"
+	const replacementPassword = "Bootstrap-Replacement-2!" //nolint:gosec // G101: Disposable replacement credentials for the password lifecycle test.
 	for _, body := range []string{
 		`{"new_password":"Bootstrap-Replacement-2!"}`,
 		`{"current_password":"wrong","new_password":"Bootstrap-Replacement-2!"}`,
@@ -205,15 +205,17 @@ func TestBootstrapPasswordLifecycle(t *testing.T) {
 
 	// Older versions could leave another unused token on a completed install.
 	bootstrapTestExec(t, pg.DB(), `INSERT INTO bootstrap_tokens(token_hash, expires_at) VALUES ($1, NOW() + INTERVAL '1 hour')`, HashBootstrapToken("leftover-test-token"))
-	if response := bootstrapTestActivate(router, "leftover-test-token", bootstrapTestPassword); response.Code != http.StatusForbidden {
-		t.Fatal("leftover token changed a completed installation's password")
+	for _, password := range []string{bootstrapTestPassword, "Aa1!" + strings.Repeat("x", 80)} {
+		if response := bootstrapTestActivate(router, "leftover-test-token", password); response.Code != http.StatusForbidden {
+			t.Fatalf("completed setup reached hashing or changed credentials: HTTP %d", response.Code)
+		}
 	}
 	bootstrapTestLogin(t, router, replacementPassword, http.StatusOK)
 }
 
 func TestBootstrapActivationRollback(t *testing.T) {
 	deps, _ := bootstrapTestDeps(t)
-	router := authTestRouter(deps)
+	router := authTestRouter(t, deps)
 	for _, tc := range []struct {
 		name, table, timing, body string
 	}{
@@ -270,7 +272,7 @@ func TestBootstrapActivationRollback(t *testing.T) {
 
 func TestBootstrapRejectsInvalidTokensAndHashFailure(t *testing.T) {
 	deps, _ := bootstrapTestDeps(t)
-	router := authTestRouter(deps)
+	router := authTestRouter(t, deps)
 	token, err := SeedBootstrapToken(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +282,8 @@ func TestBootstrapRejectsInvalidTokensAndHashFailure(t *testing.T) {
 		want            int
 	}{
 		{"invalid", bootstrapTestPassword, http.StatusForbidden},
+		// Bcrypt rejects overlong passwords. Invalid tokens must be rejected first.
+		{"invalid", "Aa1!" + strings.Repeat("x", 80), http.StatusForbidden},
 		{token, "weak", http.StatusBadRequest},
 		{token, "Aa1!" + strings.Repeat("x", 80), http.StatusInternalServerError},
 	} {
@@ -293,8 +297,10 @@ func TestBootstrapRejectsInvalidTokensAndHashFailure(t *testing.T) {
 		t.Fatal("invalid input consumed the bootstrap token")
 	}
 	bootstrapTestExec(t, deps.DB, `UPDATE bootstrap_tokens SET expires_at=NOW()-INTERVAL '1 hour'`)
-	if response := bootstrapTestActivate(router, token, bootstrapTestPassword); response.Code != http.StatusForbidden {
-		t.Fatal("expired bootstrap token was accepted")
+	for _, password := range []string{bootstrapTestPassword, "Aa1!" + strings.Repeat("x", 80)} {
+		if response := bootstrapTestActivate(router, token, password); response.Code != http.StatusForbidden {
+			t.Fatalf("expired token reached hashing or was accepted: HTTP %d", response.Code)
+		}
 	}
 	fresh, err := SeedBootstrapToken(deps)
 	if err != nil || fresh == "" || fresh == token {
@@ -307,7 +313,7 @@ func TestBootstrapRejectsInvalidTokensAndHashFailure(t *testing.T) {
 
 func TestBootstrapConcurrentActivation(t *testing.T) {
 	deps, _ := bootstrapTestDeps(t)
-	router := authTestRouter(deps)
+	router := authTestRouter(t, deps)
 	for _, distinctTokens := range []bool{false, true} {
 		resetBootstrapTestCache()
 		bootstrapTestExec(t, deps.DB, `TRUNCATE bootstrap_tokens`)

@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/crypto"
+	"github.com/pepa/pepa/internal/database"
+	rbacengine "github.com/pepa/pepa/internal/rbac/engine"
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/internal/service"
 	"github.com/pepa/pepa/internal/testenv"
@@ -30,10 +32,12 @@ func connectionHTTPTestDeps(t *testing.T) Dependencies {
 	}
 	t.Cleanup(func() { _ = pg.Terminate(context.Background()) })
 	return Dependencies{
-		DB: pg.DB(),
+		DB:   pg.DB(),
+		RBAC: rbacengine.New(pg.DB().Pool),
 		Repos: &Repositories{
-			Connection: repository.NewConnectionRepository(pg.DB()),
-			Vault:      repository.NewVaultRepository(pg.DB()),
+			Connection:  repository.NewConnectionRepository(pg.DB()),
+			Vault:       repository.NewVaultRepository(pg.DB()),
+			VaultConfig: repository.NewVaultConfigRepository(pg.DB().Pool),
 		},
 		Services: &Services{Connection: service.NewConnectionService()},
 	}
@@ -149,11 +153,183 @@ func TestConnectionHTTPSecretRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConnectionHTTPVaultReferencePermissions(t *testing.T) {
+	deps := connectionHTTPTestDeps(t)
+	tenantID := uuid.MustParse(database.DefaultTenantID)
+	reader := connectionVaultTestUser(t, deps, tenantID, true)
+	noRead := connectionVaultTestUser(t, deps, tenantID, false)
+	const secret = "vault-private-regression-value"
+	for _, path := range []string{"checks/private", "checks/shared"} {
+		if _, err := deps.Repos.Vault.Set(t.Context(), tenantID, path, map[string]string{"value": secret}, "", &noRead); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := deps.DB.Pool.Exec(t.Context(), `INSERT INTO vault_acl (tenant_id, path_prefix, user_id, can_read) VALUES ($1, 'checks/shared', $2, true)`, tenantID, reader); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/auth/token/lookup-self" && r.Header.Get("X-Vault-Token") != secret {
+			t.Error("authorized reference did not resolve to the expected credential")
+		}
+		_, _ = w.Write([]byte(`{"initialized":true,"sealed":false,"data":{}}`))
+	}))
+	defer server.Close()
+	for _, tc := range []struct {
+		name      string
+		kind      repository.ConnectionType
+		key, ref  string
+		userID    uuid.UUID
+		status    string
+		wantCalls int32
+	}{
+		{"mode disclosure", repository.ConnectionSecret, "backend_mode", "vault:checks/private/value", reader, "error", 0},
+		{"host type disclosure", repository.ConnectionDocker, "host_type", "vault:checks/private/value", reader, "error", 0},
+		{"endpoint reference", repository.ConnectionSecret, "address", "vault:checks/private/value", reader, "error", 0},
+		{"missing path ACL", repository.ConnectionSecret, "token", "vault:checks/private/value", reader, "error", 0},
+		{"Docker missing path ACL", repository.ConnectionDocker, "tls_key", "vault:checks/private/value", reader, "error", 0},
+		{"owner without Vault RBAC", repository.ConnectionSecret, "token", "vault:checks/private/value", noRead, "error", 0},
+		{"anonymous", repository.ConnectionSecret, "token", "vault:checks/shared/value", uuid.Nil, "error", 0},
+		{"explicit read ACL", repository.ConnectionSecret, "token", "vault:checks/shared/value", reader, "connected", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls.Store(0)
+			conn := &repository.Connection{
+				TenantID: tenantID, Type: tc.kind, Name: tc.name, Status: "disconnected",
+				Config: map[string]any{"address": server.URL, "host": server.URL, tc.key: tc.ref}, Labels: map[string]string{},
+			}
+			if err := deps.Repos.Connection.Create(t.Context(), conn); err != nil {
+				t.Fatal(err)
+			}
+			path := "/api/v1/connections/" + conn.ID.String() + "/test"
+			response := callConnectionHTTP(t, tenantID, true, func(c *gin.Context) {
+				if tc.userID != uuid.Nil {
+					c.Set(auth.CtxUserID, tc.userID)
+				}
+				testConnection(deps)(c)
+			}, http.MethodPost, "/api/v1/connections/:id/test", path, "")
+			var result struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusOK || result.Status != tc.status || calls.Load() != tc.wantCalls {
+				t.Fatalf("HTTP %d, result %s, calls %d", response.Code, response.Body, calls.Load())
+			}
+			if strings.Contains(response.Body.String(), secret) {
+				t.Fatal("connection check exposed a Vault value")
+			}
+			stored, err := deps.Repos.Connection.GetDecrypted(t.Context(), conn.ID, tenantID)
+			if err != nil || stored.Config[tc.key] != tc.ref {
+				t.Fatalf("stored reference changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestConnectionHTTPRemoteVaultReferences(t *testing.T) {
+	deps := connectionHTTPTestDeps(t)
+	t.Setenv("VAULT_ALLOWED_CIDRS", "127.0.0.1/32")
+	tenantID := uuid.MustParse(database.DefaultTenantID)
+	userID := connectionVaultTestUser(t, deps, tenantID, true)
+	if _, err := deps.DB.Pool.Exec(t.Context(), `INSERT INTO vault_acl (tenant_id, path_prefix, user_id, can_read) VALUES ($1, 'checks/shared', $2, true)`, tenantID, userID); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "remote-vault-regression-value" //nolint:gosec // G101: Dummy value served only by the local Vault test fixture.
+	var reads, checks atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/v1/secret/data/") {
+			reads.Add(1)
+			if strings.HasSuffix(r.URL.Path, "/failure") {
+				http.Error(w, secret, http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"data":{"value":"` + secret + `"}}}`))
+			return
+		}
+		checks.Add(1)
+		if r.URL.Path == "/v1/auth/token/lookup-self" && r.Header.Get("X-Vault-Token") != secret {
+			t.Error("remote reference did not resolve")
+		}
+		_, _ = w.Write([]byte(`{"initialized":true,"sealed":false,"data":{}}`))
+	}))
+	defer server.Close()
+	deps.Repos.Settings = repository.NewSettingsRepository(deps.DB)
+	cfg, err := json.Marshal(VaultConfig{Mode: "remote", Address: server.URL, MountPath: "secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := deps.Repos.Settings.Set(t.Context(), "vault", cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, key, ref, status string
+		reads, checks          int32
+	}{
+		{"structural field", "backend_mode", "vault:checks/shared/value", "error", 0, 0},
+		{"ACL denied", "token", "vault:checks/private/value", "error", 0, 0},
+		{"ACL granted", "token", "vault:checks/shared/value", "connected", 1, 2},
+		{"backend error redacted", "token", "vault:checks/shared/failure/value", "error", 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reads.Store(0)
+			checks.Store(0)
+			conn := &repository.Connection{TenantID: tenantID, Type: repository.ConnectionSecret, Name: tc.name,
+				Config: map[string]any{"address": server.URL, tc.key: tc.ref}, Labels: map[string]string{}}
+			if err := deps.Repos.Connection.Create(t.Context(), conn); err != nil {
+				t.Fatal(err)
+			}
+			response := callConnectionHTTP(t, tenantID, true, func(c *gin.Context) {
+				c.Set(auth.CtxUserID, userID)
+				testConnection(deps)(c)
+			}, http.MethodPost, "/api/v1/connections/:id/test", "/api/v1/connections/"+conn.ID.String()+"/test", "")
+			var result struct {
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != http.StatusOK || result.Status != tc.status || reads.Load() != tc.reads || checks.Load() != tc.checks {
+				t.Fatalf("HTTP %d, body %s, reads %d, checks %d", response.Code, response.Body, reads.Load(), checks.Load())
+			}
+			if strings.Contains(response.Body.String(), secret) {
+				t.Fatal("remote Vault response disclosed a secret")
+			}
+		})
+	}
+}
+
+func connectionVaultTestUser(t *testing.T, deps Dependencies, tenantID uuid.UUID, canRead bool) uuid.UUID {
+	t.Helper()
+	userID := uuid.New()
+	if err := repository.NewAuthRepository(deps.DB.Pool).CreateUser(t.Context(), userID, userID.String()+"@test.local", "Vault test", ""); err != nil {
+		t.Fatal(err)
+	}
+	role, err := deps.RBAC.CreateRole(t.Context(), tenantID, "Vault test", userID.String(), "", "tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canRead {
+		if _, err := deps.RBAC.AddPermission(t.Context(), role.ID, "vault", "read", "allow"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := deps.RBAC.AssignRole(t.Context(), tenantID, userID, role.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	return userID
+}
+
 func TestConnectionHTTPTestPreservesVaultReferences(t *testing.T) {
 	deps := connectionHTTPTestDeps(t)
-	tenantID := uuid.New()
-	const token = "vault-http-regression-token"
-	if _, err := deps.Repos.Vault.Set(t.Context(), tenantID, "checks/vault", map[string]string{"token": token}, "", nil); err != nil {
+	tenantID := uuid.MustParse(database.DefaultTenantID)
+	userID := connectionVaultTestUser(t, deps, tenantID, true)
+	const token = "vault-http-regression-token" //nolint:gosec // G101: Dummy credential for the isolated reference round-trip test.
+	if _, err := deps.Repos.Vault.Set(t.Context(), tenantID, "checks/vault", map[string]string{"token": token}, "", &userID); err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
@@ -197,7 +373,10 @@ func TestConnectionHTTPTestPreservesVaultReferences(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := "/api/v1/connections/" + conn.ID.String() + "/test"
-			response := callConnectionHTTP(t, tenantID, true, testConnection(deps), http.MethodPost, "/api/v1/connections/:id/test", path, "")
+			response := callConnectionHTTP(t, tenantID, true, func(c *gin.Context) {
+				c.Set(auth.CtxUserID, userID)
+				testConnection(deps)(c)
+			}, http.MethodPost, "/api/v1/connections/:id/test", path, "")
 			if response.Code != http.StatusOK {
 				t.Fatalf("test returned HTTP %d: %s", response.Code, response.Body)
 			}

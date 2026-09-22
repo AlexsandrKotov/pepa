@@ -243,7 +243,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	r.GET("/metrics", gin.WrapH(observability.Handler()))
 
 	// Public auth routes (no JWT required)
-	registerAuthRoutes(r, deps)
+	stopAuth := registerAuthRoutes(r, deps)
 
 	// Public webhook endpoints (no JWT, verified by webhook secret)
 	webhookHandlers := NewWebhookHandlers(deps)
@@ -398,6 +398,7 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 	}
 
 	return r, func() {
+		stopAuth()
 		rateLimiter.Stop()
 		if deps.LoginLimiter != nil {
 			deps.LoginLimiter.Stop()

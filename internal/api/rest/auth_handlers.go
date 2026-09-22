@@ -24,14 +24,15 @@ import (
 )
 
 // registerAuthRoutes registers authentication and user management endpoints.
-func registerAuthRoutes(r *gin.Engine, deps Dependencies) {
+func registerAuthRoutes(r *gin.Engine, deps Dependencies) func() {
+	bootstrapLimiter := newRateLimiter(10, time.Minute)
 	// Public routes (no JWT required)
 	public := r.Group("/api/v1/auth")
 	{
 		public.POST("/login", loginHandler(deps))
 		public.POST("/logout", logoutHandler(deps))
 		public.GET("/bootstrap/status", bootstrapStatusHandler(deps))
-		public.POST("/bootstrap/activate", bootstrapActivateHandler(deps))
+		public.POST("/bootstrap/activate", bootstrapLimiter.Middleware(), bootstrapActivationConcurrencyLimit(), maxBodySizeMiddleware(4096), bootstrapActivateHandler(deps))
 
 		// OIDC routes (public, no JWT required)
 		public.GET("/oidc/config", oidcConfigHandler(deps))
@@ -76,6 +77,23 @@ func registerAuthRoutes(r *gin.Engine, deps Dependencies) {
 			admin.PUT("/:id", updateUserHandler(deps))
 			admin.DELETE("/:id", deactivateUserHandler(deps))
 			admin.POST("/:id/reset-password", resetUserPasswordHandler(deps))
+		}
+	}
+	return bootstrapLimiter.Stop
+}
+
+// bootstrapActivationConcurrencyLimit bounds in-flight activation work across
+// IPs, including requests waiting on the admin row lock. It never queues work.
+func bootstrapActivationConcurrencyLimit() gin.HandlerFunc {
+	active := make(chan struct{}, 2)
+	return func(c *gin.Context) {
+		select {
+		case active <- struct{}{}:
+			defer func() { <-active }()
+			c.Next()
+		default:
+			c.Header("Retry-After", "1")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "bootstrap activation is busy, try again later"})
 		}
 	}
 }
@@ -1231,14 +1249,8 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Hash before consuming the token: a hashing failure must leave setup retryable.
-		newHash, err := auth.HashPassword(req.NewPassword, auth.DefaultBCryptCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
-			return
-		}
-
-		ctx := c.Request.Context()
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		defer cancel()
 		adminID := uuid.MustParse(database.SuperAdminUserID)
 		tenantID := uuid.MustParse(database.DefaultTenantID)
 		orgID := uuid.MustParse(database.DefaultOrganizationID)
@@ -1290,6 +1302,14 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 		if err != nil {
 			slog.Error("bootstrap activate: token consumption failed", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to activate admin account"})
+			return
+		}
+
+		// Reject invalid tokens and completed setup before expensive hashing.
+		// A hashing failure rolls back token consumption, leaving setup retryable.
+		newHash, err := auth.HashPassword(req.NewPassword, auth.DefaultBCryptCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 			return
 		}
 
