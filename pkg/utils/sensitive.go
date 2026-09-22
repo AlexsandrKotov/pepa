@@ -9,7 +9,7 @@ import "strings"
 var sensitiveSubstrings = []string{
 	"token", "password", "secret", "api_key", "apikey",
 	"private_key", "access_key", "secret_key", "kubeconfig",
-	"ssh_key", "api_token",
+	"ssh_key", "api_token", "tls_key",
 }
 
 // IsSensitiveKey reports whether the given map key likely holds a sensitive

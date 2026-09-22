@@ -15,6 +15,7 @@ import (
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/k8s"
 	"github.com/pepa/pepa/internal/repository"
+	"github.com/pepa/pepa/pkg/utils"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
@@ -70,21 +71,7 @@ func listConnections(deps Dependencies) gin.HandlerFunc {
 		}
 		// Mask sensitive config values in list response to reduce payload and avoid leaking secrets
 		for i := range items {
-			if isAdmin {
-				// Admin sees config with only sensitive keys masked
-				sanitized := make(map[string]any, len(items[i].Config))
-				for k, v := range items[i].Config {
-					if isSensitiveConfigKey(k) {
-						sanitized[k] = "***"
-					} else {
-						sanitized[k] = v
-					}
-				}
-				items[i].Config = sanitized
-			} else {
-				// Non-admin: all config values are masked — they only see name, type, status
-				items[i].Config = map[string]any{"_masked": true}
-			}
+			items[i].Config = sanitizeConnectionConfig(items[i].Config, isAdmin)
 		}
 		c.JSON(http.StatusOK, gin.H{
 			"connections": items,
@@ -114,21 +101,7 @@ func getConnection(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 		// Mask sensitive config values to prevent leaking secrets
-		isAdmin := auth.IsPlatformAdmin(c)
-		sanitized := make(map[string]any, len(conn.Config))
-		if isAdmin {
-			for k, v := range conn.Config {
-				if isSensitiveConfigKey(k) {
-					sanitized[k] = "***"
-				} else {
-					sanitized[k] = v
-				}
-			}
-		} else {
-			// Non-admin: all config values are masked
-			sanitized["_masked"] = true
-		}
-		conn.Config = sanitized
+		conn.Config = sanitizeConnectionConfig(conn.Config, auth.IsPlatformAdmin(c))
 		c.JSON(http.StatusOK, conn)
 	}
 }
@@ -213,6 +186,7 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 		autoCreateClusterFromConnection(deps, c.Request.Context(), conn)
 
 		logAudit(deps, c, "create", "connection", conn.ID.String(), nil, gin.H{"name": conn.Name, "type": string(conn.Type)})
+		conn.Config = sanitizeConnectionConfig(conn.Config, auth.IsPlatformAdmin(c))
 		c.JSON(http.StatusCreated, conn)
 	}
 }
@@ -254,6 +228,15 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 		}
 		conn.Description = req.Description
 		if req.Config != nil {
+			for key, value := range req.Config {
+				if isSensitiveConfigKey(key) && value == "***" {
+					if existing, ok := conn.Config[key]; ok {
+						req.Config[key] = existing
+					} else {
+						delete(req.Config, key)
+					}
+				}
+			}
 			conn.Config = req.Config
 		}
 		if req.Labels != nil {
@@ -279,6 +262,7 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 		syncClusterFromConnection(deps, c.Request.Context(), conn)
 
 		logAudit(deps, c, "update", "connection", conn.ID.String(), nil, gin.H{"name": conn.Name, "status": conn.Status})
+		conn.Config = sanitizeConnectionConfig(conn.Config, auth.IsPlatformAdmin(c))
 		c.JSON(http.StatusOK, conn)
 	}
 }
@@ -488,12 +472,29 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			status, message = testProxmoxConnection(deps, c, conn.Config)
 		case repository.ConnectionVMware:
 			status, message = testVMwareConnection(deps, c, conn.Config)
-		case repository.ConnectionDocker:
-			result := deps.Services.Connection.TestDockerConnection(ctx, conn.Config)
-			status, message = result.Status, result.Message
-		case repository.ConnectionSecret:
-			result := deps.Services.Connection.TestVaultConnection(ctx, conn.Config)
-			status, message = result.Status, result.Message
+		case repository.ConnectionDocker, repository.ConnectionSecret:
+			config := make(map[string]any, len(conn.Config))
+			for key, value := range conn.Config {
+				config[key] = value
+				if ref, ok := value.(string); ok && strings.HasPrefix(ref, "vault:") {
+					resolved, err := resolveVaultRef(deps, ctx, ref, conn.TenantID)
+					if err != nil {
+						status, message = "error", fmt.Sprintf("Cannot resolve Vault reference for %s", key)
+						break
+					}
+					config[key] = resolved
+				}
+			}
+			if status == "error" {
+				break
+			}
+			if conn.Type == repository.ConnectionDocker {
+				result := deps.Services.Connection.TestDockerConnection(ctx, config)
+				status, message = result.Status, result.Message
+			} else {
+				result := deps.Services.Connection.TestVaultConnection(ctx, config)
+				status, message = result.Status, result.Message
+			}
 		case repository.ConnectionNotification:
 			result := deps.Services.Connection.TestNotificationConnection(ctx, conn.Config)
 			status, message = result.Status, result.Message
@@ -526,11 +527,11 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			message = "Unknown connection type"
 		}
 
-		// Update status in DB
-		now := time.Now()
-		conn.LastCheckAt = &now
-		conn.Status = status
-		_ = deps.Repos.Connection.Update(c.Request.Context(), conn)
+		// Persist only the result, never the credentials resolved for this test.
+		if err := deps.Repos.Connection.UpdateStatus(c.Request.Context(), conn.ID, status); err != nil {
+			respondInternalError(c, err)
+			return
+		}
 
 		c.JSON(http.StatusOK, gin.H{
 			"status":            status,
@@ -924,14 +925,22 @@ func testProviderInfo(connType repository.ConnectionType, config map[string]any)
 
 // isSensitiveConfigKey returns true for config keys that contain secrets.
 func isSensitiveConfigKey(key string) bool {
-	sensitive := []string{"token", "password", "kubeconfig", "api_token", "secret", "ssh_key"}
-	lower := strings.ToLower(key)
-	for _, s := range sensitive {
-		if strings.Contains(lower, s) {
-			return true
+	return utils.IsSensitiveKey(key)
+}
+
+func sanitizeConnectionConfig(config map[string]any, isAdmin bool) map[string]any {
+	if !isAdmin {
+		return map[string]any{"_masked": true}
+	}
+	sanitized := make(map[string]any, len(config))
+	for k, v := range config {
+		if isSensitiveConfigKey(k) {
+			sanitized[k] = "***"
+		} else {
+			sanitized[k] = v
 		}
 	}
-	return false
+	return sanitized
 }
 
 // resolveGitPluginName maps a connection type and git provider to the plugin name

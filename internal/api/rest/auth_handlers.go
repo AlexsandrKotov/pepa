@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/pepa/pepa/internal/api/rest/dto"
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/database"
@@ -1040,10 +1042,12 @@ func resetUserPasswordHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Protect the super admin account from password reset by others.
+		// The admin reset endpoint cannot replace the super admin password.
+		// Self-service changes must use /auth/me/reset-password, which verifies
+		// the current password; possession of a session alone is not sufficient.
 		superAdminID := uuid.MustParse(database.SuperAdminUserID)
 		if id == superAdminID {
-			c.JSON(http.StatusForbidden, gin.H{"error": "the super admin password can only be changed by the super admin"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "use the password-change flow to change the super admin password"})
 			return
 		}
 
@@ -1227,46 +1231,15 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		ctx := c.Request.Context()
-		tokenHash := HashBootstrapToken(req.Token)
-
-		// Atomically find and consume the matching unused, non-expired token.
-		// A single UPDATE ... RETURNING prevents concurrent requests from
-		// redeeming the same token twice (race between SELECT and UPDATE).
-		var tokenID uuid.UUID
-		err := deps.DB.Pool.QueryRow(ctx, `
-			UPDATE bootstrap_tokens
-			SET used_at = NOW()
-			WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
-			RETURNING id
-		`, tokenHash).Scan(&tokenID)
-		if err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired bootstrap token"})
-			return
-		}
-
-		// Hash the new password
-		adminID := uuid.MustParse(database.SuperAdminUserID)
+		// Hash before consuming the token: a hashing failure must leave setup retryable.
 		newHash, err := auth.HashPassword(req.NewPassword, auth.DefaultBCryptCost)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 			return
 		}
 
-		// Set the admin password, clear must_change_password
-		if _, err := deps.DB.Pool.Exec(ctx, `
-			UPDATE users
-			SET password_hash = $2, must_change_password = false, updated_at = NOW()
-			WHERE id = $1
-		`, adminID, newHash); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to set admin password"})
-			return
-		}
-
-		// Bump token_version to revoke any outstanding sessions
-		bumpTokenVersion(deps, ctx, adminID)
-
-		// Get admin roles.
+		ctx := c.Request.Context()
+		adminID := uuid.MustParse(database.SuperAdminUserID)
 		tenantID := uuid.MustParse(database.DefaultTenantID)
 		orgID := uuid.MustParse(database.DefaultOrganizationID)
 		roles := userRoleNames(ctx, deps, tenantID, adminID)
@@ -1274,16 +1247,76 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 			roles = []string{"admin"}
 		}
 
-		// Read actual admin user data from DB.
+		// Token consumption, password persistence, and session-version increment
+		// commit together. No session is issued for an uncommitted activation.
+		tx, err := deps.DB.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			slog.Error("bootstrap activate: begin transaction failed", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to activate admin account"})
+			return
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+
+		// Serialize activation and seeding on the admin row, including requests
+		// using different tokens left over from an older server version.
+		var lockedID uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, adminID).Scan(&lockedID); err != nil {
+			slog.Error("bootstrap activate: cannot lock admin account", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to activate admin account"})
+			return
+		}
+		complete, err := bootstrapSetupComplete(ctx, tx)
+		if err != nil {
+			slog.Error("bootstrap activate: status check failed", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check bootstrap status"})
+			return
+		}
+		if complete {
+			c.JSON(http.StatusForbidden, gin.H{"error": "bootstrap is already complete"})
+			return
+		}
+
+		var tokenID uuid.UUID
+		err = tx.QueryRow(ctx, `
+			UPDATE bootstrap_tokens
+			SET used_at = NOW()
+			WHERE token_hash = $1 AND used_at IS NULL AND expires_at > clock_timestamp()
+			RETURNING id
+		`, HashBootstrapToken(req.Token)).Scan(&tokenID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "invalid or expired bootstrap token"})
+			return
+		}
+		if err != nil {
+			slog.Error("bootstrap activate: token consumption failed", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to activate admin account"})
+			return
+		}
+
 		var adminUser struct {
 			Email string `json:"email"`
 			Name  string `json:"name"`
 		}
-		_ = deps.DB.Pool.QueryRow(ctx, `SELECT email, name FROM users WHERE id = $1`, adminID).Scan(&adminUser.Email, &adminUser.Name)
-
-		// Read the admin's current token version (after bump).
 		var adminTokenVersion int
-		_ = deps.DB.Pool.QueryRow(ctx, `SELECT COALESCE(token_version, 0) FROM users WHERE id = $1`, adminID).Scan(&adminTokenVersion)
+		var savedHash string
+		var mustChange bool
+		err = tx.QueryRow(ctx, `
+			UPDATE users
+			SET password_hash = $2, must_change_password = false,
+			    token_version = COALESCE(token_version, 0) + 1, updated_at = NOW()
+			WHERE id = $1 AND is_active = true
+			RETURNING email, name, token_version, password_hash, must_change_password
+		`, adminID, newHash).Scan(&adminUser.Email, &adminUser.Name, &adminTokenVersion, &savedHash, &mustChange)
+		if err != nil {
+			slog.Error("bootstrap activate: admin update failed", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to set admin password"})
+			return
+		}
+		if savedHash != newHash || mustChange {
+			slog.Error("bootstrap activate: admin update did not return the expected credential state", "admin_id", adminID)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to set admin password"})
+			return
+		}
 
 		// Generate JWT.
 		tokenExpiry := deps.Config.Auth.SessionDuration
@@ -1300,7 +1333,14 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		if err := tx.Commit(ctx); err != nil {
+			slog.Error("bootstrap activate: commit failed", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to activate admin account"})
+			return
+		}
+
 		logAudit(deps, c, "bootstrap_activate", "system", "", nil, nil)
+		bootstrapComplete.Store(true)
 
 		// Invalidate bootstrap status cache — bootstrap is now complete
 		bootstrapStatusMu.Lock()
@@ -1323,27 +1363,49 @@ func bootstrapActivateHandler(deps Dependencies) gin.HandlerFunc {
 	}
 }
 
+// bootstrapSetupComplete checks durable setup state through either a pool or
+// the transaction holding the admin row lock. Token expiry never undoes setup.
+func bootstrapSetupComplete(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}) (bool, error) {
+	var complete bool
+	err := q.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM bootstrap_tokens WHERE used_at IS NOT NULL)
+		    OR EXISTS(SELECT 1 FROM users WHERE id != $1)
+	`, uuid.MustParse(database.SuperAdminUserID)).Scan(&complete)
+	return complete, err
+}
+
 // SeedBootstrapToken generates and stores a bootstrap token if this is a fresh install.
 // It returns the raw token to be printed to the console.
 func SeedBootstrapToken(deps Dependencies) (string, error) {
-	// Check if there are any non-default users.
-	var userCount int
-	err := deps.DB.Pool.QueryRow(context.Background(), `
-		SELECT COUNT(*) FROM users WHERE id != '00000000-0000-0000-0000-000000000010'
-	`).Scan(&userCount)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := deps.DB.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("begin bootstrap seeding: %w", err)
 	}
-	if userCount > 0 {
-		return "", nil // not a fresh install
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	var adminID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM users WHERE id = $1 FOR UPDATE`,
+		uuid.MustParse(database.SuperAdminUserID)).Scan(&adminID); err != nil {
+		return "", fmt.Errorf("lock bootstrap admin: %w", err)
+	}
+	complete, err := bootstrapSetupComplete(ctx, tx)
+	if err != nil {
+		return "", fmt.Errorf("check bootstrap status: %w", err)
+	}
+	if complete {
+		return "", nil
 	}
 
 	// Check if a valid token already exists.
 	var hasValidToken bool
-	err = deps.DB.Pool.QueryRow(context.Background(), `
+	err = tx.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM bootstrap_tokens
-			WHERE used_at IS NULL AND expires_at > NOW()
+			WHERE used_at IS NULL AND expires_at > clock_timestamp()
 		)
 	`).Scan(&hasValidToken)
 	if err != nil {
@@ -1361,11 +1423,14 @@ func SeedBootstrapToken(deps Dependencies) (string, error) {
 	tokenHash := HashBootstrapToken(rawToken)
 	expiresAt := time.Now().Add(1 * time.Hour)
 
-	_, err = deps.DB.Pool.Exec(context.Background(), `
+	_, err = tx.Exec(ctx, `
 		INSERT INTO bootstrap_tokens (token_hash, expires_at) VALUES ($1, $2)
 	`, tokenHash, expiresAt)
 	if err != nil {
 		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit bootstrap seeding: %w", err)
 	}
 
 	return rawToken, nil

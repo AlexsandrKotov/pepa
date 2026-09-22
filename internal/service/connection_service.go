@@ -4,19 +4,31 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	pepacrypto "github.com/pepa/pepa/internal/crypto"
 	"github.com/pepa/pepa/internal/storage"
+	"golang.org/x/crypto/ssh"
 )
 
 // ConnectionService handles connection testing business logic for various protocols.
 type ConnectionService struct {
-	httpClient *http.Client
+	httpClient        *http.Client
+	builtinVaultCheck func(context.Context) error
+}
+
+// SetBuiltinVaultCheck installs the storage readiness probe before serving requests.
+func (s *ConnectionService) SetBuiltinVaultCheck(check func(context.Context) error) {
+	s.builtinVaultCheck = check
 }
 
 // NewConnectionService creates a new ConnectionService.
@@ -404,90 +416,269 @@ func (s *ConnectionService) TestCIConnection(ctx context.Context, url string, co
 
 // TestDockerConnection tests a Docker connection.
 func (s *ConnectionService) TestDockerConnection(ctx context.Context, config map[string]any) TestResult {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	hostType, _ := config["host_type"].(string)
 	host, _ := config["host"].(string)
-
-	// Local socket connection
-	if hostType == "" || hostType == "local" || host == "" || host == "unix:///var/run/docker.sock" {
-		// Inside a container, we can't reach the host Docker socket directly.
-		// Just validate the configuration is present.
-		return TestResult{Status: "connected", Message: "Docker socket configured (local connection)"}
+	if host == "" {
+		host, _ = config["host_address"].(string)
 	}
-
-	// TCP-based Docker host with optional TLS
-	if hostType == "tcp" {
-		if host == "" {
-			return TestResult{Status: "error", Message: "No Docker host address configured"}
+	host = strings.TrimSpace(host)
+	if hostType == "" {
+		switch {
+		case host == "", strings.HasPrefix(host, "unix://"):
+			hostType = "local"
+		case strings.HasPrefix(host, "ssh://"), strings.Contains(host, "@") && !strings.Contains(host, "://"):
+			hostType = "ssh"
+		default:
+			hostType = "tcp"
 		}
-		// For now, just test basic connectivity via HTTP
-		// TLS certificates would be used for actual Docker client connections
-		req, _ := http.NewRequestWithContext(ctx, "GET", host+"/_ping", nil)
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Docker: %v", err)}
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode == 200 {
-			return TestResult{Status: "connected", Message: "Successfully connected to Docker daemon"}
-		}
-		return TestResult{Status: "error", Message: fmt.Sprintf("Docker returned status %d", resp.StatusCode)}
 	}
-
-	// SSH-based Docker host
 	if hostType == "ssh" {
-		if host == "" {
-			return TestResult{Status: "error", Message: "No SSH host configured"}
-		}
-		// SSH connections are validated by config presence; actual testing requires SSH client
-		return TestResult{Status: "connected", Message: fmt.Sprintf("SSH Docker host configured: %s", host)}
+		return testDockerSSH(ctx, host, config)
 	}
 
-	return TestResult{Status: "error", Message: fmt.Sprintf("Unknown Docker host type: %s", hostType)}
+	transport := &http.Transport{TLSHandshakeTimeout: 5 * time.Second}
+	defer transport.CloseIdleConnections()
+	endpoint := ""
+	switch hostType {
+	case "local":
+		if host == "" {
+			host = "unix:///var/run/docker.sock"
+		}
+		u, err := url.Parse(host)
+		if err != nil || u.Scheme != "unix" || u.Host != "" || u.Path == "" || u.RawQuery != "" || u.Fragment != "" {
+			return TestResult{Status: "error", Message: "Local Docker requires a unix:///absolute/socket/path address"}
+		}
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", u.Path)
+		}
+		endpoint = "http://docker/_ping"
+	case "tcp":
+		u, err := url.Parse(host)
+		if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			return TestResult{Status: "error", Message: "Docker host must be a tcp://, http://, or https:// address"}
+		}
+		if u.Scheme != "tcp" && u.Scheme != "http" && u.Scheme != "https" {
+			return TestResult{Status: "error", Message: "Unsupported Docker host scheme"}
+		}
+		ca, _ := config["tls_ca_cert"].(string)
+		cert, _ := config["tls_cert"].(string)
+		key, _ := config["tls_key"].(string)
+		hasTLS := ca != "" || cert != "" || key != ""
+		if u.Scheme == "http" && hasTLS {
+			return TestResult{Status: "error", Message: "TLS credentials require a tcp:// or https:// Docker address"}
+		}
+		if u.Scheme == "tcp" {
+			u.Scheme = "http"
+			if hasTLS {
+				u.Scheme = "https"
+			}
+		}
+		if u.Scheme == "https" {
+			tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+			if ca != "" {
+				pool := x509.NewCertPool()
+				if !pool.AppendCertsFromPEM([]byte(ca)) {
+					return TestResult{Status: "error", Message: "Invalid Docker CA certificate"}
+				}
+				tlsConfig.RootCAs = pool
+			}
+			if cert != "" || key != "" {
+				pair, err := tls.X509KeyPair([]byte(cert), []byte(key))
+				if err != nil {
+					return TestResult{Status: "error", Message: "Invalid Docker client certificate/key pair"}
+				}
+				tlsConfig.Certificates = []tls.Certificate{pair}
+			}
+			transport.TLSClientConfig = tlsConfig
+		}
+		u.Path = "/_ping"
+		endpoint = u.String()
+	default:
+		return TestResult{Status: "error", Message: fmt.Sprintf("Unknown Docker host type: %s", hostType)}
+	}
+
+	client := &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: noConnectionRedirect}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return TestResult{Status: "error", Message: "Invalid Docker ping request"}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Docker: %v", err)}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	if err != nil || resp.StatusCode != http.StatusOK || strings.TrimSpace(string(body)) != "OK" {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Docker ping failed (HTTP %d or invalid response)", resp.StatusCode)}
+	}
+	return TestResult{Status: "connected", Message: "Successfully connected to Docker daemon"}
+}
+
+// noConnectionRedirect keeps connection checks and credentials on the configured endpoint.
+func noConnectionRedirect(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+func testDockerSSH(ctx context.Context, host string, config map[string]any) TestResult {
+	if !strings.Contains(host, "://") {
+		host = "ssh://" + host
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Scheme != "ssh" || u.Hostname() == "" || u.User == nil || u.User.Username() == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return TestResult{Status: "error", Message: "SSH Docker requires ssh://user@host[:port]"}
+	}
+	if _, hasPassword := u.User.Password(); hasPassword {
+		return TestResult{Status: "error", Message: "Use the SSH private key field, not a password in the host address"}
+	}
+	privateKey, _ := config["ssh_key"].(string)
+	signer, err := ssh.ParsePrivateKey([]byte(privateKey))
+	if err != nil {
+		return TestResult{Status: "error", Message: "A valid, unencrypted SSH private key is required"}
+	}
+	hostKey, _ := config["ssh_host_key"].(string)
+	publicKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(hostKey))
+	if err != nil {
+		return TestResult{Status: "error", Message: "A verified SSH host public key is required in ssh_host_key"}
+	}
+	port := u.Port()
+	if port == "" {
+		port = "22"
+	}
+	addr := net.JoinHostPort(u.Hostname(), port)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach SSH Docker host: %v", err)}
+	}
+	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			return TestResult{Status: "error", Message: "Cannot set SSH connection deadline"}
+		}
+	}
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, addr, &ssh.ClientConfig{
+		User: u.User.Username(), Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.FixedHostKey(publicKey),
+	})
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("SSH authentication or host verification failed: %v", err)}
+	}
+	client := ssh.NewClient(sshConn, channels, requests)
+	defer func() { _ = client.Close() }()
+	session, err := client.NewSession()
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot open Docker SSH session: %v", err)}
+	}
+	defer func() { _ = session.Close() }()
+	output, err := session.StdoutPipe()
+	if err != nil {
+		return TestResult{Status: "error", Message: "Cannot read Docker SSH output"}
+	}
+	if err := session.Start("docker version --format '{{json .Server}}'"); err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot execute Docker check: %v", err)}
+	}
+	body, err := io.ReadAll(io.LimitReader(output, 64*1024))
+	if err != nil || len(body) >= 64*1024 {
+		return TestResult{Status: "error", Message: "Invalid Docker SSH response"}
+	}
+	if err := session.Wait(); err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Remote Docker daemon check failed: %v", err)}
+	}
+	var server struct{ Version string }
+	if err := json.Unmarshal(body, &server); err != nil || server.Version == "" {
+		return TestResult{Status: "error", Message: "SSH connected, but no Docker server version was returned"}
+	}
+	return TestResult{Status: "connected", Message: "Successfully verified the remote Docker daemon over SSH"}
 }
 
 // TestVaultConnection tests a Vault connection.
 func (s *ConnectionService) TestVaultConnection(ctx context.Context, config map[string]any) TestResult {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	backendMode, _ := config["backend_mode"].(string)
-
-	// Built-in KV mode - no external Vault needed
-	if backendMode == "" || backendMode == "builtin" {
-		return TestResult{Status: "connected", Message: "Built-in KV store configured (AES-256-GCM encryption)"}
-	}
-
-	// HashiCorp Vault mode - test external connection
 	address, _ := config["address"].(string)
 	token, _ := config["token"].(string)
-
-	if address == "" {
-		return TestResult{Status: "error", Message: "No Vault address configured"}
+	if backendMode == "" {
+		backendMode = "builtin"
+		if address != "" || token != "" {
+			backendMode = "vault"
+		}
 	}
-	url := strings.TrimRight(address, "/")
-	req, _ := http.NewRequestWithContext(ctx, "GET", url+"/v1/sys/health", nil)
-	if token != "" {
-		req.Header.Set("X-Vault-Token", token)
+	if backendMode == "builtin" {
+		if s.builtinVaultCheck == nil {
+			return TestResult{Status: "disconnected", Message: "Built-in KV is configured, but no storage readiness probe is available"}
+		}
+		if err := s.builtinVaultCheck(ctx); err != nil {
+			return TestResult{Status: "error", Message: "Built-in KV storage is unavailable"}
+		}
+		const probe = "pepa-vault-readiness"
+		encrypted, err := pepacrypto.Encrypt(probe)
+		if err != nil {
+			return TestResult{Status: "error", Message: "Built-in KV encryption is unavailable; check ENCRYPTION_KEY"}
+		}
+		decrypted, err := pepacrypto.Decrypt(encrypted)
+		if err != nil || decrypted != probe {
+			return TestResult{Status: "error", Message: "Built-in KV encryption self-test failed"}
+		}
+		return TestResult{Status: "connected", Message: "Built-in KV storage is reachable and encryption self-test passed"}
 	}
-
-	// Use a client with InsecureSkipVerify for Vault (self-signed certs common)
-	vaultClient := &http.Client{
-		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // #nosec // G402: self-signed certs common in Vault
+	if backendMode != "vault" {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Unknown secret backend mode: %s", backendMode)}
+	}
+	u, err := url.Parse(strings.TrimSpace(address))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return TestResult{Status: "error", Message: "Vault address must be an http:// or https:// URL"}
+	}
+	insecure := config["insecure_tls"] == true || config["insecure_tls"] == "true"
+	transport := &http.Transport{
+		TLSHandshakeTimeout: 5 * time.Second,
+		TLSClientConfig: &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: insecure, //nolint:gosec // #nosec G402: explicit per-connection administrator opt-in
 		},
 	}
-
-	resp, err := vaultClient.Do(req)
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: 5 * time.Second, Transport: transport, CheckRedirect: noConnectionRedirect}
+	baseURL := strings.TrimRight(u.String(), "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/sys/health", nil)
+	if err != nil {
+		return TestResult{Status: "error", Message: "Invalid Vault health request"}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot reach Vault: %v", err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode == 200 || resp.StatusCode == 429 {
-		return TestResult{Status: "connected", Message: "Successfully connected to Vault"}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusTooManyRequests {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Vault returned status %d", resp.StatusCode)}
 	}
-	if resp.StatusCode == 403 {
-		return TestResult{Status: "error", Message: "Vault token is invalid or expired"}
+	var health struct {
+		Initialized bool `json:"initialized"`
+		Sealed      bool `json:"sealed"`
 	}
-	return TestResult{Status: "error", Message: fmt.Sprintf("Vault returned status %d", resp.StatusCode)}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&health); err != nil || !health.Initialized || health.Sealed {
+		return TestResult{Status: "error", Message: "Vault is not initialized, is sealed, or returned an invalid health response"}
+	}
+	if token == "" {
+		return TestResult{Status: "disconnected", Message: "Vault is reachable, but no authentication token is configured"}
+	}
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/v1/auth/token/lookup-self", nil)
+	if err != nil {
+		return TestResult{Status: "error", Message: "Invalid Vault token verification request"}
+	}
+	req.Header.Set("X-Vault-Token", token)
+	authResp, err := client.Do(req)
+	if err != nil {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Cannot verify Vault token: %v", err)}
+	}
+	defer func() { _ = authResp.Body.Close() }()
+	if authResp.StatusCode != http.StatusOK {
+		return TestResult{Status: "error", Message: fmt.Sprintf("Vault token verification failed (HTTP %d)", authResp.StatusCode)}
+	}
+	return TestResult{Status: "connected", Message: "Successfully connected to Vault and verified the token"}
 }
 
 // TestNotificationConnection tests a notification service connection.

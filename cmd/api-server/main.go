@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/pepa/pepa/internal/api/rest"
 	"github.com/pepa/pepa/internal/bootstrap"
 	"github.com/pepa/pepa/internal/database"
@@ -139,6 +140,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "============================================================")
 	}
 
+	checkAdminPasswordHealth(rootCtx, comp.DB.Pool, slog.Default())
+
 	// AI manager is initialized by bootstrap; available as comp.AIManager
 
 	// Build dependencies struct
@@ -210,7 +213,16 @@ func main() {
 				comp.ServiceRepo,
 				comp.HelmRepo,
 			),
-			Connection: service.NewConnectionService(),
+			Connection: func() *service.ConnectionService {
+				svc := service.NewConnectionService()
+				if comp.DB != nil {
+					svc.SetBuiltinVaultCheck(func(ctx context.Context) error {
+						var ready bool
+						return comp.DB.Pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM vault_secrets LIMIT 1)").Scan(&ready)
+					})
+				}
+				return svc
+			}(),
 			NotificationDispatcher: func() *service.NotificationDispatcher {
 				d := service.NewNotificationDispatcher(
 					comp.NotificationRuleRepo,
@@ -348,6 +360,28 @@ func main() {
 	}
 
 	slog.Info("PEPA stopped")
+}
+
+// checkAdminPasswordHealth reports only observed state, never an inferred cause
+// of credential loss. Database failures are distinct from missing credentials.
+func checkAdminPasswordHealth(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var hasUsedToken, hasPassword bool
+	err := db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM bootstrap_tokens WHERE used_at IS NOT NULL),
+		       EXISTS(SELECT 1 FROM users WHERE id = $1 AND COALESCE(password_hash, '') != '')
+	`, uuid.MustParse(database.SuperAdminUserID)).Scan(&hasUsedToken, &hasPassword)
+	if err != nil {
+		logger.Warn("super admin password health check failed", "error", err)
+		return
+	}
+	if hasUsedToken && !hasPassword {
+		logger.Error("super admin password is unavailable after bootstrap; password login will fail",
+			"admin_id", database.SuperAdminUserID)
+	}
 }
 
 // writeSystemAuditEvent writes a system-level audit event (no HTTP context).

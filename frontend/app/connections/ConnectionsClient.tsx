@@ -513,7 +513,11 @@ function AddConnectionModal({
       description,
       notes,
       labels: parsedLabels,
-      config,
+      config: {
+        ...config,
+        ...(selectedType === 'docker' ? { host_type: config.host_type || 'local' } : {}),
+        ...(selectedType === 'secret' ? { backend_mode: config.backend_mode || 'builtin' } : {}),
+      },
       fallback_to_admin: fallbackToAdmin,
     });
   };
@@ -985,7 +989,7 @@ function AddConnectionModal({
                     <button
                       key={type}
                       type="button"
-                      onClick={() => setConfig({ ...config, host_type: type, host_address: type === 'local' ? 'unix:///var/run/docker.sock' : '' })}
+                      onClick={() => setConfig({ ...config, host_type: type, host: type === 'local' ? 'unix:///var/run/docker.sock' : '' })}
                       className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
                         (config.host_type || 'local') === type
                           ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -1002,7 +1006,7 @@ function AddConnectionModal({
                   {config.host_type === 'ssh' && 'Connect to a remote Docker daemon via SSH tunnel.'}
                 </p>
               </div>
-              {config.host_type !== 'local' && (
+              {(config.host_type || 'local') !== 'local' && (
                 <div>
                   <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">Host Address *</label>
                   <input
@@ -1054,29 +1058,44 @@ function AddConnectionModal({
                     isTextarea
                   />
                   <p className="text-xs text-[var(--text-tertiary)] -mt-2">
-                    Required for TLS-secured Docker daemons. Generate with <code className="font-mono">docker tls generate</code>.
+                    Use certificates issued for your Docker daemon. Providing TLS credentials enables HTTPS for tcp:// addresses; the client certificate and private key must be supplied together.
                   </p>
                 </>
               )}
               {config.host_type === 'ssh' && (
-                <VaultInput
-                  label="SSH Private Key"
-                  field="ssh_key"
-                  value={config.ssh_key || ''}
-                  onChange={v => setConfig({ ...config, ssh_key: v })}
-                  vaultRef={vaultRefs.ssh_key}
-                  onOpenVault={onOpenVaultPicker}
-                  onRemoveVault={onRemoveVault}
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                  isTextarea
-                />
+                <>
+                  <VaultInput
+                    label="SSH Private Key *"
+                    field="ssh_key"
+                    value={config.ssh_key || ''}
+                    onChange={v => setConfig({ ...config, ssh_key: v })}
+                    vaultRef={vaultRefs.ssh_key}
+                    onOpenVault={onOpenVaultPicker}
+                    onRemoveVault={onRemoveVault}
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    isTextarea
+                    required
+                  />
+                  <div>
+                    <label htmlFor="docker_ssh_host_key" className="block text-sm font-medium text-[var(--text-primary)] mb-1">SSH Host Public Key *</label>
+                    <textarea
+                      id="docker_ssh_host_key"
+                      value={config.ssh_host_key || ''}
+                      onChange={e => setConfig({ ...config, ssh_host_key: e.target.value })}
+                      required
+                      className="w-full px-3 py-2 border border-[var(--border)] rounded-lg font-mono text-sm"
+                      placeholder="ssh-ed25519 AAAA..."
+                    />
+                    <p className="text-xs text-[var(--text-tertiary)] mt-1">Obtain the server host public key from its administrator and verify it through a trusted channel. The test authenticates with SSH and checks the remote Docker daemon.</p>
+                  </div>
+                </>
               )}
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
                   id="docker_admin_fallback"
-                  checked={config.admin_credential_fallback === 'true'}
-                  onChange={e => setConfig({ ...config, admin_credential_fallback: e.target.checked ? 'true' : 'false' })}
+                  checked={fallbackToAdmin}
+                  onChange={e => setFallbackToAdmin(e.target.checked)}
                   className="w-4 h-4 rounded border-[var(--border)] text-[var(--accent)] focus:ring-[var(--accent)]"
                 />
                 <label htmlFor="docker_admin_fallback" className="text-sm text-[var(--text-secondary)]">
@@ -1178,7 +1197,7 @@ function AddConnectionModal({
               {config.backend_mode !== 'vault' && (
                 <div className="p-3 rounded-lg bg-[var(--accent)]/5 border border-[var(--accent)]/20">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    <span className="font-medium text-[var(--accent)]">Built-in KV mode:</span> Secrets are encrypted with AES-256-GCM and stored directly in PostgreSQL. No external Vault server required. The encryption key is derived from your <code className="font-mono">VAULT_TOKEN</code> environment variable.
+                    <span className="font-medium text-[var(--accent)]">Built-in KV mode:</span> Secrets are encrypted with AES-256-GCM and stored directly in PostgreSQL. No external Vault server required. Configure a dedicated <code className="font-mono">ENCRYPTION_KEY</code> environment variable for encryption at rest.
                   </p>
                 </div>
               )}
