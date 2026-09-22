@@ -425,8 +425,33 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 			slog.Warn("plugin discovery failed", "error", err)
 		}
 
+		// Query the database BEFORE registering in the provider registry so
+		// that uninstalled / never-installed plugins never appear as enabled,
+		// even for a brief window.  This closes the race where every
+		// discovered binary was registered as Enabled=true and only
+		// AutoRegisterPlugins() (later) corrected the state.
+		installedPlugins, dbErr := c.PluginRepo.List(context.Background())
+		installedMap := make(map[string]*repository.Plugin)
+		if dbErr != nil {
+			slog.Warn("could not list installed plugins from DB, deferring to AutoRegisterPlugins", "error", dbErr)
+		} else {
+			for i := range installedPlugins {
+				installedMap[installedPlugins[i].Name] = &installedPlugins[i]
+			}
+		}
+
 		// Sync loaded plugins into the provider registry
 		for name, info := range pluginMgr.ListLoadedPlugins() {
+			existing := installedMap[name]
+			if existing == nil || existing.Status == "uninstalled" {
+				// Discovered on disk but never installed (or explicitly
+				// uninstalled) — unload the subprocess immediately so it
+				// never enters the provider registry.
+				_ = pluginMgr.UnloadPlugin(name)
+				slog.Info("plugin discovered but not installed, kept inactive", "plugin", name, "version", info.Version)
+				continue
+			}
+
 			grpcClient, err := pluginMgr.GetGRPCClient(name)
 			if err != nil {
 				slog.Warn("could not get gRPC client for plugin", "plugin", name, "error", err)
@@ -437,13 +462,17 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 				Type:     info.PluginType,
 				Info:     info,
 				Executor: grpcClient,
-				Enabled:  true,
+				Enabled:  existing.Enabled,
 			})
+			if !existing.Enabled {
+				_ = pluginMgr.Disable(name)
+			}
 		}
 		slog.Info("provider registry loaded", "count", len(providerRegistry.List()))
 
-		// Reconcile discovered plugins with the database now that all
-		// binaries are loaded and the provider registry is populated.
+		// Final reconciliation pass — handles any DB changes that may have
+		// occurred between the List() above and now, and updates running
+		// status / version in the database.
 		c.AutoRegisterPlugins()
 	}()
 
