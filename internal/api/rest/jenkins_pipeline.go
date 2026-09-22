@@ -68,7 +68,7 @@ func resolvePipelineRequestConfig(c *gin.Context, deps Dependencies, source *mod
 	// can authenticate to the configured Jenkins server. It originates from
 	// the encrypted connection config (or Vault) and is never persisted or
 	// returned to the caller. gosec G117 is suppressed intentionally.
-	raw, err := json.Marshal(pipeline.JenkinsPipelineConfig{ //nolint:gosec
+	raw, err := json.Marshal(pipeline.JenkinsPipelineConfig{ // #nosec G117 //nolint:gosec // in-memory transfer to pipeline adapter; token is not persisted or returned
 		URL: endpoint, Username: username, Token: token, Insecure: insecure, JobName: sourceConfig.JobName,
 	})
 	if err != nil {
