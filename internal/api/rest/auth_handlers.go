@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -1398,6 +1400,13 @@ func bootstrapSetupComplete(ctx context.Context, q interface {
 
 // SeedBootstrapToken generates and stores a bootstrap token if this is a fresh install.
 // It returns the raw token to be printed to the console.
+//
+// If a token file already exists on disk (e.g. the /var/run/pepa mount survived
+// a container recreate) but the database no longer has a matching unused row,
+// the on-disk token is stale and would be rejected at activation time. Detect
+// this desync by reading the file, comparing its hash against the DB, and
+// regenerating both the DB row and the file so the admin always sees a token
+// that will actually activate.
 func SeedBootstrapToken(deps Dependencies) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1420,7 +1429,27 @@ func SeedBootstrapToken(deps Dependencies) (string, error) {
 		return "", nil
 	}
 
-	// Check if a valid token already exists.
+	// Determine whether the DB already holds a valid unused token AND the
+	// on-disk token file (if any) matches it. If the file exists but its
+	// hash is not among the unused DB rows, the file is stale and we must
+	// regenerate so the admin is not handed a token that will fail at
+	// activation.
+	fileSyncedWithDB := false
+	tokenPath := os.Getenv("BOOTSTRAP_TOKEN_PATH")
+	if tokenPath == "" {
+		tokenPath = "/var/run/pepa/bootstrap_token.txt" // #nosec G101 //nolint:gosec // not a credential, just a default file path
+	}
+	if onDisk, readErr := os.ReadFile(tokenPath); readErr == nil { // #nosec G304,G703 //nolint:gosec // tokenPath is admin-controlled (env var or hardcoded default)
+		fileHash := HashBootstrapToken(strings.TrimSpace(string(onDisk)))
+		var matches int
+		_ = tx.QueryRow(ctx, `
+			SELECT COUNT(*) FROM bootstrap_tokens
+			WHERE used_at IS NULL AND expires_at > clock_timestamp()
+			  AND token_hash = $1
+		`, fileHash).Scan(&matches)
+		fileSyncedWithDB = matches > 0
+	}
+
 	var hasValidToken bool
 	err = tx.QueryRow(ctx, `
 		SELECT EXISTS(
@@ -1431,11 +1460,16 @@ func SeedBootstrapToken(deps Dependencies) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if hasValidToken {
-		return "", nil // token already generated
+	if hasValidToken && fileSyncedWithDB {
+		return "", nil // DB token exists and the on-disk file matches it
 	}
 
-	// Generate a new token.
+	// Invalidate any prior unused tokens (they are no longer recoverable by
+	// the admin) and generate a fresh pair.
+	if _, err := tx.Exec(ctx, `DELETE FROM bootstrap_tokens WHERE used_at IS NULL`); err != nil {
+		return "", err
+	}
+
 	rawToken, err := GenerateBootstrapToken()
 	if err != nil {
 		return "", err
@@ -1451,6 +1485,18 @@ func SeedBootstrapToken(deps Dependencies) (string, error) {
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit bootstrap seeding: %w", err)
+	}
+
+	// Rewrite the on-disk file so it reflects the freshly generated DB row.
+	// tokenPath comes from an admin-set env var with a safe hardcoded default;
+	// the directory is created with 0700 and the file with 0600.
+	if dir := filepath.Dir(tokenPath); dir != "" && dir != "." {
+		if mkErr := os.MkdirAll(dir, 0700); mkErr != nil { // #nosec G703 //nolint:gosec // tokenPath is admin-controlled (env var or hardcoded default)
+			slog.Warn("failed to create bootstrap token directory", "error", mkErr)
+		}
+	}
+	if writeErr := os.WriteFile(tokenPath, []byte(rawToken+"\n"), 0600); writeErr != nil { // #nosec G304,G703 //nolint:gosec // tokenPath is admin-controlled (env var or hardcoded default)
+		slog.Warn("failed to rewrite stale bootstrap token file", "path", tokenPath, "error", writeErr)
 	}
 
 	return rawToken, nil

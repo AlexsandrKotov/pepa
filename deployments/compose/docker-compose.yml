@@ -30,8 +30,12 @@ volumes:
     driver: local
   custom-plugins:  # For user-uploaded custom plugin binaries
     driver: local
-  pepa-token-tmpfs:  # In-memory volume for bootstrap token (never persisted)
+  pepa-token-tmpfs:  # In-memory tmpfs for bootstrap token (never persisted across restarts)
     driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=4k
   nginx-logs:
     driver: local
   trivy-cache:  # Persistent cache for Trivy vulnerability DB (avoids re-downloading ~1GB on each restart)
