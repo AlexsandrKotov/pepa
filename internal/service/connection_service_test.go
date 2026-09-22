@@ -62,7 +62,7 @@ func TestDockerConnectionRejectsInvalidConfig(t *testing.T) {
 		"unknown mode":           {"host_type": "typo"},
 		"invalid URL":            {"host_type": "tcp", "host": "http://%invalid"},
 		"unsupported scheme":     {"host": "ftp://localhost:2375"},
-		"userinfo":               {"host": "http://user:password@localhost:2375"},
+		"userinfo":               {"host": "http://user:password@localhost:2375"}, //nolint:gosec // G101: Dummy credentials test URL rejection, not authentication.
 		"path":                   {"host": "http://localhost:2375/not-docker"},
 		"local remote mismatch":  {"host_type": "local", "host": "http://localhost:2375"},
 		"TCP socket mismatch":    {"host_type": "tcp", "host": "unix:///var/run/docker.sock"},
