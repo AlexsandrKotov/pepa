@@ -15,11 +15,11 @@ import (
 
 // JenkinsPipelineConfig is the expected shape of PipelineSource.Config for jenkins sources.
 type JenkinsPipelineConfig struct {
-	URL      string `json:"url"`        // Jenkins URL
-	Username string `json:"username"`   // Jenkins username
-	Token    string `json:"api_token"`  // API token
-	JobName  string `json:"job_name"`   // full job path (e.g. "folder/subfolder/my-pipeline")
-	Insecure bool   `json:"insecure"`   // allow self-signed TLS
+	URL      string `json:"url"`       // Jenkins URL
+	Username string `json:"username"`  // Jenkins username
+	Token    string `json:"api_token"` // API token
+	JobName  string `json:"job_name"`  // full job path (e.g. "folder/subfolder/my-pipeline")
+	Insecure bool   `json:"insecure"`  // allow self-signed TLS
 }
 
 func parseJenkinsConfig(raw json.RawMessage) (*JenkinsPipelineConfig, error) {
@@ -276,8 +276,10 @@ func resolveJenkinsBuild(ctx context.Context, cfg *JenkinsPipelineConfig, extern
 		return "", false, fmt.Errorf("invalid Jenkins queue ID")
 	}
 	var item struct {
-		Cancelled bool `json:"cancelled"`
-		Executable *struct { Number int `json:"number"` } `json:"executable"`
+		Cancelled  bool `json:"cancelled"`
+		Executable *struct {
+			Number int `json:"number"`
+		} `json:"executable"`
 	}
 	err := jenkinsGetJSON(ctx, jenkinsHTTPClient(cfg.Insecure), cfg.URL+"/queue/item/"+queueID+"/api/json", cfg.Username, cfg.Token, &item)
 	if err != nil {
@@ -302,7 +304,9 @@ func (a *JenkinsAdapter) Status(ctx context.Context, raw json.RawMessage, extern
 	}
 	if buildID == "" {
 		status := "pending"
-		if cancelled { status = "cancelled" }
+		if cancelled {
+			status = "cancelled"
+		}
 		return &RunStatus{ExternalRunID: externalRunID, Status: status}, nil
 	}
 	externalRunID = buildID
@@ -339,8 +343,12 @@ func (a *JenkinsAdapter) Jobs(ctx context.Context, raw json.RawMessage, external
 	}
 
 	buildID, _, err := resolveJenkinsBuild(ctx, cfg, externalRunID)
-	if err != nil { return nil, err }
-	if buildID == "" { return []JobInfo{}, nil }
+	if err != nil {
+		return nil, err
+	}
+	if buildID == "" {
+		return []JobInfo{}, nil
+	}
 	externalRunID = buildID
 	client := jenkinsHTTPClient(cfg.Insecure)
 
@@ -401,8 +409,12 @@ func (a *JenkinsAdapter) Logs(ctx context.Context, raw json.RawMessage, external
 	}
 
 	buildID, _, err := resolveJenkinsBuild(ctx, cfg, externalRunID)
-	if err != nil { return "", err }
-	if buildID == "" { return "", nil }
+	if err != nil {
+		return "", err
+	}
+	if buildID == "" {
+		return "", nil
+	}
 	externalRunID = buildID
 	client := jenkinsHTTPClient(cfg.Insecure)
 	logURL := fmt.Sprintf("%s/%s/%s/consoleText", cfg.URL, jenkinsJobPath(cfg.JobName), externalRunID)
@@ -574,10 +586,10 @@ func (a *JenkinsAdapter) Inspect(ctx context.Context, raw json.RawMessage) (json
 
 	// Wrap with metadata
 	result := map[string]interface{}{
-		"job_type":  "jenkins_pipeline",
-		"job_name":  cfg.JobName,
-		"job_url":   fmt.Sprintf("%s/%s/", cfg.URL, jenkinsJobPath(cfg.JobName)),
-		"details":   jobInfo,
+		"job_type": "jenkins_pipeline",
+		"job_name": cfg.JobName,
+		"job_url":  fmt.Sprintf("%s/%s/", cfg.URL, jenkinsJobPath(cfg.JobName)),
+		"details":  jobInfo,
 	}
 
 	return json.Marshal(result)
