@@ -1,6 +1,7 @@
 DELETE /:connectionId/buckets/:bucket
 DELETE /:connectionId/buckets/:bucket/objects/*key
 DELETE /:id
+DELETE /:id/acl/:entryId
 DELETE /:id/blueprints/:bpId
 DELETE /:id/members/:userId
 DELETE /:id/roles/:roleId
@@ -45,6 +46,7 @@ GET /:connection_id/:namespace/:name/history
 GET /:connection_id/:namespace/:name/tree
 GET /:id
 GET /:id/argo
+GET /:id/acl
 GET /:id/browse
 GET /:id/charts
 GET /:id/charts/:chartName/versions
@@ -252,6 +254,7 @@ POST /:connection_id/:namespace/:name/refresh
 POST /:connection_id/:namespace/:name/rollback
 POST /:connection_id/:namespace/:name/sync
 POST /:connection_id/:namespace/:name/terminate
+POST /:id/acl
 POST /:id/blueprints
 POST /:id/cancel
 POST /:id/deploy
@@ -318,6 +321,7 @@ POST /blueprints/:id/deploy-local
 POST /bootstrap/activate
 POST /brand-new-thing
 POST /check
+POST /check-duplicate
 POST /config
 POST /containers
 POST /containers/:node/:vmid/:action
