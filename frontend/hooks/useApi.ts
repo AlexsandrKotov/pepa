@@ -7,7 +7,10 @@ import { getBase } from '@/lib/api';
 
 /** Global SWR fetcher — resolves key to API path with optional query params. */
 async function fetcher<T>(key: string): Promise<T> {
-  const res = await fetch(`${getBase()}${key}`, { cache: 'no-store' });
+  const res = await fetch(`${getBase()}${key}`, { 
+    cache: 'no-store',
+    credentials: 'include', // Send httpOnly cookies for authentication
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `API error: ${res.status}`);
@@ -56,6 +59,7 @@ export function useApiMutation<TData = unknown, TArg = unknown>(
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(arg),
+      credentials: 'include', // Send httpOnly cookies for authentication
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));

@@ -283,7 +283,10 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 			return TestResult{Status: "error", Message: "Base URL required for Ollama"}
 		}
 		// Try to reach Ollama
-		req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/tags", nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/tags", nil)
+		if err != nil {
+			return TestResult{Status: "error", Message: fmt.Sprintf("Invalid request: %v", err)}
+		}
 		if apiKey != "" {
 			req.Header.Set("Authorization", "Bearer "+apiKey)
 		}
@@ -314,7 +317,10 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 		if baseURL == "" {
 			baseURL = ai.DefaultBaseURLFor("qoder")
 		}
-		req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", nil)
+		if err != nil {
+			return TestResult{Status: "error", Message: fmt.Sprintf("Invalid request: %v", err)}
+		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
@@ -335,7 +341,10 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 		if baseURL == "" {
 			baseURL = ai.DefaultBaseURLFor("lmstudio")
 		}
-		req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", nil)
+		if err != nil {
+			return TestResult{Status: "error", Message: fmt.Sprintf("Invalid request: %v", err)}
+		}
 		if apiKey != "" {
 			req.Header.Set("Authorization", "Bearer "+apiKey)
 		}
@@ -381,7 +390,10 @@ func (s *ConnectionService) TestCIConnection(ctx context.Context, url string, co
 
 	switch provider {
 	case "jenkins":
-		req, _ := http.NewRequestWithContext(ctx, "GET", url+"/api/json", nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", url+"/api/json", nil)
+		if err != nil {
+			return TestResult{Status: "error", Message: fmt.Sprintf("Invalid request: %v", err)}
+		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
@@ -396,7 +408,10 @@ func (s *ConnectionService) TestCIConnection(ctx context.Context, url string, co
 		return TestResult{Status: "error", Message: fmt.Sprintf("Jenkins returned status %d", resp.StatusCode)}
 
 	case "circleci":
-		req, _ := http.NewRequestWithContext(ctx, "GET", url+"/api/v1.1/me", nil)
+		req, err := http.NewRequestWithContext(ctx, "GET", url+"/api/v1.1/me", nil)
+		if err != nil {
+			return TestResult{Status: "error", Message: fmt.Sprintf("Invalid request: %v", err)}
+		}
 		if token != "" {
 			req.Header.Set("Circle-Token", token)
 		}

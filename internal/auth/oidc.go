@@ -82,9 +82,9 @@ func validateURL(rawURL string) error {
 	// Resolve hostname to check IP addresses
 	ips, err := net.LookupIP(host)
 	if err != nil {
-		// If we can't resolve, allow it (might be DNS issue)
-		// but in production you might want to be stricter
-		return nil
+		// DNS resolution failed — reject the URL to prevent DNS rebinding attacks.
+		// In production, all URLs must resolve to verified public IPs.
+		return fmt.Errorf("cannot resolve hostname %q: %w", host, err)
 	}
 
 	for _, ip := range ips {

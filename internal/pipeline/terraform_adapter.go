@@ -54,24 +54,37 @@ type tfRun struct {
 }
 
 var (
-	tfRunsMu sync.RWMutex
-	tfRuns   = make(map[string]*tfRun)
+	tfRunsMu      sync.RWMutex
+	tfRuns        = make(map[string]*tfRun)
+	tfCleanupDone = make(chan struct{})
 )
 
 func init() {
 	// Background cleanup: remove completed terraform runs older than 5 minutes
 	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
 		for {
-			time.Sleep(60 * time.Second)
-			tfRunsMu.Lock()
-			for id, r := range tfRuns {
-				if r.status != "running" && !r.finishedAt.IsZero() && time.Since(r.finishedAt) > 5*time.Minute {
-					delete(tfRuns, id)
+			select {
+			case <-tfCleanupDone:
+				return
+			case <-ticker.C:
+				tfRunsMu.Lock()
+				for id, r := range tfRuns {
+					if r.status != "running" && !r.finishedAt.IsZero() && time.Since(r.finishedAt) > 5*time.Minute {
+						delete(tfRuns, id)
+					}
 				}
+				tfRunsMu.Unlock()
 			}
-			tfRunsMu.Unlock()
 		}
 	}()
+}
+
+// StopTFCleanup stops the background terraform run cleanup goroutine.
+// Call this during graceful shutdown.
+func StopTFCleanup() {
+	close(tfCleanupDone)
 }
 
 // TerraformAdapter implements Provider and EnhancedProvider for Terraform pipelines.

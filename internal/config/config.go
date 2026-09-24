@@ -341,13 +341,13 @@ func DefaultConfig() *Config {
 			Port:     5432,
 			DBName:   "pepa",
 			User:     "pepa",
-			Password: "pepa_dev",
+			Password: "", // Must be set via POSTGRES_PASSWORD env var
 			SSLMode:  "disable",
 		},
 		Redis: RedisConfig{
 			Host:     "localhost",
 			Port:     6379,
-			Password: "redis_dev",
+			Password: "", // Must be set via REDIS_PASSWORD env var
 			DB:       0,
 		},
 		S3: S3Config{
@@ -357,11 +357,11 @@ func DefaultConfig() *Config {
 			UseSSL:        false,
 			BucketPlugins: "pepa-plugins",
 		},
-		Auth: AuthConfig{ //nolint:gosec // #nosec // G101: struct contains dev default JWT secret; Validate() warns if not overridden
-			JWTSecret:       "dev-jwt-secret-change-in-production", //nolint:gosec // #nosec // G101: dev default; Validate() warns if not overridden
-			SessionDuration: 24 * time.Hour,                        // 24 hours
-			TokenExpiry:     24 * time.Hour,                        // 24 hours
-			RefreshExpiry:   7 * 24 * time.Hour,                    // 7 days
+		Auth: AuthConfig{
+			JWTSecret:       "", // Must be set via AUTH_JWT_SECRET env var
+			SessionDuration: 24 * time.Hour,  // 24 hours
+			TokenExpiry:     24 * time.Hour,  // 24 hours
+			RefreshExpiry:   7 * 24 * time.Hour, // 7 days
 			BCryptCost:      10,
 			OIDC: OIDCConfig{
 				Enabled: false,
@@ -729,28 +729,44 @@ func (c *Config) Validate() []string {
 	return warnings
 }
 
-// ValidateStrict returns an error if any critical secrets are still set to
-// their insecure development defaults. This must be called before starting
-// in production mode to prevent running with well-known credentials.
+// ValidateStrict returns an error if any critical secrets are missing or insecure.
+// This must be called before starting in production mode.
 func (c *Config) ValidateStrict() error {
 	var failures []string
 
-	if c.Auth.JWTSecret == knownInsecureDefaults["auth.jwt_secret"] {
+	// JWT secret is required with minimum entropy
+	if c.Auth.JWTSecret == "" {
+		failures = append(failures, "AUTH_JWT_SECRET is required — set a secure random value (min 32 characters)")
+	} else if len(c.Auth.JWTSecret) < 32 {
+		failures = append(failures, fmt.Sprintf("AUTH_JWT_SECRET must be at least 32 characters (got %d)", len(c.Auth.JWTSecret)))
+	} else if c.Auth.JWTSecret == knownInsecureDefaults["auth.jwt_secret"] {
 		failures = append(failures, "AUTH_JWT_SECRET is set to the development default — set a secure random value")
 	}
-	if c.Database.Password == knownInsecureDefaults["database.password"] {
+
+	// Database password is required
+	if c.Database.Password == "" {
+		failures = append(failures, "POSTGRES_PASSWORD is required — set a secure random value")
+	} else if c.Database.Password == knownInsecureDefaults["database.password"] {
 		failures = append(failures, "POSTGRES_PASSWORD is set to the development default — set a secure random value")
 	}
-	if c.Redis.Password == knownInsecureDefaults["redis.password"] {
+
+	// Redis password is required
+	if c.Redis.Password == "" {
+		failures = append(failures, "REDIS_PASSWORD is required — set a secure random value")
+	} else if c.Redis.Password == knownInsecureDefaults["redis.password"] {
 		failures = append(failures, "REDIS_PASSWORD is set to the development default — set a secure random value")
 	}
 
+	// Encryption key is required (separate from JWT secret for domain separation)
 	encKey := c.Crypto.EncryptionKey
 	if encKey == "" {
-		encKey = c.Auth.JWTSecret
-	}
-	if encKey == "" || encKey == knownInsecureDefaults["encryption_key"] {
-		failures = append(failures, "ENCRYPTION_KEY is not set or is the development default — set a secure random value")
+		failures = append(failures, "ENCRYPTION_KEY is required — set a secure random value (min 32 characters), do not reuse AUTH_JWT_SECRET")
+	} else if len(encKey) < 32 {
+		failures = append(failures, fmt.Sprintf("ENCRYPTION_KEY must be at least 32 characters (got %d)", len(encKey)))
+	} else if encKey == knownInsecureDefaults["encryption_key"] {
+		failures = append(failures, "ENCRYPTION_KEY is set to the development default — set a secure random value")
+	} else if encKey == c.Auth.JWTSecret {
+		failures = append(failures, "ENCRYPTION_KEY must not equal AUTH_JWT_SECRET — use separate keys for domain separation")
 	}
 
 	if len(failures) > 0 {

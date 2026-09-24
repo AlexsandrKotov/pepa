@@ -166,26 +166,51 @@ func runWorker(ctx context.Context, id int, client *redis.Client, db *database.D
 			}
 
 			slog.Info("processing job", "id", id, "job", job.ID, "type", job.Type)
-			if err := processJob(ctx, &job, db, bus, wfEngine, entityRepo, aiManager, deploymentSvc); err != nil {
-				slog.Error("job failed", "id", id, "job", job.ID, "error", err)
-				// Re-queue with exponential backoff if retries remain
-				if job.Retries < 3 {
-					job.Retries++
-					backoff := time.Duration(job.Retries*job.Retries) * 10 * time.Second
-					if enqueueErr := jobQueue.EnqueueJobWithDelay(&job, backoff); enqueueErr != nil {
-						slog.Error("failed to requeue job", "id", id, "job", job.ID, "error", enqueueErr)
+			
+			// Panic recovery: catch panics in job processing to prevent worker crash
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("panic in job processing", "id", id, "job", job.ID, "panic", r)
+						// Re-queue the job if retries remain
+						if job.Retries < 3 {
+							job.Retries++
+							backoff := time.Duration(job.Retries*job.Retries) * 10 * time.Second
+							if enqueueErr := jobQueue.EnqueueJobWithDelay(&job, backoff); enqueueErr != nil {
+								slog.Error("failed to requeue job after panic", "id", id, "job", job.ID, "error", enqueueErr)
+							} else {
+								slog.Info("job requeued after panic with backoff", "id", id, "job", job.ID, "backoff", backoff, "retry", job.Retries)
+							}
+						} else {
+							slog.Warn("job exhausted retries after panic, moving to dead letter", "id", id, "job", job.ID)
+							if err := jobQueue.MoveToDeadLetter(&job); err != nil {
+								slog.Error("failed to dead-letter job after panic", "id", id, "job", job.ID, "error", err)
+							}
+						}
+					}
+				}()
+				
+				if err := processJob(ctx, &job, db, bus, wfEngine, entityRepo, aiManager, deploymentSvc); err != nil {
+					slog.Error("job failed", "id", id, "job", job.ID, "error", err)
+					// Re-queue with exponential backoff if retries remain
+					if job.Retries < 3 {
+						job.Retries++
+						backoff := time.Duration(job.Retries*job.Retries) * 10 * time.Second
+						if enqueueErr := jobQueue.EnqueueJobWithDelay(&job, backoff); enqueueErr != nil {
+							slog.Error("failed to requeue job", "id", id, "job", job.ID, "error", enqueueErr)
+						} else {
+							slog.Info("job requeued with backoff", "id", id, "job", job.ID, "backoff", backoff, "retry", job.Retries)
+						}
 					} else {
-						slog.Info("job requeued with backoff", "id", id, "job", job.ID, "backoff", backoff, "retry", job.Retries)
+						slog.Warn("job exhausted retries, moving to dead letter", "id", id, "job", job.ID)
+						if err := jobQueue.MoveToDeadLetter(&job); err != nil {
+							slog.Error("failed to dead-letter job", "id", id, "job", job.ID, "error", err)
+						}
 					}
 				} else {
-					slog.Warn("job exhausted retries, moving to dead letter", "id", id, "job", job.ID)
-					if err := jobQueue.MoveToDeadLetter(&job); err != nil {
-						slog.Error("failed to dead-letter job", "id", id, "job", job.ID, "error", err)
-					}
+					slog.Info("job completed", "id", id, "job", job.ID)
 				}
-			} else {
-				slog.Info("job completed", "id", id, "job", job.ID)
-			}
+			}()
 		}
 	}
 }

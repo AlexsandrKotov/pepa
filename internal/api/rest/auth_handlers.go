@@ -1185,11 +1185,14 @@ func bootstrapStatusHandler(deps Dependencies) gin.HandlerFunc {
 		// + password changed), even though must_change_password has since been
 		// reset to false.
 		var hasUsedToken bool
-		_ = deps.DB.Pool.QueryRow(ctx, `
+		if err := deps.DB.Pool.QueryRow(ctx, `
 			SELECT EXISTS(
 				SELECT 1 FROM bootstrap_tokens WHERE used_at IS NOT NULL
 			)
-		`).Scan(&hasUsedToken)
+		`).Scan(&hasUsedToken); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check bootstrap status"})
+			return
+		}
 		if hasUsedToken {
 			c.JSON(http.StatusOK, gin.H{
 				"needed":      false,

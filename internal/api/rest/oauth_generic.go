@@ -21,6 +21,17 @@ var (
 	oauthCallbacksMu sync.Mutex
 )
 
+func init() {
+	// Periodic cleanup of expired OAuth states to prevent memory leaks
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			cleanupOAuthStates()
+		}
+	}()
+}
+
 // oauthProviderConfig captures the provider-specific parts of the OAuth flow.
 type oauthProviderConfig struct {
 	// name is the provider name for logging (e.g. "Google", "GitHub").

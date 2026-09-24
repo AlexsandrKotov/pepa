@@ -18,12 +18,16 @@ type ListOptions struct {
 // BaseRepository provides common CRUD operations for entities that follow
 // the standard pattern: list with pagination, get by ID, create, update, delete.
 // Specific repositories can embed this and add custom queries.
+//
+// SECURITY: Table names are set at initialization time and are not user-controlled.
+// All queries use parameterized values ($1, $2, etc.) for data to prevent SQL injection.
 type BaseRepository struct {
 	DB    *database.DB
 	Table string
 }
 
 // NewBaseRepository creates a new base repository for the given table.
+// The table parameter must be a hardcoded table name, never user input.
 func NewBaseRepository(db *database.DB, table string) BaseRepository {
 	return BaseRepository{DB: db, Table: table}
 }

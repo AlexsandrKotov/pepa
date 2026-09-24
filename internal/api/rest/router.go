@@ -173,9 +173,11 @@ func NewRouter(deps Dependencies) (http.Handler, func()) {
 
 	// Configure trusted proxies so that X-Forwarded-For / X-Real-IP headers
 	// are only honoured when the request comes from a known reverse proxy.
-	// In production, set TRUSTED_PROXY_CIDRS or rely on Gin's default (trust no proxy).
+	// In production, trust only loopback and private RFC1918 ranges (typical reverse-proxy setups).
+	// For enhanced security, set TRUSTED_PROXY_CIDRS env var to restrict to specific proxy IPs.
 	if deps.Config.Server.Env == "production" {
 		// Trust only loopback and private RFC1918 ranges (typical reverse-proxy setups).
+		// This is safe because nginx runs in the same Docker network and proxies requests.
 		_ = r.SetTrustedProxies([]string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10"})
 	} else {
 		// In development, trust only loopback to prevent X-Forwarded-For spoofing

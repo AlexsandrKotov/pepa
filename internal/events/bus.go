@@ -112,16 +112,17 @@ func (b *Bus) Start() {
 	ch := pubsub.Channel()
 
 	go func() {
+		var closeOnce sync.Once
 		for {
 			select {
 			case <-b.ctx.Done():
 				_ = pubsub.Close()
-				close(b.eventCh)
+				closeOnce.Do(func() { close(b.eventCh) })
 				wg.Wait()
 				return
 			case msg, ok := <-ch:
 				if !ok {
-					close(b.eventCh)
+					closeOnce.Do(func() { close(b.eventCh) })
 					wg.Wait()
 					return
 				}

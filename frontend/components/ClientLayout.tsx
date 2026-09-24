@@ -10,6 +10,7 @@ import TopBar from '@/components/TopBar';
 import CommandPalette from '@/components/CommandPalette';
 import BottomTabBar from '@/components/BottomTabBar';
 import LiveActivityBar from '@/components/LiveActivityBar';
+import ErrorBoundary from '@/components/ErrorBoundary';
 
 // Lazy-load AI widget — only mounted inside the authenticated shell
 const DashboardAIWidget = dynamic(() => import('@/components/DashboardAIWidget'), { ssr: false });
@@ -109,21 +110,23 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
-        <TopBar />
-        <LiveActivityBar />
-        <main className="flex-1 overflow-y-auto pb-14 md:pb-0">
-          <div className="px-6 py-6 max-w-[1400px] mx-auto w-full">
-            <Breadcrumbs />
-            {children}
-          </div>
-        </main>
+    <ErrorBoundary>
+      <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
+        <Sidebar />
+        <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
+          <TopBar />
+          <LiveActivityBar />
+          <main className="flex-1 overflow-y-auto pb-14 md:pb-0">
+            <div className="px-6 py-6 max-w-[1400px] mx-auto w-full">
+              <Breadcrumbs />
+              {children}
+            </div>
+          </main>
+        </div>
+        <BottomTabBar />
+        <DashboardAIWidget />
+        <CommandPalette />
       </div>
-      <BottomTabBar />
-      <DashboardAIWidget />
-      <CommandPalette />
-    </div>
+    </ErrorBoundary>
   );
 }

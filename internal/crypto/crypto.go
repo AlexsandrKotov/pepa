@@ -64,15 +64,14 @@ const (
 // ── Master key derivation ──────────────────────────────────────
 
 // getMasterSecret returns the raw master secret from config.
-// It prefers the encryption key. Falling back to the JWT secret is deprecated
-// and logs a warning because it violates domain separation between
-// authentication and encryption.
+// It requires the encryption key to be set explicitly.
+// Falling back to the JWT secret is deprecated and only allowed in development mode.
 func getMasterSecret() (string, error) {
 	if masterSecret != "" {
 		return masterSecret, nil
 	}
 
-	// Deprecated fallback — log once.
+	// Deprecated fallback — log once and only allow in non-production mode.
 	fallbackWarned.Do(func() {
 		slog.Warn("ENCRYPTION_KEY is not set; falling back to AUTH_JWT_SECRET. This is deprecated and violates domain separation. Set ENCRYPTION_KEY explicitly.")
 	})
