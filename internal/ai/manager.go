@@ -86,18 +86,8 @@ func (m *Manager) ToolRegistry() *ToolRegistry {
 // ConfigureProvider dynamically registers (or replaces) an LLM provider.
 func (m *Manager) ConfigureProvider(name, apiKey, baseURL, model string) error {
 	if baseURL == "" {
-		switch name {
-		case "openai":
-			baseURL = "https://api.openai.com/v1"
-		case "anthropic":
-			baseURL = "https://api.anthropic.com/v1"
-		case "groq":
-			baseURL = "https://api.groq.com/openai/v1"
-		case "qoder":
-			baseURL = "https://api.qoder.com/v1"
-		case "lmstudio":
-			baseURL = "http://host.docker.internal:1234/v1"
-		default:
+		baseURL = DefaultBaseURLFor(name)
+		if baseURL == "" {
 			return fmt.Errorf("base_url is required for provider %q", name)
 		}
 	}

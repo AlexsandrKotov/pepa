@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/config"
 	"github.com/pepa/pepa/internal/hostpath"
 	"github.com/pepa/pepa/internal/plugin/engine"
 	"github.com/pepa/pepa/internal/repository"
@@ -113,10 +114,16 @@ type Scanner struct {
 	// sonarDefaultStaleHours is the freshness budget reported to the UI when the
 	// target does not configure its own (env: SONAR_DEFAULT_STALE_HOURS, default 24).
 	sonarDefaultStaleHours int
+
+	// hostDataDir is the root directory for host filesystem access.
+	hostDataDir string
+
+	// trivyCacheDir is the directory where Trivy stores its databases.
+	trivyCacheDir string
 }
 
 // NewScanner creates a new Scanner.
-func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository, registryRepo *repository.RegistryRepository, ignoreRepo *repository.ScanIgnoreRepository) *Scanner {
+func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanRepository, connRepo *repository.ConnectionRepository, registryRepo *repository.RegistryRepository, ignoreRepo *repository.ScanIgnoreRepository, secCfg config.SecurityConfig, hostDataDir string) *Scanner {
 	s := &Scanner{
 		pluginMgr:      pluginMgr,
 		repo:           repo,
@@ -125,41 +132,43 @@ func NewScanner(pluginMgr *engine.Manager, repo *repository.SecurityScanReposito
 		ignoreRepo:     ignoreRepo,
 		sem:            make(chan struct{}, maxConcurrentScans),
 		cancels:        make(map[uuid.UUID]context.CancelFunc),
+		hostDataDir:    hostDataDir,
+		trivyCacheDir:  secCfg.TrivyCacheDir,
 	}
 
-	// Initialize DB manager from environment variables.
-	s.dbRepo = os.Getenv("TRIVY_DB_REPOSITORY")
+	// Initialize DB manager from config.
+	s.dbRepo = secCfg.TrivyDBRepository
 	if s.dbRepo == "" {
 		s.dbRepo = "public.ecr.aws/aquasecurity/trivy-db"
 	}
-	s.javaDBRepo = os.Getenv("TRIVY_JAVA_DB_REPOSITORY")
+	s.javaDBRepo = secCfg.TrivyJavaDBRepository
 	if s.javaDBRepo == "" {
 		s.javaDBRepo = "public.ecr.aws/aquasecurity/trivy-java-db"
 	}
 	intervalSec := 21600 // default: 6 hours
-	if v := os.Getenv("TRIVY_DB_UPDATE_INTERVAL"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+	if secCfg.TrivyDBUpdateInterval != "" {
+		if n, err := strconv.Atoi(secCfg.TrivyDBUpdateInterval); err == nil && n > 0 {
 			intervalSec = n
 		}
 	}
 	s.dbRefreshInterval = time.Duration(intervalSec) * time.Second
 
 	s.sonarTimeout = 2 * time.Minute
-	if v := os.Getenv("SONAR_SCAN_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+	if secCfg.SonarScanTimeout != "" {
+		if d, err := time.ParseDuration(secCfg.SonarScanTimeout); err == nil && d > 0 {
 			s.sonarTimeout = d
-		} else if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		} else if n, err := strconv.Atoi(secCfg.SonarScanTimeout); err == nil && n > 0 {
 			s.sonarTimeout = time.Duration(n) * time.Second
 		} else {
-			slog.Warn("invalid SONAR_SCAN_TIMEOUT, using default", "value", v, "default", s.sonarTimeout)
+			slog.Warn("invalid SONAR_SCAN_TIMEOUT, using default", "value", secCfg.SonarScanTimeout, "default", s.sonarTimeout)
 		}
 	}
 	s.sonarDefaultStaleHours = 24
-	if v := os.Getenv("SONAR_DEFAULT_STALE_HOURS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+	if secCfg.SonarDefaultStaleHours != "" {
+		if n, err := strconv.Atoi(secCfg.SonarDefaultStaleHours); err == nil && n > 0 {
 			s.sonarDefaultStaleHours = n
 		} else {
-			slog.Warn("invalid SONAR_DEFAULT_STALE_HOURS, using default", "value", v, "default", s.sonarDefaultStaleHours)
+			slog.Warn("invalid SONAR_DEFAULT_STALE_HOURS, using default", "value", secCfg.SonarDefaultStaleHours, "default", s.sonarDefaultStaleHours)
 		}
 	}
 
@@ -412,7 +421,7 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 	// For filesystem targets, resolve the path through hostpath to handle
 	// Docker container path translation and validate it's within HOST_DATA_DIR.
 	if target.TargetType == "filesystem" {
-		hostDataDir := os.Getenv("HOST_DATA_DIR")
+		hostDataDir := s.hostDataDir
 		resolved, resolveErr := hostpath.Resolve(imageRef, hostDataDir)
 		if resolveErr != nil {
 			return nil, nil, fmt.Errorf("filesystem target path resolution failed: %w", resolveErr)
@@ -1839,7 +1848,7 @@ func (s *Scanner) GetDatabaseStatus(ctx context.Context) map[string]any {
 	}
 
 	// Check DB cache directory
-	cacheDir := os.Getenv("TRIVY_CACHE_DIR")
+	cacheDir := s.trivyCacheDir
 	if cacheDir == "" {
 		cacheDir = "/tmp/trivy-cache"
 	}
@@ -1881,7 +1890,7 @@ func (s *Scanner) GetDatabaseStatus(ctx context.Context) map[string]any {
 // javaDBRepo) which can be overridden at runtime via SetDBRepository.
 // This eliminates the need for a separate db-cache container.
 func (s *Scanner) DownloadDB(ctx context.Context) error {
-	cacheDir := os.Getenv("TRIVY_CACHE_DIR")
+	cacheDir := s.trivyCacheDir
 	if cacheDir == "" {
 		cacheDir = "/tmp/trivy-cache"
 	}

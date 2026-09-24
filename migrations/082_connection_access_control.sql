@@ -38,7 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_connection_acl_team ON connection_acl(team_id);
 -- Row Level Security (consistent with all tenant-scoped tables).
 ALTER TABLE connection_acl ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation_connection_acl ON connection_acl
-    USING (tenant_id = current_setting('app.current_tenant', true)::UUID);
+    USING (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 -- ============================================================
 -- RESTRICTED COLUMN ON CONNECTIONS

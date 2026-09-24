@@ -37,11 +37,6 @@ const TOKEN_KEY = 'pepa_token'; // legacy — migrated away, cleaned up below
 const USER_KEY = 'pepa_user';
 let _bootstrapJwt: string | null = null;
 
-export function getToken(): string | null {
-  // Tokens are no longer accessible to client-side code (httpOnly cookie).
-  return null;
-}
-
 export function setToken(_token: string): void {
   // No-op: the server sets the httpOnly cookie on login/refresh.
   // Kept for backward compatibility with older call sites.
@@ -675,10 +670,6 @@ export async function createUser(data: { email: string; name: string; password: 
   return fetchAPI('/api/v1/auth/users', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function getUser(id: string): Promise<{ user: User; roles: string[] }> {
-  return fetchAPI(`/api/v1/auth/users/${id}`);
-}
-
 export async function updateUser(id: string, data: { name?: string; email?: string; is_active?: boolean; roles?: string[] }): Promise<void> {
   await fetchAPI(`/api/v1/auth/users/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 }
@@ -721,14 +712,6 @@ export async function createTeam(data: { name: string; slug: string; description
   return fetchAPI('/api/v1/teams', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function getTeam(id: string): Promise<{ team: Team; member_count: number }> {
-  return fetchAPI(`/api/v1/teams/${id}`);
-}
-
-export async function updateTeam(id: string, data: { name?: string; description?: string; parent_team_id?: string | null }): Promise<void> {
-  await fetchAPI(`/api/v1/teams/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-}
-
 export async function deleteTeam(id: string): Promise<void> {
   await fetchAPI(`/api/v1/teams/${id}`, { method: 'DELETE' });
 }
@@ -745,16 +728,8 @@ export async function removeTeamMember(teamId: string, userId: string): Promise<
   await fetchAPI(`/api/v1/teams/${teamId}/members/${userId}`, { method: 'DELETE' });
 }
 
-export async function getTeamRoles(teamId: string): Promise<{ roles: Array<{ assignment_id: string; role_id: string; name: string; slug: string }> }> {
-  return fetchAPI(`/api/v1/teams/${teamId}/roles`);
-}
-
 export async function assignTeamRole(teamId: string, roleId: string): Promise<void> {
   await fetchAPI(`/api/v1/teams/${teamId}/roles`, { method: 'POST', body: JSON.stringify({ role_id: roleId }) });
-}
-
-export async function removeTeamRole(teamId: string, roleId: string): Promise<void> {
-  await fetchAPI(`/api/v1/teams/${teamId}/roles/${roleId}`, { method: 'DELETE' });
 }
 
 // ── User Credentials API ─────────────────────────────────────

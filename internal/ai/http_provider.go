@@ -44,22 +44,7 @@ func (p *httpProvider) defaultModel() string {
 	if p.model != "" {
 		return p.model
 	}
-	switch p.name {
-	case "openai":
-		return "gpt-4o-mini"
-	case "anthropic":
-		return "claude-3-haiku-20240307"
-	case "groq":
-		return "openai/gpt-oss-120b"
-	case "qoder":
-		return "qoder-coder"
-	case "lmstudio":
-		return "local-model"
-	case "ollama":
-		return "llama3"
-	default:
-		return "default"
-	}
+	return DefaultModelFor(p.name)
 }
 
 func (p *httpProvider) setHeaders(req *http.Request) {

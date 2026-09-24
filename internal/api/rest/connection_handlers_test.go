@@ -61,13 +61,13 @@ func TestConnectionTestConfigRejectsUnsafeVaultReferences(t *testing.T) {
 		{repository.ConnectionDocker, "host_type", "vault:checks/private/value", "credential fields"},
 		{repository.ConnectionDocker, "host", "vault:checks/private/value", "credential fields"},
 		{repository.ConnectionDocker, "unknown_token", "vault:checks/private/value", "credential fields"},
-		{repository.ConnectionSecret, "token", "vault:path", "Invalid Vault reference"},
-		{repository.ConnectionSecret, "token", "vault:path/", "Invalid Vault reference"},
-		{repository.ConnectionSecret, "token", "vault:/key", "Invalid Vault reference"},
-		{repository.ConnectionSecret, "token", "vault:allowed/../private/key", "Invalid Vault reference"},
-		{repository.ConnectionSecret, "token", "vault:allowed/%2e%2e/private/key", "Invalid Vault reference"},
-		{repository.ConnectionSecret, "token", "vault:allowed//private/key", "Invalid Vault reference"},
-		{repository.ConnectionSecret, "token", "vault:allowed?other/key", "Invalid Vault reference"},
+		{repository.ConnectionSecret, "token", "vault:path", "invalid vault reference"},
+		{repository.ConnectionSecret, "token", "vault:path/", "invalid vault reference"},
+		{repository.ConnectionSecret, "token", "vault:/key", "invalid vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed/../private/key", "invalid vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed/%2e%2e/private/key", "invalid vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed//private/key", "invalid vault reference"},
+		{repository.ConnectionSecret, "token", "vault:allowed?other/key", "invalid vault reference"},
 	} {
 		t.Run(string(tc.kind)+"/"+tc.key+"/"+tc.ref, func(t *testing.T) {
 			conn := &repository.Connection{Type: tc.kind, Config: map[string]any{tc.key: tc.ref}}

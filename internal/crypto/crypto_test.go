@@ -8,7 +8,8 @@ import (
 
 func setupTestKey(t *testing.T) {
 	t.Helper()
-	t.Setenv("ENCRYPTION_KEY", "test-encryption-key-that-is-at-least-32-characters-long")
+	SetMasterSecret("test-encryption-key-that-is-at-least-32-characters-long", "")
+	t.Cleanup(func() { SetMasterSecret("", "") })
 }
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
@@ -174,9 +175,7 @@ func TestDerivePathKeyUniqueness(t *testing.T) {
 
 func TestValidateKeyStrength(t *testing.T) {
 	// Test with no key set
-	t.Setenv("ENCRYPTION_KEY", "")
-	t.Setenv("AUTH_JWT_SECRET", "")
-	t.Setenv("JWT_SECRET", "")
+	SetMasterSecret("", "")
 
 	err := ValidateKeyStrength(false)
 	if err == nil {
@@ -184,7 +183,7 @@ func TestValidateKeyStrength(t *testing.T) {
 	}
 
 	// Test with weak key in production
-	t.Setenv("ENCRYPTION_KEY", "dev-secret-change-me-in-production")
+	SetMasterSecret("dev-secret-change-me-in-production", "")
 	err = ValidateKeyStrength(true)
 	if err == nil {
 		t.Fatal("expected error for weak key in production")
@@ -197,11 +196,12 @@ func TestValidateKeyStrength(t *testing.T) {
 	}
 
 	// Test with strong key in production
-	t.Setenv("ENCRYPTION_KEY", "a-very-long-and-strong-random-key-at-least-32-chars")
+	SetMasterSecret("a-very-long-and-strong-random-key-at-least-32-chars", "")
 	err = ValidateKeyStrength(true)
 	if err != nil {
 		t.Fatalf("strong key should pass validation: %v", err)
 	}
+	t.Cleanup(func() { SetMasterSecret("", "") })
 }
 
 func TestDecryptInvalidFormat(t *testing.T) {

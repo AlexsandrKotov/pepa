@@ -257,9 +257,9 @@ func crdListApplications(ctx context.Context, dc *crdClient) ([]byte, error) {
 
 	apps := make([]provider.CDApplication, 0, len(list.Items))
 	for _, item := range list.Items {
-		health, _ := getNestedString(item.Object, "status", "health", "status")
-		syncStatus, _ := getNestedString(item.Object, "status", "sync", "status")
-		revision, _ := getNestedString(item.Object, "status", "sync", "revision")
+		health, _ := sdk.GetNestedString(item.Object, "status", "health", "status")
+		syncStatus, _ := sdk.GetNestedString(item.Object, "status", "sync", "status")
+		revision, _ := sdk.GetNestedString(item.Object, "status", "sync", "revision")
 
 		apps = append(apps, provider.CDApplication{
 			Name:       item.GetName(),
@@ -421,9 +421,9 @@ func crdGetStatus(ctx context.Context, dc *crdClient, params []byte) ([]byte, er
 		return nil, fmt.Errorf("get application %s/%s: %w", input.Namespace, input.Name, err)
 	}
 
-	health, _ := getNestedString(obj.Object, "status", "health", "status")
-	syncStatus, _ := getNestedString(obj.Object, "status", "sync", "status")
-	revision, _ := getNestedString(obj.Object, "status", "sync", "revision")
+	health, _ := sdk.GetNestedString(obj.Object, "status", "health", "status")
+	syncStatus, _ := sdk.GetNestedString(obj.Object, "status", "sync", "status")
+	revision, _ := sdk.GetNestedString(obj.Object, "status", "sync", "revision")
 
 	return sdk.ActionOutput(provider.DeployStatus{
 		Application: input.Name,
@@ -462,9 +462,9 @@ func flattenArgoResource(obj *unstructured.Unstructured) map[string]interface{} 
 	}
 
 	if status, ok := obj.Object["status"].(map[string]interface{}); ok {
-		health, _ := getNestedString(obj.Object, "status", "health", "status")
-		syncStatus, _ := getNestedString(obj.Object, "status", "sync", "status")
-		revision, _ := getNestedString(obj.Object, "status", "sync", "revision")
+		health, _ := sdk.GetNestedString(obj.Object, "status", "health", "status")
+		syncStatus, _ := sdk.GetNestedString(obj.Object, "status", "sync", "status")
+		revision, _ := sdk.GetNestedString(obj.Object, "status", "sync", "revision")
 		result["status"] = map[string]interface{}{
 			"health":     health,
 			"syncStatus": syncStatus,
@@ -474,22 +474,6 @@ func flattenArgoResource(obj *unstructured.Unstructured) map[string]interface{} 
 	}
 
 	return result
-}
-
-// getNestedString safely extracts a string from nested maps.
-func getNestedString(obj map[string]interface{}, fields ...string) (string, bool) {
-	var val interface{} = obj
-	for _, field := range fields {
-		if m, ok := val.(map[string]interface{}); ok {
-			val = m[field]
-		} else {
-			return "", false
-		}
-	}
-	if s, ok := val.(string); ok {
-		return s, true
-	}
-	return "", false
 }
 
 // =============================================================================

@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 
@@ -33,6 +32,19 @@ import (
 
 // fallbackWarned ensures the domain-separation warning is logged at most once.
 var fallbackWarned sync.Once
+
+// masterSecret is the configured encryption key, set by SetMasterSecret.
+var masterSecret string
+
+// masterSecretFallback is the JWT secret used as a deprecated fallback.
+var masterSecretFallback string
+
+// SetMasterSecret configures the encryption key and its deprecated fallback.
+// Called during application initialization from the loaded config.
+func SetMasterSecret(encryptionKey, jwtSecret string) {
+	masterSecret = encryptionKey
+	masterSecretFallback = jwtSecret
+}
 
 const (
 	encryptedPrefix = "enc:"
@@ -51,14 +63,13 @@ const (
 
 // ── Master key derivation ──────────────────────────────────────
 
-// getMasterSecret returns the raw master secret from environment.
-// It prefers ENCRYPTION_KEY. Falling back to AUTH_JWT_SECRET is deprecated
+// getMasterSecret returns the raw master secret from config.
+// It prefers the encryption key. Falling back to the JWT secret is deprecated
 // and logs a warning because it violates domain separation between
 // authentication and encryption.
 func getMasterSecret() (string, error) {
-	secret := os.Getenv("ENCRYPTION_KEY")
-	if secret != "" {
-		return secret, nil
+	if masterSecret != "" {
+		return masterSecret, nil
 	}
 
 	// Deprecated fallback — log once.
@@ -66,13 +77,8 @@ func getMasterSecret() (string, error) {
 		slog.Warn("ENCRYPTION_KEY is not set; falling back to AUTH_JWT_SECRET. This is deprecated and violates domain separation. Set ENCRYPTION_KEY explicitly.")
 	})
 
-	secret = os.Getenv("AUTH_JWT_SECRET")
-	if secret != "" {
-		return secret, nil
-	}
-	secret = os.Getenv("JWT_SECRET")
-	if secret != "" {
-		return secret, nil
+	if masterSecretFallback != "" {
+		return masterSecretFallback, nil
 	}
 	return "", errors.New("ENCRYPTION_KEY environment variable required for encryption")
 }
@@ -375,15 +381,12 @@ var knownWeakKeys = []string{
 // In production mode (isProduction=true), weak or missing keys are fatal.
 // In development mode, only missing keys produce an error; weak keys produce a warning.
 func ValidateKeyStrength(isProduction bool) error {
-	secret := os.Getenv("ENCRYPTION_KEY")
+	secret := masterSecret
 
 	// Check if ENCRYPTION_KEY is explicitly set
 	if secret == "" {
 		// Falls back to JWT secret — dangerous in production
-		fallback := os.Getenv("AUTH_JWT_SECRET")
-		if fallback == "" {
-			fallback = os.Getenv("JWT_SECRET")
-		}
+		fallback := masterSecretFallback
 		if fallback == "" {
 			return errors.New("no encryption key configured: set ENCRYPTION_KEY environment variable")
 		}

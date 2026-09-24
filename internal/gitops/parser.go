@@ -549,12 +549,8 @@ func parseKustomizeFile(data []byte, filePath string) *Resource {
 	}
 
 	// Combine resources + bases as dependencies
-	for _, ref := range kInfo.Resources {
-		r.DependsOn = append(r.DependsOn, ref)
-	}
-	for _, ref := range kInfo.Components {
-		r.DependsOn = append(r.DependsOn, ref)
-	}
+	r.DependsOn = append(r.DependsOn, kInfo.Resources...)
+	r.DependsOn = append(r.DependsOn, kInfo.Components...)
 
 	// Set namespace override
 	if kInfo.Namespace != "" {

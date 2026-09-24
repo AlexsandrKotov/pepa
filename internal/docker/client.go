@@ -19,6 +19,15 @@ import (
 	"github.com/pepa/pepa/internal/hostpath"
 )
 
+// hostDataDir is the configured root directory for host filesystem access.
+// Set by SetHostDataDir during application startup.
+var hostDataDir string
+
+// SetHostDataDir configures the root directory for host filesystem access.
+func SetHostDataDir(dir string) {
+	hostDataDir = dir
+}
+
 // HostConfig holds the connection details for a Docker host.
 type HostConfig struct {
 	HostType    string // "local", "tcp", "ssh"
@@ -340,7 +349,7 @@ func (c *Client) ComposeUpFromFolderStream(ctx context.Context, projectName, fol
 // translateToHostHome translates a host path to a container-accessible path
 // using the unified hostpath package. Returns empty string if translation fails.
 func translateToHostHome(p string) string {
-	resolved, err := hostpath.Resolve(p, os.Getenv("HOST_DATA_DIR"))
+	resolved, err := hostpath.Resolve(p, hostDataDir)
 	if err != nil {
 		return ""
 	}

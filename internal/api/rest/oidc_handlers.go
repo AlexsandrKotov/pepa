@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,24 +13,13 @@ import (
 	"github.com/pepa/pepa/internal/repository"
 )
 
-// oidcStateStore stores state and nonce for OIDC flow (in production, use Redis).
-var (
-	oidcStates   = make(map[string]oidcStateData)
-	oidcStatesMu sync.Mutex
-)
-
-type oidcStateData struct {
-	Nonce     string
-	CreatedAt time.Time
-}
-
-// cleanupTicker fires periodically to remove expired OIDC states.
+// cleanupTicker fires periodically to remove expired OAuth states.
 var cleanupTicker = time.NewTicker(5 * time.Minute)
 
 func init() {
 	go func() {
 		for range cleanupTicker.C {
-			cleanupOldStates()
+			cleanupOAuthStates()
 		}
 	}()
 }
@@ -58,13 +46,8 @@ func oidcLoginHandler(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		// Store state and nonce
-		oidcStatesMu.Lock()
-		oidcStates[state] = oidcStateData{
-			Nonce:     nonce,
-			CreatedAt: time.Now(),
-		}
-		oidcStatesMu.Unlock()
+		// Store state for later verification.
+		storeOAuthState("OIDC", state)
 
 		provider := auth.NewOIDCProvider(deps.Config.Auth.OIDC)
 		authURL, err := provider.BuildAuthURL(c.Request.Context(), state, nonce)
@@ -82,95 +65,23 @@ func oidcLoginHandler(deps Dependencies) gin.HandlerFunc {
 
 // oidcCallbackHandler handles the OIDC callback after user authentication.
 func oidcCallbackHandler(deps Dependencies) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if !deps.Config.Auth.OIDC.Enabled {
-			c.JSON(http.StatusNotFound, gin.H{"error": "OIDC not enabled"})
-			return
-		}
-
-		code := c.Query("code")
-		state := c.Query("state")
-
-		if code == "" || state == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing code or state"})
-			return
-		}
-
-		// Verify state
-		oidcStatesMu.Lock()
-		_, exists := oidcStates[state]
-		if exists {
-			delete(oidcStates, state)
-		}
-		oidcStatesMu.Unlock()
-
-		if !exists {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid state"})
-			return
-		}
-
-		// Exchange code for tokens
-		provider := auth.NewOIDCProvider(deps.Config.Auth.OIDC)
-		tokens, err := provider.ExchangeCode(c.Request.Context(), code)
-		if err != nil {
-			slog.Error("failed to exchange OIDC code", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to exchange code"})
-			return
-		}
-
-		// Get user info
-		userInfo, err := provider.GetUserInfo(c.Request.Context(), tokens.AccessToken)
-		if err != nil {
-			slog.Error("failed to get OIDC user info", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user info"})
-			return
-		}
-
-		// Find or create user
-		user, err := findOrCreateOIDCUser(c.Request.Context(), deps, userInfo)
-		if err != nil {
-			slog.Error("failed to find/create OIDC user", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to authenticate user"})
-			return
-		}
-
-		// Get user roles
-		tenantID := uuid.MustParse(database.DefaultTenantID)
-		orgID := uuid.MustParse(database.DefaultOrganizationID)
-		var roles []string
-		if deps.RBAC != nil {
-			assignments, err := deps.RBAC.GetUserRoles(c.Request.Context(), tenantID, user.ID)
-			if err == nil {
-				roles = append(roles, jwtRolesFromAssignments(assignments)...)
+	cfg := oauthProviderConfig{
+		name:    "OIDC",
+		enabled: deps.Config.Auth.OIDC.Enabled,
+		exchangeAndFindUser: func(ctx context.Context, code string) (*repository.User, error) {
+			provider := auth.NewOIDCProvider(deps.Config.Auth.OIDC)
+			tokens, err := provider.ExchangeCode(ctx, code)
+			if err != nil {
+				return nil, err
 			}
-		}
-		// No hardcoded fallback roles — only explicit role_assignments grant access.
-
-		// Generate JWT token
-		tokenExpiry := deps.Config.Auth.TokenExpiry
-		if tokenExpiry == 0 {
-			tokenExpiry = 24 * time.Hour
-		}
-		token, err := auth.GenerateToken(
-			deps.Config.Auth.JWTSecret,
-			user.ID, tenantID, orgID,
-			user.Email, roles, user.TokenVersion, tokenExpiry,
-		)
-		if err != nil {
-			slog.Error("failed to generate JWT", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
-			return
-		}
-
-		// Set auth cookie — use the same expiry as the JWT
-		cookieExpiry := tokenExpiry
-		setAuthCookie(c, deps, token, cookieExpiry)
-
-		slog.Info("OIDC login successful", "user_id", user.ID, "email", user.Email)
-
-		// Redirect to frontend
-		c.Redirect(http.StatusTemporaryRedirect, "/")
+			userInfo, err := provider.GetUserInfo(ctx, tokens.AccessToken)
+			if err != nil {
+				return nil, err
+			}
+			return findOrCreateOIDCUser(ctx, deps, userInfo)
+		},
 	}
+	return genericOAuthCallback(deps, cfg)
 }
 
 // oidcConfigHandler returns public OIDC configuration for the frontend.
@@ -235,32 +146,4 @@ func findOrCreateOIDCUser(ctx context.Context, deps Dependencies, userInfo *auth
 
 	slog.Info("created new user via OIDC", "user_id", createdUser.ID, "email", createdUser.Email)
 	return createdUser, nil
-}
-
-// cleanupOldStates removes OIDC states older than 10 minutes.
-func cleanupOldStates() {
-	oidcStatesMu.Lock()
-	defer oidcStatesMu.Unlock()
-
-	cutoff := time.Now().Add(-10 * time.Minute)
-	for state, data := range oidcStates {
-		if data.CreatedAt.Before(cutoff) {
-			delete(oidcStates, state)
-		}
-	}
-	for state, data := range azureStates {
-		if data.CreatedAt.Before(cutoff) {
-			delete(azureStates, state)
-		}
-	}
-	for state, data := range googleStates {
-		if data.CreatedAt.Before(cutoff) {
-			delete(googleStates, state)
-		}
-	}
-	for state, data := range githubStates {
-		if data.CreatedAt.Before(cutoff) {
-			delete(githubStates, state)
-		}
-	}
 }

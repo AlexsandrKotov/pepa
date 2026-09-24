@@ -121,7 +121,7 @@ func applyConfig(cfg Config) {
 // setupSyslog creates a syslog writer.
 func setupSyslog(cfg SyslogConfig) (io.Writer, error) {
 	// Parse facility
-	facility := parseFacility(cfg.Facility)
+	facility := ParseSyslogFacility(cfg.Facility)
 
 	// Connect to syslog server
 	writer, err := syslog.Dial(cfg.Network, cfg.Address, facility|syslog.LOG_INFO, cfg.Tag)
@@ -132,8 +132,9 @@ func setupSyslog(cfg SyslogConfig) (io.Writer, error) {
 	return writer, nil
 }
 
-// parseFacility converts facility string to syslog.Priority.
-func parseFacility(facility string) syslog.Priority {
+// ParseSyslogFacility converts a facility name (local0-local7, user, daemon)
+// to a syslog.Priority. Unknown and empty names fall back to LOG_LOCAL0.
+func ParseSyslogFacility(facility string) syslog.Priority {
 	switch strings.ToLower(facility) {
 	case "local0":
 		return syslog.LOG_LOCAL0

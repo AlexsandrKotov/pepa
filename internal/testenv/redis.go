@@ -28,8 +28,7 @@ type RedisContainer struct {
 func StartRedis(ctx context.Context, t *testing.T) (*RedisContainer, error) {
 	t.Helper()
 
-	redisContainer, err := tcredis.RunContainer(ctx,
-		testcontainers.WithImage(redisImage),
+	redisContainer, err := tcredis.Run(ctx, redisImage,
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("Ready to accept connections").
 				WithStartupTimeout(15*time.Second),

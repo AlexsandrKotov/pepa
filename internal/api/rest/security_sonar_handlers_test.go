@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/config"
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/internal/security"
 )
@@ -121,19 +122,19 @@ func TestValidateScanTargetShapeRequiresSonarConnection(t *testing.T) {
 }
 
 func TestCheckSonarWebhookSecret(t *testing.T) {
-	t.Setenv("SONAR_WEBHOOK_TOKEN", "")
-	if ok, status := checkSonarWebhookSecret("anything"); ok || status != http.StatusServiceUnavailable {
+	deps := Dependencies{Config: &config.Config{}}
+	if ok, status := checkSonarWebhookSecret("anything", deps); ok || status != http.StatusServiceUnavailable {
 		t.Errorf("an unconfigured webhook must answer 503, got ok=%v status=%d", ok, status)
 	}
 
-	t.Setenv("SONAR_WEBHOOK_TOKEN", "s3cret")
-	if ok, status := checkSonarWebhookSecret(""); ok || status != http.StatusUnauthorized {
+	deps.Config.Security.SonarWebhookToken = "s3cret"
+	if ok, status := checkSonarWebhookSecret("", deps); ok || status != http.StatusUnauthorized {
 		t.Errorf("a missing signature must be rejected, got ok=%v status=%d", ok, status)
 	}
-	if ok, status := checkSonarWebhookSecret("s3cre"); ok || status != http.StatusUnauthorized {
+	if ok, status := checkSonarWebhookSecret("s3cre", deps); ok || status != http.StatusUnauthorized {
 		t.Errorf("a wrong signature must be rejected, got ok=%v status=%d", ok, status)
 	}
-	if ok, status := checkSonarWebhookSecret("s3cret"); !ok || status != http.StatusOK {
+	if ok, status := checkSonarWebhookSecret("s3cret", deps); !ok || status != http.StatusOK {
 		t.Errorf("the shared secret must be accepted, got ok=%v status=%d", ok, status)
 	}
 }
@@ -206,19 +207,19 @@ func TestSonarWebhookTargetMatches(t *testing.T) {
 
 // The webhook is a public route, so its guards have to be exercised over HTTP.
 func TestSonarWebhookHTTPGuards(t *testing.T) {
-	h := sonarWebhook(Dependencies{
-		// A wired scanner and repositories get past the 503 readiness check, so
-		// what is asserted below really is the authentication behaviour.
-		Scanner: security.NewScanner(nil, nil, nil, nil, nil),
+	deps := Dependencies{
+		Config:  &config.Config{},
+		Scanner: security.NewScanner(nil, nil, nil, nil, nil, config.SecurityConfig{}, ""),
 		Repos:   &Repositories{Connection: &repository.ConnectionRepository{}, SecurityScan: &repository.SecurityScanRepository{}},
-	})
+	}
+	h := sonarWebhook(deps)
 
-	t.Setenv("SONAR_WEBHOOK_TOKEN", "")
 	if w := callHandler(t, h, "POST", "/api/v1/security/sonar/webhook", "/api/v1/security/sonar/webhook", `{}`, nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("disabled webhook: got %d, want 503", w.Code)
 	}
 
-	t.Setenv("SONAR_WEBHOOK_TOKEN", "s3cret")
+	deps.Config.Security.SonarWebhookToken = "s3cret"
+	h = sonarWebhook(deps)
 	if w := callHandler(t, h, "POST", "/api/v1/security/sonar/webhook", "/api/v1/security/sonar/webhook", `{}`, nil); w.Code != http.StatusUnauthorized {
 		t.Errorf("unsigned webhook: got %d, want 401", w.Code)
 	}
@@ -253,7 +254,7 @@ func TestTransitionSonarIssueGuards(t *testing.T) {
 		t.Errorf("unwired scanner: got %d, want 503", w.Code)
 	}
 
-	h = transitionSonarIssue(Dependencies{Scanner: security.NewScanner(nil, nil, nil, nil, nil), Repos: &Repositories{Connection: &repository.ConnectionRepository{}}})
+	h = transitionSonarIssue(Dependencies{Scanner: security.NewScanner(nil, nil, nil, nil, nil, config.SecurityConfig{}, ""), Repos: &Repositories{Connection: &repository.ConnectionRepository{}}})
 	if w := callHandler(t, h, "POST", "/api/v1/security/sonar/issues/transition", "/api/v1/security/sonar/issues/transition", `{"connection_id":"not-a-uuid"}`, nil); w.Code != http.StatusBadRequest {
 		t.Errorf("invalid connection id: got %d, want 400", w.Code)
 	}
@@ -269,7 +270,7 @@ func TestListSonarProjectsGuards(t *testing.T) {
 		t.Errorf("unwired scanner: got %d, want 503", w.Code)
 	}
 
-	h = listSonarProjects(Dependencies{Scanner: security.NewScanner(nil, nil, nil, nil, nil), Repos: &Repositories{}})
+	h = listSonarProjects(Dependencies{Scanner: security.NewScanner(nil, nil, nil, nil, nil, config.SecurityConfig{}, ""), Repos: &Repositories{}})
 	if w := callHandler(t, h, "GET", "/api/v1/security/sonar/projects", "/api/v1/security/sonar/projects", "", nil); w.Code != http.StatusBadRequest {
 		t.Errorf("missing connection_id: got %d, want 400", w.Code)
 	}

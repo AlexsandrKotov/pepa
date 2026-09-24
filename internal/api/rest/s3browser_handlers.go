@@ -262,10 +262,6 @@ func s3ListObjects(deps Dependencies) gin.HandlerFunc {
 
 		// Log the keys returned for debugging
 		if len(topLevel) > 0 {
-			keys := make([]string, 0, len(topLevel))
-			for _, obj := range topLevel {
-				keys = append(keys, obj.Key)
-			}
 			slog.Debug("LIST objects", "bucket", bucketName, "prefix", prefix, "count", len(topLevel))
 		}
 		if len(folders) > 0 {

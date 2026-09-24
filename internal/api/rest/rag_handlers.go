@@ -379,7 +379,7 @@ func (h *RAGHandlers) CreateDocument(c *gin.Context) {
 	meta["title"] = req.Title
 
 	doc := &ai.Document{
-		ID:       "custom-" + sanitizeID(req.Title),
+		ID:       "custom-" + ai.SanitizeDocID(req.Title),
 		Source:   source,
 		Type:     sourceType,
 		Content:  req.Content,
@@ -403,24 +403,6 @@ func (h *RAGHandlers) CreateDocument(c *gin.Context) {
 		"id":      doc.ID,
 		"title":   req.Title,
 	})
-}
-
-// sanitizeID creates a safe document ID from a title.
-func sanitizeID(s string) string {
-	s = strings.ToLower(s)
-	s = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			return r
-		}
-		if r == ' ' {
-			return '-'
-		}
-		return -1
-	}, s)
-	for strings.Contains(s, "--") {
-		s = strings.ReplaceAll(s, "--", "-")
-	}
-	return strings.Trim(s, "-")
 }
 
 // toStringMap converts map[string]interface{} to map[string]string.

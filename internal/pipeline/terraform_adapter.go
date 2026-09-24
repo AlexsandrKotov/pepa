@@ -84,11 +84,11 @@ func NewTerraformAdapter() *TerraformAdapter {
 func (a *TerraformAdapter) Name() string { return "terraform" }
 
 // iacBinary resolves the IaC CLI binary name.
-// Priority: IAC_BINARY env var > "tofu" in PATH > "terraform" in PATH.
+// Priority: configured IACBinary > "tofu" in PATH > "terraform" in PATH.
 // Falls back to "tofu" (will produce a clear exec error if missing).
 func iacBinary() string {
-	if v := os.Getenv("IAC_BINARY"); v != "" {
-		return v
+	if iacBinaryOverride != "" {
+		return iacBinaryOverride
 	}
 	if p, err := exec.LookPath("tofu"); err == nil {
 		return p

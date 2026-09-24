@@ -436,7 +436,7 @@ func (t *DeployTracker) checkFluxStatus(ctx context.Context, repo *Repo, commitS
 
 	// Try to get FluxCD HelmRelease status via kubectl
 	cmd := exec.CommandContext(ctx, "kubectl", "get", "helmreleases", "--all-namespaces", //nolint:gosec // #nosec // G204: kubectl with static args
-		"-o", "json", "-l", fmt.Sprintf("meta.helm.sh/release-name"))
+		"-o", "json", "-l", "meta.helm.sh/release-name")
 	out, err := cmd.Output()
 	if err != nil {
 		// kubectl not available or not configured - skip

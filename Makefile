@@ -3,9 +3,9 @@
 # "Delivery without pain, GitOps with joy."
 # ============================================================
 
-.PHONY: all build test lint clean docker-build docker-up docker-down docker-logs deploy plugins clean-plugins \
+.PHONY: all build test lint clean clean-local docker-build docker-up docker-down docker-logs deploy plugins clean-plugins \
 	release release-check release-tag release-checksums release-plugins-image release-push release-helm \
-	sign-plugins verify-plugins clean-plugins
+	sign-plugins verify-plugins
 
 # Variables
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -197,6 +197,16 @@ deploy: clean plugins docker-build
 clean:
 	@echo "→ Cleaning..."
 	@rm -rf bin/ coverage.out coverage.html
+
+# Remove gitignored scratch directories left behind by local debugging and
+# analysis runs. Never part of `clean` — these dirs can hold artifacts a
+# developer still needs, so the cleanup has to be asked for explicitly.
+clean-local:
+	@echo "→ Removing local scratch artifacts (gitignored, never released)..."
+	@for d in tmp .tmp-patch .tmp-frontend-patch; do \
+		if [ -e "$$d" ]; then rm -rf "$$d" && echo "  ✓ $$d"; fi; \
+	done
+	@rmdir internal/graphql 2>/dev/null && echo "  ✓ internal/graphql (empty)" || true
 
 # ── Dependencies ─────────────────────────────────────────────
 

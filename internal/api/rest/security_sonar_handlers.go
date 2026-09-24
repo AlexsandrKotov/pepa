@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -137,8 +136,8 @@ type sonarWebhookPayload struct {
 // checkSonarWebhookSecret verifies the shared secret SonarQube sends in
 // X-PEPA-Signature. An unconfigured token answers 503 instead of accepting
 // anonymous triggers, because forgetting the configuration is the likely mistake.
-func checkSonarWebhookSecret(provided string) (ok bool, status int) {
-	token := os.Getenv("SONAR_WEBHOOK_TOKEN")
+func checkSonarWebhookSecret(provided string, deps Dependencies) (ok bool, status int) {
+	token := deps.Config.Security.SonarWebhookToken
 	if token == "" {
 		return false, http.StatusServiceUnavailable
 	}
@@ -198,7 +197,7 @@ func sonarWebhook(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "security scanning not available"})
 			return
 		}
-		if ok, status := checkSonarWebhookSecret(c.GetHeader("X-PEPA-Signature")); !ok {
+		if ok, status := checkSonarWebhookSecret(c.GetHeader("X-PEPA-Signature"), deps); !ok {
 			if status == http.StatusServiceUnavailable {
 				c.JSON(status, gin.H{"error": "sonarqube webhook is disabled: SONAR_WEBHOOK_TOKEN is not configured"})
 				return

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pepa/pepa/internal/logging"
 	sdk "github.com/pepa/pepa/internal/plugin/sdk-go"
 	"github.com/pepa/pepa/internal/provider"
 )
@@ -94,7 +95,7 @@ func (p *SyslogPlugin) initWriter(config map[string]string) error {
 		protocol = "udp"
 	}
 
-	facility := parseFacility(config["facility"])
+	facility := logging.ParseSyslogFacility(config["facility"])
 	tag := config["tag"]
 	if tag == "" {
 		tag = "pepa"
@@ -317,34 +318,6 @@ func (p *SyslogPlugin) formatMessage(level, message string, fields map[string]st
 			parts = append(parts, fmt.Sprintf("%s=%s", k, v))
 		}
 		return strings.Join(parts, " ")
-	}
-}
-
-// parseFacility converts facility string to syslog.Priority.
-func parseFacility(facility string) syslog.Priority {
-	switch strings.ToLower(facility) {
-	case "local0":
-		return syslog.LOG_LOCAL0
-	case "local1":
-		return syslog.LOG_LOCAL1
-	case "local2":
-		return syslog.LOG_LOCAL2
-	case "local3":
-		return syslog.LOG_LOCAL3
-	case "local4":
-		return syslog.LOG_LOCAL4
-	case "local5":
-		return syslog.LOG_LOCAL5
-	case "local6":
-		return syslog.LOG_LOCAL6
-	case "local7":
-		return syslog.LOG_LOCAL7
-	case "user":
-		return syslog.LOG_USER
-	case "daemon":
-		return syslog.LOG_DAEMON
-	default:
-		return syslog.LOG_LOCAL0
 	}
 }
 

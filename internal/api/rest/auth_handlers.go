@@ -1435,7 +1435,7 @@ func SeedBootstrapToken(deps Dependencies) (string, error) {
 	// regenerate so the admin is not handed a token that will fail at
 	// activation.
 	fileSyncedWithDB := false
-	tokenPath := os.Getenv("BOOTSTRAP_TOKEN_PATH")
+	tokenPath := deps.Config.Bootstrap.TokenPath
 	if tokenPath == "" {
 		tokenPath = "/var/run/pepa/bootstrap_token.txt" // #nosec G101 //nolint:gosec // not a credential, just a default file path
 	}

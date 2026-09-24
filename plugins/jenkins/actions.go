@@ -26,19 +26,19 @@ type triggerParams struct {
 }
 
 type createJobParams struct {
-	JobName string    `json:"job_name"`
-	Folder  string    `json:"folder,omitempty"`
-	Script  string    `json:"script"`
+	JobName string     `json:"job_name"`
+	Folder  string     `json:"folder,omitempty"`
+	Script  string     `json:"script"`
 	Params  []ParamDef `json:"params,omitempty"`
-	Sandbox bool      `json:"sandbox"`
+	Sandbox bool       `json:"sandbox"`
 }
 
 type updateJobParams struct {
-	JobName     string    `json:"job_name"`
-	Description string    `json:"description,omitempty"`
-	Script      string    `json:"script,omitempty"`
+	JobName     string     `json:"job_name"`
+	Description string     `json:"description,omitempty"`
+	Script      string     `json:"script,omitempty"`
 	Params      []ParamDef `json:"params,omitempty"`
-	Sandbox     *bool     `json:"sandbox,omitempty"`
+	Sandbox     *bool      `json:"sandbox,omitempty"`
 }
 
 type updateScriptParams struct {
@@ -443,9 +443,9 @@ func (p *JenkinsPlugin) getPipelineScript(ctx context.Context, c *JenkinsClient,
 	}
 
 	return actionOutput(map[string]interface{}{
-		"script":        script,
-		"type":          pipelineType,
-		"config_xml":    configXML,
+		"script":     script,
+		"type":       pipelineType,
+		"config_xml": configXML,
 	})
 }
 

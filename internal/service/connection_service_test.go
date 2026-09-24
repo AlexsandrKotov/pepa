@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pepa/pepa/internal/crypto"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -409,13 +410,12 @@ func TestVaultConnectionBuiltinReadiness(t *testing.T) {
 		t.Fatal(result)
 	}
 	svc.SetBuiltinVaultCheck(func(context.Context) error { return nil })
-	for _, key := range []string{"ENCRYPTION_KEY", "AUTH_JWT_SECRET", "JWT_SECRET"} {
-		t.Setenv(key, "")
-	}
+	crypto.SetMasterSecret("", "")
 	if result := svc.TestVaultConnection(t.Context(), config); result.Status != "error" {
 		t.Fatal(result)
 	}
-	t.Setenv("ENCRYPTION_KEY", "connection-readiness-test-key-32-characters")
+	crypto.SetMasterSecret("connection-readiness-test-key-32-characters", "")
+	t.Cleanup(func() { crypto.SetMasterSecret("", "") })
 	for _, cfg := range []map[string]any{config, {}} {
 		if result := svc.TestVaultConnection(t.Context(), cfg); result.Status != "connected" {
 			t.Fatal(result)

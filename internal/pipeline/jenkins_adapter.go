@@ -244,15 +244,15 @@ func (a *JenkinsAdapter) Trigger(ctx context.Context, raw json.RawMessage, param
 
 	queueURL, err := url.Parse(resp.Header.Get("Location"))
 	if err != nil || queueURL.Path == "" {
-		return nil, fmt.Errorf("Jenkins accepted the build but did not return a queue location; check Jenkins before retrying")
+		return nil, fmt.Errorf("jenkins accepted the build but did not return a queue location; check Jenkins before retrying")
 	}
 	parts := strings.Split(strings.Trim(queueURL.Path, "/"), "/")
 	if len(parts) < 3 || parts[len(parts)-3] != "queue" || parts[len(parts)-2] != "item" {
-		return nil, fmt.Errorf("Jenkins returned an invalid queue location")
+		return nil, fmt.Errorf("jenkins returned an invalid queue location")
 	}
 	queueID := parts[len(parts)-1]
 	if _, err := strconv.ParseUint(queueID, 10, 64); err != nil {
-		return nil, fmt.Errorf("Jenkins returned an invalid queue ID")
+		return nil, fmt.Errorf("jenkins returned an invalid queue ID")
 	}
 	return &TriggerResult{
 		ExternalRunID: "queue:" + queueID,

@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -84,7 +83,7 @@ func createRegistryRepo(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
-		if err := validateRegistryURL(req.URL); err != nil {
+		if err := validateRegistryURL(req.URL, deps); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -181,7 +180,7 @@ func updateRegistryRepo(deps Dependencies) gin.HandlerFunc {
 			existing.RegistryType = req.RegistryType
 		}
 		if req.URL != "" {
-			if err := validateRegistryURL(req.URL); err != nil {
+			if err := validateRegistryURL(req.URL, deps); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -236,7 +235,7 @@ func deleteRegistryRepo(deps Dependencies) gin.HandlerFunc {
 // Environment variables (consistent with Vault's VAULT_ALLOW_PRIVATE_IPS / VAULT_ALLOWED_CIDRS):
 //   - REGISTRY_ALLOW_PRIVATE_IPS=true  — full bypass (dev/docker)
 //   - REGISTRY_ALLOWED_CIDRS=10.0.0.0/8,172.16.0.0/12 — granular allowlist (production)
-func validateRegistryURL(rawURL string) error {
+func validateRegistryURL(rawURL string, deps Dependencies) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
@@ -250,7 +249,7 @@ func validateRegistryURL(rawURL string) error {
 	}
 
 	// Full bypass — dev/docker mode.
-	if os.Getenv("REGISTRY_ALLOW_PRIVATE_IPS") == "true" {
+	if deps.Config.Security.RegistryAllowPrivateIPs {
 		return nil
 	}
 
@@ -265,7 +264,7 @@ func validateRegistryURL(rawURL string) error {
 
 	// Parse granular CIDR allowlist (production-safe alternative to full bypass).
 	var allowedNetworks []*net.IPNet
-	if cidrs := os.Getenv("REGISTRY_ALLOWED_CIDRS"); cidrs != "" {
+	if cidrs := deps.Config.Security.RegistryAllowedCIDRs; cidrs != "" {
 		for _, cidr := range strings.Split(cidrs, ",") {
 			cidr = strings.TrimSpace(cidr)
 			_, network, parseErr := net.ParseCIDR(cidr)
@@ -383,7 +382,7 @@ const maxBodyRead = 1 << 20 // 1 MB
 
 // validateRealmURL checks that an auth realm URL is safe to request.
 // Prevents SSRF via a malicious Www-Authenticate realm pointing to internal services.
-func validateRealmURL(realm string) error {
+func validateRealmURL(realm string, deps Dependencies) error {
 	u, err := url.Parse(realm)
 	if err != nil {
 		return fmt.Errorf("invalid realm URL: %w", err)
@@ -396,7 +395,7 @@ func validateRealmURL(realm string) error {
 		return fmt.Errorf("realm must include a hostname")
 	}
 	// In dev/docker mode, skip IP checks.
-	if os.Getenv("REGISTRY_ALLOW_PRIVATE_IPS") == "true" {
+	if deps.Config.Security.RegistryAllowPrivateIPs {
 		return nil
 	}
 	ips, lookupErr := net.LookupIP(host)
@@ -422,9 +421,9 @@ func validateRealmURL(realm string) error {
 }
 
 // getScopedToken requests a JWT token from the registry auth endpoint with a specific scope.
-func getScopedToken(challenge *authChallenge, repo *repository.RegistryRepo, scope string) (string, error) {
+func getScopedToken(challenge *authChallenge, repo *repository.RegistryRepo, scope string, deps Dependencies) (string, error) {
 	// Validate the realm URL to prevent SSRF via malicious Www-Authenticate headers.
-	if err := validateRealmURL(challenge.realm); err != nil {
+	if err := validateRealmURL(challenge.realm, deps); err != nil {
 		return "", fmt.Errorf("unsafe auth realm: %w", err)
 	}
 
@@ -623,7 +622,7 @@ func listRegistryImages(deps Dependencies) gin.HandlerFunc {
 		catalogOK := false
 
 		if challenge != nil {
-			token, tokenErr := getScopedToken(challenge, repo, "registry:catalog:*")
+			token, tokenErr := getScopedToken(challenge, repo, "registry:catalog:*", deps)
 			if tokenErr == nil && token != "" {
 				req, _ := http.NewRequest("GET", baseURL+"/v2/_catalog", nil)
 				req.Header.Set("Authorization", "Bearer "+token)
@@ -721,7 +720,7 @@ func listRegistryImageTags(deps Dependencies) gin.HandlerFunc {
 		}
 		if challenge != nil {
 			scope := fmt.Sprintf("repository:%s:pull", imageName)
-			token, tokenErr := getScopedToken(challenge, repo, scope)
+			token, tokenErr := getScopedToken(challenge, repo, scope, deps)
 			if tokenErr != nil {
 				slog.Warn("scoped token request failed", "id", id, "scope", scope, "error", tokenErr.Error())
 			}

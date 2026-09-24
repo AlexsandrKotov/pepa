@@ -15,6 +15,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	sdk "github.com/pepa/pepa/internal/plugin/sdk-go"
 )
 
 // FluxCD GVR (GroupVersionResource) definitions
@@ -109,9 +111,9 @@ func (p *FluxCDPlugin) listKustomizations(ctx context.Context, fc *FluxControlle
 			}
 		}
 
-		revision, _ := getNestedString(item.Object, "status", "lastAppliedRevision")
+		revision, _ := sdk.GetNestedString(item.Object, "status", "lastAppliedRevision")
 		if revision == "" {
-			revision, _ = getNestedString(item.Object, "status", "lastAttemptedRevision")
+			revision, _ = sdk.GetNestedString(item.Object, "status", "lastAttemptedRevision")
 		}
 
 		suspended := false
@@ -233,9 +235,9 @@ func (p *FluxCDPlugin) listHelmReleases(ctx context.Context, fc *FluxController,
 			}
 		}
 
-		revision, _ := getNestedString(item.Object, "status", "lastAppliedRevision")
+		revision, _ := sdk.GetNestedString(item.Object, "status", "lastAppliedRevision")
 		if revision == "" {
-			revision, _ = getNestedString(item.Object, "status", "lastAttemptedRevision")
+			revision, _ = sdk.GetNestedString(item.Object, "status", "lastAttemptedRevision")
 		}
 
 		suspended := false
@@ -559,21 +561,6 @@ func analyzeFluxHealth(items []unstructured.Unstructured) (result struct {
 }
 
 // ── Unstructured Helpers ──────────────────────────────────────
-
-func getNestedString(obj map[string]interface{}, fields ...string) (string, bool) {
-	var val interface{} = obj
-	for _, field := range fields {
-		if m, ok := val.(map[string]interface{}); ok {
-			val = m[field]
-		} else {
-			return "", false
-		}
-	}
-	if s, ok := val.(string); ok {
-		return s, true
-	}
-	return "", false
-}
 
 func getNestedSlice(obj map[string]interface{}, fields ...string) ([]interface{}, bool) {
 	var val interface{} = obj

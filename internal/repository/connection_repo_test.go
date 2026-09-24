@@ -9,7 +9,8 @@ import (
 )
 
 func TestConnectionConfigProtectsTLSKey(t *testing.T) {
-	t.Setenv("ENCRYPTION_KEY", "connection-encryption-regression-test-key")
+	crypto.SetMasterSecret("connection-encryption-regression-test-key", "")
+	t.Cleanup(func() { crypto.SetMasterSecret("", "") })
 	config := map[string]any{
 		"tls_key": "private-key-test-value", "ssh_key": "ssh-test-value",
 		"api_key": "api-test-value", "token": "vault:secret/docker/token",

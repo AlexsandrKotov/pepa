@@ -1148,13 +1148,13 @@ func getPipelineState(deps Dependencies) gin.HandlerFunc {
 			}
 		}
 		if len(params) == 0 && deps.Repos.PipelineRun != nil {
+			// Take the latest run (page=1, perPage=1); if it succeeded with
+			// stored parameters, reuse them for the preview.
 			runs, _, listErr := deps.Repos.PipelineRun.List(c.Request.Context(), id, 1, 1)
-			if listErr == nil {
-				for _, run := range runs {
-					if run.Status == "success" && len(run.Parameters) > 0 {
-						_ = json.Unmarshal(run.Parameters, &params)
-					}
-					break
+			if listErr == nil && len(runs) > 0 {
+				run := runs[0]
+				if run.Status == "success" && len(run.Parameters) > 0 {
+					_ = json.Unmarshal(run.Parameters, &params)
 				}
 			}
 		}

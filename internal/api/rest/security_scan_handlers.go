@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -133,7 +132,7 @@ func createScanTarget(deps Dependencies) gin.HandlerFunc {
 
 		// Validate filesystem target paths are within HOST_DATA_DIR.
 		if input.TargetType == "filesystem" {
-			hostDataDir := os.Getenv("HOST_DATA_DIR")
+			hostDataDir := deps.Config.HostDataDir
 			if hostDataDir == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "HOST_DATA_DIR is not configured — filesystem scan targets require the admin to set HOST_DATA_DIR"})
 				return
@@ -356,7 +355,7 @@ func updateScanTarget(deps Dependencies) gin.HandlerFunc {
 
 		// Validate filesystem target paths are within HOST_DATA_DIR.
 		if existing.TargetType == "filesystem" {
-			hostDataDir := os.Getenv("HOST_DATA_DIR")
+			hostDataDir := deps.Config.HostDataDir
 			if hostDataDir == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "HOST_DATA_DIR is not configured — filesystem scan targets require the admin to set HOST_DATA_DIR"})
 				return
@@ -1022,7 +1021,7 @@ func registerHostDataRoutes(v1 *gin.RouterGroup, deps Dependencies) {
 // the root directory for the directory browser.
 func getHostDataConfig(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		hostDataDir := os.Getenv("HOST_DATA_DIR")
+		hostDataDir := deps.Config.HostDataDir
 		c.JSON(http.StatusOK, gin.H{
 			"host_data_dir": hostDataDir,
 			"configured":    hostDataDir != "",
@@ -1034,7 +1033,7 @@ func getHostDataConfig(deps Dependencies) gin.HandlerFunc {
 // Query parameter "path" optionally specifies a subdirectory to list.
 func listHostDirectories(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		hostDataDir := os.Getenv("HOST_DATA_DIR")
+		hostDataDir := deps.Config.HostDataDir
 		if hostDataDir == "" {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"error": "HOST_DATA_DIR is not configured — ask your admin to set it in .env",

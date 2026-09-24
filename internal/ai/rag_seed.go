@@ -187,7 +187,7 @@ func SeedDocumentList() []map[string]string {
 // This is a convenience wrapper around IngestionEngine.IngestDocument.
 func IngestCustomDocument(ctx context.Context, engine *IngestionEngine, tenantID uuid.UUID, title, sourceType, content string) error {
 	doc := &Document{
-		ID:      "custom-" + sanitizeID(title),
+		ID:      "custom-" + SanitizeDocID(title),
 		Source:  "custom",
 		Type:    sourceType,
 		Content: content,
@@ -198,8 +198,8 @@ func IngestCustomDocument(ctx context.Context, engine *IngestionEngine, tenantID
 	return engine.IngestDocument(ctx, doc, tenantID)
 }
 
-// sanitizeID creates a safe document ID from a title.
-func sanitizeID(s string) string {
+// SanitizeDocID creates a safe document ID from a title.
+func SanitizeDocID(s string) string {
 	s = strings.ToLower(s)
 	s = strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {

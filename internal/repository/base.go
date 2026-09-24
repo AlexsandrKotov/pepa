@@ -59,3 +59,26 @@ func (r *BaseRepository) Exists(ctx context.Context, id, tenantID uuid.UUID) (bo
 	).Scan(&exists)
 	return exists, err
 }
+
+// ScanRows scans all rows into a slice using the provided scan function.
+// The scan function should scan a single row into the target type.
+func ScanRows[T any](rows interface {
+	Next() bool
+	Err() error
+}, scan func() (T, error)) ([]T, error) {
+	var results []T
+	for rows.Next() {
+		item, err := scan()
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if results == nil {
+		results = []T{}
+	}
+	return results, nil
+}

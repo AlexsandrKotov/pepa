@@ -63,7 +63,7 @@ func (r *LoginRateLimiter) Allow(key string) (bool, time.Duration) {
 
 	// If currently locked, return remaining lockout time.
 	if time.Now().Before(a.lockedUntil) {
-		return false, a.lockedUntil.Sub(time.Now())
+		return false, time.Until(a.lockedUntil)
 	}
 
 	// If the window has passed since last failure, reset counter.

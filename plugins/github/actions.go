@@ -572,7 +572,7 @@ func extractGitHubDispatchInputs(workflow map[string]interface{}, varMap map[str
 			if raw != nil {
 				entry.Value = fmt.Sprintf("%v", raw)
 			}
-			entry.Description = fmt.Sprintf("From GitHub Actions workflow")
+			entry.Description = "From GitHub Actions workflow"
 			varMap[name] = entry
 			continue
 		}

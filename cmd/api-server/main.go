@@ -254,7 +254,7 @@ func main() {
 		WorkflowBuilder:  comp.WorkflowBuilder,
 		RBAC:             rbacEngine,
 		Storage:          comp.Storage,
-		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo, comp.ScanIgnoreRepo),
+		Scanner:          security.NewScanner(comp.PluginMgr, comp.SecurityScanRepo, comp.ConnectionRepo, comp.RegistryRepo, comp.ScanIgnoreRepo, comp.Config.Security, comp.Config.HostDataDir),
 		Version:          version,
 		BuildTime:        buildTime,
 	}

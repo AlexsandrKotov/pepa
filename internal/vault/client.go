@@ -11,10 +11,22 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
+
+// vaultAllowPrivateIPs bypasses IP range checks when true (dev/docker mode).
+var vaultAllowPrivateIPs bool
+
+// vaultAllowedCIDRs is a comma-separated list of CIDR ranges allowed for Vault connections.
+var vaultAllowedCIDRs string
+
+// SetNetworkPolicy configures the Vault network policy.
+// Called during application initialization from the loaded config.
+func SetNetworkPolicy(allowPrivateIPs bool, allowedCIDRs string) {
+	vaultAllowPrivateIPs = allowPrivateIPs
+	vaultAllowedCIDRs = allowedCIDRs
+}
 
 // Client communicates with a HashiCorp Vault server.
 type Client struct {
@@ -119,12 +131,12 @@ func validateRedirect(u *url.URL) error {
 // Set VAULT_ALLOWED_CIDRS=10.0.0.0/8,172.16.0.0/12 to allow specific ranges only.
 func isBlockedIP(ip net.IP) bool {
 	// Full bypass — dev/docker mode
-	if os.Getenv("VAULT_ALLOW_PRIVATE_IPS") == "true" {
+	if vaultAllowPrivateIPs {
 		return false
 	}
 	// Granular allowlist — production-safe
-	if allowedCIDRs := os.Getenv("VAULT_ALLOWED_CIDRS"); allowedCIDRs != "" {
-		for _, cidr := range strings.Split(allowedCIDRs, ",") {
+	if vaultAllowedCIDRs != "" {
+		for _, cidr := range strings.Split(vaultAllowedCIDRs, ",") {
 			cidr = strings.TrimSpace(cidr)
 			_, network, err := net.ParseCIDR(cidr)
 			if err != nil {

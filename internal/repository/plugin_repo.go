@@ -196,7 +196,7 @@ func (r *PluginRepository) GetByNameDecrypted(ctx context.Context, name string) 
 
 // encryptPluginConfig encrypts sensitive keys in plugin config JSON.
 func encryptPluginConfig(config json.RawMessage) json.RawMessage {
-	if config == nil || len(config) == 0 {
+	if len(config) == 0 {
 		return config
 	}
 	var m map[string]any
@@ -232,7 +232,7 @@ func DecryptPluginConfig(config json.RawMessage) json.RawMessage {
 
 // decryptPluginConfig decrypts sensitive keys in plugin config JSON.
 func decryptPluginConfig(config json.RawMessage) json.RawMessage {
-	if config == nil || len(config) == 0 {
+	if len(config) == 0 {
 		return config
 	}
 	var m map[string]any

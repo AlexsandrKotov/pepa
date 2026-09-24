@@ -97,7 +97,7 @@ func (c *Client) do(method, path string, body url.Values) (json.RawMessage, erro
 		return nil, fmt.Errorf("proxmox: parse response: %w", err)
 	}
 
-	if pr.Errors != nil && len(pr.Errors) > 2 {
+	if len(pr.Errors) > 2 {
 		return nil, fmt.Errorf("proxmox: API errors: %s", string(pr.Errors))
 	}
 

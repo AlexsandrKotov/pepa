@@ -1,5 +1,9 @@
 # Dependencies
 frontend/node_modules/
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/blob-report/
 
 # Build output
 frontend/.next/
@@ -24,6 +28,16 @@ out/
 /webhook
 /prometheus
 /jenkins
+/sonarqube
+/trivy
+/telegram
+/slack
+/teams
+/ai_bot
+/gitea
+/bitbucket
+/proxmox
+/vmware
 /examples
 
 # Environment files (NEVER commit secrets)

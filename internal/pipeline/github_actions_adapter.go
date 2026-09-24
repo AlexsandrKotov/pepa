@@ -138,9 +138,18 @@ func (a *GitHubActionsAdapter) ResolveSchema(ctx context.Context, raw json.RawMe
 		props["ref"] = PropertyDef{Type: "string", Description: "Git ref to run against", Default: cfg.Ref}
 	}
 
+	// Collect required properties
+	var required []string
+	for name, pd := range props {
+		if pd.Required {
+			required = append(required, name)
+		}
+	}
+
 	return &ParameterSchema{
 		Type:       "object",
 		Properties: props,
+		Required:   required,
 	}, nil
 }
 
@@ -418,8 +427,7 @@ func (a *GitHubActionsAdapter) ListRemoteRuns(ctx context.Context, raw json.RawM
 			}
 		}
 	} else {
-		var runsURL string
-		runsURL = fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs?per_page=%d",
+		runsURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/runs?per_page=%d",
 			cfg.Owner, cfg.Repo, perPage)
 		body, err = ghAPIGet(ctx, runsURL, cfg.Token)
 		if err != nil {
@@ -693,7 +701,7 @@ func ghParseWorkflowInputs(yamlContent string, props map[string]PropertyDef) map
 			pd.Default = fmt.Sprintf("%v", def)
 		}
 		if req, ok := input["required"].(bool); ok && req {
-			// Mark as required (handled at schema level)
+			pd.Required = true
 		}
 		if opts, ok := input["options"].([]interface{}); ok {
 			for _, o := range opts {

@@ -17,6 +17,7 @@ import (
 	"github.com/pepa/pepa/internal/config"
 	"github.com/pepa/pepa/internal/crypto"
 	"github.com/pepa/pepa/internal/database"
+	"github.com/pepa/pepa/internal/docker"
 	"github.com/pepa/pepa/internal/events"
 	"github.com/pepa/pepa/internal/gitops"
 	"github.com/pepa/pepa/internal/logging"
@@ -28,6 +29,7 @@ import (
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/internal/security"
 	"github.com/pepa/pepa/internal/storage"
+	"github.com/pepa/pepa/internal/vault"
 )
 
 // Components holds all initialized core components shared across binaries.
@@ -138,6 +140,9 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 			return nil, fmt.Errorf("refusing to start in production: %w", err)
 		}
 	}
+
+	// Wire config values into packages before validation.
+	crypto.SetMasterSecret(cfg.Crypto.EncryptionKey, cfg.Auth.JWTSecret)
 
 	// Validate encryption key strength
 	isProduction := cfg.Server.Env == "production"
@@ -402,6 +407,11 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	}
 
 	// Initialize pipeline provider registry
+	pipeline.SetHostDataDir(c.Config.HostDataDir)
+	pipeline.SetIACBinary(c.Config.Pipeline.IACBinary)
+	docker.SetHostDataDir(c.Config.HostDataDir)
+	vault.SetNetworkPolicy(c.Config.Security.VaultAllowPrivateIPs, c.Config.Security.VaultAllowedCIDRs)
+	crypto.SetMasterSecret(c.Config.Crypto.EncryptionKey, c.Config.Auth.JWTSecret)
 	pipelineRegistry := pipeline.NewRegistry()
 	pipelineRegistry.Register("gitlab_ci", pipeline.NewGitLabAdapter())
 	pipelineRegistry.Register("gitlab", pipeline.NewGitLabAdapter())
@@ -411,7 +421,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 	pipelineRegistry.Register("trivy", pipeline.NewTrivyAdapter())
 	pipelineRegistry.Register("jenkins", pipeline.NewJenkinsAdapter())
 	// Register security scan adapter for pipeline integration
-	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo, c.RegistryRepo, c.ScanIgnoreRepo)
+	secScanner := security.NewScanner(pluginMgr, c.SecurityScanRepo, c.ConnectionRepo, c.RegistryRepo, c.ScanIgnoreRepo, c.Config.Security, c.Config.HostDataDir)
 	pipelineRegistry.Register("security_scan", pipeline.NewSecurityScanAdapter(secScanner, c.SecurityScanRepo))
 	c.PipelineRegistry = pipelineRegistry
 	slog.Info("pipeline registry initialized", "adapters", pipelineRegistry.List())

@@ -8,11 +8,29 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/pepa/pepa/internal/hostpath"
 )
+
+// hostDataDir is the configured root directory for host filesystem access.
+// Set by SetHostDataDir during application startup.
+var hostDataDir string
+
+// iacBinaryOverride is the configured IaC binary path/name.
+// Set by SetIACBinary during application startup.
+var iacBinaryOverride string
+
+// SetHostDataDir configures the root directory for host filesystem access.
+// Called during application initialization from the loaded config.
+func SetHostDataDir(dir string) {
+	hostDataDir = dir
+}
+
+// SetIACBinary configures the IaC binary path/name override.
+func SetIACBinary(binary string) {
+	iacBinaryOverride = binary
+}
 
 // ParameterSchema is a JSON Schema describing the parameters a pipeline accepts.
 type ParameterSchema struct {
@@ -28,6 +46,7 @@ type PropertyDef struct {
 	Default     any      `json:"default,omitempty"`
 	Enum        []string `json:"enum,omitempty"`
 	IsInput     bool     `json:"is_input,omitempty"` // true for GitLab CI spec.inputs
+	Required    bool     `json:"required,omitempty"` // true if the parameter is required
 }
 
 // TriggerResult is returned after successfully triggering a pipeline.
@@ -355,7 +374,7 @@ func randomRunID() string {
 
 // resolveContainerPath resolves a local_path entered in the UI to a path
 // accessible inside the current process. Delegates to hostpath.Resolve using
-// the HOST_DATA_DIR environment variable.
+// the configured HOST_DATA_DIR.
 func resolveContainerPath(p string) (string, error) {
-	return hostpath.Resolve(p, os.Getenv("HOST_DATA_DIR"))
+	return hostpath.Resolve(p, hostDataDir)
 }

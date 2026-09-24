@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pepa/pepa/internal/config"
 	"github.com/pepa/pepa/internal/repository"
 )
 
@@ -348,9 +349,7 @@ func TestSonarIssueIgnored(t *testing.T) {
 // A collection is a handful of REST calls, not an analysis: it needs its own
 // short budget, and a typo in the environment must not disable it.
 func TestSonarScanEnvironmentConfiguration(t *testing.T) {
-	t.Setenv("SONAR_SCAN_TIMEOUT", "")
-	t.Setenv("SONAR_DEFAULT_STALE_HOURS", "")
-	s := NewScanner(nil, nil, nil, nil, nil)
+	s := NewScanner(nil, nil, nil, nil, nil, config.SecurityConfig{}, "")
 	if s.sonarTimeout != 2*time.Minute {
 		t.Errorf("default sonar timeout = %v, want 2m", s.sonarTimeout)
 	}
@@ -358,16 +357,12 @@ func TestSonarScanEnvironmentConfiguration(t *testing.T) {
 		t.Errorf("default staleness budget = %d, want 24", s.sonarDefaultStaleHours)
 	}
 
-	t.Setenv("SONAR_SCAN_TIMEOUT", "45s")
-	t.Setenv("SONAR_DEFAULT_STALE_HOURS", "6")
-	s = NewScanner(nil, nil, nil, nil, nil)
+	s = NewScanner(nil, nil, nil, nil, nil, config.SecurityConfig{SonarScanTimeout: "45s", SonarDefaultStaleHours: "6"}, "")
 	if s.sonarTimeout != 45*time.Second || s.sonarDefaultStaleHours != 6 {
 		t.Errorf("environment values must be honoured: %v / %d", s.sonarTimeout, s.sonarDefaultStaleHours)
 	}
 
-	t.Setenv("SONAR_SCAN_TIMEOUT", "nonsense")
-	t.Setenv("SONAR_DEFAULT_STALE_HOURS", "-1")
-	s = NewScanner(nil, nil, nil, nil, nil)
+	s = NewScanner(nil, nil, nil, nil, nil, config.SecurityConfig{SonarScanTimeout: "nonsense", SonarDefaultStaleHours: "-1"}, "")
 	if s.sonarTimeout != 2*time.Minute || s.sonarDefaultStaleHours != 24 {
 		t.Errorf("invalid values must fall back to the defaults, got %v / %d", s.sonarTimeout, s.sonarDefaultStaleHours)
 	}

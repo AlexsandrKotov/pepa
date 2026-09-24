@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -231,13 +232,7 @@ func (r *AuthRepository) UpdateUser(ctx context.Context, userID uuid.UUID, field
 	}
 
 	args = append(args, userID)
-	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d",
-		setClauses[0], argIdx)
-	for i := 1; i < len(setClauses); i++ {
-		query = fmt.Sprintf("UPDATE users SET %s, %s WHERE id = $%d",
-			query[len("UPDATE users SET "):len(query)-len(fmt.Sprintf(" WHERE id = $%d", argIdx))],
-			setClauses[i], argIdx)
-	}
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d", strings.Join(setClauses, ", "), argIdx)
 
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {

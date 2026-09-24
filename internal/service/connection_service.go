@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pepa/pepa/internal/ai"
 	pepacrypto "github.com/pepa/pepa/internal/crypto"
 	"github.com/pepa/pepa/internal/storage"
 	"golang.org/x/crypto/ssh"
@@ -311,7 +312,7 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 		}
 		baseURL, _ := config["base_url"].(string)
 		if baseURL == "" {
-			baseURL = "https://api.qoder.com/v1"
+			baseURL = ai.DefaultBaseURLFor("qoder")
 		}
 		req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", nil)
 		req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -332,7 +333,7 @@ func (s *ConnectionService) TestAIConnection(ctx context.Context, config map[str
 			baseURL, _ = config["url"].(string)
 		}
 		if baseURL == "" {
-			baseURL = "http://host.docker.internal:1234/v1"
+			baseURL = ai.DefaultBaseURLFor("lmstudio")
 		}
 		req, _ := http.NewRequestWithContext(ctx, "GET", baseURL+"/models", nil)
 		if apiKey != "" {

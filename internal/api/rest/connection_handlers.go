@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pepa/pepa/internal/auth"
 	"github.com/pepa/pepa/internal/k8s"
+	"github.com/pepa/pepa/internal/provider"
 	"github.com/pepa/pepa/internal/repository"
 	"github.com/pepa/pepa/pkg/utils"
 	"k8s.io/client-go/tools/clientcmd"
@@ -43,16 +44,16 @@ func resolveConnectionTestConfig(deps Dependencies, c *gin.Context, ctx context.
 			}
 		}
 		if !allowed {
-			return nil, fmt.Errorf("Vault references are only supported in credential fields")
+			return nil, fmt.Errorf("vault references are only supported in credential fields")
 		}
 		raw := strings.TrimPrefix(ref, "vault:")
 		idx := strings.LastIndex(raw, "/")
 		if idx <= 0 || idx == len(raw)-1 {
-			return nil, fmt.Errorf("Invalid Vault reference")
+			return nil, fmt.Errorf("invalid vault reference")
 		}
 		path := raw[:idx]
 		if validateVaultPath(path) != nil || strings.ContainsAny(path, "%?#\\") || strings.Contains(path, "//") {
-			return nil, fmt.Errorf("Invalid Vault reference")
+			return nil, fmt.Errorf("invalid vault reference")
 		}
 		paths[key] = path
 	}
@@ -62,22 +63,22 @@ func resolveConnectionTestConfig(deps Dependencies, c *gin.Context, ctx context.
 
 	userID := auth.GetUserID(c)
 	if userID == nil || conn.TenantID != auth.GetTenantID(c) || deps.RBAC == nil || deps.Repos == nil || deps.Repos.VaultConfig == nil {
-		return nil, fmt.Errorf("Vault reference access denied")
+		return nil, fmt.Errorf("vault reference access denied")
 	}
 	allowed, err := deps.RBAC.CheckPermission(ctx, conn.TenantID, *userID, "vault", "read")
 	if err != nil || !allowed {
-		return nil, fmt.Errorf("Vault reference access denied")
+		return nil, fmt.Errorf("vault reference access denied")
 	}
 	// Authorize every path before reading anything from either backend.
 	for _, path := range paths {
 		if !checkVaultPathAccess(deps, c, path, "read") {
-			return nil, fmt.Errorf("Vault reference access denied")
+			return nil, fmt.Errorf("vault reference access denied")
 		}
 	}
 	for key := range paths {
 		resolved, err := resolveVaultRef(deps, ctx, config[key].(string), conn.TenantID)
 		if err != nil {
-			return nil, fmt.Errorf("Cannot resolve Vault reference")
+			return nil, fmt.Errorf("cannot resolve vault reference")
 		}
 		config[key] = resolved
 	}
@@ -161,9 +162,8 @@ func getConnection(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection repository not available"})
 			return
 		}
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -276,9 +276,8 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection repository not available"})
 			return
 		}
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -356,9 +355,8 @@ func deleteConnection(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection repository not available"})
 			return
 		}
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 
@@ -446,9 +444,8 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection repository not available"})
 			return
 		}
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -750,9 +747,8 @@ func parseKubeconfig(deps Dependencies) gin.HandlerFunc {
 // browseConnection lists available resources for a connection using the associated plugin.
 func browseConnection(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection id"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -814,12 +810,7 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Build connection config from connection's config
-		connConfig := make(map[string]string)
-		for k, v := range conn.Config {
-			if s, ok := v.(string); ok {
-				connConfig[k] = s
-			}
-		}
+		connConfig := mapToStringMap(conn.Config)
 
 		// Resolve credentials: user personal → shared → admin fallback
 		userID := auth.GetUserID(c)
@@ -887,9 +878,8 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 // This allows passing complex parameters (e.g. variables map) unlike the GET browse endpoint.
 func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection id"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 
@@ -961,12 +951,7 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 		}
 
 		// Build connection config
-		connConfig := make(map[string]string)
-		for k, v := range conn.Config {
-			if s, ok := v.(string); ok {
-				connConfig[k] = s
-			}
-		}
+		connConfig := mapToStringMap(conn.Config)
 
 		// Resolve credentials: user personal → shared → admin fallback
 		userID := auth.GetUserID(c)
@@ -1039,24 +1024,7 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 // credential resolution during connection testing. Returns ("", "") for types
 // that do not support per-user credential override.
 func testProviderInfo(connType repository.ConnectionType, config map[string]any) (string, string) {
-	switch connType {
-	case repository.ConnectionGit, repository.ConnectionGitLab:
-		provider, _ := config["provider"].(string)
-		if provider == "" {
-			provider = "gitlab"
-		}
-		return provider, "url"
-	case repository.ConnectionJira:
-		return "jira", "url"
-	case repository.ConnectionKubernetes:
-		return "kubernetes", ""
-	case repository.ConnectionArgoCD:
-		return "argocd", "server_url"
-	case repository.ConnectionJenkins:
-		return "jenkins", "url"
-	default:
-		return "", ""
-	}
+	return ProviderInfo(connType, config)
 }
 
 // isSensitiveConfigKey returns true for config keys that contain secrets.
@@ -1079,53 +1047,26 @@ func sanitizeConnectionConfig(config map[string]any, isAdmin bool) map[string]an
 	return sanitized
 }
 
-// resolveGitPluginName maps a connection type and git provider to the plugin name
-// that handles browsing/execution for that provider.
-func resolveGitPluginName(connType, provider string) string {
-	if connType == "gitlab" {
-		return "gitlab"
-	}
-	switch provider {
-	case "github":
-		return "github"
-	case "gitlab":
-		return "gitlab"
-	case "gitea":
-		return "gitea"
-	case "bitbucket":
-		return "bitbucket"
-	}
-	return ""
-}
-
 // requiredPluginForConnection returns the plugin name that must be installed and
 // enabled for a given connection type + config. Returns "" if no plugin is required.
 func requiredPluginForConnection(connType string, config map[string]any) string {
-	switch connType {
-	case "git":
-		provider, _ := config["provider"].(string)
-		return resolveGitPluginName(connType, provider)
-	case "gitlab":
-		return "gitlab"
-	case "jira":
-		return "jira"
-	case "proxmox":
-		return "proxmox"
-	case "jenkins":
-		return "jenkins"
-	case "notification":
-		provider, _ := config["provider"].(string)
-		switch provider {
-		case "slack":
-			return "slack"
-		case "telegram":
-			return "telegram"
-		case "teams":
-			return "teams"
+	// Notification connections have sub-providers that map to different plugins.
+	if connType == "notification" {
+		prov, _ := config["provider"].(string)
+		switch prov {
+		case provider.PluginSlack:
+			return provider.PluginSlack
+		case provider.PluginTelegram:
+			return provider.PluginTelegram
+		case provider.PluginTeams:
+			return provider.PluginTeams
 		}
 		// email and webhook are built-in, no plugin required
+		return ""
 	}
-	return ""
+	// Use the dispatch table for all other types.
+	conn := repository.Connection{Type: repository.ConnectionType(connType), Config: config}
+	return ResolvePluginName(conn)
 }
 
 // connectionPluginStatus returns the installation/enabled status of each git
@@ -1134,23 +1075,23 @@ func connectionPluginStatus(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		providers := map[string]string{
 			// Git providers
-			"github":    "github",
-			"gitlab":    "gitlab",
-			"gitea":     "gitea",
-			"bitbucket": "bitbucket",
+			provider.PluginGitHub:    provider.PluginGitHub,
+			provider.PluginGitLab:    provider.PluginGitLab,
+			provider.PluginGitea:     provider.PluginGitea,
+			provider.PluginBitbucket: provider.PluginBitbucket,
 			// Notification providers
-			"email":    "email",
-			"webhook":  "webhook",
-			"slack":    "slack",
-			"telegram": "telegram",
-			"teams":    "teams",
+			provider.PluginEmail:    provider.PluginEmail,
+			provider.PluginWebhook:  provider.PluginWebhook,
+			provider.PluginSlack:    provider.PluginSlack,
+			provider.PluginTelegram: provider.PluginTelegram,
+			provider.PluginTeams:    provider.PluginTeams,
 			// Other plugin-backed connection types
-			"jira":    "jira",
-			"proxmox": "proxmox",
-			"jenkins": "jenkins",
+			provider.PluginJira:    provider.PluginJira,
+			provider.PluginProxmox: provider.PluginProxmox,
+			provider.PluginJenkins: provider.PluginJenkins,
 			// GitOps engines
-			"argocd": "argocd",
-			"fluxcd": "fluxcd",
+			provider.PluginArgoCD: provider.PluginArgoCD,
+			provider.PluginFluxCD: provider.PluginFluxCD,
 		}
 
 		if deps.ProviderRegistry == nil {
@@ -1307,26 +1248,7 @@ func credentialStatus(deps Dependencies) gin.HandlerFunc {
 
 // credLookupForConn returns the provider name and URL for credential lookup.
 func credLookupForConn(conn repository.Connection) (string, string) {
-	switch conn.Type {
-	case repository.ConnectionGitLab:
-		url, _ := conn.Config["url"].(string)
-		return "gitlab", url
-	case repository.ConnectionGit:
-		provider, _ := conn.Config["provider"].(string)
-		url, _ := conn.Config["url"].(string)
-		if provider == "" {
-			provider = "gitlab"
-		}
-		return provider, url
-	case repository.ConnectionJira:
-		url, _ := conn.Config["url"].(string)
-		return "jira", url
-	case repository.ConnectionArgoCD:
-		url, _ := conn.Config["server_url"].(string)
-		return "argocd", url
-	default:
-		return "", ""
-	}
+	return CredentialLookup(conn)
 }
 
 // connectionHealthDashboard returns a health matrix for admin dashboards.
@@ -1695,9 +1617,8 @@ func listConnectionACL(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection ACL repository not available"})
 			return
 		}
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -1734,9 +1655,8 @@ func createConnectionACL(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection ACL repository not available"})
 			return
 		}
-		id, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		id, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
 		tenantID := auth.GetTenantID(c)
@@ -1806,14 +1726,12 @@ func deleteConnectionACL(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection ACL repository not available"})
 			return
 		}
-		connID, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+		connID, ok := parseUUIDParam(c, "id", "connection")
+		if !ok {
 			return
 		}
-		entryID, err := uuid.Parse(c.Param("entryId"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ACL entry ID"})
+		entryID, ok2 := parseUUIDParam(c, "entryId", "ACL entry")
+		if !ok2 {
 			return
 		}
 		tenantID := auth.GetTenantID(c)

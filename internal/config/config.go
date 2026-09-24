@@ -21,6 +21,10 @@ type Config struct {
 	CORS          CORSConfig          `mapstructure:"cors"`
 	Worker        WorkerConfig        `mapstructure:"worker"`
 	Observability ObservabilityConfig `mapstructure:"observability"`
+	Security      SecurityConfig      `mapstructure:"security"`
+	Crypto        CryptoConfig        `mapstructure:"crypto"`
+	Bootstrap     BootstrapConfig     `mapstructure:"bootstrap"`
+	Pipeline      PipelineConfig      `mapstructure:"pipeline"`
 	// HostDataDir is the root directory on the host containing all
 	// scannable/deployable projects. When PEPA runs inside Docker this
 	// directory is bind-mounted into the container at the same path so that
@@ -142,7 +146,7 @@ func (d DatabaseConfig) ValidateRLS() error {
 	case RLSTenantModePerRequest:
 		return fmt.Errorf(
 			"DB_RLS_TENANT_MODE=%s is not implemented: repositories take connections straight from the pool, so a "+
-				"request-scoped GUC cannot be pinned yet. Use %s for single-tenant deployments.",
+				"request-scoped GUC cannot be pinned yet; use %s for single-tenant deployments",
 			RLSTenantModePerRequest, RLSTenantModePinned)
 	default:
 		return fmt.Errorf("unknown DB_RLS_TENANT_MODE %q (want %s, %s or %s)", d.RLSTenantMode,
@@ -283,6 +287,40 @@ type SyslogConfig struct {
 	Address  string `mapstructure:"address"`  // "syslog-server:514"
 	Tag      string `mapstructure:"tag"`      // "pepa"
 	Facility string `mapstructure:"facility"` // "local0"-"local7"
+}
+
+// SecurityConfig holds security scanning and network policy settings.
+type SecurityConfig struct {
+	// Trivy
+	TrivyDBRepository     string `mapstructure:"trivy_db_repository"`
+	TrivyJavaDBRepository string `mapstructure:"trivy_java_db_repository"`
+	TrivyDBUpdateInterval string `mapstructure:"trivy_db_update_interval"`
+	TrivyCacheDir         string `mapstructure:"trivy_cache_dir"`
+	// SonarQube
+	SonarScanTimeout       string `mapstructure:"sonar_scan_timeout"`
+	SonarDefaultStaleHours string `mapstructure:"sonar_default_stale_hours"`
+	SonarWebhookToken      string `mapstructure:"sonar_webhook_token"`
+	// Registry network policy
+	RegistryAllowPrivateIPs bool   `mapstructure:"registry_allow_private_ips"`
+	RegistryAllowedCIDRs    string `mapstructure:"registry_allowed_cidrs"`
+	// Vault network policy
+	VaultAllowPrivateIPs bool   `mapstructure:"vault_allow_private_ips"`
+	VaultAllowedCIDRs    string `mapstructure:"vault_allowed_cidrs"`
+}
+
+// CryptoConfig holds encryption key settings.
+type CryptoConfig struct {
+	EncryptionKey string `mapstructure:"encryption_key"`
+}
+
+// BootstrapConfig holds bootstrap/initial-setup settings.
+type BootstrapConfig struct {
+	TokenPath string `mapstructure:"token_path"`
+}
+
+// PipelineConfig holds CI/CD pipeline tool settings.
+type PipelineConfig struct {
+	IACBinary string `mapstructure:"iac_binary"`
 }
 
 // DefaultConfig returns a configuration with sensible defaults for development.
@@ -582,6 +620,56 @@ func (c *Config) LoadFromEnv() {
 	} else if v := getenv("HOST_HOME_DIR"); v != "" {
 		c.HostDataDir = v
 	}
+
+	// Security / scanning
+	if v := getenv("TRIVY_DB_REPOSITORY"); v != "" {
+		c.Security.TrivyDBRepository = v
+	}
+	if v := getenv("TRIVY_JAVA_DB_REPOSITORY"); v != "" {
+		c.Security.TrivyJavaDBRepository = v
+	}
+	if v := getenv("TRIVY_DB_UPDATE_INTERVAL"); v != "" {
+		c.Security.TrivyDBUpdateInterval = v
+	}
+	if v := getenv("TRIVY_CACHE_DIR"); v != "" {
+		c.Security.TrivyCacheDir = v
+	}
+	if v := getenv("SONAR_SCAN_TIMEOUT"); v != "" {
+		c.Security.SonarScanTimeout = v
+	}
+	if v := getenv("SONAR_DEFAULT_STALE_HOURS"); v != "" {
+		c.Security.SonarDefaultStaleHours = v
+	}
+	if v := getenv("SONAR_WEBHOOK_TOKEN"); v != "" {
+		c.Security.SonarWebhookToken = v
+	}
+	if v := getenv("REGISTRY_ALLOW_PRIVATE_IPS"); v == "true" {
+		c.Security.RegistryAllowPrivateIPs = true
+	}
+	if v := getenv("REGISTRY_ALLOWED_CIDRS"); v != "" {
+		c.Security.RegistryAllowedCIDRs = v
+	}
+	if v := getenv("VAULT_ALLOW_PRIVATE_IPS"); v == "true" {
+		c.Security.VaultAllowPrivateIPs = true
+	}
+	if v := getenv("VAULT_ALLOWED_CIDRS"); v != "" {
+		c.Security.VaultAllowedCIDRs = v
+	}
+
+	// Crypto
+	if v := getenv("ENCRYPTION_KEY"); v != "" {
+		c.Crypto.EncryptionKey = v
+	}
+
+	// Bootstrap
+	if v := getenv("BOOTSTRAP_TOKEN_PATH"); v != "" {
+		c.Bootstrap.TokenPath = v
+	}
+
+	// Pipeline
+	if v := getenv("IAC_BINARY"); v != "" {
+		c.Pipeline.IACBinary = v
+	}
 }
 
 func getenv(key string) string {
@@ -614,12 +702,9 @@ func (c *Config) Validate() []string {
 		case "redis.password":
 			actual = c.Redis.Password
 		case "encryption_key":
-			actual = os.Getenv("ENCRYPTION_KEY")
+			actual = c.Crypto.EncryptionKey
 			if actual == "" {
-				actual = os.Getenv("AUTH_JWT_SECRET")
-			}
-			if actual == "" {
-				actual = os.Getenv("JWT_SECRET")
+				actual = c.Auth.JWTSecret
 			}
 		}
 		if actual == insecure {
@@ -660,9 +745,9 @@ func (c *Config) ValidateStrict() error {
 		failures = append(failures, "REDIS_PASSWORD is set to the development default — set a secure random value")
 	}
 
-	encKey := os.Getenv("ENCRYPTION_KEY")
+	encKey := c.Crypto.EncryptionKey
 	if encKey == "" {
-		encKey = os.Getenv("AUTH_JWT_SECRET")
+		encKey = c.Auth.JWTSecret
 	}
 	if encKey == "" || encKey == knownInsecureDefaults["encryption_key"] {
 		failures = append(failures, "ENCRYPTION_KEY is not set or is the development default — set a secure random value")

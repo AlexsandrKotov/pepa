@@ -76,8 +76,9 @@ func (r *CredentialResolver) ResolveArgo(ctx context.Context, opts ResolveOpts) 
 		return r.argocredsFromConnection(ctx, conn)
 	}
 
-	// 2-4. TODO: Implement binding/cluster/repo resolution in later stages
-	// For now, fall through to step 5
+	// 2-4. Binding/cluster/repo resolution is not implemented; fall through to
+	// tenant-scoped resolution (step 5).
+	slog.Warn("gitops credential resolution from bindings/clusters/repos is not implemented; using tenant-scoped fallback")
 
 	// 5. Tenant's single argocd connection (tenant-scoped)
 	conns, err := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionArgoCD))
@@ -133,7 +134,9 @@ func (r *CredentialResolver) ResolveFlux(ctx context.Context, opts ResolveOpts) 
 		return r.fluxcredsFromConnection(ctx, conn)
 	}
 
-	// 2-4. TODO: Implement binding/cluster/repo resolution in later stages
+	// 2-4. Binding/cluster/repo resolution is not implemented; fall through to
+	// tenant-scoped resolution (step 5).
+	slog.Warn("gitops credential resolution from bindings/clusters/repos is not implemented; using tenant-scoped fallback")
 
 	// 5. Tenant's single fluxcd connection (tenant-scoped)
 	conns, err := r.connRepo.List(ctx, opts.TenantID, string(repository.ConnectionFluxCD))

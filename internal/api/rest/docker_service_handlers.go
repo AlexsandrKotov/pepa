@@ -21,9 +21,10 @@ import (
 )
 
 // resolveHostPath translates a host absolute path to a path accessible inside
-// the current container. Delegates to hostpath.Resolve using HOST_DATA_DIR.
-func resolveHostPath(p string) (string, error) {
-	return hostpath.Resolve(p, os.Getenv("HOST_DATA_DIR"))
+// the current container. Delegates to hostpath.Resolve using the configured
+// HOST_DATA_DIR.
+func resolveHostPath(p, hostDataDir string) (string, error) {
+	return hostpath.Resolve(p, hostDataDir)
 }
 
 func registerDockerServiceRoutes(r *gin.RouterGroup, deps Dependencies) {
@@ -139,7 +140,7 @@ func createDockerService(deps Dependencies) gin.HandlerFunc {
 
 		// Validate folder path is accessible (tries original path, then /host-home translation)
 		if req.FolderPath != "" {
-			if _, resolveErr := resolveHostPath(req.FolderPath); resolveErr != nil {
+			if _, resolveErr := resolveHostPath(req.FolderPath, deps.Config.HostDataDir); resolveErr != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
 				return
 			}
@@ -253,7 +254,7 @@ func deployLocalDockerService(deps Dependencies) gin.HandlerFunc {
 
 		// Validate folder path is accessible (tries original path, then /host-home translation)
 		if req.FolderPath != "" {
-			if _, resolveErr := resolveHostPath(req.FolderPath); resolveErr != nil {
+			if _, resolveErr := resolveHostPath(req.FolderPath, deps.Config.HostDataDir); resolveErr != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
 				return
 			}
@@ -388,7 +389,7 @@ func deployLocalDockerServiceStream(deps Dependencies) gin.HandlerFunc {
 		}
 
 		if req.FolderPath != "" {
-			if _, resolveErr := resolveHostPath(req.FolderPath); resolveErr != nil {
+			if _, resolveErr := resolveHostPath(req.FolderPath, deps.Config.HostDataDir); resolveErr != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
 				return
 			}
@@ -849,7 +850,7 @@ func rollbackDockerService(deps Dependencies) gin.HandlerFunc {
 		// Redeploy with the previous compose configuration.
 		// Reuse the service's stored env vars to match the original deployment.
 		var envVars map[string]string
-		if svc.EnvVars != nil && len(svc.EnvVars) > 0 {
+		if len(svc.EnvVars) > 0 {
 			_ = json.Unmarshal(svc.EnvVars, &envVars)
 		}
 		if err := client.ComposeUp(ctx, svc.Name, prevCompose, envVars); err != nil {
