@@ -190,6 +190,7 @@ func main() {
 			EnvironmentOverview: comp.EnvironmentOverviewRepo,
 			SelfService:         comp.SelfServiceRepo,
 			AutoDeployRule:      comp.AutoDeployRuleRepo,
+			ConnectionACL:       comp.ConnectionACLRepo,
 		},
 		Services: &rest.Services{
 			Deployment: func() *service.DeploymentService {

@@ -94,12 +94,17 @@ func registerConnectionRoutes(r *gin.RouterGroup, deps Dependencies) {
 		conns.GET("/credential-status", credentialStatus(deps))
 		conns.GET("/health", connectionHealthDashboard(deps))
 		conns.POST("/parse-kubeconfig", parseKubeconfig(deps))
+		conns.POST("/check-duplicate", checkConnectionDuplicate(deps))
 		conns.GET("/:id", getConnection(deps))
 		conns.PUT("/:id", updateConnection(deps))
 		conns.DELETE("/:id", deleteConnection(deps))
 		conns.POST("/:id/test", testConnection(deps))
 		conns.GET("/:id/browse", browseConnection(deps))
 		conns.POST("/:id/execute", executeConnectionAction(deps))
+		// ACL management
+		conns.GET("/:id/acl", listConnectionACL(deps))
+		conns.POST("/:id/acl", createConnectionACL(deps))
+		conns.DELETE("/:id/acl/:entryId", deleteConnectionACL(deps))
 	}
 }
 
@@ -111,17 +116,20 @@ func listConnections(deps Dependencies) gin.HandlerFunc {
 		}
 		tenantID := auth.GetTenantID(c)
 		isAdmin := auth.IsPlatformAdmin(c)
+		userID := auth.GetUserID(c)
 
 		// Parse pagination and filter params.
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "20"))
 		filter := repository.ConnectionFilter{
-			TenantID: tenantID,
-			Page:     page,
-			PerPage:  perPage,
-			Search:   c.Query("search"),
-			Type:     c.Query("type"),
-			Status:   c.Query("status"),
+			TenantID:         tenantID,
+			Page:             page,
+			PerPage:          perPage,
+			Search:           c.Query("search"),
+			Type:             c.Query("type"),
+			Status:           c.Query("status"),
+			IsAdmin:          isAdmin,
+			AccessibleToUser: userID,
 		}
 
 		result, err := deps.Repos.Connection.ListFiltered(c.Request.Context(), filter)
@@ -164,6 +172,11 @@ func getConnection(deps Dependencies) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
 			return
 		}
+		// Check ACL-based access control for restricted connections.
+		if !checkConnectionAccess(deps, c, conn, "read") {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied: you do not have permission to view this connection"})
+			return
+		}
 		// Mask sensitive config values to prevent leaking secrets
 		conn.Config = sanitizeConnectionConfig(conn.Config, auth.IsPlatformAdmin(c))
 		c.JSON(http.StatusOK, conn)
@@ -184,6 +197,7 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 			Labels          map[string]string         `json:"labels"`
 			Notes           string                    `json:"notes"`
 			FallbackToAdmin *bool                     `json:"fallback_to_admin"`
+			Restricted      bool                      `json:"restricted"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -216,6 +230,7 @@ func createConnection(deps Dependencies) gin.HandlerFunc {
 			Notes:           req.Notes,
 			Status:          "disconnected",
 			FallbackToAdmin: true, // default: allow fallback to admin credentials
+			Restricted:      req.Restricted,
 		}
 		// Allow admin to disable fallback on creation
 		if req.FallbackToAdmin != nil {
@@ -281,6 +296,7 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 			Notes           string            `json:"notes"`
 			Status          string            `json:"status"`
 			FallbackToAdmin *bool             `json:"fallback_to_admin"`
+			Restricted      *bool             `json:"restricted"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -312,6 +328,9 @@ func updateConnection(deps Dependencies) gin.HandlerFunc {
 		conn.Notes = req.Notes
 		if req.FallbackToAdmin != nil {
 			conn.FallbackToAdmin = *req.FallbackToAdmin
+		}
+		if req.Restricted != nil {
+			conn.Restricted = *req.Restricted
 		}
 
 		if err := deps.Repos.Connection.Update(c.Request.Context(), conn); err != nil {
@@ -436,6 +455,12 @@ func testConnection(deps Dependencies) gin.HandlerFunc {
 		conn, err := deps.Repos.Connection.GetDecrypted(c.Request.Context(), id, tenantID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+			return
+		}
+
+		// Enforce ACL for connection usage.
+		if !checkConnectionAccess(deps, c, conn, "use") {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied: you do not have permission to use this connection"})
 			return
 		}
 
@@ -738,6 +763,12 @@ func browseConnection(deps Dependencies) gin.HandlerFunc {
 			return
 		}
 
+		// Enforce ACL for connection usage.
+		if !checkConnectionAccess(deps, c, conn, "use") {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied: you do not have permission to use this connection"})
+			return
+		}
+
 		// Map connection type to plugin name
 		pluginName := ""
 		switch conn.Type {
@@ -879,6 +910,12 @@ func executeConnectionAction(deps Dependencies) gin.HandlerFunc {
 		conn, err := deps.Repos.Connection.GetDecrypted(c.Request.Context(), id, tenantID)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "connection not found or credentials unavailable"})
+			return
+		}
+
+		// Enforce ACL for connection usage.
+		if !checkConnectionAccess(deps, c, conn, "use") {
+			c.JSON(http.StatusForbidden, gin.H{"error": "access denied: you do not have permission to use this connection"})
 			return
 		}
 
@@ -1564,4 +1601,248 @@ func autoCreateConnectionFromCluster(deps Dependencies, ctx context.Context, clu
 		return
 	}
 	slog.Info("auto-created kubernetes connection from cluster", "connection", conn.Name, "cluster", cluster.Name)
+}
+
+// ============================================================
+// CONNECTION ACCESS CONTROL
+// ============================================================
+
+// checkConnectionAccess checks if the current user has access to a connection.
+// Admin bypasses all checks. Owner bypasses all checks.
+// If connection is not restricted, anyone with connections:read can access.
+// If restricted, checks connection_acl for user or team grants.
+func checkConnectionAccess(deps Dependencies, c *gin.Context, conn *repository.Connection, action string) bool {
+	// 1. Admin bypass.
+	if auth.IsPlatformAdmin(c) {
+		return true
+	}
+
+	// 2. Owner bypass.
+	userID := auth.GetUserID(c)
+	if userID != nil && conn.OwnerID != nil && *conn.OwnerID == *userID {
+		return true
+	}
+
+	// 3. If not restricted, allow (backward compatible).
+	if !conn.Restricted {
+		return true
+	}
+
+	// 4. Check connection_acl.
+	if userID == nil || deps.Repos == nil || deps.Repos.ConnectionACL == nil {
+		return false
+	}
+
+	hasAccess, err := deps.Repos.ConnectionACL.CheckAccess(
+		c.Request.Context(),
+		conn.TenantID,
+		conn.ID,
+		*userID,
+		action,
+	)
+	if err != nil {
+		slog.Error("check connection ACL access", "error", err, "connection_id", conn.ID, "user_id", userID.String(), "action", action)
+		return false
+	}
+	return hasAccess
+}
+
+// checkConnectionDuplicate checks if a connection with the same type and URL already exists.
+func checkConnectionDuplicate(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.Connection == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection repository not available"})
+			return
+		}
+		var req struct {
+			Type string `json:"type" binding:"required"`
+			URL  string `json:"url" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		existing, err := deps.Repos.Connection.FindDuplicate(c.Request.Context(), tenantID, repository.ConnectionType(req.Type), req.URL)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if existing != nil {
+			// Enforce ACL read access before revealing details of restricted connections.
+			if !checkConnectionAccess(deps, c, existing, "read") {
+				c.JSON(http.StatusOK, gin.H{"duplicate": true})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{
+				"duplicate": true,
+				"existing": gin.H{
+					"id":   existing.ID.String(),
+					"name": existing.Name,
+					"type": string(existing.Type),
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"duplicate": false})
+	}
+}
+
+// listConnectionACL returns all ACL entries for a connection.
+func listConnectionACL(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ConnectionACL == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection ACL repository not available"})
+			return
+		}
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+
+		// Verify the connection exists and user can see it.
+		if deps.Repos.Connection != nil {
+			conn, connErr := deps.Repos.Connection.Get(c.Request.Context(), id, tenantID)
+			if connErr != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+				return
+			}
+			if !checkConnectionAccess(deps, c, conn, "read") {
+				c.JSON(http.StatusForbidden, gin.H{"error": "access denied"})
+				return
+			}
+		}
+
+		entries, err := deps.Repos.ConnectionACL.List(c.Request.Context(), tenantID, id)
+		if err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		if entries == nil {
+			entries = []repository.ConnectionACL{}
+		}
+		c.JSON(http.StatusOK, gin.H{"acl": entries, "total": len(entries)})
+	}
+}
+
+// createConnectionACL adds a new ACL entry to a connection.
+func createConnectionACL(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ConnectionACL == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection ACL repository not available"})
+			return
+		}
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		userID := auth.GetUserID(c)
+		if userID == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+
+		// Only admin or connection owner can manage ACL.
+		if deps.Repos.Connection != nil {
+			conn, connErr := deps.Repos.Connection.Get(c.Request.Context(), id, tenantID)
+			if connErr != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+				return
+			}
+			if !auth.IsPlatformAdmin(c) {
+				if conn.OwnerID == nil || *conn.OwnerID != *userID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "only admin or connection owner can manage access control"})
+					return
+				}
+			}
+		}
+
+		var req struct {
+			UserID  *uuid.UUID `json:"user_id"`
+			TeamID  *uuid.UUID `json:"team_id"`
+			CanRead bool       `json:"can_read"`
+			CanUse  bool       `json:"can_use"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if req.UserID == nil && req.TeamID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "either user_id or team_id is required"})
+			return
+		}
+		if req.UserID != nil && req.TeamID != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "specify either user_id or team_id, not both"})
+			return
+		}
+
+		acl := &repository.ConnectionACL{
+			ID:           uuid.New(),
+			TenantID:     tenantID,
+			ConnectionID: id,
+			UserID:       req.UserID,
+			TeamID:       req.TeamID,
+			CanRead:      req.CanRead,
+			CanUse:       req.CanUse,
+			CreatedBy:    *userID,
+		}
+		if err := deps.Repos.ConnectionACL.Create(c.Request.Context(), acl); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		slog.Info("connection ACL created", "connection_id", id, "created_by", userID.String())
+		c.JSON(http.StatusCreated, acl)
+	}
+}
+
+// deleteConnectionACL removes an ACL entry from a connection.
+func deleteConnectionACL(deps Dependencies) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if deps.Repos.ConnectionACL == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "connection ACL repository not available"})
+			return
+		}
+		connID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid connection ID"})
+			return
+		}
+		entryID, err := uuid.Parse(c.Param("entryId"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ACL entry ID"})
+			return
+		}
+		tenantID := auth.GetTenantID(c)
+		userID := auth.GetUserID(c)
+		if userID == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+
+		// Only admin or connection owner can manage ACL.
+		if deps.Repos.Connection != nil {
+			conn, connErr := deps.Repos.Connection.Get(c.Request.Context(), connID, tenantID)
+			if connErr != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": "connection not found"})
+				return
+			}
+			if !auth.IsPlatformAdmin(c) {
+				if conn.OwnerID == nil || *conn.OwnerID != *userID {
+					c.JSON(http.StatusForbidden, gin.H{"error": "only admin or connection owner can manage access control"})
+					return
+				}
+			}
+		}
+
+		if err := deps.Repos.ConnectionACL.Delete(c.Request.Context(), tenantID, connID, entryID); err != nil {
+			respondInternalError(c, err)
+			return
+		}
+		slog.Info("connection ACL deleted", "connection_id", connID, "entry_id", entryID)
+		c.JSON(http.StatusOK, gin.H{"message": "ACL entry deleted"})
+	}
 }

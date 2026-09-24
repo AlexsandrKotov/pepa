@@ -183,6 +183,20 @@ func validateScanTargetShape(ctx context.Context, deps Dependencies, target *rep
 		return err.Error(), false
 	}
 	if target.ScannerType != "sonarqube" {
+		// For git_repo targets, validate the connection is a git-compatible type
+		// (GitLab or Git) so Trivy can clone private repositories.
+		if target.TargetType == "git_repo" && target.ConnectionID != nil {
+			if deps.Repos.Connection == nil {
+				return "connection repository not available", false
+			}
+			conn, err := deps.Repos.Connection.Get(ctx, *target.ConnectionID, target.TenantID)
+			if err != nil {
+				return "the selected Connection was not found in this tenant", false
+			}
+			if conn.Type != repository.ConnectionGitLab && conn.Type != repository.ConnectionGit {
+				return "the selected Connection must be of type 'gitlab' or 'git' for git repository scans (got '" + string(conn.Type) + "')", false
+			}
+		}
 		return "", true
 	}
 	if err := security.ValidateSonarProjectKey(target); err != nil {

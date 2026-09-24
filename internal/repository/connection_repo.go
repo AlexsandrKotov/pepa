@@ -51,6 +51,7 @@ type Connection struct {
 	Labels          map[string]string `json:"labels"`
 	Notes           string            `json:"notes"`
 	FallbackToAdmin bool              `json:"fallback_to_admin"`
+	Restricted      bool              `json:"restricted"`
 	CreatedAt       time.Time         `json:"created_at"`
 	UpdatedAt       time.Time         `json:"updated_at"`
 }
@@ -76,7 +77,7 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 			       type, name, COALESCE(description,''),
 			       COALESCE(config,'{}'::jsonb), status, last_check_at,
 			       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
-			       COALESCE(fallback_to_admin, true),
+			       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
 			       created_at, updated_at
 			FROM connections WHERE tenant_id = $1 AND type = $2
 			ORDER BY created_at DESC
@@ -87,7 +88,7 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 			       type, name, COALESCE(description,''),
 			       COALESCE(config,'{}'::jsonb), status, last_check_at,
 			       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
-			       COALESCE(fallback_to_admin, true),
+			       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
 			       created_at, updated_at
 			FROM connections WHERE tenant_id = $1
 			ORDER BY created_at DESC
@@ -106,7 +107,7 @@ func (r *ConnectionRepository) List(ctx context.Context, tenantID uuid.UUID, con
 		if err := rows.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
 			&c.Type, &c.Name, &c.Description,
 			&configJSON, &c.Status, &c.LastCheckAt,
-			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.Restricted, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
@@ -133,6 +134,11 @@ type ConnectionFilter struct {
 	Search   string
 	Type     string
 	Status   string
+
+	// ACL-based filtering: if AccessibleToUser is set and IsAdmin is false,
+	// only connections the user has access to (via restricted flag + connection_acl) are returned.
+	AccessibleToUser *uuid.UUID
+	IsAdmin          bool
 }
 
 // ConnectionListResponse is the paginated result of ListFiltered.
@@ -145,17 +151,37 @@ type ConnectionListResponse struct {
 }
 
 // ListFiltered returns connections with filtering, sorting, and pagination.
+// If AccessibleToUser is set and IsAdmin is false, only connections the user has
+// access to are returned (non-restricted + ACL-granted).
 func (r *ConnectionRepository) ListFiltered(ctx context.Context, f ConnectionFilter) (*ConnectionListResponse, error) {
 	query := `
 		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
 		       type, name, COALESCE(description,''),
 		       COALESCE(config,'{}'::jsonb), status, last_check_at,
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
-		       COALESCE(fallback_to_admin, true),
+		       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
 		       created_at, updated_at
 		FROM connections WHERE tenant_id = $1`
 	args := []interface{}{f.TenantID}
 	argIdx := 2
+
+	// ACL-based visibility filter: non-admin users see non-restricted connections
+	// plus connections where they have a direct or team-based ACL grant.
+	if !f.IsAdmin && f.AccessibleToUser != nil {
+		query += fmt.Sprintf(` AND (
+			restricted = false
+			OR id IN (
+				SELECT ca.connection_id FROM connection_acl ca
+				WHERE ca.tenant_id = $1 AND ca.user_id = $%d AND ca.can_read = true
+				UNION
+				SELECT ca.connection_id FROM connection_acl ca
+				JOIN team_memberships tm ON tm.team_id = ca.team_id
+				WHERE ca.tenant_id = $1 AND tm.user_id = $%d AND ca.can_read = true
+			)
+		)`, argIdx, argIdx)
+		args = append(args, *f.AccessibleToUser)
+		argIdx++
+	}
 
 	if f.Type != "" {
 		query += fmt.Sprintf(" AND type = $%d", argIdx)
@@ -201,7 +227,7 @@ func (r *ConnectionRepository) ListFiltered(ctx context.Context, f ConnectionFil
 		if err := rows.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
 			&c.Type, &c.Name, &c.Description,
 			&configJSON, &c.Status, &c.LastCheckAt,
-			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.Restricted, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
@@ -239,7 +265,7 @@ func (r *ConnectionRepository) Get(ctx context.Context, id uuid.UUID, tenantID u
 		       type, name, COALESCE(description,''),
 		       COALESCE(config,'{}'::jsonb), status, last_check_at,
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
-		       COALESCE(fallback_to_admin, true),
+		       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
 		       created_at, updated_at
 		FROM connections WHERE id = $1 AND tenant_id = $2
 	`, id, tenantID)
@@ -250,7 +276,7 @@ func (r *ConnectionRepository) Get(ctx context.Context, id uuid.UUID, tenantID u
 	if err := row.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
 		&c.Type, &c.Name, &c.Description,
 		&configJSON, &c.Status, &c.LastCheckAt,
-		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.Restricted, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("connection not found: %s", id)
 		}
@@ -278,7 +304,7 @@ func (r *ConnectionRepository) GetByClusterID(ctx context.Context, clusterID uui
 		       type, name, COALESCE(description,''),
 		       COALESCE(config,'{}'::jsonb), status, last_check_at,
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
-		       COALESCE(fallback_to_admin, true),
+		       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
 		       created_at, updated_at
 		FROM connections
 		WHERE labels->>'cluster_id' = $1
@@ -291,7 +317,7 @@ func (r *ConnectionRepository) GetByClusterID(ctx context.Context, clusterID uui
 	if err := row.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
 		&c.Type, &c.Name, &c.Description,
 		&configJSON, &c.Status, &c.LastCheckAt,
-		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.Restricted, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
 		}
@@ -327,9 +353,9 @@ func (r *ConnectionRepository) Create(ctx context.Context, c *Connection) error 
 	labelsJSON, _ := json.Marshal(c.Labels)
 
 	_, err = r.pool.Exec(ctx, `
-		INSERT INTO connections (id, tenant_id, owner_id, type, name, description, config, status, labels, notes, fallback_to_admin, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-	`, c.ID, c.TenantID, c.OwnerID, c.Type, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.FallbackToAdmin, c.CreatedAt, c.UpdatedAt)
+		INSERT INTO connections (id, tenant_id, owner_id, type, name, description, config, status, labels, notes, fallback_to_admin, restricted, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+	`, c.ID, c.TenantID, c.OwnerID, c.Type, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.FallbackToAdmin, c.Restricted, c.CreatedAt, c.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("create connection: %w", err)
 	}
@@ -350,9 +376,9 @@ func (r *ConnectionRepository) Update(ctx context.Context, c *Connection) error 
 	_, err = r.pool.Exec(ctx, `
 		UPDATE connections SET name=$2, description=$3, config=$4, status=$5,
 		       labels=$6, notes=$7, last_check_at=$8, updated_at=$9,
-		       fallback_to_admin=$10
+		       fallback_to_admin=$10, restricted=$11
 		WHERE id=$1
-	`, c.ID, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.LastCheckAt, c.UpdatedAt, c.FallbackToAdmin)
+	`, c.ID, c.Name, c.Description, configJSON, c.Status, labelsJSON, c.Notes, c.LastCheckAt, c.UpdatedAt, c.FallbackToAdmin, c.Restricted)
 	if err != nil {
 		return fmt.Errorf("update connection: %w", err)
 	}
@@ -479,7 +505,7 @@ func (r *ConnectionRepository) FindByType(ctx context.Context, connType string, 
 		       type, name, COALESCE(description,''),
 		       COALESCE(config,'{}'::jsonb), status, last_check_at,
 		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
-		       COALESCE(fallback_to_admin, true),
+		       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
 		       created_at, updated_at
 		FROM connections WHERE type = $1 AND tenant_id = $2 AND status = 'connected'
 		ORDER BY updated_at DESC
@@ -497,7 +523,7 @@ func (r *ConnectionRepository) FindByType(ctx context.Context, connType string, 
 		if err := rows.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
 			&c.Type, &c.Name, &c.Description,
 			&configJSON, &c.Status, &c.LastCheckAt,
-			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.Restricted, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
@@ -529,4 +555,56 @@ func (r *ConnectionRepository) FindByTypeDecrypted(ctx context.Context, connType
 		}
 	}
 	return conns, nil
+}
+
+// FindDuplicate checks if a connection with the same type and URL already exists.
+// It checks common URL config keys: url, endpoint, repo_url, server_url.
+// Returns nil if no duplicate is found.
+func (r *ConnectionRepository) FindDuplicate(ctx context.Context, tenantID uuid.UUID, connType ConnectionType, rawURL string) (*Connection, error) {
+	if rawURL == "" {
+		return nil, nil
+	}
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'),
+		       type, name, COALESCE(description,''),
+		       COALESCE(config,'{}'::jsonb), status, last_check_at,
+		       COALESCE(labels,'{}'::jsonb), COALESCE(notes,''),
+		       COALESCE(fallback_to_admin, true), COALESCE(restricted, false),
+		       created_at, updated_at
+		FROM connections
+		WHERE tenant_id = $1
+		  AND type = $2
+		  AND (
+		      config->>'url' = $3
+		      OR config->>'endpoint' = $3
+		      OR config->>'repo_url' = $3
+		      OR config->>'server_url' = $3
+		  )
+		LIMIT 1
+	`, tenantID, connType, rawURL)
+
+	var c Connection
+	var configJSON, labelsJSON []byte
+	var ownerIDRaw string
+	if err := row.Scan(&c.ID, &c.TenantID, &ownerIDRaw,
+		&c.Type, &c.Name, &c.Description,
+		&configJSON, &c.Status, &c.LastCheckAt,
+		&labelsJSON, &c.Notes, &c.FallbackToAdmin, &c.Restricted, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // no duplicate
+		}
+		return nil, fmt.Errorf("find duplicate connection: %w", err)
+	}
+	if parsed, err := uuid.Parse(ownerIDRaw); err == nil && parsed != uuid.Nil {
+		c.OwnerID = &parsed
+	}
+	_ = json.Unmarshal(configJSON, &c.Config)
+	_ = json.Unmarshal(labelsJSON, &c.Labels)
+	if c.Config == nil {
+		c.Config = map[string]any{}
+	}
+	if c.Labels == nil {
+		c.Labels = map[string]string{}
+	}
+	return &c, nil
 }

@@ -44,6 +44,29 @@ var validScanConfigKeys = map[string]map[string]bool{
 	"both":      {"scan_type": true, "severity": true, "ignore_unfixed": true, "vex": true, "db_repository": true, "java_db_repository": true, "project_key": true, "branch": true, "stale_after_hours": true, "source_ci_url": true},
 }
 
+// injectGitToken embeds a token into an HTTPS or HTTP git URL for authentication.
+// This allows Trivy to clone private repositories.
+// It uses net/url to properly encode special characters in tokens
+// and avoids double-injection if the URL already contains credentials.
+func injectGitToken(repoURL, token string) string {
+	if token == "" {
+		return repoURL
+	}
+	u, err := url.Parse(repoURL)
+	if err != nil {
+		return repoURL
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return repoURL
+	}
+	if u.User != nil {
+		// Credentials already present — don't double-inject
+		return repoURL
+	}
+	u.User = url.UserPassword("oauth2", token)
+	return u.String()
+}
+
 // ValidateScanConfig reports whether a scan_config uses only keys the scanner
 // understands. It is checked when the target is saved, so an unsupported key (or
 // a leftover url/token credential) is rejected with a clear message instead of
@@ -408,6 +431,22 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		slog.Info("filesystem target path resolved", "original", target.TargetRef, "resolved", resolved)
 	}
 
+	// Resolve git credentials for private repository scans.
+	// When a git_repo target has a linked Connection (GitLab or Git type),
+	// inject the token into the URL so Trivy can clone the repository.
+	if target.TargetType == "git_repo" && target.ConnectionID != nil && s.connectionRepo != nil {
+		conn, connErr := s.connectionRepo.GetDecrypted(ctx, *target.ConnectionID, target.TenantID)
+		if connErr != nil {
+			slog.Warn("failed to resolve git connection for trivy scan", "connection_id", *target.ConnectionID, "error", connErr)
+		} else {
+			token, _ := conn.Config["token"].(string)
+			if token != "" {
+				imageRef = injectGitToken(imageRef, token)
+				slog.Info("trivy scan using git credentials", "connection", conn.Name, "url", target.TargetRef)
+			}
+		}
+	}
+
 	var regUsername, regPassword, regToken string
 	var regHost string
 	var regRepoData *repository.RegistryRepo
@@ -455,11 +494,13 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		}
 	}
 
-	slog.Info("AFTER registry credential resolution", "regHost", regHost, "imageRef", imageRef, "regRepoData", regRepoData != nil)
+	// Log the original target_ref (never the credential-bearing imageRef) to avoid
+	// leaking git tokens or registry passwords into application logs.
+	slog.Info("AFTER registry credential resolution", "regHost", regHost, "target_ref", target.TargetRef, "regRepoData", regRepoData != nil)
 
 	// Detect "scan entire registry" case: target_ref is just the registry hostname
 	// with no specific image path. List all images and scan each one.
-	slog.Info("checking scan entire registry condition", "regHost", regHost, "imageRef", imageRef, "equal", imageRef == regHost)
+	slog.Info("checking scan entire registry condition", "regHost", regHost, "target_ref", target.TargetRef, "equal", target.TargetRef == regHost)
 	if regHost != "" && imageRef == regHost {
 		slog.Info("scanning entire registry, listing images", "registry", regHost)
 		images, listErr := s.listRegistryImages(ctx, regRepoData, regHost)
@@ -633,6 +674,15 @@ func (s *Scanner) runTrivyScan(ctx context.Context, target *repository.ScanTarge
 		if regToken != "" {
 			cmd.Env = append(cmd.Env, "TRIVY_REGISTRY_TOKEN="+regToken)
 		}
+	}
+
+	// Suppress git interactive prompts for repo scans so an invalid token
+	// fails fast instead of hanging until the scan timeout.
+	if scanType == "repo" {
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+		cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0")
 	}
 
 	slog.Info("running trivy scan", "target", target.TargetRef, "scan_type", scanType, "timeout", scanTimeout)

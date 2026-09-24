@@ -65,18 +65,71 @@ export default function JenkinsPanel({ enabled, sources, onOpenSource }: {
 
   return (
     <div className="space-y-4">
-      <div className="card p-4 flex flex-wrap items-center gap-3">
-        <BrandIcon name="jenkins" size={28} />
-        <label htmlFor="jenkins-connection" className="text-sm font-medium">Jenkins connection</label>
-        <select id="jenkins-connection" value={connectionId} onChange={e => setConnectionId(e.target.value)} disabled={loading} className="flex-1 min-w-48 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm">
-          <option value="">Select a connection</option>
-          {items.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <button className="btn btn-secondary" onClick={() => setRefresh(v => v + 1)} disabled={loading}>Refresh connections</button>
-        <Link href="/connections" className="btn btn-secondary">Manage connections</Link>
+      <div className="card overflow-hidden">
+        {/* Accent bar */}
+        <div className="h-1" style={{ background: 'linear-gradient(90deg, #d3923a, #ef6b3c 50%, #d3923a)' }} />
+
+        <div className="px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-2.5">
+          {/* ── Brand block ── */}
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl flex items-center justify-center ring-1 ring-black/[0.06]" style={{ background: 'linear-gradient(145deg, rgba(211,146,58,0.10), rgba(239,107,60,0.16))' }}>
+              <BrandIcon name="jenkins" size={22} />
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-semibold text-[var(--text-primary)] leading-none">Jenkins</span>
+              {connectionId ? (
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 leading-none mt-0.5">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  </span>
+                  Connected
+                </span>
+              ) : (
+                <span className="text-[11px] text-[var(--text-tertiary)] leading-none mt-0.5">No connection</span>
+              )}
+            </div>
+          </div>
+
+          <div className="h-8 w-px bg-[var(--border-light)]" />
+
+          {/* ── Connection selector ── */}
+          <div className="relative flex-1 min-w-56">
+            <select
+              id="jenkins-connection"
+              value={connectionId}
+              onChange={e => setConnectionId(e.target.value)}
+              disabled={loading}
+              className="w-full appearance-none rounded-lg border border-[var(--border)] bg-[var(--surface)] pl-3 pr-9 py-[7px] text-sm font-medium focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_rgba(0,102,255,0.08),inset_0_1px_2px_rgba(0,102,255,0.06)] outline-none transition-all"
+            >
+              <option value="">Select a connection</option>
+              {items.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <svg className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--text-tertiary)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+          </div>
+
+          {items.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-tertiary)] bg-[var(--surface-hover)] rounded-full px-2.5 py-1 leading-none">
+              <span className="h-1 w-1 rounded-full bg-[var(--text-tertiary)]" />
+              {items.length}
+            </span>
+          )}
+
+          <div className="h-8 w-px bg-[var(--border-light)]" />
+
+          {/* ── Action toolbar ── */}
+          <div className="flex items-center rounded-lg border border-[var(--border)] bg-[var(--surface-hover)]/60 p-0.5 gap-px">
+            <button className="flex items-center justify-center h-8 w-8 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)] transition-colors" onClick={() => setRefresh(v => v + 1)} disabled={loading} title="Refresh connections">
+              <svg className={`h-[15px] w-[15px] ${loading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6" /><path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" /><path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" /></svg>
+            </button>
+            <Link href="/connections" className="flex items-center justify-center h-8 w-8 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface)] transition-colors" title="Manage connections">
+              <svg className="h-[15px] w-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
+            </Link>
+          </div>
+        </div>
       </div>
-      {error && <p role="alert" className="p-3 rounded-lg bg-red-500/10 text-red-500">{error}</p>}
-      {loading ? <p role="status">Loading Jenkins connections...</p> : !connectionId ? (
+      {error && <p role="alert" className="p-3 rounded-lg bg-red-500/10 text-red-500 text-sm">{error}</p>}
+      {loading ? <p role="status" className="text-sm text-[var(--text-secondary)] flex items-center gap-2"><svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>Loading connections...</p> : !connectionId ? (
         <div className="card p-6 text-sm text-[var(--text-secondary)]">Add a Jenkins connection with its URL, username, and API token in Connections.</div>
       ) : <JenkinsJobs key={connectionId} connectionId={connectionId} sources={sources} onOpenSource={onOpenSource} />}
     </div>

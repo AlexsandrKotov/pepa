@@ -18,7 +18,7 @@ type ParamDef struct {
 // The script is embedded as a CPS (Groovy) pipeline definition.
 func buildPipelineJobXML(script string, params []ParamDef, sandbox bool) string {
 	var b strings.Builder
-	b.WriteString(`<?xml version='1.1' encoding='UTF-8'?>`)
+	b.WriteString(`<?xml version='1.0' encoding='UTF-8'?>`)
 	b.WriteString(`<flow-definition plugin="workflow-job">`)
 
 	// Parameters

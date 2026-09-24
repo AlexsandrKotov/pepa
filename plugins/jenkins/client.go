@@ -9,11 +9,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// xmlVersionRe normalises XML 1.1 declarations to 1.0 so that Go's xml
+// package (which only supports 1.0) can parse Jenkins config.xml files.
+var xmlVersionRe = regexp.MustCompile(`<\?xml[^>]*version=['"]1\.1['"]`)
 
 // JenkinsClient is an HTTP client for the Jenkins REST API.
 type JenkinsClient struct {
@@ -577,7 +582,9 @@ type JenkinsSystemInfo struct {
 
 // parseJobConfigXML extracts the Groovy script from a Jenkins Pipeline job config.xml.
 func parseJobConfigXML(xmlContent string) (script string, pipelineType string, sandbox bool, err error) {
-	decoder := xml.NewDecoder(strings.NewReader(xmlContent))
+	// Jenkins may emit XML 1.1 declarations; Go's xml package only supports 1.0.
+	sanitized := xmlVersionRe.ReplaceAllString(xmlContent, `<?xml version='1.0'`)
+	decoder := xml.NewDecoder(strings.NewReader(sanitized))
 	var inScript, inDefinition bool
 	var scriptBuilder strings.Builder
 

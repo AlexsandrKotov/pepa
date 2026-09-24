@@ -83,6 +83,7 @@ type Components struct {
 	EnvironmentOverviewRepo *repository.EnvironmentOverviewRepository
 	SelfServiceRepo         *repository.SelfServiceDeploymentRepository
 	AutoDeployRuleRepo      *repository.AutoDeployRuleRepository
+	ConnectionACLRepo       *repository.ConnectionACLRepository
 
 	// Pipeline
 	PipelineRegistry *pipeline.Registry
@@ -397,6 +398,7 @@ func Bootstrap(ctx context.Context) (*Components, error) {
 		EnvironmentOverviewRepo: repository.NewEnvironmentOverviewRepository(db.Pool),
 		SelfServiceRepo:         repository.NewSelfServiceDeploymentRepository(db.Pool),
 		AutoDeployRuleRepo:      repository.NewAutoDeployRuleRepository(db.Pool),
+		ConnectionACLRepo:       repository.NewConnectionACLRepository(db.Pool),
 	}
 
 	// Initialize pipeline provider registry

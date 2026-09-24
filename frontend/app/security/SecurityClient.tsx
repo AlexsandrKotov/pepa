@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { securityScan, devops, connections, registryRepositories, type ScanTarget, type ScanRun, type ScanSchedule, type SecurityDashboard, type ScannerType, type TargetType, type CompliancePolicy, type SecurityFinding, type SecurityFindingSummary, type RegistryRepository, type Connection, type SonarProject, type SonarQualityGateCondition, type SonarIssueTransition } from '@/lib/api';
+import { securityScan, devops, connections, registryRepositories, plugins, type ScanTarget, type ScanRun, type ScanSchedule, type SecurityDashboard, type ScannerType, type TargetType, type CompliancePolicy, type SecurityFinding, type SecurityFindingSummary, type RegistryRepository, type Connection, type SonarProject, type SonarQualityGateCondition, type SonarIssueTransition } from '@/lib/api';
 import { friendlyError } from '@/lib/errors';
 import BrandIcon from '@/components/BrandIcon';
 import Tabs from '@/components/Tabs';
@@ -50,6 +50,11 @@ export default function SecurityClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>((searchParams.get('tab') as TabKey) || 'overview');
+
+  // Plugin availability state
+  const [trivyInstalled, setTrivyInstalled] = useState(false);
+  const [sonarqubeInstalled, setSonarqubeInstalled] = useState(false);
+  const [pluginsLoading, setPluginsLoading] = useState(true);
 
   // Persist tab in URL
   const handleTabChange = useCallback((tab: TabKey) => {
@@ -99,7 +104,42 @@ export default function SecurityClient() {
     }
   }, []);
 
+  // Check plugin availability
+  useEffect(() => {
+    plugins.list().then(d => {
+      const list = d.plugins || [];
+      setTrivyInstalled(list.some(p => p.name === 'trivy' && (p.status === 'installed' || p.status === 'running')));
+      setSonarqubeInstalled(list.some(p => p.name === 'sonarqube' && (p.status === 'installed' || p.status === 'running')));
+    }).catch(() => {}).finally(() => setPluginsLoading(false));
+  }, []);
+
   useEffect(() => { loadData(); }, [loadData]);
+
+  // When no security plugins are installed, show install prompt
+  if (!pluginsLoading && !trivyInstalled && !sonarqubeInstalled) {
+    return (
+      <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
+        <div className="px-6 py-6 space-y-6">
+          <div className="page-animate flex items-center justify-center min-h-[60vh]">
+            <div className="card card-body text-center py-16 px-12 max-w-lg">
+              <div className="text-5xl mb-4 opacity-30">
+                <BrandIcon name="trivy" size={48} />
+              </div>
+              <h3 className="text-[16px] font-semibold text-[var(--text-primary)] mb-2">Security plugins required</h3>
+              <p className="text-[13px] text-[var(--text-secondary)] mb-6 leading-relaxed">
+                To use the Security Scanning features, you need to install at least one security plugin.
+                Install <strong>Trivy</strong> for vulnerability scanning or <strong>SonarQube</strong> for code quality analysis.
+              </p>
+              <a href="/marketplace" className="btn btn-primary inline-flex items-center gap-2">
+                <BrandIcon name="marketplace" size={16} />
+                Go to Marketplace
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="-mx-6 -my-6 min-h-full page-mesh-bg">
@@ -132,6 +172,22 @@ export default function SecurityClient() {
           { key: 'schedules', label: 'Schedules', icon: 'prometheus', badge: schedules.length || undefined },
         ]}
       />
+
+      {/* Missing plugin banner */}
+      {!pluginsLoading && (!trivyInstalled || !sonarqubeInstalled) && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-500 text-sm flex items-center gap-2">
+          <BrandIcon name="alert" size={16} />
+          <span>
+            {!trivyInstalled && !sonarqubeInstalled
+              ? 'Install Trivy or SonarQube plugins from the '
+              : !trivyInstalled
+                ? 'Trivy plugin is not installed. Install it from the '
+                : 'SonarQube plugin is not installed. Install it from the '}
+            <a href="/marketplace" className="underline font-medium hover:text-amber-400">Marketplace</a>
+            {' '}to enable full security scanning features.
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-500 text-sm">

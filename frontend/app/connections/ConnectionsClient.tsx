@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { connections as connectionsAPI, plugins as pluginsAPI, ai as aiAPI, type Connection, type ConnectionType, type PluginInfo, type ConnectionCredentialStatus } from '@/lib/api';
+import { connections as connectionsAPI, plugins as pluginsAPI, ai as aiAPI, listTeams, type Connection, type ConnectionType, type ConnectionACL, type PluginInfo, type ConnectionCredentialStatus, type Team } from '@/lib/api';
 import Link from 'next/link';
 import ConceptHelp from '@/components/ConceptHelp';
 import { friendlyError } from '@/lib/errors';
@@ -354,6 +354,11 @@ export default function ConnectionsClient({ initialConnections, initialType }: {
                           <h3 className="font-semibold text-[var(--text-primary)]">{conn.name}</h3>
                           {isDefaultAI && (
                             <span className="px-1.5 py-0.5 bg-[var(--accent)]/10 text-[var(--accent)] text-[10px] font-semibold rounded-full border border-[var(--accent)]/20">Default</span>
+                          )}
+                          {conn.restricted && (
+                            <span className="px-1.5 py-0.5 bg-amber-500/10 text-amber-600 text-[10px] font-semibold rounded-full border border-amber-500/20" title="Access restricted to specific users/teams">
+                              Restricted
+                            </span>
                           )}
                         </div>
                         {conn.description && (

@@ -1877,6 +1877,7 @@ export interface Connection {
   labels: Record<string, string>;
   notes: string;
   fallback_to_admin?: boolean;
+  restricted?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1912,6 +1913,30 @@ export interface ParsedCluster {
   name: string;
   server: string;
   kubeconfig: string;
+}
+
+export interface ConnectionACL {
+  id: string;
+  tenant_id: string;
+  connection_id: string;
+  user_id?: string;
+  team_id?: string;
+  can_read: boolean;
+  can_use: boolean;
+  created_by: string;
+  created_at: string;
+  user_name?: string;
+  user_email?: string;
+  team_name?: string;
+}
+
+export interface DuplicateCheckResult {
+  duplicate: boolean;
+  existing?: {
+    id: string;
+    name: string;
+    type: string;
+  };
 }
 
 export const connections = {
@@ -1957,6 +1982,23 @@ export const connections = {
       method: 'POST',
       body: JSON.stringify({ kubeconfig }),
     }),
+  checkDuplicate: (type: string, url: string) =>
+    fetchAPI<DuplicateCheckResult>('/api/v1/connections/check-duplicate', {
+      method: 'POST',
+      body: JSON.stringify({ type, url }),
+    }),
+  // ACL management
+  acl: {
+    list: (connectionId: string) =>
+      fetchAPI<{ acl: ConnectionACL[]; total: number }>(`/api/v1/connections/${connectionId}/acl`),
+    create: (connectionId: string, data: { user_id?: string; team_id?: string; can_read: boolean; can_use: boolean }) =>
+      fetchAPI<ConnectionACL>(`/api/v1/connections/${connectionId}/acl`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    delete: (connectionId: string, entryId: string) =>
+      fetchAPI<{ message: string }>(`/api/v1/connections/${connectionId}/acl/${entryId}`, { method: 'DELETE' }),
+  },
 };
 
 // ── Git Browser ──────────────────────────────────────────────

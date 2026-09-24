@@ -79,6 +79,39 @@ const CONN_TYPE_INFO: Record<string, { icon: string; label: string }> = {
   git: { icon: 'git', label: 'Git' },
 };
 
+/** Determine the pipeline source_type from a git connection. Returns empty string if not supported as an engine. */
+function getSourceTypeFromConnection(conn: Connection): string {
+  const provider = (conn.config as Record<string, unknown>)?.provider as string || conn.type;
+  switch (provider) {
+    case 'github': return 'github_actions';
+    case 'gitlab': return 'gitlab_ci';
+    // Gitea plugin exists for browsing but no pipeline adapter yet
+    case 'gitea': return '';
+    default: return '';
+  }
+}
+
+/** Build the engine config from picker values for a given connection. */
+function buildEngineConfigFromPicker(conn: Connection, picker: Partial<{ repo_id: string; repo_url: string; repo_full_name: string; branch: string }>): Record<string, string> {
+  const provider = (conn.config as Record<string, unknown>)?.provider as string || conn.type;
+  const ref = picker.branch || 'main';
+  if (provider === 'github' || provider === 'gitea') {
+    // For GitHub/Gitea: extract owner/repo from repo_full_name or repo_url
+    let owner = '';
+    let repo = '';
+    if (picker.repo_full_name) {
+      const parts = picker.repo_full_name.split('/');
+      if (parts.length >= 2) { owner = parts[0]; repo = parts.slice(1).join('/'); }
+    } else if (picker.repo_url) {
+      const match = picker.repo_url.match(/(?:github|gitea)\.[^/]+\/([^/]+)\/([^/]+)/);
+      if (match) { owner = match[1]; repo = match[2]; }
+    }
+    return { owner, repo, ref, repo_url: picker.repo_url || '' };
+  }
+  // GitLab: use repo_id as project_id
+  return { project_id: picker.repo_id || '', ref, base_url: (conn.config as Record<string, unknown>)?.url as string || '' };
+}
+
 function getConnTypeInfo(conn: Connection) {
   const info = CONN_TYPE_INFO[conn.type] || { icon: 'plugin', label: conn.type };
   const provider = (conn.config as Record<string, unknown>)?.provider as string;
@@ -150,7 +183,7 @@ function PipelinesClientContent({
   const { enabledPlugins } = usePermission();
   const jenkinsEnabled = enabledPlugins.includes('jenkins');
   const tab = searchParams.get('tab');
-  const activeTab = tab === 'providers' || tab === 'jenkins' ? tab : 'engines';
+  const activeTab = tab === 'providers' || (tab === 'jenkins' && jenkinsEnabled) ? tab : 'engines';
   const [sources, setSources] = useState<PipelineSource[]>(initialSources ?? []);
   const [connections, setConnections] = useState(initialConnections ?? []);
   const [loading, setLoading] = useState(false);
@@ -197,6 +230,7 @@ function PipelinesClientContent({
   const [pickerValue, setPickerValue] = useState<Partial<{ connection_id: string; group_id: string; repo_id: string; repo_url: string; repo_full_name: string; branch: string }>>({});
   const [pipelines, setPipelines] = useState<GitPipeline[]>([]);
   const [loadingPipelines, setLoadingPipelines] = useState(false);
+  const [addingToEngines, setAddingToEngines] = useState(false);
 
   // Provider tab: trigger, jobs, logs, presets
   const [showProviderTrigger, setShowProviderTrigger] = useState(false);
@@ -661,6 +695,59 @@ function PipelinesClientContent({
     }
   };
 
+  // Provider tab: check if an engine already exists for the current selection
+  const existingEngineForSelection = sources.find(s => {
+    if (!selectedProviderConn || !pickerValue.repo_id) return false;
+    if (s.connection_id !== selectedProviderConn.id) return false;
+    const sourceType = getSourceTypeFromConnection(selectedProviderConn);
+    if (s.source_type !== sourceType) return false;
+    const cfg = s.config as Record<string, unknown> | undefined;
+    if (!cfg) return false;
+    // Match by project_id (GitLab) or owner/repo (GitHub/Gitea)
+    if (sourceType === 'gitlab_ci') return cfg.project_id === pickerValue.repo_id;
+    if (sourceType === 'github_actions') {
+      const fullName = pickerValue.repo_full_name || '';
+      return cfg.repo === fullName || cfg.repo_url === pickerValue.repo_url;
+    }
+    return false;
+  });
+
+  // Provider tab: add current selection as an engine
+  const handleAddToEngines = async () => {
+    if (!selectedProviderConn || !pickerValue.repo_id) return;
+    const sourceType = getSourceTypeFromConnection(selectedProviderConn);
+    if (!sourceType) {
+      addToast('This provider does not support engine integration yet', 'error');
+      return;
+    }
+    // If engine already exists, switch to Engines tab and select it
+    if (existingEngineForSelection) {
+      router.replace(`/pipelines?tab=engines&engine=${existingEngineForSelection.id}`);
+      return;
+    }
+    setAddingToEngines(true);
+    try {
+      const config = buildEngineConfigFromPicker(selectedProviderConn, pickerValue);
+      const name = pickerValue.repo_full_name || pickerValue.repo_id;
+      const source = await pipelineSources.create({
+        name,
+        source_type: sourceType,
+        connection_id: selectedProviderConn.id,
+        config,
+      });
+      addToast(`Engine "${name}" added`, 'success');
+      await loadSources();
+      // Switch to Engines tab and select the new source
+      if (source?.id) {
+        router.replace(`/pipelines?tab=engines&engine=${source.id}`);
+      }
+    } catch (err) {
+      addToast(friendlyError(err).message, 'error');
+    } finally {
+      setAddingToEngines(false);
+    }
+  };
+
   // Provider tab: preset load/save (localStorage per connection+repo)
   const presetStorageKey = () => `pepa:provider-presets:${pickerValue.connection_id}:${pickerValue.repo_id}`;
 
@@ -848,7 +935,7 @@ function PipelinesClientContent({
             tabs={[
               { key: 'engines', label: 'Engines', icon: 'cicd', badge: sources.length || undefined },
               { key: 'providers', label: 'Providers', icon: 'plugin', badge: connections.length || undefined },
-              ...(jenkinsEnabled || activeTab === 'jenkins' ? [{ key: 'jenkins', label: 'Jenkins', icon: 'jenkins' }] : []),
+              ...(jenkinsEnabled ? [{ key: 'jenkins', label: 'Jenkins', icon: 'jenkins' }] : []),
             ]}
           />
         </div>
@@ -1747,6 +1834,16 @@ function PipelinesClientContent({
                               >
                                 Run Pipeline
                               </button>
+                              {selectedProviderConn && getSourceTypeFromConnection(selectedProviderConn) && (
+                                <button
+                                  onClick={handleAddToEngines}
+                                  disabled={addingToEngines}
+                                  className="px-3 py-1.5 bg-[var(--accent)] text-white rounded-md hover:opacity-90 text-sm font-medium disabled:opacity-50"
+                                  title={existingEngineForSelection ? 'Open this engine' : 'Add this repository as an engine'}
+                                >
+                                  {addingToEngines ? 'Adding...' : existingEngineForSelection ? 'Open Engine' : '+ Add to Engines'}
+                                </button>
+                              )}
                             </div>
                           </div>
                           <div className="p-4">

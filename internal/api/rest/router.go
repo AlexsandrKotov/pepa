@@ -76,6 +76,7 @@ type Repositories struct {
 	EnvironmentOverview *repository.EnvironmentOverviewRepository
 	SelfService         *repository.SelfServiceDeploymentRepository
 	AutoDeployRule      *repository.AutoDeployRuleRepository
+	ConnectionACL       *repository.ConnectionACLRepository
 }
 
 // Dependencies holds all injected dependencies for the HTTP layer.
