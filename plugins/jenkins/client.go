@@ -313,15 +313,15 @@ func (c *JenkinsClient) ListJobs(ctx context.Context, folder string, start, limi
 
 // JenkinsBuild represents a Jenkins build.
 type JenkinsBuild struct {
-	Class       string `json:"_class"`
-	Number      int    `json:"number"`
-	URL         string `json:"url"`
-	Result      *string `json:"result"` // null if still building
-	Building    bool   `json:"building"`
-	Duration    int64  `json:"duration"`
-	Timestamp   int64  `json:"timestamp"`
-	DisplayName string `json:"displayName"`
-	Description string `json:"description,omitempty"`
+	Class       string            `json:"_class"`
+	Number      int               `json:"number"`
+	URL         string            `json:"url"`
+	Result      *string           `json:"result"` // null if still building
+	Building    bool              `json:"building"`
+	Duration    int64             `json:"duration"`
+	Timestamp   int64             `json:"timestamp"`
+	DisplayName string            `json:"displayName"`
+	Description string            `json:"description,omitempty"`
 	Actions     []json.RawMessage `json:"actions"`
 	ChangeSets  []json.RawMessage `json:"changeSets,omitempty"`
 }

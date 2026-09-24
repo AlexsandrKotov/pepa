@@ -7,11 +7,11 @@ import (
 
 // ParamDef describes a Jenkins job parameter definition.
 type ParamDef struct {
-	Name         string   `json:"name"`
-	Type         string   `json:"type"` // StringParameterDefinition, BooleanParameterDefinition, ChoiceParameterDefinition, etc.
-	Description  string   `json:"description,omitempty"`
-	Default      string   `json:"default,omitempty"`
-	Choices      []string `json:"choices,omitempty"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"` // StringParameterDefinition, BooleanParameterDefinition, ChoiceParameterDefinition, etc.
+	Description string   `json:"description,omitempty"`
+	Default     string   `json:"default,omitempty"`
+	Choices     []string `json:"choices,omitempty"`
 }
 
 // buildPipelineJobXML generates a complete Pipeline job config.xml.

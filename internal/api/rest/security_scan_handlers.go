@@ -1024,8 +1024,8 @@ func getHostDataConfig(deps Dependencies) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		hostDataDir := os.Getenv("HOST_DATA_DIR")
 		c.JSON(http.StatusOK, gin.H{
-			"host_data_dir":    hostDataDir,
-			"configured":       hostDataDir != "",
+			"host_data_dir": hostDataDir,
+			"configured":    hostDataDir != "",
 		})
 	}
 }
