@@ -358,9 +358,9 @@ func DefaultConfig() *Config {
 			BucketPlugins: "pepa-plugins",
 		},
 		Auth: AuthConfig{
-			JWTSecret:       "", // Must be set via AUTH_JWT_SECRET env var
-			SessionDuration: 24 * time.Hour,  // 24 hours
-			TokenExpiry:     24 * time.Hour,  // 24 hours
+			JWTSecret:       "",                 // Must be set via AUTH_JWT_SECRET env var
+			SessionDuration: 24 * time.Hour,     // 24 hours
+			TokenExpiry:     24 * time.Hour,     // 24 hours
 			RefreshExpiry:   7 * 24 * time.Hour, // 7 days
 			BCryptCost:      10,
 			OIDC: OIDCConfig{

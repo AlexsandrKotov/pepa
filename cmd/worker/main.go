@@ -166,7 +166,7 @@ func runWorker(ctx context.Context, id int, client *redis.Client, db *database.D
 			}
 
 			slog.Info("processing job", "id", id, "job", job.ID, "type", job.Type)
-			
+
 			// Panic recovery: catch panics in job processing to prevent worker crash
 			func() {
 				defer func() {
@@ -189,7 +189,7 @@ func runWorker(ctx context.Context, id int, client *redis.Client, db *database.D
 						}
 					}
 				}()
-				
+
 				if err := processJob(ctx, &job, db, bus, wfEngine, entityRepo, aiManager, deploymentSvc); err != nil {
 					slog.Error("job failed", "id", id, "job", job.ID, "error", err)
 					// Re-queue with exponential backoff if retries remain
