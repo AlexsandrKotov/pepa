@@ -707,7 +707,12 @@ func (c *Config) Validate() []string {
 				actual = c.Auth.JWTSecret
 			}
 		}
-		if actual == insecure {
+		if actual == "" {
+			warnings = append(warnings, fmt.Sprintf(
+				"INSECURE DEFAULT: %s is not set. Set the corresponding env var before deploying.",
+				path,
+			))
+		} else if actual == insecure {
 			warnings = append(warnings, fmt.Sprintf(
 				"INSECURE DEFAULT: %s is still set to the development value %q. Set the corresponding env var before deploying.",
 				path, insecure,
